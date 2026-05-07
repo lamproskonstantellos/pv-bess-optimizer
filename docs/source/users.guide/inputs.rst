@@ -9,6 +9,8 @@ Sheet ``timeseries``
 --------------------
 
 Per-step data (one row per timestep; the timestep is auto-detected).
+The case-study workbook ships at 15-minute cadence (35 040 rows for one
+year) per MD YPEN/DAPEEK/93976/2772/2024.
 
 ==========================  =========  ====================================
 Column                      Required   Notes
@@ -90,5 +92,5 @@ and :data:`pvbess_opt.io.ECON_DEFAULTS`.  Run::
     python scripts/build_input_xlsx.py
 
 to regenerate the case-study ``inputs/input.xlsx`` from the defaults
-(8 760 hourly rows for 2026, 4 500 kWp PV, 5 MW / 20 MWh BESS, ``vnb``
-mode, 27 % curtailment cap).
+(35 040 fifteen-minute rows for 2026, 4 500 kWp PV, 5 MW / 20 MWh BESS,
+``vnb`` mode, 27 % curtailment cap).

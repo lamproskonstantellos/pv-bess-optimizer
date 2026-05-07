@@ -34,17 +34,20 @@ def test_repo_input_xlsx_has_three_sheets():
     assert set(sheets) == {"timeseries", "project", "economic"}
 
 
-def test_repo_input_xlsx_has_8760_timeseries_rows():
+def test_repo_input_xlsx_has_35040_timeseries_rows():
     ts = pd.read_excel(ROOT / "inputs" / "input.xlsx", sheet_name="timeseries")
-    assert len(ts) == 8760
+    assert len(ts) == 35040
 
 
 def test_repo_input_xlsx_has_negative_dam_hours():
-    """Spec: 3-5 negative-price hours seeded so the no-sim-IO logic and
-    the sign-aware noise (Phase B) actually exercise."""
+    """Spec: 4 negative-price hours seeded so the no-sim-IO logic and
+    the sign-aware noise actually exercise.  At 15-minute cadence each
+    hour expands to 4 steps, so the 4 seeded hours give 16 negative
+    steps; we allow a small tolerance for any noise that lands in the
+    same bucket as a seeded hour."""
     ts = pd.read_excel(ROOT / "inputs" / "input.xlsx", sheet_name="timeseries")
     n_neg = int((ts["dam_price_eur_per_mwh"] < 0).sum())
-    assert 3 <= n_neg <= 5
+    assert 12 <= n_neg <= 20
 
 
 def test_build_input_xlsx_script_runs(tmp_path, monkeypatch):
@@ -60,7 +63,7 @@ def test_build_input_xlsx_script_runs(tmp_path, monkeypatch):
 def test_read_workbook_round_trip_after_build_script():
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
-    assert typed["dt_minutes"] == 60
+    assert typed["dt_minutes"] == 15
     assert typed["project"]["regulatory"]["mode"] == "vnb"
     assert typed["economic"]["project_lifecycle_years"] == 25
     assert "load_kwh" in typed["ts"].columns
@@ -71,7 +74,7 @@ def test_main_vnb_short_horizon(tmp_path, monkeypatch):
     """End-to-end smoke: main.py on a short window, vnb mode."""
     from pvbess_opt.io import read_workbook, write_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
-    typed["ts"] = typed["ts"].iloc[:72].reset_index(drop=True)
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)  # 1 day @ 15 min
     short_xlsx = tmp_path / "short.xlsx"
     write_workbook(typed, short_xlsx)
 
@@ -82,7 +85,7 @@ def test_main_vnb_short_horizon(tmp_path, monkeypatch):
         str(short_xlsx),
         "--solver", "highs",
         "--mip-gap", "0.05",
-        "--time-limit", "60",
+        "--time-limit", "180",
     ])
     assert rc == 0
 
@@ -92,7 +95,7 @@ def test_main_merchant_short_horizon(tmp_path, monkeypatch):
     """End-to-end smoke: main.py on a short window, merchant mode."""
     from pvbess_opt.io import read_workbook, write_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
-    typed["ts"] = typed["ts"].iloc[:72].reset_index(drop=True)
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)  # 1 day @ 15 min
     typed["project"]["regulatory"]["mode"] = "merchant"
     short_xlsx = tmp_path / "short_merchant.xlsx"
     write_workbook(typed, short_xlsx)
@@ -105,6 +108,6 @@ def test_main_merchant_short_horizon(tmp_path, monkeypatch):
         "--mode", "merchant",
         "--solver", "highs",
         "--mip-gap", "0.05",
-        "--time-limit", "60",
+        "--time-limit", "180",
     ])
     assert rc == 0

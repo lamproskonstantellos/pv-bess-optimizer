@@ -90,7 +90,7 @@ def test_detect_timestep_irregular_raises():
 def test_read_workbook_repo_default(repo_input_xlsx):
     typed = read_workbook(repo_input_xlsx)
     assert "ts" in typed and "project" in typed and "economic" in typed
-    assert typed["dt_minutes"] == 60
+    assert typed["dt_minutes"] == 15
     assert typed["project"]["regulatory"]["mode"] == "vnb"
 
 
@@ -99,7 +99,7 @@ def test_read_inputs_returns_flat_params(repo_input_xlsx):
     assert "efficiency_charge" in params and "p_charge_max_kw" in params
     assert params["mode"] == "vnb"
     assert "load_kwh" in ts.columns
-    assert len(ts) == 8760
+    assert len(ts) == 35040
 
 
 def test_workbook_round_trip(tmp_path, repo_input_xlsx):
