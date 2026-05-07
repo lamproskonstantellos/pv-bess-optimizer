@@ -1,0 +1,11 @@
+# Documentation toolchain.
+# Install with:
+#     pip install -r requirements/docs.txt
+#
+# Pulls in base + solvers so autodoc can import the package.
+
+-r base.txt
+-r solvers.txt
+
+sphinx>=7.0
+sphinx-rtd-theme>=2.0

@@ -1,0 +1,16 @@
+# Developer / CI tooling.
+# Install with:
+#     pip install -r requirements/dev.txt
+#
+# Includes everything from base + solvers so a fresh checkout can be
+# linted, smoke-tested and run end-to-end without extra commands.
+
+-r base.txt
+-r solvers.txt
+
+# Linters / formatters
+pyflakes>=3.1
+pycodestyle>=2.11
+
+# Tests
+pytest>=7.4

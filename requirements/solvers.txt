@@ -1,0 +1,18 @@
+# Solver back-ends for the BESS optimisation MILP.
+# Install with:
+#     pip install -r requirements/solvers.txt
+#
+# `highspy` is the default open-source solver used when no specific solver
+# is requested via --solver.  Gurobi is optional (commercial licence).
+
+# HiGHS — fast open-source LP/MIP solver, default for the project.
+# Wheels are published for Linux, macOS, Windows on PyPI.
+highspy>=1.7
+
+# Optional commercial alternative — uncomment if you have a Gurobi licence.
+# gurobipy>=11.0
+
+# CBC is typically installed via the OS package manager rather than pip:
+#   macOS:   brew install cbc
+#   Windows: choco install coin-or-cbc  (or download binaries)
+#   Linux:   sudo apt install coinor-cbc

@@ -1,0 +1,4 @@
+# Backwards-compatible shim that pulls in the canonical lists under
+# requirements/.  New code should depend on the split files directly.
+-r requirements/base.txt
+-r requirements/solvers.txt

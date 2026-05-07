@@ -1,0 +1,533 @@
+"""Multi-year economic and cash-flow projection for the PV + BESS optimizer.
+
+This module extends the single-year MILP with a long-horizon financial
+model.  Given the hourly dispatch produced by :mod:`pvbess_opt.optimization`
+and the headline KPI dictionary returned by :func:`pvbess_opt.kpis.compute_kpis`,
+the helpers below project yearly, quarterly, and monthly cash-flows and
+compute the standard project-finance metrics (NPV, IRR, ROI, BCR, simple
+and discounted payback).
+
+Why an analytical scaling and not a re-solve per year?
+------------------------------------------------------
+
+Industry tools such as **Gridcog**, **Aurora Energy Research**, and
+**HOMER Pro** all use the same pragmatic recipe:
+
+    Solve the dispatch optimisation **once** for a representative
+    "Year 1" then derive Years 2..N analytically, applying:
+
+    * a PV degradation curve (initial light-induced + linear),
+    * a BESS capacity-fade curve (linear),
+    * a revenue-side inflation index, and
+    * an OPEX inflation index.
+
+Sign convention
+---------------
+
+* **CAPEX** rows are stored as **negative** numbers (cash outflow).
+* **OPEX** rows are stored as **negative** numbers (cash outflow).
+* **Revenue** rows are stored as **positive** numbers (cash inflow).
+* ``net_cashflow = revenue + opex + capex`` (sum of signed components).
+
+References for default values
+-----------------------------
+
+* PV CAPEX ~525 EUR/kWp (utility-scale ground mount, 2024) — IRENA
+  *Renewable Power Generation Costs in 2023* (2024).
+* BESS CAPEX ~200 EUR/kW power block (DC + PCS, EU-utility, 2024) —
+  Lazard *Levelized Cost of Storage v9* (2024).
+* PV degradation 2.5% Year-1 LID + 0.55%/yr linear — Tier-1 module
+  warranty terms (Jinko / LONGi / Trina, 25-year linear ≤ 0.55%/yr).
+* BESS degradation 2%/yr linear (LFP, ~80% capacity at 10y) — typical
+  Tier-1 cell warranty.
+* Discount rate 7% — typical EU renewable WACC band 6–8%.
+* Inflation 2% — ECB target.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# IRR helper
+# ---------------------------------------------------------------------------
+
+
+def calculate_irr(
+    cash_flows: np.ndarray,
+    *,
+    guess: float = 0.1,
+    max_iterations: int = 200,
+    tolerance: float = 1.0e-7,
+) -> float:
+    """Compute IRR via Newton-Raphson with a bisection fall-back."""
+    cash_flows = np.asarray(cash_flows, dtype=float)
+    if cash_flows.size == 0 or np.all(cash_flows >= 0) or np.all(cash_flows <= 0):
+        return float("nan")
+
+    def npv(rate: float) -> float:
+        return float(sum(cf / (1.0 + rate) ** t for t, cf in enumerate(cash_flows)))
+
+    rate = guess
+    for _ in range(max_iterations):
+        if rate <= -0.999:
+            break
+        f = npv(rate)
+        df = sum(-t * cf / (1.0 + rate) ** (t + 1) for t, cf in enumerate(cash_flows))
+        if abs(df) < 1.0e-12:
+            break
+        new_rate = rate - f / df
+        if abs(new_rate - rate) < tolerance:
+            return float(new_rate)
+        rate = new_rate
+
+    low, high = -0.99, 10.0
+    f_low, f_high = npv(low), npv(high)
+    if np.isnan(f_low) or np.isnan(f_high) or f_low * f_high > 0.0:
+        return float("nan")
+    for _ in range(200):
+        mid = 0.5 * (low + high)
+        f_mid = npv(mid)
+        if abs(f_mid) < tolerance or (high - low) < tolerance:
+            return float(mid)
+        if f_low * f_mid < 0.0:
+            high, f_high = mid, f_mid
+        else:
+            low, f_low = mid, f_mid
+    return float(0.5 * (low + high))
+
+
+# ---------------------------------------------------------------------------
+# Workbook input
+# ---------------------------------------------------------------------------
+
+
+def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
+    """Read the ``economic`` sheet via the typed loader.
+
+    The sheet is mandatory in the v0.5 schema; this is a thin
+    convenience wrapper around :func:`pvbess_opt.io.read_workbook` that
+    returns just the economic dict (with no ``enabled`` flag — the sheet
+    is always present and active).
+    """
+    from .io import read_workbook
+    typed = read_workbook(xlsx_path)
+    return dict(typed["economic"])
+
+
+# ---------------------------------------------------------------------------
+# Asset sizing resolution
+# ---------------------------------------------------------------------------
+
+
+def derive_asset_capacities(
+    econ: dict[str, Any],
+    params: dict[str, Any],
+    ts: pd.DataFrame,
+    e_cap_kwh: float,
+) -> dict[str, float]:
+    """Resolve the PV nameplate and BESS power that drive EUR/kW math.
+
+    Pulls from the ``project.system`` group first (declared values in
+    the workbook), falls back to inference from the timeseries / dispatch
+    params when zero is supplied.
+    """
+    dt_h = float(params.get("dt_minutes", 60)) / 60.0
+
+    pv_kwp = float(params.get("pv_nameplate_kwp", 0.0) or 0.0)
+    if pv_kwp <= 0.0:
+        if "pv_kwh" in ts.columns and len(ts) > 0:
+            pv_peak_kwh_per_step = float(ts["pv_kwh"].max())
+            pv_kwp = max(pv_peak_kwh_per_step / dt_h, 0.0)
+        else:
+            pv_kwp = 0.0
+
+    bess_kw = float(params.get("bess_power_kw", 0.0) or 0.0)
+    if bess_kw <= 0.0:
+        bess_kw = float(params.get("p_dis_max_kw", 0.0) or 0.0)
+
+    return {
+        "pv_kwp": pv_kwp,
+        "bess_kw": bess_kw,
+        "bess_kwh": float(e_cap_kwh),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Yearly cash-flow
+# ---------------------------------------------------------------------------
+
+
+def build_yearly_cashflow(
+    year1_kpis: dict[str, Any],
+    econ: dict[str, Any],
+    capacities: dict[str, float],
+) -> pd.DataFrame:
+    """Build the Year-0..N yearly cash-flow projection.
+
+    Year 0 carries the upfront CAPEX and nothing else.  Year 1 uses the
+    Year-1 KPI ``profit_total_eur`` as the revenue base.  Years 2..N are
+    derived analytically from the PV degradation curve, BESS capacity
+    fade, and inflation indices.
+
+    Calendar-year mapping (HOMER / Gridcog / Aurora convention):
+    Year 0 (CAPEX paid at COD) and Year 1 (first operating year) share
+    the same calendar year — ``project_start_year``.
+    """
+    raw_n_years = econ.get("project_lifecycle_years", 25)
+    if raw_n_years is None:
+        raw_n_years = 25
+    n_years = int(raw_n_years)
+    if n_years < 1:
+        raise ValueError(
+            f"project_lifecycle_years must be >= 1, got {n_years!r}"
+        )
+
+    project_start_year = int(econ.get("project_start_year", 2026) or 2026)
+
+    pv_kwp = float(capacities["pv_kwp"])
+    bess_kw = float(capacities["bess_kw"])
+
+    capex_pv_y0 = -float(econ["capex_pv_eur_per_kw"]) * pv_kwp
+    capex_bess_y0 = -float(econ["capex_bess_eur_per_kw"]) * bess_kw
+    capex_lic_y0 = -float(econ["capex_licenses_eur_per_kw"]) * (pv_kwp + bess_kw)
+    capex_total_y0 = capex_pv_y0 + capex_bess_y0 + capex_lic_y0
+
+    revenue_1 = float(year1_kpis.get("profit_total_eur", 0.0))
+    opex_pv_1 = float(econ["opex_pv_eur_per_kwp"]) * pv_kwp
+    opex_bess_1 = float(econ["opex_bess_eur_per_kw"]) * bess_kw
+    opex_1 = -(opex_pv_1 + opex_bess_1)
+
+    pv_deg_y1 = float(econ["pv_degradation_year1_pct"]) / 100.0
+    pv_deg_annual = float(econ["pv_degradation_annual_pct"]) / 100.0
+    bess_deg_annual = float(econ["bess_degradation_annual_pct"]) / 100.0
+    rev_infl = float(econ["revenue_inflation_pct"]) / 100.0
+    opex_infl = float(econ["opex_inflation_pct"]) / 100.0
+    discount_rate = float(econ["discount_rate_pct"]) / 100.0
+
+    bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
+    bess_repl_cost_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
+
+    rows: list[dict[str, float]] = []
+    for y in range(0, n_years + 1):
+        if y == 0:
+            pv_factor = 1.0
+            bess_factor = 1.0
+            revenue_y = 0.0
+            opex_y = 0.0
+            capex_y = capex_total_y0
+        else:
+            if y == 1:
+                pv_factor = 1.0
+            else:
+                pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
+            bess_factor = (1.0 - bess_deg_annual) ** (y - 1)
+            revenue_y = revenue_1 * pv_factor * (1.0 + rev_infl) ** (y - 1)
+            opex_y = opex_1 * (1.0 + opex_infl) ** (y - 1)
+            if bess_repl_year > 0 and y == bess_repl_year:
+                capex_y = capex_bess_y0 * (bess_repl_cost_pct / 100.0)
+            else:
+                capex_y = 0.0
+
+        net_cf = revenue_y + opex_y + capex_y
+        discount_factor = 1.0 / (1.0 + discount_rate) ** y
+        rows.append(
+            {
+                "project_year": int(y),
+                "calendar_year": int(project_start_year + max(y - 1, 0)),
+                "pv_production_factor": float(pv_factor),
+                "bess_capacity_factor": float(bess_factor),
+                "revenue_eur": float(revenue_y),
+                "opex_eur": float(opex_y),
+                "capex_eur": float(capex_y),
+                "net_cashflow_eur": float(net_cf),
+                "discount_factor": float(discount_factor),
+                "discounted_cf_eur": float(net_cf * discount_factor),
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    df["cumulative_cf_eur"] = df["net_cashflow_eur"].cumsum()
+    df["cumulative_dcf_eur"] = df["discounted_cf_eur"].cumsum()
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Monthly + quarterly cash-flow
+# ---------------------------------------------------------------------------
+
+
+def derive_monthly_cashflow(
+    res: pd.DataFrame,
+    yearly_cf: pd.DataFrame,
+    econ: dict[str, Any],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Derive monthly and quarterly cash-flows from the yearly projection."""
+    if not pd.api.types.is_datetime64_any_dtype(res["timestamp"]):
+        raise ValueError(
+            "derive_monthly_cashflow requires res['timestamp'] to be a "
+            "datetime column."
+        )
+
+    discount_rate = float(econ["discount_rate_pct"]) / 100.0
+
+    timestamps = pd.to_datetime(res["timestamp"])
+    month_idx = timestamps.dt.month
+
+    revenue_cols = [
+        c for c in (
+            "profit_load_from_pv_eur", "profit_load_from_bess_eur",
+            "profit_export_from_pv_eur", "profit_export_from_bess_eur",
+        ) if c in res.columns
+    ]
+    expense_cols = [
+        c for c in ("expense_charge_bess_grid_eur",) if c in res.columns
+    ]
+
+    monthly_revenue_y1 = pd.Series(0.0, index=range(1, 13), dtype=float)
+    monthly_pv_kwh_y1 = pd.Series(0.0, index=range(1, 13), dtype=float)
+
+    if revenue_cols:
+        revenue_per_step = res[revenue_cols].sum(axis=1)
+    else:
+        revenue_per_step = pd.Series(0.0, index=res.index, dtype=float)
+    if expense_cols:
+        expense_per_step = res[expense_cols].sum(axis=1)
+    else:
+        expense_per_step = pd.Series(0.0, index=res.index, dtype=float)
+
+    net_revenue_per_step = revenue_per_step - expense_per_step
+
+    grouped_revenue = net_revenue_per_step.groupby(month_idx).sum()
+    if "pv_kwh" in res.columns:
+        grouped_pv_kwh = res["pv_kwh"].groupby(month_idx).sum()
+    else:
+        grouped_pv_kwh = pd.Series(dtype=float)
+
+    for m, val in grouped_revenue.items():
+        monthly_revenue_y1.loc[int(m)] = float(val)
+    for m, val in grouped_pv_kwh.items():
+        monthly_pv_kwh_y1.loc[int(m)] = float(val)
+
+    yearly_y1_revenue = float(
+        yearly_cf.loc[yearly_cf["project_year"] == 1, "revenue_eur"].iloc[0]
+    )
+    monthly_y1_sum = float(monthly_revenue_y1.sum())
+    if abs(monthly_y1_sum) > 1e-9 and abs(yearly_y1_revenue) > 1e-9:
+        scale = yearly_y1_revenue / monthly_y1_sum
+        monthly_revenue_y1 = monthly_revenue_y1 * scale
+
+    yearly_y1_opex = float(
+        yearly_cf.loc[yearly_cf["project_year"] == 1, "opex_eur"].iloc[0]
+    )
+    monthly_opex_y1 = pd.Series(yearly_y1_opex / 12.0, index=range(1, 13), dtype=float)
+
+    monthly_pv_mwh_y1 = monthly_pv_kwh_y1 / 1000.0
+
+    rows: list[dict[str, Any]] = []
+    yearly_indexed = yearly_cf.set_index("project_year")
+    for y in yearly_indexed.index:
+        if y == 0:
+            continue
+        rev_y = float(yearly_indexed.loc[y, "revenue_eur"])
+        opex_y = float(yearly_indexed.loc[y, "opex_eur"])
+        pv_factor = float(yearly_indexed.loc[y, "pv_production_factor"])
+        cal_y = int(yearly_indexed.loc[y, "calendar_year"])
+
+        if abs(yearly_y1_revenue) > 1e-9:
+            rev_scale = rev_y / yearly_y1_revenue
+        else:
+            rev_scale = 0.0
+        if abs(yearly_y1_opex) > 1e-9:
+            opex_scale = opex_y / yearly_y1_opex
+        else:
+            opex_scale = 0.0
+
+        for m in range(1, 13):
+            rev_m = float(monthly_revenue_y1.loc[m]) * rev_scale
+            opex_m = float(monthly_opex_y1.loc[m]) * opex_scale
+            pv_mwh_m = float(monthly_pv_mwh_y1.loc[m]) * pv_factor
+            net_m = rev_m + opex_m
+            t_years = float(y) + (m - 1) / 12.0
+            disc_factor = 1.0 / (1.0 + discount_rate) ** t_years
+            rows.append(
+                {
+                    "project_year": int(y),
+                    "calendar_year": cal_y,
+                    "period": int(m),
+                    "period_type": "month",
+                    "pv_production_mwh": float(pv_mwh_m),
+                    "revenue_eur": float(rev_m),
+                    "opex_eur": float(opex_m),
+                    "net_cashflow_eur": float(net_m),
+                    "discounted_cf_eur": float(net_m * disc_factor),
+                }
+            )
+
+    monthly_cf = pd.DataFrame(rows)
+
+    if monthly_cf.empty:
+        quarterly_cf = pd.DataFrame(
+            columns=[
+                "project_year", "calendar_year", "period",
+                "period_type", "pv_production_mwh", "revenue_eur",
+                "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
+            ]
+        )
+    else:
+        monthly_with_q = monthly_cf.copy()
+        monthly_with_q["quarter"] = ((monthly_with_q["period"] - 1) // 3) + 1
+        agg = (
+            monthly_with_q.groupby(
+                ["project_year", "calendar_year", "quarter"], as_index=False,
+            )[
+                [
+                    "pv_production_mwh", "revenue_eur", "opex_eur",
+                    "net_cashflow_eur", "discounted_cf_eur",
+                ]
+            ].sum()
+        )
+        agg = agg.rename(columns={"quarter": "period"})
+        agg["period_type"] = "quarter"
+        agg = agg[
+            [
+                "project_year", "calendar_year", "period",
+                "period_type", "pv_production_mwh", "revenue_eur",
+                "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
+            ]
+        ]
+        quarterly_cf = agg.reset_index(drop=True)
+
+    return monthly_cf, quarterly_cf
+
+
+# ---------------------------------------------------------------------------
+# Headline financial KPIs
+# ---------------------------------------------------------------------------
+
+
+def compute_financial_kpis(
+    yearly_cf: pd.DataFrame,
+    econ: dict[str, Any],
+) -> dict[str, float]:
+    """Compute the headline NPV / IRR / ROI / BCR / payback metrics.
+
+    KPI keys are lowercase snake_case.
+    """
+    df = yearly_cf
+
+    project_year_col = "project_year"
+    project_years = df[project_year_col].to_numpy(dtype=float)
+    after_y0_mask = df[project_year_col] >= 1
+
+    capex_y0 = float(df.loc[df[project_year_col] == 0, "capex_eur"].iloc[0]) \
+        if (df[project_year_col] == 0).any() else 0.0
+    capex_abs = abs(float(capex_y0))
+
+    npv = float(df["discounted_cf_eur"].sum())
+
+    cf_array = df["net_cashflow_eur"].to_numpy(dtype=float)
+    irr = calculate_irr(cf_array)
+    irr_pct = float("nan") if np.isnan(irr) else irr * 100.0
+
+    after_y0_cf = df.loc[after_y0_mask, "net_cashflow_eur"]
+    if capex_abs > 1e-9:
+        roi_pct = float(after_y0_cf.sum()) / capex_abs * 100.0
+    else:
+        roi_pct = float("nan")
+
+    discounted = df["discounted_cf_eur"].to_numpy(dtype=float)
+    dcf_pos = float(np.sum(np.where(discounted > 0, discounted, 0.0)))
+    dcf_neg_abs = float(np.sum(np.where(discounted < 0, -discounted, 0.0)))
+    if dcf_neg_abs > 1e-9:
+        bcr = dcf_pos / dcf_neg_abs
+    else:
+        bcr = float("nan")
+
+    payback = _payback_year(
+        project_years,
+        df["cumulative_cf_eur"].to_numpy(dtype=float),
+        df["net_cashflow_eur"].to_numpy(dtype=float),
+    )
+    discounted_payback = _payback_year(
+        project_years,
+        df["cumulative_dcf_eur"].to_numpy(dtype=float),
+        df["discounted_cf_eur"].to_numpy(dtype=float),
+    )
+
+    total_capex_eur = float(df["capex_eur"].sum()) if "capex_eur" in df.columns \
+        else float(capex_y0)
+    total_opex_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "opex_eur"].sum())
+        if "opex_eur" in df.columns else 0.0
+    )
+    total_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "revenue_eur"].sum())
+        if "revenue_eur" in df.columns else 0.0
+    )
+
+    if "calendar_year" in df.columns and (df["project_year"] >= 1).any():
+        first_op_year_row = df.loc[df["project_year"] == 1].iloc[0]
+        project_start_year = int(first_op_year_row["calendar_year"])
+        project_end_year = int(df["calendar_year"].iloc[-1])
+    elif "calendar_year" in df.columns and len(df) > 0:
+        project_start_year = int(df["calendar_year"].iloc[0])
+        project_end_year = int(df["calendar_year"].iloc[-1])
+    else:
+        project_start_year = int(econ.get("project_start_year", 0) or 0)
+        n_years = int(econ.get("project_lifecycle_years", 0) or 0)
+        project_end_year = (
+            project_start_year + n_years - 1 if project_start_year else 0
+        )
+
+    payback_rounded = (
+        float("nan") if np.isnan(payback) else float(round(payback, 4))
+    )
+    return {
+        "npv_eur": float(round(npv, 2)),
+        "irr_pct": float("nan") if np.isnan(irr_pct) else float(round(irr_pct, 4)),
+        "roi_pct": float("nan") if np.isnan(roi_pct) else float(round(roi_pct, 4)),
+        "bcr": float("nan") if np.isnan(bcr) else float(round(bcr, 4)),
+        "simple_payback_years": payback_rounded,
+        "discounted_payback_years": (
+            float("nan") if np.isnan(discounted_payback)
+            else float(round(discounted_payback, 4))
+        ),
+        "total_capex_eur": float(round(total_capex_eur, 2)),
+        "total_opex_eur_lifecycle": float(round(total_opex_eur_lifecycle, 2)),
+        "total_revenue_eur_lifecycle": float(round(total_revenue_eur_lifecycle, 2)),
+        "project_start_year": int(project_start_year),
+        "project_end_year": int(project_end_year),
+    }
+
+
+def _payback_year(
+    years: np.ndarray,
+    cumulative: np.ndarray,
+    incremental: np.ndarray,
+) -> float:
+    """Linear-interpolate the year at which ``cumulative`` first reaches 0."""
+    cumulative = np.asarray(cumulative, dtype=float)
+    years = np.asarray(years, dtype=float)
+    incremental = np.asarray(incremental, dtype=float)
+    if cumulative.size == 0:
+        return float("nan")
+
+    for i in range(cumulative.size):
+        if cumulative[i] >= 0:
+            if i == 0:
+                return float(years[0])
+            cum_prev = cumulative[i - 1]
+            inc = incremental[i]
+            if inc > 1e-12:
+                return float(years[i - 1] + (-cum_prev) / inc)
+            return float(years[i])
+    return float("nan")

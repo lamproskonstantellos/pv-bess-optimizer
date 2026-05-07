@@ -1,0 +1,248 @@
+"""Multi-year hourly dispatch projection by analytical degradation scaling.
+
+The MILP is solved **once** for Year 1; Years 2..N are derived from
+the Year-1 dispatch by applying:
+
+* a PV degradation curve (initial light-induced + linear),
+* a BESS capacity-fade curve (linear),
+* a revenue-side inflation index, and
+* an OPEX inflation index.
+
+This matches the recipe used by Gridcog, Aurora, and HOMER in their
+"fast" / "quick" mode.
+
+Scaling rules (per year ``y`` for ``y >= 1``)
+---------------------------------------------
+
+* **PV-origin flows** are multiplied by ``pv_factor[y]``.
+* **BESS-origin flows** are multiplied by ``bess_factor[y]``.
+* **SOC** is also multiplied by ``bess_factor[y]``.
+* **Load and grid prices** are unchanged from Year 1.
+* **Mixed flows** (``grid_to_load_kwh``, ``bess_charge_grid_kwh``)
+  pass through Year-1 values; their financial scaling lives in
+  :mod:`pvbess_opt.economics`.
+
+Timestamps are shifted year-by-year so each year of the lifetime
+DataFrame carries a plausible datetime aligned with the
+``calendar_year`` column.
+
+Reconciliation invariant
+------------------------
+
+``test_lifetime_dispatch.py`` asserts:
+
+    sum(pv_kwh in lifetime[y]) / sum(pv_kwh in Year 1) ≈ pv_factor[y]
+
+within 0.1 % for every year.  See
+:doc:`technical.documentation/lifetime_scaling` for the derivation.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pandas as pd
+
+# Columns scaled by the PV degradation curve.
+_PV_ORIGIN_COLUMNS: tuple[str, ...] = (
+    "pv_kwh",
+    "pv_to_load_kwh",
+    "pv_to_grid_kwh",
+    "pv_curtail_kwh",
+    "pv_to_bess_kwh",
+)
+
+# Columns scaled by the BESS capacity-fade curve.
+_BESS_ORIGIN_COLUMNS: tuple[str, ...] = (
+    "bess_dis_load_kwh",
+    "bess_dis_grid_kwh",
+    "bess_charge_grid_kwh",
+    "grid_export_total_kwh",
+    "bess_dis_load_green_kwh",
+    "bess_dis_grid_green_kwh",
+    "soc_kwh",
+    "soc_green_kwh",
+)
+
+# EUR-per-step columns added by :func:`pvbess_opt.kpis.add_economic_columns`.
+# Scaling convention: load tariff (retail) is PV-driven, BESS-export
+# revenue is BESS-driven — matches the documented "revenue ~ pv_factor"
+# simplification used in :func:`pvbess_opt.economics.build_yearly_cashflow`.
+_PV_REVENUE_COLUMNS: tuple[str, ...] = (
+    "profit_load_from_pv_eur",
+    "profit_export_from_pv_eur",
+)
+_BESS_REVENUE_COLUMNS: tuple[str, ...] = (
+    "profit_load_from_bess_eur",
+    "profit_export_from_bess_eur",
+    "expense_charge_bess_grid_eur",
+)
+
+
+def _pv_factor(y: int, lid: float, d_annual: float) -> float:
+    """Return the PV production factor for project year ``y``."""
+    if y < 1:
+        return 1.0
+    if y == 1:
+        return 1.0
+    return (1.0 - lid) * (1.0 - d_annual) ** (y - 2)
+
+
+def _bess_factor(y: int, d_bess: float) -> float:
+    """Return the BESS capacity factor for project year ``y``."""
+    if y < 1:
+        return 1.0
+    return (1.0 - d_bess) ** (y - 1)
+
+
+def build_lifetime_dispatch(
+    res_year1: pd.DataFrame,
+    econ: dict[str, Any],
+    capacities: dict[str, float],
+) -> pd.DataFrame:
+    """Project the Year-1 hourly dispatch across the full project horizon."""
+    if "timestamp" not in res_year1.columns:
+        raise ValueError(
+            "build_lifetime_dispatch requires a 'timestamp' column on "
+            "res_year1."
+        )
+    if not pd.api.types.is_datetime64_any_dtype(res_year1["timestamp"]):
+        raise ValueError(
+            "build_lifetime_dispatch requires res_year1['timestamp'] to "
+            "be a datetime column."
+        )
+
+    raw_n_years = econ.get("project_lifecycle_years", 25)
+    if raw_n_years is None:
+        raw_n_years = 25
+    n_years = int(raw_n_years)
+    if n_years < 1:
+        raise ValueError(
+            f"project_lifecycle_years must be >= 1, got {n_years!r}"
+        )
+    project_start_year = int(econ.get("project_start_year", 2026) or 2026)
+    lid = float(econ.get("pv_degradation_year1_pct", 0.0)) / 100.0
+    d_annual = float(econ.get("pv_degradation_annual_pct", 0.0)) / 100.0
+    d_bess = float(econ.get("bess_degradation_annual_pct", 0.0)) / 100.0
+
+    _ = capacities  # accepted for API symmetry with other multi-year helpers
+
+    pv_cols = [c for c in _PV_ORIGIN_COLUMNS if c in res_year1.columns]
+    bess_cols = [c for c in _BESS_ORIGIN_COLUMNS if c in res_year1.columns]
+    pv_rev_cols = [c for c in _PV_REVENUE_COLUMNS if c in res_year1.columns]
+    bess_rev_cols = [c for c in _BESS_REVENUE_COLUMNS if c in res_year1.columns]
+
+    # Anchor the timestamp shift to ``project_start_year`` so the
+    # lifetime DataFrame's ``timestamp`` column is internally consistent
+    # with its ``calendar_year`` column.
+    input_first_year = int(
+        pd.to_datetime(res_year1["timestamp"]).dt.year.iloc[0]
+    )
+
+    chunks: list[pd.DataFrame] = []
+    for y in range(1, n_years + 1):
+        pv_f = _pv_factor(y, lid, d_annual)
+        bess_f = _bess_factor(y, d_bess)
+        chunk = res_year1.copy()
+        chunk["project_year"] = int(y)
+        target_calendar_year = int(project_start_year + y - 1)
+        chunk["calendar_year"] = target_calendar_year
+        chunk["timestamp"] = (
+            chunk["timestamp"]
+            + pd.DateOffset(years=target_calendar_year - input_first_year)
+        )
+        for col in pv_cols:
+            chunk[col] = chunk[col].astype(float) * pv_f
+        for col in bess_cols:
+            chunk[col] = chunk[col].astype(float) * bess_f
+        for col in pv_rev_cols:
+            chunk[col] = chunk[col].astype(float) * pv_f
+        for col in bess_rev_cols:
+            chunk[col] = chunk[col].astype(float) * bess_f
+        # soc_pct stays unchanged: SOC and E_cap both scale by bess_factor.
+        chunks.append(chunk)
+
+    lifetime = pd.concat(chunks, ignore_index=True)
+
+    leading = ["project_year", "calendar_year", "timestamp"]
+    rest = [c for c in res_year1.columns if c not in leading]
+    ordered = leading + [c for c in rest if c in lifetime.columns]
+    return lifetime[ordered]
+
+
+def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
+    """Sum lifetime hourly columns by calendar year for cross-checks."""
+    if lifetime_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "project_year", "calendar_year",
+                "pv_generation_mwh", "pv_to_load_mwh", "pv_to_grid_mwh",
+                "bess_charge_mwh", "bess_discharge_mwh",
+                "import_to_load_mwh", "export_total_mwh",
+                "revenue_eur_total",
+            ],
+        )
+
+    df = lifetime_df.copy()
+
+    def _sum_kwh(col: str) -> pd.Series:
+        if col in df.columns:
+            return df.groupby("calendar_year")[col].sum() / 1000.0
+        return pd.Series(dtype=float)
+
+    revenue_cols = [
+        c for c in (
+            "profit_load_from_pv_eur",
+            "profit_load_from_bess_eur",
+            "profit_export_from_pv_eur",
+            "profit_export_from_bess_eur",
+        ) if c in df.columns
+    ]
+    expense_cols = [
+        c for c in ("expense_charge_bess_grid_eur",) if c in df.columns
+    ]
+    if revenue_cols:
+        revenue = df[revenue_cols].sum(axis=1)
+    else:
+        revenue = pd.Series(0.0, index=df.index, dtype=float)
+    if expense_cols:
+        expense = df[expense_cols].sum(axis=1)
+    else:
+        expense = pd.Series(0.0, index=df.index, dtype=float)
+    df["_net_revenue_per_step"] = revenue - expense
+
+    grouped = df.groupby("calendar_year")
+    out = pd.DataFrame(
+        {
+            "project_year": grouped["project_year"].first().astype(int),
+            "pv_generation_mwh": _sum_kwh("pv_kwh"),
+            "pv_to_load_mwh": _sum_kwh("pv_to_load_kwh"),
+            "pv_to_grid_mwh": _sum_kwh("pv_to_grid_kwh"),
+            "bess_charge_mwh": (
+                _sum_kwh("pv_to_bess_kwh").reindex(
+                    grouped.size().index, fill_value=0.0,
+                )
+                + _sum_kwh("bess_charge_grid_kwh").reindex(
+                    grouped.size().index, fill_value=0.0,
+                )
+            ),
+            "bess_discharge_mwh": (
+                _sum_kwh("bess_dis_load_kwh").reindex(
+                    grouped.size().index, fill_value=0.0,
+                )
+                + _sum_kwh("bess_dis_grid_kwh").reindex(
+                    grouped.size().index, fill_value=0.0,
+                )
+            ),
+            "import_to_load_mwh": _sum_kwh("grid_to_load_kwh"),
+            "export_total_mwh": _sum_kwh("grid_export_total_kwh"),
+            "revenue_eur_total": grouped["_net_revenue_per_step"].sum(),
+        }
+    )
+    out = out.reset_index().rename(
+        columns={"calendar_year": "calendar_year"},
+    )
+    cols = ["project_year", "calendar_year"] + [
+        c for c in out.columns if c not in ("project_year", "calendar_year")
+    ]
+    return out[cols].sort_values("calendar_year").reset_index(drop=True)
