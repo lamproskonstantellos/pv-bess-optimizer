@@ -88,11 +88,22 @@ def _pv_factor(y: int, lid: float, d_annual: float) -> float:
     return (1.0 - lid) * (1.0 - d_annual) ** (y - 2)
 
 
-def _bess_factor(y: int, d_bess: float) -> float:
-    """Return the BESS capacity factor for project year ``y``."""
+def _bess_factor(
+    y: int, d_bess: float, replacement_year: int = 0,
+) -> float:
+    """Return the BESS capacity factor for project year ``y``.
+
+    When ``replacement_year > 0`` and ``y >= replacement_year``, the
+    factor resets to 1.0 at year ``replacement_year`` and degrades
+    fresh from there (linear at ``d_bess`` per year).
+    """
     if y < 1:
         return 1.0
-    return (1.0 - d_bess) ** (y - 1)
+    if replacement_year > 0 and y >= replacement_year:
+        years_since_install = y - replacement_year
+    else:
+        years_since_install = y - 1
+    return (1.0 - d_bess) ** years_since_install
 
 
 def build_lifetime_dispatch(
@@ -124,6 +135,7 @@ def build_lifetime_dispatch(
     lid = float(econ.get("pv_degradation_year1_pct", 0.0)) / 100.0
     d_annual = float(econ.get("pv_degradation_annual_pct", 0.0)) / 100.0
     d_bess = float(econ.get("bess_degradation_annual_pct", 0.0)) / 100.0
+    bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
 
     _ = capacities  # accepted for API symmetry with other multi-year helpers
 
@@ -142,7 +154,7 @@ def build_lifetime_dispatch(
     chunks: list[pd.DataFrame] = []
     for y in range(1, n_years + 1):
         pv_f = _pv_factor(y, lid, d_annual)
-        bess_f = _bess_factor(y, d_bess)
+        bess_f = _bess_factor(y, d_bess, replacement_year=bess_repl_year)
         chunk = res_year1.copy()
         chunk["project_year"] = int(y)
         target_calendar_year = int(project_start_year + y - 1)

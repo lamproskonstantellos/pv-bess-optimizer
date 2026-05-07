@@ -1,13 +1,16 @@
 """Build the case-study ``inputs/input.xlsx`` workbook.
 
-Generates a synthetic-but-realistic Greek profile:
+Generates a synthetic-but-realistic Greek profile at 15-minute cadence
+(35 040 rows for a full year — Greek VNB settles every 15 min per
+MD YPEN/DAPEEK/93976/2772/2024):
 
-* 8 760 hourly rows for 2026
 * 4 500 kWp PV with sinusoidal seasonal envelope x diurnal sine
 * 5 MW peak load (residential / commercial mix)
-* DAM curve avg ~100 EUR/MWh +/- 50 EUR/MWh diurnal
-* 3-5 negative-price hours seeded so the no-sim-IO logic and the
-  sign-aware noise (Phase B) actually exercise
+* DAM curve avg ~100 EUR/MWh +/- 50 EUR/MWh diurnal, piecewise
+  constant per hour (each hourly value repeats four times)
+* 4 negative-price hours (16 negative quarter-hour steps) seeded so
+  the no-sim-IO logic and the sign-aware noise (Phase B) actually
+  exercise
 
 Run from the repo root::
 
@@ -31,57 +34,81 @@ if str(REPO_ROOT) not in sys.path:
 from pvbess_opt.io import write_workbook  # noqa: E402
 
 
-def build_timeseries(year: int = 2026) -> pd.DataFrame:
-    """Generate an 8760-row hourly timeseries for ``year``.
+def build_timeseries(year: int = 2026, target_minutes: int = 15) -> pd.DataFrame:
+    """Generate a ``target_minutes`` cadence timeseries for ``year``.
+
+    With ``target_minutes=15`` (default) the workbook carries 35 040
+    rows (1 year of 15-minute steps); ``target_minutes=60`` reproduces
+    the legacy 8 760-row hourly profile.
 
     PV: 4 500 kWp, sinusoidal seasonal envelope (peak in July, trough in
-    January) x diurnal sine (clipped at 0).  load: 5 MW peak with
+    January) x diurnal sine (clipped at 0).  Load: 5 MW peak with
     residential/commercial mix (morning + evening peaks).  DAM:
     ~100 EUR/MWh average, diurnal variation, with 4 deliberately
     negative hours to exercise the sign-aware noise / no-sim-IO logic.
+    Energy columns are scaled by the timestep duration; price columns
+    are not.
     """
+    if target_minutes <= 0 or 60 % target_minutes != 0:
+        raise ValueError(
+            "target_minutes must be a positive divisor of 60 "
+            f"(got {target_minutes!r})."
+        )
+
     rng = np.random.default_rng(seed=20260101)
+    n_steps_per_day = 24 * 60 // target_minutes
+    n_steps = 365 * n_steps_per_day
+    dt_hours = target_minutes / 60.0
+
     timestamps = pd.date_range(
-        start=f"{year}-01-01 00:00", periods=8760, freq="h",
+        start=f"{year}-01-01 00:00", periods=n_steps, freq=f"{target_minutes}min",
     )
-    hours = np.arange(8760, dtype=float)
-    day_of_year = (hours // 24).astype(int) + 1
+    step_idx = np.arange(n_steps, dtype=float)
+    day_of_year = (step_idx // n_steps_per_day).astype(int) + 1
+    h_of_day = (step_idx % n_steps_per_day) * dt_hours  # continuous 0..24
 
     # PV: 4500 kWp peak.  Seasonal: max in DOY 172 (~21 Jun), min in DOY 355.
     # Diurnal: sin(pi * (h - 6) / 12) on [6,18], else 0.
     seasonal = 0.55 + 0.45 * np.cos(2 * np.pi * (day_of_year - 172) / 365.25)
-    h_of_day = (hours % 24).astype(float)
     diurnal = np.where(
         (h_of_day >= 6) & (h_of_day <= 18),
         np.sin(np.pi * (h_of_day - 6) / 12.0),
         0.0,
     )
     pv_kwp = 4500.0
-    pv_kwh = pv_kwp * seasonal * diurnal
-    pv_kwh += rng.normal(0.0, 30.0, size=8760)
+    pv_kwh = pv_kwp * seasonal * diurnal * dt_hours
+    pv_kwh += rng.normal(0.0, 30.0 * dt_hours, size=n_steps)
     pv_kwh = np.maximum(pv_kwh, 0.0)
 
     # Load: 5 MW peak, ~3 MW base, morning and evening bumps.
-    base = 3000.0
-    morning = 1500.0 * np.exp(-((h_of_day - 9) ** 2) / 8.0)
-    evening = 2000.0 * np.exp(-((h_of_day - 19) ** 2) / 6.0)
-    load_kwh = base + morning + evening
-    load_kwh += rng.normal(0.0, 80.0, size=8760)
-    load_kwh = np.maximum(load_kwh, 800.0)
+    base_kw = 3000.0
+    morning_kw = 1500.0 * np.exp(-((h_of_day - 9) ** 2) / 8.0)
+    evening_kw = 2000.0 * np.exp(-((h_of_day - 19) ** 2) / 6.0)
+    load_kw = base_kw + morning_kw + evening_kw
+    load_kwh = load_kw * dt_hours
+    load_kwh += rng.normal(0.0, 80.0 * dt_hours, size=n_steps)
+    load_kwh = np.maximum(load_kwh, 800.0 * dt_hours)
 
     # DAM: ~100 EUR/MWh with +/- 50 diurnal swing, low at midday (PV
-    # surplus) and high at evening peak.
-    dam = 100.0 - 50.0 * np.sin(np.pi * (h_of_day - 6) / 12.0)
-    dam += rng.normal(0.0, 10.0, size=8760)
+    # surplus) and high at evening peak.  Day-ahead market prices are
+    # piecewise constant per hour, so we sample once per hour and
+    # repeat each value n_per_hour times to align with the energy grid.
+    n_hours = 8760
+    n_per_hour = 60 // target_minutes
+    h_idx = np.arange(n_hours, dtype=float)
+    h_of_day_hourly = h_idx % 24
+    dam_hourly = 100.0 - 50.0 * np.sin(np.pi * (h_of_day_hourly - 6) / 12.0)
+    dam_hourly += rng.normal(0.0, 10.0, size=n_hours)
     # Seed 4 negative-price hours (early-morning windy weekend slots).
-    negative_idx = [
+    negative_hours = [
         24 * 5 + 3,    # Saturday Jan 6th, 03:00
         24 * 47 + 4,   # mid-Feb 04:00
         24 * 102 + 2,  # mid-Apr 02:00
         24 * 250 + 3,  # early Sep 03:00
     ]
-    for idx in negative_idx:
-        dam[idx] = -25.0 + rng.normal(0.0, 3.0)
+    for h in negative_hours:
+        dam_hourly[h] = -25.0 + rng.normal(0.0, 3.0)
+    dam = np.repeat(dam_hourly, n_per_hour)
 
     return pd.DataFrame({
         "timestamp": timestamps,
@@ -161,7 +188,7 @@ def main() -> int:
     n_neg = int((typed["ts"]["dam_price_eur_per_mwh"] < 0).sum())
     print(
         f"Wrote {out} (timeseries rows={len(typed['ts'])}, "
-        f"negative-price hours={n_neg})"
+        f"negative-price steps={n_neg})"
     )
     return 0
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from pvbess_opt.optimization import (
@@ -13,9 +15,11 @@ from pvbess_opt.optimization import (
 
 @pytest.fixture(scope="module")
 def _solved_vnb(short_params, short_ts):
+    # mip_gap=0.001 keeps the LP optimum tight enough to reach
+    # the canonical curtail-zero / pv_to_grid-positive solution.
     res, e_cap, _ = run_scenario(
         short_params, short_ts, solver_name="highs",
-        mip_gap=0.01, time_limit_seconds=30,
+        mip_gap=0.001, time_limit_seconds=60,
     )
     return res, e_cap
 
@@ -24,7 +28,7 @@ def _solved_vnb(short_params, short_ts):
 def _solved_merchant(short_params_merchant, short_ts):
     res, e_cap, _ = run_scenario(
         short_params_merchant, short_ts, solver_name="highs",
-        mip_gap=0.01, time_limit_seconds=30,
+        mip_gap=0.001, time_limit_seconds=60,
     )
     return res, e_cap
 
@@ -81,6 +85,7 @@ def test_invariants_vnb(short_params, _solved_vnb):
     assert inv["invariant_6_load_priority_violations"] == 0
     assert inv["invariant_7_curtail_behavior_kwh"] == 0
     assert inv["invariant_8_soc_closed_cycle_kwh"] < tol
+    assert inv["invariant_9_pv_load_priority_kwh"] < tol
 
 
 def test_invariants_merchant_zero_for_vnb_only(short_params_merchant, _solved_merchant):
@@ -90,6 +95,7 @@ def test_invariants_merchant_zero_for_vnb_only(short_params_merchant, _solved_me
     assert inv["invariant_2_load_balance_kwh"] == 0.0
     assert inv["invariant_5_no_sim_grid_io_max_product_kwh2"] == 0.0
     assert inv["invariant_6_load_priority_violations"] == 0.0
+    assert inv["invariant_9_pv_load_priority_kwh"] == 0.0
     # All-mode invariants still pass
     assert inv["invariant_1_pv_balance_kwh"] < 1e-3
     assert inv["invariant_7_curtail_behavior_kwh"] == 0.0
@@ -137,3 +143,79 @@ def test_invalid_mode_raises():
     from pvbess_opt.optimization import _resolve_mode
     with pytest.raises(ValueError, match="Unknown mode"):
         _resolve_mode({"mode": "bogus"})
+
+
+# ---------------------------------------------------------------------------
+# Spec rule coverage — Sections 2, 4, 6
+# ---------------------------------------------------------------------------
+
+
+def test_pv_priority_over_bess_for_load(short_params):
+    """Section 2: pv_to_load[t] == min(pv[t], load[t]) exactly.
+
+    PV equals load for the first 12 hours; PV is zero for the last 12.
+    With BESS at 80 % SOC the optimiser would otherwise be tempted to
+    discharge the BESS to load during the daylight hours (since the BESS
+    is already nearly full).  The hard LOAD_PV_PRIORITY constraint
+    forbids this.
+    """
+    n = 24
+    timestamps = pd.date_range("2026-06-01 00:00", periods=n, freq="h")
+    pv = np.zeros(n, dtype=float)
+    pv[:12] = 1000.0
+    load = np.zeros(n, dtype=float)
+    load[:12] = 1000.0
+    load[12:] = 1000.0
+    dam = np.full(n, 100.0, dtype=float)
+    ts = pd.DataFrame({
+        "timestamp": timestamps,
+        "pv_kwh": pv,
+        "load_kwh": load,
+        "dam_price_eur_per_mwh": dam,
+    })
+    params = dict(short_params)
+    params["initial_soc_frac"] = 0.80
+
+    res, _e_cap, _ = run_scenario(
+        params, ts, solver_name="highs",
+        mip_gap=0.01, time_limit_seconds=30,
+    )
+
+    pv_to_load = res["pv_to_load_kwh"].to_numpy()
+    pv_arr = res["pv_kwh"].to_numpy()
+    load_arr = res["load_kwh"].to_numpy()
+    expected = np.minimum(pv_arr, load_arr)
+    diffs = np.abs(pv_to_load - expected)
+    assert diffs.max() < 1e-3
+    # First 12 hours: PV fully covers load, BESS must not discharge to load.
+    assert float(res["bess_dis_load_kwh"].iloc[:12].sum()) < 1e-3
+
+
+def test_no_charge_discharge_simultaneity(_solved_vnb):
+    """Section 4: y_charge[t] + y_dis[t] <= 1 ⇒ products zero."""
+    res, _e_cap = _solved_vnb
+    pv_to_bess = res["pv_to_bess_kwh"].to_numpy()
+    grid_to_bess = res["bess_charge_grid_kwh"].to_numpy()
+    bess_dis_load = res["bess_dis_load_kwh"].to_numpy()
+    bess_dis_grid = res["bess_dis_grid_kwh"].to_numpy()
+    # No timestep has both pv_to_bess > 1e-3 and bess_dis_grid > 1e-3.
+    assert ((pv_to_bess > 1e-3) & (bess_dis_grid > 1e-3)).sum() == 0
+    # Generalised: total charge and total discharge cannot both be
+    # active in the same step (which is what MODE_LINK enforces and is
+    # equivalent to (y_charge[t] * y_dis[t]).max() == 0).
+    charge = pv_to_bess + grid_to_bess
+    discharge = bess_dis_load + bess_dis_grid
+    assert ((charge > 1e-3) & (discharge > 1e-3)).sum() == 0
+
+
+def test_grid_charge_only_when_pv_zero(short_params, short_ts):
+    """Section 6: grid_to_bess > 0 ⇒ pv ≈ 0 in the same step."""
+    params = dict(short_params)
+    params["allow_bess_grid_charging"] = True
+    res, _e_cap, _ = run_scenario(
+        params, short_ts, solver_name="highs",
+        mip_gap=0.01, time_limit_seconds=30,
+    )
+    pv = res["pv_kwh"].to_numpy()
+    grid_to_bess = res["bess_charge_grid_kwh"].to_numpy()
+    assert ((pv > 1e-3) & (grid_to_bess > 1e-3)).sum() == 0

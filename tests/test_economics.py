@@ -118,11 +118,12 @@ def test_monthly_cashflow_sums_to_yearly_y1():
     kpis = {"profit_total_eur": 240_000.0}  # 20k/month average
     caps = {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
     yearly_cf = build_yearly_cashflow(kpis, _econ(), caps)
-    timestamps = pd.date_range("2026-01-01", periods=8760, freq="h")
+    n = 35040
+    timestamps = pd.date_range("2026-01-01", periods=n, freq="15min")
     res = pd.DataFrame({
         "timestamp": timestamps,
-        "pv_kwh": np.ones(8760) * 100.0,
-        "profit_load_from_pv_eur": np.ones(8760) * (240_000.0 / 8760.0),
+        "pv_kwh": np.ones(n) * 100.0,
+        "profit_load_from_pv_eur": np.ones(n) * (240_000.0 / n),
     })
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, _econ())
     y1 = monthly_cf.loc[monthly_cf["project_year"] == 1, "revenue_eur"].sum()

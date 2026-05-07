@@ -3,9 +3,10 @@
 Two regulatory regimes are supported via the ``mode`` parameter:
 
 * ``vnb`` — Greek Virtual Net Billing.  Strictly enforced rules:
-  load balance, load priority (binary-free slack formulation), no
+  load balance, hard PV→load priority (Section 2 of the spec), no
   simultaneous grid I/O (tight big-M), retail tariff for self-
-  consumption, DAM for export.
+  consumption, DAM for export.  A binary-free slack additionally
+  enforces surplus-only export (Section 5).
 * ``merchant`` — pure utility-scale dispatch with **no co-located load**.
   Load balance NOT enforced; load priority NOT enforced; the
   ``pv_to_load`` / ``bess_dis_load`` / ``grid_to_load`` flows are pinned
@@ -14,9 +15,10 @@ Two regulatory regimes are supported via the ``mode`` parameter:
 
 The single objective is **profit** maximisation: under Greek VNB
 economics retail (132 EUR/MWh) > DAM avg (~100 EUR/MWh) in >99 %
-of hours, so the profit objective maximises self-consumption
-emergently via the load-priority slack and produces the same
-dispatch as a "green" objective in this market.  In merchant mode
+of hours, so the profit objective produces the same dispatch as a
+"green" objective in this market.  Self-consumption is no longer
+emergent: the hard ``LOAD_PV_PRIORITY`` constraint pins
+``pv_to_load[t] == min(pv[t], load[t])`` exactly.  In merchant mode
 there is no load to "be green about".
 
 Tight big-M values
@@ -32,7 +34,7 @@ Big-Ms are derived per-instance:
 Audit invariants
 ----------------
 
-After every solve :func:`verify_dispatch_invariants` checks the eight
+After every solve :func:`verify_dispatch_invariants` checks the nine
 mandatory invariants.  Residuals are returned and logged at INFO; the
 ``--strict`` CLI flag turns violations into errors.
 """
@@ -42,6 +44,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pyomo.environ as pyo
 from pyomo.opt import SolverStatus, TerminationCondition
@@ -203,11 +206,20 @@ def build_model(
 
     Variable & constraint structure adapts to ``params['mode']``:
 
-    * ``vnb``     — full set of variables, slack-based load priority,
-                    tight-big-M no-sim grid I/O, retail-driven objective.
+    * ``vnb``     — full set of variables, hard ``LOAD_PV_PRIORITY``
+                    (Section 2 of the spec) plus a binary-free slack for
+                    surplus-only export (Section 5), tight-big-M no-sim
+                    grid I/O, retail-driven objective.
     * ``merchant``— ``pv_to_load``, ``bess_dis_load``, ``grid_to_load``
                     pinned to 0; load balance + load priority + no-sim
                     constraints omitted; objective DAM-only.
+
+    Load priority is enforced by the hard ``LOAD_PV_PRIORITY``
+    constraint (Section 2 of the spec):
+    ``pv_to_load[t] == min(pv[t], load[t])`` exactly.  The slack-based
+    ``LOAD_PRIORITY_SLACK_DEF`` enforces Section 5 (surplus-only
+    export) — exports are gated by the same slack so an hour with
+    ``grid_to_load > 0`` cannot also export.
 
     Parameters
     ----------
@@ -307,6 +319,7 @@ def build_model(
 
     m.y_charge = pyo.Var(m.T, domain=pyo.Binary)
     m.y_dis = pyo.Var(m.T, domain=pyo.Binary)
+    # Section 4 of the VNB spec — no charge + discharge simultaneously.
     m.MODE_LINK = pyo.Constraint(
         m.T, rule=lambda m, t: m.y_charge[t] + m.y_dis[t] <= 1,
     )
@@ -331,6 +344,17 @@ def build_model(
             rule=lambda m, t: (
                 m.pv_to_load[t] + m.bess_dis_load[t] + m.grid_to_load[t] == load[t]
             ),
+        )
+
+        # Section 2 of the VNB spec — strict load-coverage priority.
+        # All available PV (up to the load) must be consumed by the load.
+        # Combined with PV_SPLIT and LOAD_BAL this forces
+        # pv_to_load[t] == min(pv[t], load[t]) exactly.  BESS-before-Grid
+        # for the residual remains emergent through retail > DAM economics.
+        pv_load_priority = {t: min(pv[t], load[t]) for t in time_index}
+        m.LOAD_PV_PRIORITY = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: m.pv_to_load[t] >= pv_load_priority[t],
         )
 
     # --- SOC dynamics ----------------------------------------------------
@@ -404,13 +428,20 @@ def build_model(
         m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * m.e_cap)
 
     # --- Static curtailment cap (HARD constraint, BOTH modes) -------------
-    # Regulatory grid-connection limit per MD YPEN/DAPEEK/53563/1556/2023.
+    # Section 8 of the VNB spec — regulatory grid-connection limit per
+    # MD YPEN/DAPEEK/53563/1556/2023.  Applies in vnb AND merchant modes.
     m.EXPORT_CAP = pyo.Constraint(
         m.T, rule=lambda m, t: m.grid_export_total[t] <= export_cap_kwh,
     )
 
     # --- vnb-only constraints --------------------------------------------
     if mode == "vnb":
+        # Section 5 of the VNB spec — surplus-only export.
+        # Substituting PV_SPLIT (pv = pv_to_load + pv_to_bess + pv_to_grid +
+        # pv_curtail) and LOAD_BAL (load = pv_to_load + bess_dis_load +
+        # grid_to_load) into the slack RHS, the constraint reduces to
+        # ``grid_to_load <= pv_to_bess + pv_curtail``, i.e. an hour can
+        # only export when its load is fully covered without grid import.
         m.slack = pyo.Var(m.T, domain=pyo.NonNegativeReals)
         m.LOAD_PRIORITY_SLACK_DEF = pyo.Constraint(
             m.T,
@@ -443,6 +474,10 @@ def build_model(
         )
 
     if allow_grid_charge:
+        # Section 6 of the VNB spec — BESS may charge from grid only in
+        # periods with pv ~ 0.  z_pv_active[t] is forced to 1 whenever
+        # pv[t] > 0 by GRID_CHG_PV_GATE; GRID_CHARGE_GATE then drives
+        # grid_to_bess[t] to 0 in those steps.
         m.z_pv_active = pyo.Var(m.T, domain=pyo.Binary)
         m.GRID_CHARGE_GATE = pyo.Constraint(
             m.T,
@@ -609,7 +644,7 @@ def verify_dispatch_invariants(
     mode: str | None = None,
     tol_kwh: float = 1.0e-3,
 ) -> dict[str, float]:
-    """Check the eight audit invariants on a solved dispatch.
+    """Check the nine audit invariants on a solved dispatch.
 
     Returns a dict of named residuals.
 
@@ -625,6 +660,7 @@ def verify_dispatch_invariants(
             ``invariant_6_load_priority_violations``         (vnb only)
             ``invariant_7_curtail_behavior_kwh``  (BOTH modes)
             ``invariant_8_soc_closed_cycle_kwh``  (when terminal_soc_equal)
+            ``invariant_9_pv_load_priority_kwh``  (vnb only; Section 2)
     """
     if mode is None:
         mode = _resolve_mode(params)
@@ -714,6 +750,13 @@ def verify_dispatch_invariants(
     else:
         inv_8 = 0.0
 
+    # Invariant 9 — Section 2 of the spec: pv_to_load == min(pv, load).
+    if mode == "vnb" and len(pv):
+        pv_load_priority = np.minimum(pv, load)
+        inv_9 = float(abs(pv_to_load - pv_load_priority).max())
+    else:
+        inv_9 = 0.0
+
     return {
         "invariant_1_pv_balance_kwh": inv_1,
         "invariant_2_load_balance_kwh": inv_2,
@@ -723,4 +766,5 @@ def verify_dispatch_invariants(
         "invariant_6_load_priority_violations": inv_6,
         "invariant_7_curtail_behavior_kwh": inv_7,
         "invariant_8_soc_closed_cycle_kwh": inv_8,
+        "invariant_9_pv_load_priority_kwh": inv_9,
     }

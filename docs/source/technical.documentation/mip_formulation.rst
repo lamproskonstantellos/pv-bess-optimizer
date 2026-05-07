@@ -62,7 +62,17 @@ Static curtailment cap (BOTH modes):
 
 In ``vnb`` mode additionally:
 
-* **Load priority** — binary-free slack formulation:
+* **PV→Load priority (Section 2, hard)** — pinned exactly:
+
+  .. math::
+
+     p^{\text{pv→load}}_t \ge \min(\text{pv}_t, l_t) \quad \forall t
+
+  Combined with the PV-split and load-balance equalities this forces
+  ``pv_to_load[t] == min(pv[t], load[t])`` exactly, so all available
+  PV (up to the load) is consumed by the load.
+
+* **Surplus-only export (Section 5)** — binary-free slack formulation:
 
   .. math::
 
@@ -108,7 +118,7 @@ Audit invariants
 ----------------
 
 After every solve :func:`pvbess_opt.optimization.verify_dispatch_invariants`
-checks eight invariants:
+checks nine invariants:
 
 1. **PV balance** — ``pv = pv_to_load + pv_to_bess + pv_to_grid + pv_curtail``.
 2. **Load balance** — vnb only; 0 in merchant.
@@ -118,11 +128,13 @@ checks eight invariants:
    (soc[0] - final_state)``.
 5. **No-sim grid I/O** — vnb only; max product of grid-import × grid-
    export across all timesteps.
-6. **Load priority** — vnb only; count of timesteps with simultaneous
-   export > 0 and grid_to_load > 0.
+6. **Load priority (Section 5)** — vnb only; count of timesteps with
+   simultaneous export > 0 and grid_to_load > 0.
 7. **Curtail behavior** — cap not binding ⇒ curtail = 0.  Checked in
    **both** modes.
 8. **Closed-cycle SOC** — when ``terminal_soc_equal=True``, ``final_state
    = soc[0]``.
+9. **PV→Load priority (Section 2)** — vnb only; max absolute deviation
+   of ``pv_to_load[t]`` from ``min(pv[t], load[t])``.
 
 The ``--strict`` CLI flag turns invariant violations into errors.

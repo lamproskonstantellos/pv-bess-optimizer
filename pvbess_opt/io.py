@@ -763,6 +763,7 @@ LAYOUT_SUBDIRS: tuple[str, ...] = (
     "02_dispatch",
     "04_financial_plots",
     "05_energy_plots",
+    "06_uncertainty_plots",
 )
 
 

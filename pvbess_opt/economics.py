@@ -230,6 +230,10 @@ def build_yearly_cashflow(
             else:
                 pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
             bess_factor = (1.0 - bess_deg_annual) ** (y - 1)
+            # Revenue scaling is intentionally PV-driven only — see the
+            # documented "revenue ~ pv_factor" simplification in
+            # :mod:`pvbess_opt.lifetime`.  No bess_factor reset on
+            # ``bess_replacement_year`` is applied here.
             revenue_y = revenue_1 * pv_factor * (1.0 + rev_infl) ** (y - 1)
             opex_y = opex_1 * (1.0 + opex_infl) ** (y - 1)
             if bess_repl_year > 0 and y == bess_repl_year:
