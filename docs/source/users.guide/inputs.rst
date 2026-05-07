@@ -33,32 +33,40 @@ Column                      Required   Notes
                                        the ``project`` sheet.
 ==========================  =========  ====================================
 
-Sheet ``project``
------------------
+Sheet ``project`` (v0.6)
+------------------------
 
 Three logical groups (separator rows starting with ``#`` are allowed and
-ignored by the loader):
+ignored by the loader).  v0.6 splits the v0.5 ``# system`` group into
+sizing-only and BESS-internal-behaviour halves and removes the
+``# optimization`` group entirely (solver gap / time limit are CLI-
+only via ``--mip-gap`` / ``--time-limit``; the curtail-tiebreaker and
+cycles-bonus weights are private constants in
+:mod:`pvbess_opt.optimization`):
 
-**system**
+**system_sizing**
     ``pv_nameplate_kwp``, ``bess_power_kw``, ``bess_capacity_kwh``,
-    ``efficiency_charge``, ``efficiency_discharge``, ``soc_min_frac``, ``soc_max_frac``,
-    ``initial_soc_frac``, ``terminal_soc_equal``, ``p_charge_max_kw``,
-    ``p_dis_max_kw``, ``battery_hours``, ``max_cycles_per_day``,
+    ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw``,
     ``p_grid_export_max_kw``.
+
+**bess_operation**
+    ``efficiency_charge``, ``efficiency_discharge``, ``soc_min_frac``,
+    ``soc_max_frac``, ``initial_soc_frac``, ``terminal_soc_equal``,
+    ``max_cycles_per_day``.
 
 **regulatory**
     ``mode`` (``vnb`` | ``merchant``), ``retail_tariff_eur_per_mwh``,
     ``curtailment_pct``, ``allow_bess_grid_charging``,
     ``settlement_minutes``.
 
-**optimization**
-    ``weight_curtail_tiebreak``, ``weight_cycles_term``,
-    ``solver_mip_gap``, ``solver_time_limit_seconds``.
+A zero ``pv_nameplate_kwp`` means **no PV in the project**; a zero
+``bess_power_kw`` means **no BESS in the project**.  Setting both to
+zero raises ``ValueError`` from :func:`pvbess_opt.io.read_inputs`.
 
-Sheet ``economic``
-------------------
+Sheet ``economic`` (v0.6)
+-------------------------
 
-Six logical groups (separator rows allowed):
+Eight logical groups (separator rows allowed):
 
 **horizon**
     ``project_lifecycle_years``, ``project_start_year``,
@@ -82,9 +90,20 @@ Six logical groups (separator rows allowed):
     ``sensitivity_opex_delta_pct``, ``sensitivity_revenue_delta_pct``,
     ``sensitivity_discount_rate_delta_pp``.
 
+**uncertainty** (new in v0.6)
+    ``uncertainty_enabled``, ``uncertainty_compare_sources``,
+    ``uncertainty_n_seeds``, ``uncertainty_window_hours``,
+    ``uncertainty_commit_hours``, ``uncertainty_dam_enabled``,
+    ``uncertainty_pv_enabled``, ``uncertainty_load_enabled``,
+    ``uncertainty_sigma_dam``, ``uncertainty_sigma_pv``,
+    ``uncertainty_sigma_load``.  See
+    ``docs/technical.documentation/uncertainty_modelling.md``.
+
 **output**
-    ``show_titles``, ``currency_format``, ``plot_daily_year1``,
-    ``plot_monthly_scope``, ``plot_yearly_scope``.
+    ``show_titles``, ``currency_format``, ``plot_daily_scope``,
+    ``plot_monthly_scope``, ``plot_yearly_scope``.  All three plot
+    scope flags share the same vocabulary in v0.6:
+    ``none`` | ``year1_only`` | ``all``.
 
 The canonical defaults live in :data:`pvbess_opt.io.PROJECT_DEFAULTS`
 and :data:`pvbess_opt.io.ECON_DEFAULTS`.  Run::

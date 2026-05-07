@@ -14,8 +14,17 @@ Two regulatory modes are supported:
     * vnb       — Greek Virtual Net Billing with co-located load.
     * merchant  — pure utility-scale DAM dispatch (no co-located load).
 
+Three asset modes are first-class in v0.6:
+    * Hybrid PV+BESS — both pv_nameplate_kwp and bess_power_kw > 0.
+    * PV-only        — bess_power_kw = 0; the optimizer pins all BESS
+                       variables to zero and skips the BESS-only
+                       constraints.
+    * BESS-only      — pv_nameplate_kwp = 0; the optimizer pins all PV
+                       variables to zero (most useful with
+                       allow_bess_grid_charging = TRUE).
+
 The hard static curtailment cap on grid-bound flows is enforced in
 both modes per MD YPEN/DAPEEK/53563/1556/2023.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

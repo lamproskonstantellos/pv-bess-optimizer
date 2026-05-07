@@ -58,10 +58,20 @@ The lifetime test asserts:
 
 within 0.1 % for every year.
 
-Calendar mapping
-----------------
+Calendar mapping (v0.6)
+-----------------------
 
-HOMER / Gridcog / Aurora convention: Year 0 (CAPEX paid at COD) and
-Year 1 (first operating year) share the same calendar year
-(``project_start_year``).  Year :math:`y` for :math:`y \ge 1` maps to
-``project_start_year + (y - 1)``.
+* **Year 0** carries CAPEX only; its calendar value is
+  ``project_start_year - 1`` (CAPEX is paid the year before
+  commercial-operations date).
+* **Year 1** is the first operating year, calendar
+  ``project_start_year``.
+* **Year N** is the last operating year, calendar
+  ``project_start_year + N - 1``.
+
+A 20-year run with ``project_start_year = 2026`` therefore produces
+21 yearly cashflow rows: Year 0 = 2025 (CAPEX only); Years 1..20 =
+2026..2045.  ``02_dispatch/dispatch_hourly.xlsx`` covers operating
+years only (2026..2045) — there is no 2025 sheet.  This replaces the
+v0.5 convention in which Year 0 and Year 1 shared
+``project_start_year``.

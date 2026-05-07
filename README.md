@@ -1,15 +1,15 @@
 # PV & BESS Optimizer
 
-[![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
-[![version](https://img.shields.io/badge/version-0.5.0-blue)](#)
-[![python](https://img.shields.io/badge/python-3.9%20%7C%203.11%20%7C%203.12-blue)](#)
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
+[![version](https://img.shields.io/badge/version-0.6.0-blue)](pvbess_opt/__init__.py)
+[![python](https://img.shields.io/badge/python-3.9%20%7C%203.11%20%7C%203.12-blue)](pyproject.toml)
+[![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
 Mixed-integer linear programming model for PV + BESS sizing and 15-minute
 dispatch, with a multi-year project-finance pipeline and rolling-horizon
 Monte Carlo for uncertainty analysis.
 
-Two regulatory regimes are supported:
+Two regulatory regimes and three asset modes are supported:
 
 * `vnb` — Greek Virtual Net Billing with co-located load.  Load
   balance, hard PV→load priority (Section 2 of the spec), surplus-only
@@ -21,6 +21,10 @@ Two regulatory regimes are supported:
   grid-connection limit per
   [MD YPEN/DAPEEK/53563/1556/2023](https://www.et.gr/), 27 % distribution-
   connected, 28 % transmission-connected).
+
+The asset mode is read literally from the workbook in v0.6 — set
+`pv_nameplate_kwp = 0` for a BESS-only project, `bess_power_kw = 0`
+for a PV-only project, both > 0 for a hybrid PV+BESS project.
 
 The codebase is pure Python and runs on **Linux, macOS, and Windows** with
 Python ≥ 3.9.  All plots are exported as IEEE-styled PDFs.
@@ -82,7 +86,7 @@ A run produces, under `results/<input>_<scenario>_<timestamp>/`:
 06_uncertainty_plots/ inputs_forecast_band, inputs_seasonal_boxplot, dam_intraday_heatmap
 ```
 
-## Workbook schema
+## Workbook schema (v0.6)
 
 Three sheets:
 
@@ -92,17 +96,26 @@ Three sheets:
   `retail_price_eur_per_mwh`.  The case-study workbook ships at
   15-minute cadence (35 040 rows for one year) per
   MD YPEN/DAPEEK/93976/2772/2024; the MILP timestep is auto-detected.
-* **`project`** — physical system + regulatory framework + optimisation
-  behaviour, in three logical groups (separator rows allowed).  Keys
-  include `efficiency_charge`, `p_charge_max_kw`, `p_grid_export_max_kw`,
-  `mode`, `retail_tariff_eur_per_mwh`, `curtailment_pct`,
-  `allow_bess_grid_charging`, `solver_mip_gap`.
-* **`economic`** — project finance + plot preferences, in six logical
-  groups.  Keys include `project_lifecycle_years`, `discount_rate_pct`,
-  `capex_pv_eur_per_kw`, `opex_bess_eur_per_kw`, sensitivity deltas,
-  plot scopes.
+* **`project`** — three logical groups (separator rows allowed):
+    * `# system_sizing` — `pv_nameplate_kwp`, `bess_power_kw`,
+      `bess_capacity_kwh`, `battery_hours`, `p_charge_max_kw`,
+      `p_dis_max_kw`, `p_grid_export_max_kw`.
+    * `# bess_operation` — `efficiency_charge`, `efficiency_discharge`,
+      `soc_min_frac`, `soc_max_frac`, `initial_soc_frac`,
+      `terminal_soc_equal`, `max_cycles_per_day`.
+    * `# regulatory` — `mode`, `retail_tariff_eur_per_mwh`,
+      `curtailment_pct`, `allow_bess_grid_charging`, `settlement_minutes`.
+* **`economic`** — eight logical groups: `# horizon`, `# capex`,
+  `# opex`, `# degradation_replacement`, `# sensitivity`,
+  `# uncertainty` (new), `# output`.  The output group's plot scope
+  flags share the same vocabulary in v0.6:
+  `plot_daily_scope` / `plot_monthly_scope` / `plot_yearly_scope` ∈
+  `none | year1_only | all`.
 
-See `docs/source/users.guide/inputs.rst` for the full reference.
+See `docs/source/users.guide/inputs.rst` for the full reference,
+`docs/v0.6_changelog.md` for the v0.5 → v0.6 migration notes, and
+`docs/technical.documentation/uncertainty_modelling.md` plus
+`docs/technical.documentation/asset_modes.md` for the new groups.
 
 ## CLI
 
@@ -165,6 +178,35 @@ Forecast-noise sigmas (defensible from literature):
 | Load          | 0.05 (MAPE)  | Predictable-customer benchmark               |
 
 See `docs/source/users.guide/rolling_horizon.rst` for the full guide.
+
+## What's new in v0.6
+
+* **Three asset modes** — set `pv_nameplate_kwp = 0` for BESS-only,
+  `bess_power_kw = 0` for PV-only, both > 0 for hybrid.  Setting both
+  to zero raises `ValueError` from `read_inputs`.
+* **Year-0 / Year-1 calendar split** — a 20-year run with
+  `project_start_year = 2026` produces 21 yearly cashflow rows: Year 0
+  (CAPEX) at calendar 2025; Years 1..20 at 2026..2045.  The new
+  `capex_year` financial KPI surfaces 2025 explicitly.
+* **Workbook-driven uncertainty** — the new `# uncertainty` group on
+  the economic sheet drives rolling-horizon Monte Carlo.  Set
+  `uncertainty_compare_sources = TRUE` to run four ensembles
+  (DAM-only, PV-only, Load-only, All-combined) and emit a foresight-
+  gap comparison plot plus four P50 KPIs.
+* **Unified plot scopes** — `plot_daily_scope`, `plot_monthly_scope`,
+  `plot_yearly_scope` all accept the same `none | year1_only | all`
+  vocabulary.  Selecting `all` for the daily resolution warns about
+  the ~9 000 PDFs a 25-year run would emit.
+* **Merchant-mode plots** — dispatch / SOC / revenue trio per
+  resolution replaces the empty supply / surplus / combined plots
+  that the load-pinned merchant runs used to produce.
+* **New financial KPIs** — `lcoe_eur_per_mwh`, `lcos_eur_per_mwh`,
+  `pv_capacity_factor`, `bess_lifetime_cycles`, plus five Year-1
+  revenue-breakdown keys.  Three new lifecycle plots:
+  `revenue_stack_yearly`, `lifetime_cycles`, `lcoe_lcos_summary`.
+
+See `docs/v0.6_changelog.md` for the full list of breaking changes
+and the five-line v0.5 → v0.6 migration summary.
 
 ## Documentation
 
