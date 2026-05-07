@@ -1,12 +1,21 @@
 """Daily dispatch plots.
 
-Three figures per calendar day, all written into the
+Three vnb-mode figures per calendar day, all written into the
 ``out_dir/<YYYY>-<MM>/`` subdirectory of the daily plot folder:
 
 * ``daily_supply_<YYYY-MM-DD>.pdf`` — stacked load supply
 * ``daily_surplus_<YYYY-MM-DD>.pdf`` — surplus / charges / curtailment
 * ``daily_combined_<YYYY-MM-DD>.pdf`` — supply + surplus on top of the
   load line
+
+Three merchant-mode figures per calendar day (added in v0.6 — no
+load, so the supply / combined views collapse to a single stack):
+
+* ``daily_dispatch_<YYYY-MM-DD>.pdf`` — stacked PV/BESS exports +
+  curtailment plus negative charging stacks.
+* ``daily_soc_<YYYY-MM-DD>.pdf`` — SOC trajectory (kWh + %).
+* ``daily_revenue_<YYYY-MM-DD>.pdf`` — DAM revenue per step minus
+  grid-charging cost.
 
 Filenames intentionally do **not** carry a scenario tag — the scenario
 is encoded in the parent run-output directory (``results/<...>``) so
@@ -19,10 +28,12 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from ..config import XTICK_ROT
 from .helpers import (
+    bar_stacked_bins,
     fill_stacked_above,
     line_if_nonzero,
     pad_right_to_end,
@@ -176,3 +187,149 @@ def plot_daily_combined(
     _setup_day_axes(ax, start, end)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="daily")
     save_figure_daily(out_dir / f"daily_combined_{date_str}.pdf", date_str)
+
+
+# ---------------------------------------------------------------------------
+# Merchant-mode plots (no load) — added in v0.6
+# ---------------------------------------------------------------------------
+
+
+def plot_daily_dispatch(
+    res: pd.DataFrame, date_str: str, out_dir: Path,
+) -> None:
+    """Stacked merchant dispatch: exports + curtailment vs charging."""
+    day = pd.to_datetime(date_str).date()
+    df = res[res["timestamp"].dt.date == day]
+    if df.empty:
+        return
+    start = pd.Timestamp(day)
+    end = start + pd.Timedelta(days=1)
+    t = df["timestamp"]
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+
+    # Positive stacks: exports + curtailment.
+    pos_series = [
+        df["pv_to_grid_kwh"].to_numpy(),
+        df["bess_dis_grid_kwh"].to_numpy(),
+        df["pv_curtail_kwh"].to_numpy(),
+    ]
+    pos_labels = [
+        "PV→Grid (export)",
+        "BESS→Grid (export)",
+        "PV→Curtailment",
+    ]
+    t_pad, pos_pads = pad_right_to_end(t, pos_series, end)
+    plot_stack_filtered(ax, t_pad, pos_pads, pos_labels, step_post=True)
+
+    # Negative stacks: charging is consumption from the system's POV.
+    neg_series = [
+        -df["pv_to_bess_kwh"].to_numpy(),
+        -df["bess_charge_grid_kwh"].to_numpy(),
+    ]
+    neg_labels = ["PV→BESS (charge)", "Import→BESS (charge)"]
+    t_pad, neg_pads = pad_right_to_end(t, neg_series, end)
+    plot_stack_filtered(ax, t_pad, neg_pads, neg_labels, step_post=True)
+
+    ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
+
+    if show_titles():
+        plt.title(
+            f"Merchant — Daily Dispatch{title_prefix(get_scenario_label())} "
+            f"— {pretty_date(date_str)}"
+        )
+    plt.xlabel("Time (HH:mm)")
+    plt.ylabel("Energy (kWh)")
+    _setup_day_axes(ax, start, end)
+    apply_legend(ax, max_rows=2, custom_order=True, plot_type="daily")
+    save_figure_daily(out_dir / f"daily_dispatch_{date_str}.pdf", date_str)
+
+
+def plot_daily_soc(
+    res: pd.DataFrame, date_str: str, out_dir: Path, *,
+    e_cap_kwh: float | None = None,
+) -> None:
+    """SOC trajectory for one day — kWh on left axis, % on right."""
+    day = pd.to_datetime(date_str).date()
+    df = res[res["timestamp"].dt.date == day]
+    if df.empty:
+        return
+    soc_kwh = df["soc_kwh"].to_numpy(dtype=float)
+    if soc_kwh.max() <= 1e-9:
+        # No BESS in the project — skip the plot.
+        return
+    start = pd.Timestamp(day)
+    end = start + pd.Timedelta(days=1)
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    t_pad, [soc_pad] = pad_right_to_end(df["timestamp"], [soc_kwh], end)
+    ax.plot(
+        t_pad, soc_pad, drawstyle="steps-post",
+        color="#1565C0", linewidth=1.5, label="SOC (kWh)",
+    )
+
+    if "soc_pct" in df.columns:
+        soc_pct = df["soc_pct"].to_numpy(dtype=float)
+        _t_pct, [soc_pct_pad] = pad_right_to_end(df["timestamp"], [soc_pct], end)
+        ax2 = ax.twinx()
+        ax2.plot(
+            _t_pct, soc_pct_pad, drawstyle="steps-post",
+            color="#6A1B9A", linewidth=1.0, linestyle="--", label="SOC (%)",
+        )
+        ax2.set_ylabel("SOC (%)")
+
+    if show_titles():
+        plt.title(
+            f"Merchant — Daily SOC{title_prefix(get_scenario_label())} "
+            f"— {pretty_date(date_str)}"
+        )
+    ax.set_xlabel("Time (HH:mm)")
+    ax.set_ylabel("SOC (kWh)")
+    _setup_day_axes(ax, start, end)
+    ax.legend(loc="best", framealpha=0.9, fontsize=7)
+    save_figure_daily(out_dir / f"daily_soc_{date_str}.pdf", date_str)
+
+
+def plot_daily_revenue(
+    res: pd.DataFrame, date_str: str, out_dir: Path,
+) -> None:
+    """DAM revenue per step (positive) minus grid-charging cost (negative)."""
+    day = pd.to_datetime(date_str).date()
+    df = res[res["timestamp"].dt.date == day]
+    if df.empty:
+        return
+    start = pd.Timestamp(day)
+    end = start + pd.Timedelta(days=1)
+    t = df["timestamp"]
+
+    rev_pv = df.get("profit_export_from_pv_eur", pd.Series(0.0, index=df.index))
+    rev_bess = df.get("profit_export_from_bess_eur", pd.Series(0.0, index=df.index))
+    cost_grid = df.get("expense_charge_bess_grid_eur", pd.Series(0.0, index=df.index))
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    t_pad, pos = pad_right_to_end(
+        t, [rev_pv.to_numpy(), rev_bess.to_numpy()], end,
+    )
+    plot_stack_filtered(
+        ax, t_pad, pos, ["PV→Grid (revenue)", "BESS→Grid (revenue)"],
+        step_post=True,
+    )
+    t_pad_n, neg = pad_right_to_end(t, [(-cost_grid).to_numpy()], end)
+    plot_stack_filtered(
+        ax, t_pad_n, neg, ["Import→BESS (cost)"], step_post=True,
+    )
+    ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
+
+    if show_titles():
+        plt.title(
+            f"Merchant — Daily Revenue{title_prefix(get_scenario_label())} "
+            f"— {pretty_date(date_str)}"
+        )
+    ax.set_xlabel("Time (HH:mm)")
+    ax.set_ylabel("EUR")
+    _setup_day_axes(ax, start, end)
+    apply_legend(ax, max_rows=2, custom_order=False, plot_type="daily")
+    save_figure_daily(out_dir / f"daily_revenue_{date_str}.pdf", date_str)

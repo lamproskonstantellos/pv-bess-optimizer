@@ -62,12 +62,18 @@ from pvbess_opt.plotting import (
     apply_ieee_style,
     plot_cumulative_cashflow,
     plot_daily_combined,
+    plot_daily_dispatch,
+    plot_daily_revenue,
+    plot_daily_soc,
     plot_daily_supply,
     plot_daily_surplus,
     plot_irr_tornado,
     plot_lifetime_summary,
     plot_monthly_cashflow_year1,
     plot_monthly_combined,
+    plot_monthly_dispatch,
+    plot_monthly_revenue,
+    plot_monthly_soc,
     plot_monthly_supply,
     plot_monthly_surplus,
     plot_npv_tornado,
@@ -76,6 +82,9 @@ from pvbess_opt.plotting import (
     plot_rolling_horizon_distribution,
     plot_yearly_cashflow_bars,
     plot_yearly_combined,
+    plot_yearly_dispatch,
+    plot_yearly_revenue,
+    plot_yearly_soc,
     plot_yearly_supply,
     plot_yearly_surplus,
     set_project_mode_label,
@@ -225,12 +234,19 @@ def _generate_energy_plots_for_year(
     daily: bool,
     monthly: bool,
     yearly: bool,
+    mode: str = "vnb",
 ) -> None:
-    """Render daily / monthly / yearly plots for a single calendar year."""
+    """Render daily / monthly / yearly plots for a single calendar year.
+
+    In ``vnb`` mode this drives the supply / surplus / combined views.
+    In ``merchant`` mode the load is pinned to zero so those plots
+    collapse — render the v0.6 dispatch / SOC / revenue trio instead.
+    """
     if not pd.api.types.is_datetime64_any_dtype(res_for_year["timestamp"]):
         return
     year_root = _energy_plot_root_for_year(energy_plots_dir, calendar_year)
     timestamps = pd.to_datetime(res_for_year["timestamp"])
+    is_merchant = str(mode).lower() == "merchant"
 
     if daily:
         daily_root = year_root / "daily"
@@ -238,9 +254,14 @@ def _generate_energy_plots_for_year(
         for day in unique_days:
             date_str = pd.Timestamp(day).strftime("%Y-%m-%d")
             try:
-                plot_daily_supply(res_for_year, date_str, daily_root)
-                plot_daily_surplus(res_for_year, date_str, daily_root)
-                plot_daily_combined(res_for_year, date_str, daily_root)
+                if is_merchant:
+                    plot_daily_dispatch(res_for_year, date_str, daily_root)
+                    plot_daily_soc(res_for_year, date_str, daily_root)
+                    plot_daily_revenue(res_for_year, date_str, daily_root)
+                else:
+                    plot_daily_supply(res_for_year, date_str, daily_root)
+                    plot_daily_surplus(res_for_year, date_str, daily_root)
+                    plot_daily_combined(res_for_year, date_str, daily_root)
             except Exception:
                 logger.exception("Daily plot failed for %s", date_str)
 
@@ -250,9 +271,14 @@ def _generate_energy_plots_for_year(
         months_present = sorted(set(timestamps.dt.month.tolist()))
         for month in months_present:
             try:
-                plot_monthly_supply(res_for_year, month, monthly_root)
-                plot_monthly_surplus(res_for_year, month, monthly_root)
-                plot_monthly_combined(res_for_year, month, monthly_root)
+                if is_merchant:
+                    plot_monthly_dispatch(res_for_year, month, monthly_root)
+                    plot_monthly_soc(res_for_year, month, monthly_root)
+                    plot_monthly_revenue(res_for_year, month, monthly_root)
+                else:
+                    plot_monthly_supply(res_for_year, month, monthly_root)
+                    plot_monthly_surplus(res_for_year, month, monthly_root)
+                    plot_monthly_combined(res_for_year, month, monthly_root)
             except Exception:
                 logger.exception("Monthly plot failed for month %s", month)
 
@@ -260,9 +286,14 @@ def _generate_energy_plots_for_year(
         yearly_root = year_root / "yearly"
         yearly_root.mkdir(parents=True, exist_ok=True)
         try:
-            plot_yearly_supply(res_for_year, int(calendar_year), yearly_root)
-            plot_yearly_surplus(res_for_year, int(calendar_year), yearly_root)
-            plot_yearly_combined(res_for_year, int(calendar_year), yearly_root)
+            if is_merchant:
+                plot_yearly_dispatch(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_soc(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_revenue(res_for_year, int(calendar_year), yearly_root)
+            else:
+                plot_yearly_supply(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_surplus(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_combined(res_for_year, int(calendar_year), yearly_root)
         except Exception:
             logger.exception(
                 "Yearly plot failed for year %s", calendar_year,
@@ -287,6 +318,8 @@ def _generate_all_energy_plots(
     lifetime_yearly: pd.DataFrame | None,
     econ: dict[str, Any],
     energy_plots_dir: Path,
+    *,
+    mode: str = "vnb",
 ) -> None:
     """Drive the energy-plot fan-out across the project lifetime."""
     daily_scope = str(econ.get("plot_daily_scope", "year1_only"))
@@ -305,6 +338,7 @@ def _generate_all_energy_plots(
             daily=_scope_active_for_year(daily_scope, 1),
             monthly=_scope_active_for_year(monthly_scope, 1),
             yearly=_scope_active_for_year(yearly_scope, 1),
+            mode=mode,
         )
         return
 
@@ -318,6 +352,7 @@ def _generate_all_energy_plots(
             daily=_scope_active_for_year(daily_scope, proj_year),
             monthly=_scope_active_for_year(monthly_scope, proj_year),
             yearly=_scope_active_for_year(yearly_scope, proj_year),
+            mode=mode,
         )
 
     if (
@@ -792,6 +827,7 @@ def _run_one(
             res, bundle.get("lifetime_df"), bundle.get("lifetime_yearly"),
             econ,
             layout["energy_plots"],
+            mode=str(params.get("mode", "vnb")).lower(),
         )
 
         _generate_uncertainty_plots(ts, layout["uncertainty_plots"])
