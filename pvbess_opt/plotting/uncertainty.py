@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -20,6 +21,16 @@ _SOURCE_SET_COLORS: dict[str, str] = {
     "load": "#1565C0",  # blue — load noise only
     "all": "#2E7D32",   # green — all three combined
 }
+
+# matplotlib 3.10 added boxplot(orientation=...) and started deprecating
+# vert=; matplotlib 3.10 also dropped Python 3.9 support, so a 3.9 runner
+# is pinned to 3.9.x where only vert= exists.  Pick the right kwarg from
+# the installed signature so the same call works on both generations.
+_BOXPLOT_HORIZONTAL_KW = (
+    {"orientation": "horizontal"}
+    if "orientation" in inspect.signature(plt.Axes.boxplot).parameters
+    else {"vert": False}
+)
 
 
 def _empty_placeholder(out_path: Path, message: str) -> Path:
@@ -142,8 +153,8 @@ def plot_foresight_gap_comparison(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     bplot = ax.boxplot(
-        data, orientation="horizontal", patch_artist=True, widths=0.6,
-        tick_labels=sources,
+        data, patch_artist=True, widths=0.6, tick_labels=sources,
+        **_BOXPLOT_HORIZONTAL_KW,
     )
     for patch, colour in zip(bplot["boxes"], colours):
         patch.set_facecolor(colour)
