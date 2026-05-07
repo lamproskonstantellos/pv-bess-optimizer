@@ -15,11 +15,16 @@ Plot titles default to off; toggle with ``show_titles`` in the
 ``economic`` sheet.
 
 Plot-scope flags in ``economic`` control how many energy PDFs are
-produced (a 25-year run with daily-all would be ~9 000 PDFs):
+produced.  All three share the same vocabulary in v0.6:
 
-* ``plot_daily_year1``   — render Year-1 daily plots (TRUE/FALSE)
+* ``plot_daily_scope``   — none / year1_only / all   (default ``year1_only``)
 * ``plot_monthly_scope`` — none / year1_only / all   (default ``all``)
-* ``plot_yearly_scope``  — none / all                 (default ``all``)
+* ``plot_yearly_scope``  — none / year1_only / all   (default ``all``)
+
+A 25-year run with ``plot_daily_scope = "all"`` produces ~9 000 daily
+PDFs (3 figures × 365 days × 25 years).  The runner emits a WARNING
+at run start in that case so the user can interrupt before the
+post-solve fan-out kicks in.
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from pvbess_opt.economics import (
     derive_monthly_cashflow,
     read_economic_params,
 )
+from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
 from pvbess_opt.io import (
     copy_input_snapshot,
     make_run_layout,
@@ -56,22 +62,35 @@ from pvbess_opt.plotting import (
     apply_ieee_style,
     plot_cumulative_cashflow,
     plot_daily_combined,
+    plot_daily_dispatch,
+    plot_daily_revenue,
+    plot_daily_soc,
     plot_daily_supply,
     plot_daily_surplus,
     plot_irr_tornado,
+    plot_lcoe_lcos_summary,
+    plot_lifetime_cycles,
     plot_lifetime_summary,
     plot_monthly_cashflow_year1,
     plot_monthly_combined,
+    plot_monthly_dispatch,
+    plot_monthly_revenue,
+    plot_monthly_soc,
     plot_monthly_supply,
     plot_monthly_surplus,
     plot_npv_tornado,
     plot_npv_waterfall,
     plot_payback,
+    plot_revenue_stack_yearly,
     plot_rolling_horizon_distribution,
     plot_yearly_cashflow_bars,
     plot_yearly_combined,
+    plot_yearly_dispatch,
+    plot_yearly_revenue,
+    plot_yearly_soc,
     plot_yearly_supply,
     plot_yearly_surplus,
+    set_project_mode_label,
     set_scenario_label,
     set_show_titles,
 )
@@ -116,27 +135,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tee", action="store_true",
                         help="Print solver output.")
 
-    # Rolling-horizon (Phase B) flags.
+    # Rolling-horizon flags.  In v0.6 these become CLI overrides of
+    # the workbook ``# uncertainty`` group; when omitted, the workbook
+    # value applies (None sentinel signals "not provided").
     parser.add_argument(
-        "--rolling-horizon", action="store_true",
-        help="Run a rolling-horizon dispatch with imperfect foresight.",
+        "--rolling-horizon", action="store_true", default=False,
+        help="Force-enable rolling-horizon dispatch with imperfect "
+             "foresight (overrides workbook uncertainty_enabled).",
     )
     parser.add_argument(
-        "--window-hours", type=int, default=48,
-        help="Rolling-horizon window length in hours (default 48).",
+        "--window-hours", type=int, default=None,
+        help="Rolling-horizon window length in hours "
+             "(overrides workbook uncertainty_window_hours).",
     )
     parser.add_argument(
-        "--commit-hours", type=int, default=24,
-        help="Rolling-horizon commit slice in hours (default 24).",
+        "--commit-hours", type=int, default=None,
+        help="Rolling-horizon commit slice in hours "
+             "(overrides workbook uncertainty_commit_hours).",
     )
     parser.add_argument(
-        "--monte-carlo", type=int, default=0,
-        help="Number of Monte Carlo seeds for the rolling-horizon run "
-             "(0 = single deterministic noiseless rolling horizon).",
+        "--monte-carlo", type=int, default=None,
+        help="Number of Monte Carlo seeds (overrides workbook "
+             "uncertainty_n_seeds; 0 = single deterministic noiseless RH).",
     )
     parser.add_argument(
         "--seed", type=int, default=42,
         help="Base seed for the Monte Carlo rolling-horizon ensemble.",
+    )
+    parser.add_argument(
+        "--compare-uncertainty-sources", action="store_true", default=False,
+        help="Run four MC ensembles (DAM-only, PV-only, Load-only, "
+             "All-combined) and emit a comparison plot "
+             "(overrides workbook uncertainty_compare_sources).",
     )
     return parser.parse_args(argv)
 
@@ -207,12 +237,19 @@ def _generate_energy_plots_for_year(
     daily: bool,
     monthly: bool,
     yearly: bool,
+    mode: str = "vnb",
 ) -> None:
-    """Render daily / monthly / yearly plots for a single calendar year."""
+    """Render daily / monthly / yearly plots for a single calendar year.
+
+    In ``vnb`` mode this drives the supply / surplus / combined views.
+    In ``merchant`` mode the load is pinned to zero so those plots
+    collapse — render the v0.6 dispatch / SOC / revenue trio instead.
+    """
     if not pd.api.types.is_datetime64_any_dtype(res_for_year["timestamp"]):
         return
     year_root = _energy_plot_root_for_year(energy_plots_dir, calendar_year)
     timestamps = pd.to_datetime(res_for_year["timestamp"])
+    is_merchant = str(mode).lower() == "merchant"
 
     if daily:
         daily_root = year_root / "daily"
@@ -220,9 +257,14 @@ def _generate_energy_plots_for_year(
         for day in unique_days:
             date_str = pd.Timestamp(day).strftime("%Y-%m-%d")
             try:
-                plot_daily_supply(res_for_year, date_str, daily_root)
-                plot_daily_surplus(res_for_year, date_str, daily_root)
-                plot_daily_combined(res_for_year, date_str, daily_root)
+                if is_merchant:
+                    plot_daily_dispatch(res_for_year, date_str, daily_root)
+                    plot_daily_soc(res_for_year, date_str, daily_root)
+                    plot_daily_revenue(res_for_year, date_str, daily_root)
+                else:
+                    plot_daily_supply(res_for_year, date_str, daily_root)
+                    plot_daily_surplus(res_for_year, date_str, daily_root)
+                    plot_daily_combined(res_for_year, date_str, daily_root)
             except Exception:
                 logger.exception("Daily plot failed for %s", date_str)
 
@@ -232,9 +274,14 @@ def _generate_energy_plots_for_year(
         months_present = sorted(set(timestamps.dt.month.tolist()))
         for month in months_present:
             try:
-                plot_monthly_supply(res_for_year, month, monthly_root)
-                plot_monthly_surplus(res_for_year, month, monthly_root)
-                plot_monthly_combined(res_for_year, month, monthly_root)
+                if is_merchant:
+                    plot_monthly_dispatch(res_for_year, month, monthly_root)
+                    plot_monthly_soc(res_for_year, month, monthly_root)
+                    plot_monthly_revenue(res_for_year, month, monthly_root)
+                else:
+                    plot_monthly_supply(res_for_year, month, monthly_root)
+                    plot_monthly_surplus(res_for_year, month, monthly_root)
+                    plot_monthly_combined(res_for_year, month, monthly_root)
             except Exception:
                 logger.exception("Monthly plot failed for month %s", month)
 
@@ -242,9 +289,14 @@ def _generate_energy_plots_for_year(
         yearly_root = year_root / "yearly"
         yearly_root.mkdir(parents=True, exist_ok=True)
         try:
-            plot_yearly_supply(res_for_year, int(calendar_year), yearly_root)
-            plot_yearly_surplus(res_for_year, int(calendar_year), yearly_root)
-            plot_yearly_combined(res_for_year, int(calendar_year), yearly_root)
+            if is_merchant:
+                plot_yearly_dispatch(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_soc(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_revenue(res_for_year, int(calendar_year), yearly_root)
+            else:
+                plot_yearly_supply(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_surplus(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_combined(res_for_year, int(calendar_year), yearly_root)
         except Exception:
             logger.exception(
                 "Yearly plot failed for year %s", calendar_year,
@@ -269,9 +321,11 @@ def _generate_all_energy_plots(
     lifetime_yearly: pd.DataFrame | None,
     econ: dict[str, Any],
     energy_plots_dir: Path,
+    *,
+    mode: str = "vnb",
 ) -> None:
     """Drive the energy-plot fan-out across the project lifetime."""
-    daily_year1 = bool(econ.get("plot_daily_year1", True))
+    daily_scope = str(econ.get("plot_daily_scope", "year1_only"))
     monthly_scope = str(econ.get("plot_monthly_scope", "all"))
     yearly_scope = str(econ.get("plot_yearly_scope", "all"))
     project_start_year = int(econ.get("project_start_year", 2026) or 2026)
@@ -284,9 +338,10 @@ def _generate_all_energy_plots(
             cal_year = project_start_year
         _generate_energy_plots_for_year(
             res_year1, cal_year, energy_plots_dir,
-            daily=daily_year1,
+            daily=_scope_active_for_year(daily_scope, 1),
             monthly=_scope_active_for_year(monthly_scope, 1),
             yearly=_scope_active_for_year(yearly_scope, 1),
+            mode=mode,
         )
         return
 
@@ -295,12 +350,12 @@ def _generate_all_energy_plots(
             lifetime_df["calendar_year"] == int(cal_year)
         ].copy()
         proj_year = int(sub["project_year"].iloc[0])
-        daily_active = daily_year1 and proj_year == 1
         _generate_energy_plots_for_year(
             sub, int(cal_year), energy_plots_dir,
-            daily=daily_active,
+            daily=_scope_active_for_year(daily_scope, proj_year),
             monthly=_scope_active_for_year(monthly_scope, proj_year),
             yearly=_scope_active_for_year(yearly_scope, proj_year),
+            mode=mode,
         )
 
     if (
@@ -357,7 +412,13 @@ def _generate_financial_plots(
     econ: dict[str, Any],
     plots_dir: Path,
     rolling_mc: pd.DataFrame | None = None,
+    rolling_compare_mc: pd.DataFrame | None = None,
+    uncertainty_dir: Path | None = None,
     pf_profit_eur: float | None = None,
+    *,
+    year1_kpis: dict[str, Any] | None = None,
+    lifetime_yearly: pd.DataFrame | None = None,
+    capacities: dict[str, float] | None = None,
 ) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
     start = int(econ.get("project_start_year", 2026) or 2026)
@@ -404,6 +465,37 @@ def _generate_financial_plots(
                 plots_dir / "rolling_horizon_distribution.pdf",
                 pf_profit_eur=pf_profit_eur,
             )
+        if rolling_compare_mc is not None and not rolling_compare_mc.empty:
+            plot_rolling_horizon_distribution(
+                rolling_compare_mc,
+                plots_dir / "rolling_horizon_distribution_compare.pdf",
+                pf_profit_eur=pf_profit_eur,
+            )
+            target_dir = uncertainty_dir or plots_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            plot_foresight_gap_comparison(
+                rolling_compare_mc,
+                target_dir / "rolling_horizon_foresight_gap_comparison.pdf",
+            )
+        # v0.6 lifecycle plots
+        if year1_kpis is not None:
+            plot_revenue_stack_yearly(
+                yearly_cf, year1_kpis,
+                plots_dir / f"revenue_stack_yearly_{start}-{end}.pdf",
+                econ=econ,
+            )
+        if lifetime_yearly is not None and capacities is not None:
+            plot_lifetime_cycles(
+                lifetime_yearly,
+                float(capacities.get("bess_kwh", 0.0) or 0.0),
+                plots_dir / f"lifetime_cycles_{start}-{end}.pdf",
+                bess_present=float(capacities.get("bess_kw", 0.0) or 0.0) > 0.0,
+            )
+        if fin_kpis is not None and capacities is not None:
+            plot_lcoe_lcos_summary(
+                fin_kpis, sensitivity_df, capacities, econ,
+                plots_dir / "lcoe_lcos_summary.pdf",
+            )
     except Exception:
         logger.exception("Financial plot generation failed")
 
@@ -427,9 +519,14 @@ def _build_financials(
     capacities = derive_asset_capacities(econ, params, ts, e_cap_kwh)
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
-    fin_kpis = compute_financial_kpis(yearly_cf, econ)
     lifetime_df = build_lifetime_dispatch(res, econ, capacities)
     lifetime_yearly = aggregate_lifetime_to_yearly(lifetime_df)
+    fin_kpis = compute_financial_kpis(
+        yearly_cf, econ,
+        capacities=capacities,
+        lifetime_yearly=lifetime_yearly,
+        year1_kpis=kpis,
+    )
     sensitivity_df: pd.DataFrame | None
     if bool(econ.get("sensitivity_enabled", True)):
         sensitivity_df = run_sensitivity_analysis(
@@ -476,6 +573,72 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
         )
 
 
+def _project_mode_label(params: dict[str, Any]) -> str:
+    """Return ``"PV-only"`` / ``"BESS-only"`` / ``"Hybrid PV+BESS"``."""
+    pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
+    bess_present = float(params.get("bess_power_kw", 0.0) or 0.0) > 0.0
+    if pv_present and bess_present:
+        return "Hybrid PV+BESS"
+    if pv_present:
+        return "PV-only"
+    if bess_present:
+        return "BESS-only"
+    return ""
+
+
+_COMPARE_SOURCE_FLAGS: tuple[tuple[str, bool, bool, bool], ...] = (
+    ("dam", True, False, False),
+    ("pv", False, True, False),
+    ("load", False, False, True),
+    ("all", True, True, True),
+)
+
+
+def _resolve_uncertainty_config(
+    args: argparse.Namespace, econ: dict[str, Any], mode: str,
+) -> dict[str, Any]:
+    """Merge CLI overrides on top of the workbook ``# uncertainty`` group."""
+    enabled = bool(args.rolling_horizon) or bool(econ.get("uncertainty_enabled", False))
+    compare = (
+        bool(args.compare_uncertainty_sources)
+        or bool(econ.get("uncertainty_compare_sources", False))
+    )
+    n_seeds = (
+        int(args.monte_carlo) if args.monte_carlo is not None
+        else int(econ.get("uncertainty_n_seeds", 30) or 30)
+    )
+    window = (
+        int(args.window_hours) if args.window_hours is not None
+        else int(econ.get("uncertainty_window_hours", 48) or 48)
+    )
+    commit = (
+        int(args.commit_hours) if args.commit_hours is not None
+        else int(econ.get("uncertainty_commit_hours", 24) or 24)
+    )
+    enable_dam = bool(econ.get("uncertainty_dam_enabled", True))
+    enable_pv = bool(econ.get("uncertainty_pv_enabled", True))
+    enable_load = bool(econ.get("uncertainty_load_enabled", True))
+    if mode == "merchant" and enable_load:
+        logger.info(
+            "merchant mode: ignoring uncertainty_load_enabled (no load to perturb)"
+        )
+        enable_load = False
+    return {
+        "enabled": enabled,
+        "compare_sources": compare,
+        "n_seeds": n_seeds,
+        "window_hours": window,
+        "commit_hours": commit,
+        "enable_dam": enable_dam,
+        "enable_pv": enable_pv,
+        "enable_load": enable_load,
+        "sigma_dam": float(econ.get("uncertainty_sigma_dam", 0.20) or 0.20),
+        "sigma_pv": float(econ.get("uncertainty_sigma_pv", 0.12) or 0.12),
+        "sigma_load": float(econ.get("uncertainty_sigma_load", 0.05) or 0.05),
+        "base_seed": int(args.seed),
+    }
+
+
 def _run_one(
     params: dict[str, Any],
     ts: pd.DataFrame,
@@ -486,11 +649,32 @@ def _run_one(
     """Solve, post-process, archive and plot a single scenario."""
     slug = _scenario_slug(params)
     set_scenario_label(slug)
+    set_project_mode_label(_project_mode_label(params))
 
     folder = f"{base_name}_{slug}_{timestamp}"
     out_dir = Path(args.outdir) / folder
     layout = make_run_layout(out_dir)
     log_path = layout["summary"] / "run_log.txt"
+
+    # Load the economic group up front so the uncertainty config can be
+    # resolved before the perfect-foresight solve produces its KPIs.
+    econ_pre = read_economic_params(Path(args.excel))
+    unc_cfg = _resolve_uncertainty_config(
+        args, econ_pre, mode=str(params.get("mode", "vnb")).lower(),
+    )
+
+    # plot_daily_scope = "all" with a long horizon produces ~9 000 PDFs
+    # for a 25-year run.  Warn loudly so the user can interrupt before
+    # the post-solve fan-out kicks in.
+    if str(econ_pre.get("plot_daily_scope", "year1_only")).strip().lower() == "all":
+        n_years = int(econ_pre.get("project_lifecycle_years", 25) or 25)
+        approx_pdfs = 365 * max(n_years, 1) * 3
+        logger.warning(
+            "plot_daily_scope='all' selected: ~%d daily PDFs will be "
+            "generated across %d operating years (3 figures/day). "
+            "Set plot_daily_scope=year1_only to keep iteration fast.",
+            approx_pdfs, n_years,
+        )
 
     with _tee_stdout_to_log(log_path):
         print(f"[run] mode={params.get('mode')}  "
@@ -531,39 +715,84 @@ def _run_one(
         # Optional rolling-horizon run (writes its KPIs alongside the
         # perfect-foresight benchmark for comparison).
         rolling_mc_df: pd.DataFrame | None = None
-        if args.rolling_horizon:
+        rolling_compare_df: pd.DataFrame | None = None
+        if unc_cfg["enabled"]:
             pf_profit_eur = float(kpis.get("profit_total_eur", 0.0))
-            n_seeds = int(args.monte_carlo)
-            if n_seeds > 0:
-                print(f"[rolling] running {n_seeds} MC seeds "
-                      f"(window={args.window_hours}h, commit={args.commit_hours}h, "
-                      f"base_seed={args.seed})")
+            n_seeds = int(unc_cfg["n_seeds"])
+            window_h = int(unc_cfg["window_hours"])
+            commit_h = int(unc_cfg["commit_hours"])
+            base_seed = int(unc_cfg["base_seed"])
+
+            if unc_cfg["compare_sources"] and n_seeds > 0:
+                print(
+                    f"[rolling] compare-sources mode: 4 ensembles x {n_seeds} seeds "
+                    f"(window={window_h}h, commit={commit_h}h, base_seed={base_seed})"
+                )
+                ensembles: list[pd.DataFrame] = []
+                for src, en_dam, en_pv, en_load in _COMPARE_SOURCE_FLAGS:
+                    sub = monte_carlo_rolling(
+                        params, ts,
+                        n_seeds=n_seeds,
+                        base_seed=base_seed,
+                        pf_profit_eur=pf_profit_eur,
+                        sigma_dam=unc_cfg["sigma_dam"],
+                        sigma_pv=unc_cfg["sigma_pv"],
+                        sigma_load=unc_cfg["sigma_load"],
+                        enable_dam=en_dam,
+                        enable_pv=en_pv,
+                        enable_load=en_load,
+                        window_hours=window_h,
+                        commit_hours=commit_h,
+                        solver_name=args.solver,
+                        mip_gap=args.mip_gap,
+                        time_limit_seconds=args.time_limit,
+                        tee=args.tee,
+                    )
+                    sub.insert(0, "source_set", src)
+                    ensembles.append(sub)
+                    p50 = float(sub["foresight_gap_pct"].quantile(0.50))
+                    kpis[f"foresight_gap_pct_p50_{src}"] = float(round(p50, 4))
+                rolling_compare_df = pd.concat(ensembles, ignore_index=True)
+                kpis["mc_n_seeds"] = int(n_seeds)
+                kpis["mc_window_hours"] = int(window_h)
+                kpis["mc_commit_hours"] = int(commit_h)
+            elif n_seeds > 0:
+                print(
+                    f"[rolling] running {n_seeds} MC seeds "
+                    f"(window={window_h}h, commit={commit_h}h, "
+                    f"base_seed={base_seed})"
+                )
                 rolling_mc_df = monte_carlo_rolling(
                     params, ts,
                     n_seeds=n_seeds,
-                    base_seed=int(args.seed),
+                    base_seed=base_seed,
                     pf_profit_eur=pf_profit_eur,
-                    window_hours=int(args.window_hours),
-                    commit_hours=int(args.commit_hours),
+                    sigma_dam=unc_cfg["sigma_dam"],
+                    sigma_pv=unc_cfg["sigma_pv"],
+                    sigma_load=unc_cfg["sigma_load"],
+                    enable_dam=unc_cfg["enable_dam"],
+                    enable_pv=unc_cfg["enable_pv"],
+                    enable_load=unc_cfg["enable_load"],
+                    window_hours=window_h,
+                    commit_hours=commit_h,
                     solver_name=args.solver,
                     mip_gap=args.mip_gap,
                     time_limit_seconds=args.time_limit,
                     tee=args.tee,
                 )
-                # Add P10/P50/P90 KPIs.
                 gap_p = rolling_mc_df["foresight_gap_pct"].quantile([0.10, 0.50, 0.90])
                 kpis["foresight_gap_pct_p10"] = float(round(gap_p.loc[0.10], 4))
                 kpis["foresight_gap_pct_p50"] = float(round(gap_p.loc[0.50], 4))
                 kpis["foresight_gap_pct_p90"] = float(round(gap_p.loc[0.90], 4))
                 kpis["mc_n_seeds"] = int(n_seeds)
-                kpis["mc_window_hours"] = int(args.window_hours)
-                kpis["mc_commit_hours"] = int(args.commit_hours)
+                kpis["mc_window_hours"] = int(window_h)
+                kpis["mc_commit_hours"] = int(commit_h)
             else:
                 # Single deterministic noiseless rolling horizon.
-                rh_full, rh_kpis = rolling_horizon_dispatch(
+                _rh_full, rh_kpis = rolling_horizon_dispatch(
                     params, ts,
-                    window_hours=int(args.window_hours),
-                    commit_hours=int(args.commit_hours),
+                    window_hours=window_h,
+                    commit_hours=commit_h,
                     forecast_seed=None,
                     evaluate_with_actuals=True,
                     solver_name=args.solver,
@@ -608,6 +837,7 @@ def _run_one(
             lifetime_yearly=bundle.get("lifetime_yearly"),
             economic_assumptions=econ,
             rolling_horizon_mc=rolling_mc_df,
+            rolling_horizon_compare_mc=rolling_compare_df,
         )
 
         if bundle.get("yearly_cf") is not None:
@@ -619,13 +849,19 @@ def _run_one(
                 econ,
                 layout["financial_plots"],
                 rolling_mc=rolling_mc_df,
+                rolling_compare_mc=rolling_compare_df,
+                uncertainty_dir=layout["uncertainty_plots"],
                 pf_profit_eur=float(kpis.get("profit_total_eur", 0.0)),
+                year1_kpis=kpis,
+                lifetime_yearly=bundle.get("lifetime_yearly"),
+                capacities=bundle.get("capacities"),
             )
 
         _generate_all_energy_plots(
             res, bundle.get("lifetime_df"), bundle.get("lifetime_yearly"),
             econ,
             layout["energy_plots"],
+            mode=str(params.get("mode", "vnb")).lower(),
         )
 
         _generate_uncertainty_plots(ts, layout["uncertainty_plots"])

@@ -21,13 +21,16 @@ from pvbess_opt.io import (
 
 
 def test_project_defaults_have_three_groups():
-    assert set(PROJECT_DEFAULTS.keys()) == {"system", "regulatory", "optimization"}
+    assert set(PROJECT_DEFAULTS.keys()) == {
+        "system_sizing", "bess_operation", "regulatory",
+    }
 
 
 def test_econ_defaults_have_canonical_keys():
     for key in (
         "project_lifecycle_years", "project_start_year", "discount_rate_pct",
         "capex_pv_eur_per_kw", "opex_bess_eur_per_kw",
+        "uncertainty_enabled", "plot_daily_scope",
     ):
         assert key in ECON_DEFAULTS
 
@@ -58,11 +61,32 @@ def test_flat_dict_skips_separator_rows():
 
 
 def test_parse_project_sheet_distributes_to_groups():
-    flat = {"efficiency_charge": 0.95, "mode": "merchant", "weight_cycles_term": 1.5}
+    flat = {
+        "efficiency_charge": 0.95,         # bess_operation
+        "pv_nameplate_kwp": 4500.0,        # system_sizing
+        "mode": "merchant",                # regulatory
+    }
     parsed = _parse_project_sheet(flat)
-    assert parsed["system"]["efficiency_charge"] == 0.95
+    assert parsed["bess_operation"]["efficiency_charge"] == 0.95
+    assert parsed["system_sizing"]["pv_nameplate_kwp"] == 4500.0
     assert parsed["regulatory"]["mode"] == "merchant"
-    assert parsed["optimization"]["weight_cycles_term"] == 1.5
+
+
+def test_parse_project_sheet_warns_on_legacy_optimization_keys(caplog):
+    """v0.5 # optimization keys must produce a single warning and be ignored."""
+    flat = {
+        "efficiency_charge": 0.95,
+        "weight_cycles_term": 1.5,
+        "solver_mip_gap": 0.005,
+    }
+    with caplog.at_level("WARNING"):
+        parsed = _parse_project_sheet(flat)
+    assert parsed["bess_operation"]["efficiency_charge"] == 0.95
+    # Legacy keys are not surfaced anywhere in the typed dict.
+    for grp in parsed.values():
+        assert "weight_cycles_term" not in grp
+        assert "solver_mip_gap" not in grp
+    assert any("legacy v0.5" in rec.getMessage() for rec in caplog.records)
 
 
 def test_parse_economic_sheet_round_trip():
@@ -107,8 +131,8 @@ def test_workbook_round_trip(tmp_path, repo_input_xlsx):
     dst = tmp_path / "round_trip.xlsx"
     write_workbook(typed, dst)
     typed2 = read_workbook(dst)
-    eta1 = typed["project"]["system"]["efficiency_charge"]
-    eta2 = typed2["project"]["system"]["efficiency_charge"]
+    eta1 = typed["project"]["bess_operation"]["efficiency_charge"]
+    eta2 = typed2["project"]["bess_operation"]["efficiency_charge"]
     assert eta1 == eta2
     assert typed["economic"]["discount_rate_pct"] == typed2["economic"]["discount_rate_pct"]
     assert len(typed["ts"]) == len(typed2["ts"])
@@ -144,9 +168,9 @@ def test_unknown_mode_falls_back_to_vnb(tmp_path):
             "load_kwh": [100.0] * 24,
         }),
         "project": {
-            "system": dict(PROJECT_DEFAULTS["system"]),
+            "system_sizing": dict(PROJECT_DEFAULTS["system_sizing"]),
+            "bess_operation": dict(PROJECT_DEFAULTS["bess_operation"]),
             "regulatory": dict(PROJECT_DEFAULTS["regulatory"]),
-            "optimization": dict(PROJECT_DEFAULTS["optimization"]),
         },
         "economic": dict(ECON_DEFAULTS),
     }

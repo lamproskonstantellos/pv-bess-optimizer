@@ -35,7 +35,7 @@ def _make_short_ts(n_hours: int = 48, *, with_load: bool = True, seed: int = 0) 
 
 
 def _short_params(mode: str = "vnb") -> dict:
-    """Minimal valid param dict for a 48-hour test."""
+    """Minimal valid param dict for a 48-hour test (v0.6 schema)."""
     return {
         "dt_minutes": 60,
         "efficiency_charge": 0.97,
@@ -57,10 +57,6 @@ def _short_params(mode: str = "vnb") -> dict:
         "settlement_minutes": 15,
         "mode": mode,
         "allow_bess_grid_charging": False,
-        "weight_curtail_tiebreak": 1.0e-5,
-        "weight_cycles_term": 0.0,
-        "solver_mip_gap": 0.01,
-        "solver_time_limit_seconds": 60,
         "show_titles": False,
     }
 

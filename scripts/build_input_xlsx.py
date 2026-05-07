@@ -119,24 +119,26 @@ def build_timeseries(year: int = 2026, target_minutes: int = 15) -> pd.DataFrame
 
 
 def build_typed_dict() -> dict:
-    """Assemble the typed nested dict for the case-study run."""
+    """Assemble the typed nested dict for the case-study run (v0.6 schema)."""
     ts = build_timeseries(2026)
     project = {
-        "system": {
+        "system_sizing": {
             "pv_nameplate_kwp": 4500.0,
             "bess_power_kw": 5000.0,
             "bess_capacity_kwh": 20000.0,
+            "battery_hours": 4.0,
+            "p_charge_max_kw": 5000.0,
+            "p_dis_max_kw": 5000.0,
+            "p_grid_export_max_kw": 5000.0,
+        },
+        "bess_operation": {
             "efficiency_charge": 0.97,
             "efficiency_discharge": 0.97,
             "soc_min_frac": 0.20,
             "soc_max_frac": 0.95,
             "initial_soc_frac": 0.50,
             "terminal_soc_equal": True,
-            "p_charge_max_kw": 5000.0,
-            "p_dis_max_kw": 5000.0,
-            "battery_hours": 4.0,
             "max_cycles_per_day": 1.0,
-            "p_grid_export_max_kw": 5000.0,
         },
         "regulatory": {
             "mode": "vnb",
@@ -144,12 +146,6 @@ def build_typed_dict() -> dict:
             "curtailment_pct": 27.0,
             "allow_bess_grid_charging": False,
             "settlement_minutes": 15,
-        },
-        "optimization": {
-            "weight_curtail_tiebreak": 1.0e-5,
-            "weight_cycles_term": 0.0,
-            "solver_mip_gap": 0.001,
-            "solver_time_limit_seconds": 1800,
         },
     }
     economic = {
@@ -173,9 +169,20 @@ def build_typed_dict() -> dict:
         "sensitivity_opex_delta_pct": 10.0,
         "sensitivity_revenue_delta_pct": 10.0,
         "sensitivity_discount_rate_delta_pp": 2.0,
+        "uncertainty_enabled": False,
+        "uncertainty_compare_sources": False,
+        "uncertainty_n_seeds": 30,
+        "uncertainty_window_hours": 48,
+        "uncertainty_commit_hours": 24,
+        "uncertainty_dam_enabled": True,
+        "uncertainty_pv_enabled": True,
+        "uncertainty_load_enabled": True,
+        "uncertainty_sigma_dam": 0.20,
+        "uncertainty_sigma_pv": 0.12,
+        "uncertainty_sigma_load": 0.05,
         "show_titles": False,
         "currency_format": "auto",
-        "plot_daily_year1": True,
+        "plot_daily_scope": "year1_only",
         "plot_monthly_scope": "all",
         "plot_yearly_scope": "all",
     }

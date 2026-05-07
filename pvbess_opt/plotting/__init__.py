@@ -15,7 +15,14 @@ Three families of plots:
   heatmap (``inputs_uncertainty.py``).
 """
 
-from .daily import plot_daily_combined, plot_daily_supply, plot_daily_surplus
+from .daily import (
+    plot_daily_combined,
+    plot_daily_dispatch,
+    plot_daily_revenue,
+    plot_daily_soc,
+    plot_daily_supply,
+    plot_daily_surplus,
+)
 from .financial import (
     plot_cumulative_cashflow,
     plot_irr_tornado,
@@ -32,31 +39,60 @@ from .inputs_uncertainty import (
 )
 from .monthly import (
     plot_monthly_combined,
+    plot_monthly_dispatch,
+    plot_monthly_revenue,
+    plot_monthly_soc,
     plot_monthly_supply,
     plot_monthly_surplus,
 )
-from .style import apply_ieee_style, set_scenario_label, set_show_titles
-from .uncertainty import plot_rolling_horizon_distribution
+from .style import (
+    apply_ieee_style,
+    set_project_mode_label,
+    set_scenario_label,
+    set_show_titles,
+)
+from .lifecycle import (
+    plot_lcoe_lcos_summary,
+    plot_lifetime_cycles,
+    plot_revenue_stack_yearly,
+)
+from .uncertainty import (
+    plot_foresight_gap_comparison,
+    plot_rolling_horizon_distribution,
+)
 from .yearly import (
     plot_lifetime_summary,
     plot_yearly_combined,
+    plot_yearly_dispatch,
+    plot_yearly_revenue,
+    plot_yearly_soc,
     plot_yearly_supply,
     plot_yearly_surplus,
 )
 
 __all__ = [
     "apply_ieee_style",
+    "set_project_mode_label",
     "set_scenario_label",
     "set_show_titles",
     "plot_daily_supply",
     "plot_daily_surplus",
     "plot_daily_combined",
+    "plot_daily_dispatch",
+    "plot_daily_soc",
+    "plot_daily_revenue",
     "plot_monthly_supply",
     "plot_monthly_surplus",
     "plot_monthly_combined",
+    "plot_monthly_dispatch",
+    "plot_monthly_soc",
+    "plot_monthly_revenue",
     "plot_yearly_supply",
     "plot_yearly_surplus",
     "plot_yearly_combined",
+    "plot_yearly_dispatch",
+    "plot_yearly_soc",
+    "plot_yearly_revenue",
     "plot_lifetime_summary",
     "plot_cumulative_cashflow",
     "plot_yearly_cashflow_bars",
@@ -66,6 +102,10 @@ __all__ = [
     "plot_npv_tornado",
     "plot_irr_tornado",
     "plot_rolling_horizon_distribution",
+    "plot_foresight_gap_comparison",
+    "plot_revenue_stack_yearly",
+    "plot_lifetime_cycles",
+    "plot_lcoe_lcos_summary",
     "plot_input_forecast_band",
     "plot_input_seasonal_boxplot",
     "plot_dam_intraday_heatmap",

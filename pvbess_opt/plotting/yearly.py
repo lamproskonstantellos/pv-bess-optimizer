@@ -1,10 +1,17 @@
 """Yearly aggregate plots.
 
-Three figures per calendar year, written directly into ``out_dir``:
+Three vnb-mode figures per calendar year, written directly into
+``out_dir``:
 
 * ``yearly_supply.pdf``
 * ``yearly_surplus.pdf``
 * ``yearly_combined.pdf``
+
+Three merchant-mode figures per calendar year (added in v0.6):
+
+* ``yearly_dispatch.pdf`` — monthly exports + curtailment vs charging.
+* ``yearly_soc.pdf`` — monthly min/mean/max SOC envelope.
+* ``yearly_revenue.pdf`` — monthly DAM revenue minus charging cost.
 
 Filenames intentionally do **not** carry a year suffix — the year is
 already encoded in the ``out_dir`` parent (``05_energy_plots/<YYYY>/``).
@@ -16,6 +23,7 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from matplotlib.ticker import ScalarFormatter
 
@@ -163,6 +171,143 @@ def plot_yearly_combined(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     _setup_month_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="yearly")
     save_figure(out_dir / "yearly_combined.pdf")
+
+
+# ---------------------------------------------------------------------------
+# Merchant-mode plots (no load) — added in v0.6
+# ---------------------------------------------------------------------------
+
+
+def plot_yearly_dispatch(res: pd.DataFrame, year: int, out_dir: Path) -> None:
+    """Monthly merchant dispatch: exports + curtailment vs charging."""
+    mth = year_aggregate(res, year)
+    if mth.empty:
+        return
+    left, width_days = edges_and_widths_yearly(mth["month_start"])
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    bar_stacked_bins(
+        ax, left, width_days,
+        [
+            mth["pv_to_grid_kwh"] / 1000.0,
+            mth["bess_dis_grid_kwh"] / 1000.0,
+            mth["pv_curtail_kwh"] / 1000.0,
+        ],
+        ["PV→Grid (export)", "BESS→Grid (export)", "PV→Curtailment"],
+    )
+    bar_stacked_bins(
+        ax, left, width_days,
+        [
+            -(mth["pv_to_bess_kwh"] / 1000.0),
+            -(mth["bess_charge_grid_kwh"] / 1000.0),
+        ],
+        ["PV→BESS (charge)", "Import→BESS (charge)"],
+    )
+    ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
+    _set_mwh_yaxis(ax, "Energy (MWh/month)")
+    if show_titles():
+        ax.set_title(
+            f"Merchant — Yearly Dispatch{title_prefix(get_scenario_label())} "
+            f"— {year}"
+        )
+    ax.set_xlabel("Month")
+    _setup_month_axis(ax, left, width_days)
+    apply_legend(ax, max_rows=2, custom_order=False, plot_type="yearly")
+    save_figure(out_dir / "yearly_dispatch.pdf")
+
+
+def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
+    """Monthly min / mean / max SOC envelope for the calendar year."""
+    df = res[pd.to_datetime(res["timestamp"]).dt.year == year]
+    if df.empty or "soc_kwh" not in df.columns:
+        return
+    if float(df["soc_kwh"].max()) <= 1e-9:
+        return  # No BESS in the project.
+    monthly = (
+        df.groupby(pd.to_datetime(df["timestamp"]).dt.to_period("M"))["soc_kwh"]
+        .agg(["min", "mean", "max"]).reset_index()
+    )
+    monthly["month_start"] = monthly["timestamp"].dt.to_timestamp()
+    monthly = monthly.sort_values("month_start").reset_index(drop=True)
+    if monthly.empty:
+        return
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    ax.fill_between(
+        monthly["month_start"], monthly["min"], monthly["max"],
+        color="#1565C0", alpha=0.25, label="Monthly min-max",
+    )
+    ax.plot(
+        monthly["month_start"], monthly["mean"],
+        color="#1565C0", linewidth=1.5, marker="o", markersize=3,
+        label="Monthly mean",
+    )
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%Y"))
+    plt.setp(ax.get_xticklabels(), rotation=XTICK_ROT, ha="right")
+    if show_titles():
+        ax.set_title(
+            f"Merchant — Yearly SOC{title_prefix(get_scenario_label())} "
+            f"— {year}"
+        )
+    ax.set_xlabel("Month")
+    ax.set_ylabel("SOC (kWh)")
+    ax.legend(loc="best", framealpha=0.9, fontsize=7)
+    ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    save_figure(out_dir / "yearly_soc.pdf")
+
+
+def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
+    """Monthly DAM revenue minus grid-charging cost."""
+    df = res[pd.to_datetime(res["timestamp"]).dt.year == year].copy()
+    if df.empty:
+        return
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    cols = {
+        "rev_pv": "profit_export_from_pv_eur",
+        "rev_bess": "profit_export_from_bess_eur",
+        "cost_grid": "expense_charge_bess_grid_eur",
+    }
+    monthly = df.groupby(df["timestamp"].dt.to_period("M")).agg(
+        {c: "sum" for c in cols.values() if c in df.columns}
+    ).reset_index()
+    monthly["month_start"] = monthly["timestamp"].dt.to_timestamp()
+    monthly = monthly.sort_values("month_start").reset_index(drop=True)
+    if monthly.empty:
+        return
+    left, width_days = edges_and_widths_yearly(monthly["month_start"])
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    pos = []
+    pos_labels = []
+    if cols["rev_pv"] in monthly.columns:
+        pos.append(monthly[cols["rev_pv"]].to_numpy(dtype=float))
+        pos_labels.append("PV→Grid (revenue)")
+    if cols["rev_bess"] in monthly.columns:
+        pos.append(monthly[cols["rev_bess"]].to_numpy(dtype=float))
+        pos_labels.append("BESS→Grid (revenue)")
+    if pos:
+        bar_stacked_bins(ax, left, width_days, pos, pos_labels)
+    if cols["cost_grid"] in monthly.columns:
+        bar_stacked_bins(
+            ax, left, width_days,
+            [-monthly[cols["cost_grid"]].to_numpy(dtype=float)],
+            ["Import→BESS (cost)"],
+        )
+    ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
+    if show_titles():
+        ax.set_title(
+            f"Merchant — Yearly Revenue{title_prefix(get_scenario_label())} "
+            f"— {year}"
+        )
+    ax.set_xlabel("Month")
+    ax.set_ylabel("EUR/month")
+    _setup_month_axis(ax, left, width_days)
+    apply_legend(ax, max_rows=2, custom_order=False, plot_type="yearly")
+    save_figure(out_dir / "yearly_revenue.pdf")
 
 
 def plot_lifetime_summary(
