@@ -323,6 +323,32 @@ def _generate_all_energy_plots(
 # ---------------------------------------------------------------------------
 
 
+def _generate_uncertainty_plots(
+    ts: pd.DataFrame,
+    out_dir: Path,
+) -> None:
+    """Render the three input-uncertainty PDFs into ``out_dir``."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        from pvbess_opt.plotting import (
+            plot_dam_intraday_heatmap,
+            plot_input_forecast_band,
+            plot_input_seasonal_boxplot,
+        )
+        plot_input_forecast_band(
+            ts, out_dir / "inputs_forecast_band.pdf",
+            week_start_doy=165,
+        )
+        plot_input_seasonal_boxplot(
+            ts, out_dir / "inputs_seasonal_boxplot.pdf",
+        )
+        plot_dam_intraday_heatmap(
+            ts, out_dir / "dam_intraday_heatmap.pdf",
+        )
+    except Exception:
+        logger.exception("Uncertainty plot generation failed")
+
+
 def _generate_financial_plots(
     yearly_cf: pd.DataFrame,
     monthly_cf: pd.DataFrame | None,
@@ -434,6 +460,8 @@ def _scenario_slug(params: dict[str, Any]) -> str:
 
 def _check_strict_invariants(invariants: dict[str, float]) -> None:
     tol = 1.0e-3
+    # Invariant 6 is an integer count and piggybacks on the same tol;
+    # the smallest non-zero count is 1, which trivially exceeds tol=1e-3.
     offenders = {
         k: v for k, v in invariants.items()
         if v > tol and k != "invariant_5_no_sim_grid_io_max_product_kwh2"
@@ -599,6 +627,8 @@ def _run_one(
             econ,
             layout["energy_plots"],
         )
+
+        _generate_uncertainty_plots(ts, layout["uncertainty_plots"])
 
         print(f"=== KPIs ({slug}) ===")
         for key, value in kpis.items():

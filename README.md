@@ -79,6 +79,7 @@ A run produces, under `results/<input>_<scenario>_<timestamp>/`:
 04_financial_plots/ cumulative, waterfall, payback, tornados, rolling_horizon_distribution
 05_energy_plots/<calendar_year>/{daily,monthly,yearly}/...
                    lifetime_summary_<start>-<end>.pdf
+06_uncertainty_plots/ inputs_forecast_band, inputs_seasonal_boxplot, dam_intraday_heatmap
 ```
 
 ## Workbook schema

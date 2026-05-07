@@ -2,7 +2,7 @@
 
 All figures use the IEEE matplotlib preset and are exported as PDF.
 
-Two families of plots:
+Three families of plots:
 
 * **Energy plots** — stacked daily / monthly / yearly views of the
   Year-1 dispatch (these come from ``daily.py``, ``monthly.py``, and
@@ -10,6 +10,9 @@ Two families of plots:
 * **Financial plots** — multi-year cash-flow plots + tornado diagrams
   + rolling-horizon Monte Carlo distribution (``financial.py``,
   ``uncertainty.py``).
+* **Input-uncertainty plots** — analytical P10/P90 envelope on a
+  representative week, monthly boxplots, and DAM intraday × seasonal
+  heatmap (``inputs_uncertainty.py``).
 """
 
 from .daily import plot_daily_combined, plot_daily_supply, plot_daily_surplus
@@ -21,6 +24,11 @@ from .financial import (
     plot_npv_waterfall,
     plot_payback,
     plot_yearly_cashflow_bars,
+)
+from .inputs_uncertainty import (
+    plot_dam_intraday_heatmap,
+    plot_input_forecast_band,
+    plot_input_seasonal_boxplot,
 )
 from .monthly import (
     plot_monthly_combined,
@@ -58,4 +66,7 @@ __all__ = [
     "plot_npv_tornado",
     "plot_irr_tornado",
     "plot_rolling_horizon_distribution",
+    "plot_input_forecast_band",
+    "plot_input_seasonal_boxplot",
+    "plot_dam_intraday_heatmap",
 ]
