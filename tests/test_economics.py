@@ -88,14 +88,15 @@ def test_build_yearly_cashflow_lowercase_keys():
     assert df.loc[df["project_year"] == 0, "capex_eur"].iloc[0] < 0
 
 
-def test_calendar_year_homer_convention():
-    """Year 0 and Year 1 share the same calendar year."""
+def test_calendar_year_v06_convention():
+    """v0.6: Year 0 (CAPEX) is project_start_year - 1; Year 1 is project_start_year."""
     kpis = {"profit_total_eur": 200_000.0}
     caps = {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
     df = build_yearly_cashflow(kpis, _econ(), caps)
     y0 = int(df.loc[df["project_year"] == 0, "calendar_year"].iloc[0])
     y1 = int(df.loc[df["project_year"] == 1, "calendar_year"].iloc[0])
-    assert y0 == y1 == 2026
+    assert y0 == 2025
+    assert y1 == 2026
 
 
 def test_compute_financial_kpis_lowercase_keys():

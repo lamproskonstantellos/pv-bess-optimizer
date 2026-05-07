@@ -64,6 +64,44 @@ def _start_end_years(yearly_cf: pd.DataFrame) -> tuple[int, int]:
     )
 
 
+def _operating_window_with_capex(
+    yearly_cf: pd.DataFrame,
+) -> tuple[int, int, int | None]:
+    """Return ``(op_start, op_end, capex_year)`` for v0.6 title strings.
+
+    ``op_start`` is the calendar year of Year 1 (first operating year).
+    ``op_end`` is the calendar year of the last row.  ``capex_year`` is
+    the calendar year of Year 0 — None when the frame contains only
+    operating years (e.g. a sensitivity slice).
+    """
+    if "calendar_year" in yearly_cf.columns and len(yearly_cf) > 0:
+        if "project_year" in yearly_cf.columns and (yearly_cf["project_year"] == 1).any():
+            op_start = int(
+                yearly_cf.loc[yearly_cf["project_year"] == 1, "calendar_year"].iloc[0]
+            )
+        else:
+            op_start = int(yearly_cf["calendar_year"].iloc[0])
+        op_end = int(yearly_cf["calendar_year"].iloc[-1])
+        if "project_year" in yearly_cf.columns and (yearly_cf["project_year"] == 0).any():
+            capex_year: int | None = int(
+                yearly_cf.loc[yearly_cf["project_year"] == 0, "calendar_year"].iloc[0]
+            )
+        else:
+            capex_year = None
+        return op_start, op_end, capex_year
+    s, e = _start_end_years(yearly_cf)
+    return s, e, None
+
+
+def _title_window(yearly_cf: pd.DataFrame) -> str:
+    """Return the ``2026-2045 (CAPEX in 2025)`` title fragment."""
+    op_start, op_end, capex_year = _operating_window_with_capex(yearly_cf)
+    base = f"{op_start}-{op_end}"
+    if capex_year is not None and capex_year != op_start:
+        return f"{base} (CAPEX in {capex_year})"
+    return base
+
+
 def _maybe_set_title(ax, text: str) -> None:
     if show_titles():
         ax.set_title(text)
@@ -126,12 +164,11 @@ def plot_cumulative_cashflow(
                 alpha=0.7, label=label,
             )
 
-    start, end = _start_end_years(yearly_cf)
     ax.set_xlabel("Calendar year" if "calendar_year" in yearly_cf.columns
                   else "Project year")
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
-    _maybe_set_title(ax, f"Cumulative Cash-flow — {start}-{end}")
+    _maybe_set_title(ax, f"Cumulative Cash-flow — {_title_window(yearly_cf)}")
     ax.legend(loc="best", framealpha=0.9)
     ax.grid(True, linestyle="--", alpha=0.5)
     return save_figure(out_path)
@@ -165,17 +202,15 @@ def plot_yearly_cashflow_bars(
            edgecolor="black", linewidth=0.4, label="CAPEX")
     ax.plot(years, net, color=_COLOR_NET, linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
-    # Horizontal grid at y=0 (v0.5: linewidth=0.8 per spec).
     ax.axhline(0.0, color="black", linewidth=0.8)
 
-    start, end = _start_end_years(yearly_cf)
     ax.set_xlabel(
         "Calendar year" if "calendar_year" in yearly_cf.columns
         else "Project year"
     )
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
-    _maybe_set_title(ax, f"Yearly Cash-flow Stack — {start}-{end}")
+    _maybe_set_title(ax, f"Yearly Cash-flow Stack — {_title_window(yearly_cf)}")
     # Pin to the lower right — the post-payback region is roughly
     # horizontal there, so the legend stays clear of the bars and the
     # Year-0 CAPEX stack on the left.
@@ -244,14 +279,13 @@ def plot_npv_waterfall(
     xmin, xmax = ax.get_xlim()
     ax.set_xlim(xmin, xmax + 1.5)
 
-    start, end = _start_end_years(yearly_cf)
     ax.set_xlabel(
         "Calendar year" if "calendar_year" in yearly_cf.columns
         else "Project year"
     )
     ax.set_ylabel("Discounted EUR")
     _apply_eur_yaxis(ax, econ)
-    _maybe_set_title(ax, f"NPV Waterfall — {start}-{end}")
+    _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
     ax.legend(loc="best", framealpha=0.9)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     return save_figure(out_path)
@@ -285,11 +319,14 @@ def plot_payback(
     ax.axhline(0.0, color="black", linewidth=0.6)
 
     using_calendar = "calendar_year" in yearly_cf.columns
+    # Year-0 row's calendar value is the new "base year" anchor: a payback
+    # of N years lands at calendar (capex_year + N) = (project_start_year - 1
+    # + N), one step earlier than the v0.5 mapping.
     base_year = float(years[0]) if using_calendar else 0.0
 
     def _to_axis(payback: float) -> float:
         if using_calendar:
-            return base_year + payback - 1.0
+            return base_year + payback
         return payback
 
     if simple_payback_years is not None and not np.isnan(simple_payback_years):
@@ -299,8 +336,6 @@ def plot_payback(
             alpha=0.8,
             label=f"Simple payback: {simple_payback_years:.1f} yr",
         )
-        # Filled marker at the cross-zero point so simple and discounted
-        # markers stay distinguishable when they overlap.
         ax.scatter([x], [0.0], color=_COLOR_NET, s=20, zorder=5)
     if (
         discounted_payback_years is not None
@@ -314,11 +349,10 @@ def plot_payback(
         )
         ax.scatter([x], [0.0], color=_COLOR_DISCOUNTED, s=20, zorder=5)
 
-    start, end = _start_end_years(yearly_cf)
     ax.set_xlabel("Calendar year" if using_calendar else "Project year")
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
-    _maybe_set_title(ax, f"Payback Visualisation — {start}-{end}")
+    _maybe_set_title(ax, f"Payback Visualisation — {_title_window(yearly_cf)}")
     ax.legend(loc="best", framealpha=0.9)
     ax.grid(True, linestyle="--", alpha=0.5)
     return save_figure(out_path)
@@ -516,6 +550,17 @@ def _tornado_plot(
     return save_figure(out_path)
 
 
+def _econ_title_window(econ: dict[str, Any]) -> str:
+    """Build the ``2026-2045 (CAPEX in 2025)`` fragment from the econ dict."""
+    start = int(econ.get("project_start_year", 0) or 0)
+    n = int(econ.get("project_lifecycle_years", 0) or 0)
+    if not start or not n:
+        return ""
+    end = start + n - 1
+    capex_year = start - 1
+    return f"{start}-{end} (CAPEX in {capex_year})"
+
+
 def plot_npv_tornado(
     sens_df: pd.DataFrame,
     base_kpis: dict[str, Any],
@@ -524,9 +569,8 @@ def plot_npv_tornado(
 ) -> Path:
     """Sorted NPV tornado.  All annotations use compact EUR format."""
     base_npv = float(base_kpis.get("npv_eur", 0.0))
-    start = int(econ.get("project_start_year", 0) or 0)
-    end = start + int(econ.get("project_lifecycle_years", 0) or 0) - 1
-    title = f"NPV Sensitivity — {start}-{end}" if start else "NPV Sensitivity"
+    window = _econ_title_window(econ)
+    title = f"NPV Sensitivity — {window}" if window else "NPV Sensitivity"
     fmt_mode = _resolve_currency_format(econ)
     return _tornado_plot(
         sens_df, base_npv, "npv_eur", out_path,
@@ -551,9 +595,8 @@ def plot_irr_tornado(
     out and an italic footer note is added when the filter actually fired.
     """
     base_irr = float(base_kpis.get("irr_pct", 0.0) or 0.0)
-    start = int(econ.get("project_start_year", 0) or 0)
-    end = start + int(econ.get("project_lifecycle_years", 0) or 0) - 1
-    title = f"IRR Sensitivity — {start}-{end}" if start else "IRR Sensitivity"
+    window = _econ_title_window(econ)
+    title = f"IRR Sensitivity — {window}" if window else "IRR Sensitivity"
     return _tornado_plot(
         sens_df, base_irr, "irr_pct", out_path,
         title=title,

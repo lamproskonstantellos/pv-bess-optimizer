@@ -278,8 +278,9 @@ _ECON_HORIZON_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("project_lifecycle_years", 25, "years",
      "Total project horizon used to project Years 0..N."),
     ("project_start_year", 2026, "year",
-     "Calendar year of Year 1 (commissioning) AND Year 0 (CAPEX, paid at "
-     "COD). HOMER / Gridcog / Aurora convention."),
+     "Calendar year of Year 1 (first operating year). CAPEX is paid in "
+     "Year 0 (calendar = project_start_year - 1). Operating horizon is "
+     "Years 1..N covering project_start_year..project_start_year + N - 1."),
     ("discount_rate_pct", 7.0, "%",
      "WACC. Typical EU RES band 6-8 %."),
     ("opex_inflation_pct", 1.0, "%",

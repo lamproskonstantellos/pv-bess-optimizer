@@ -10,16 +10,26 @@ and discounted payback).
 Why an analytical scaling and not a re-solve per year?
 ------------------------------------------------------
 
-Industry tools such as **Gridcog**, **Aurora Energy Research**, and
-**HOMER Pro** all use the same pragmatic recipe:
+Industry practice is to solve the dispatch optimisation **once** for
+a representative "Year 1" then derive Years 2..N analytically by
+applying a PV degradation curve, a BESS capacity-fade curve, and
+inflation indices for revenue and OPEX.
 
-    Solve the dispatch optimisation **once** for a representative
-    "Year 1" then derive Years 2..N analytically, applying:
+Calendar-year convention (v0.6)
+-------------------------------
 
-    * a PV degradation curve (initial light-induced + linear),
-    * a BESS capacity-fade curve (linear),
-    * a revenue-side inflation index, and
-    * an OPEX inflation index.
+* **Year 0** carries the upfront CAPEX only.  Its calendar year is
+  ``project_start_year - 1`` (CAPEX is paid the year before
+  commercial-operations date).
+* **Year 1** is the first operating year.  Its calendar year is
+  ``project_start_year`` exactly.
+* **Year N** is the last operating year, calendar
+  ``project_start_year + N - 1``.
+
+A 20-year run with ``project_start_year = 2026`` therefore produces
+21 yearly rows: Year 0 = 2025 (CAPEX only), Years 1..20 = 2026..2045.
+This replaces the v0.5 convention in which Year 0 and Year 1 shared
+the same calendar year.
 
 Sign convention
 ---------------
@@ -178,9 +188,10 @@ def build_yearly_cashflow(
     derived analytically from the PV degradation curve, BESS capacity
     fade, and inflation indices.
 
-    Calendar-year mapping (HOMER / Gridcog / Aurora convention):
-    Year 0 (CAPEX paid at COD) and Year 1 (first operating year) share
-    the same calendar year — ``project_start_year``.
+    Calendar-year mapping (v0.6 convention):
+    Year 0 (CAPEX paid the year before COD) lands at calendar
+    ``project_start_year - 1``; Years 1..N at
+    ``project_start_year .. project_start_year + N - 1``.
     """
     raw_n_years = econ.get("project_lifecycle_years", 25)
     if raw_n_years is None:
@@ -246,7 +257,7 @@ def build_yearly_cashflow(
         rows.append(
             {
                 "project_year": int(y),
-                "calendar_year": int(project_start_year + max(y - 1, 0)),
+                "calendar_year": int(project_start_year + y - 1),
                 "pv_production_factor": float(pv_factor),
                 "bess_capacity_factor": float(bess_factor),
                 "revenue_eur": float(revenue_y),
@@ -492,6 +503,13 @@ def compute_financial_kpis(
             project_start_year + n_years - 1 if project_start_year else 0
         )
 
+    if "calendar_year" in df.columns and (df["project_year"] == 0).any():
+        capex_year = int(
+            df.loc[df["project_year"] == 0, "calendar_year"].iloc[0]
+        )
+    else:
+        capex_year = int(project_start_year - 1) if project_start_year else 0
+
     payback_rounded = (
         float("nan") if np.isnan(payback) else float(round(payback, 4))
     )
@@ -508,6 +526,7 @@ def compute_financial_kpis(
         "total_capex_eur": float(round(total_capex_eur, 2)),
         "total_opex_eur_lifecycle": float(round(total_opex_eur_lifecycle, 2)),
         "total_revenue_eur_lifecycle": float(round(total_revenue_eur_lifecycle, 2)),
+        "capex_year": int(capex_year),
         "project_start_year": int(project_start_year),
         "project_end_year": int(project_end_year),
     }
