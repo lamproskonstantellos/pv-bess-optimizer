@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from pvbess_opt.lifetime import (
+    _bess_factor,
     aggregate_lifetime_to_yearly,
     build_lifetime_dispatch,
 )
@@ -90,3 +92,31 @@ def test_aggregate_lifetime_empty():
     out = aggregate_lifetime_to_yearly(pd.DataFrame())
     assert "project_year" in out.columns
     assert out.empty
+
+
+def test_bess_replacement_resets_factor():
+    """Section 2.4 of the upgrade spec: capacity factor resets at replacement year."""
+    # No replacement: monotonic decay
+    assert _bess_factor(1, 0.02, replacement_year=0) == 1.0
+    assert _bess_factor(10, 0.02, replacement_year=0) == pytest.approx(0.98 ** 9)
+    # Replacement at year 10
+    assert _bess_factor(9, 0.02, replacement_year=10) == pytest.approx(0.98 ** 8)
+    assert _bess_factor(10, 0.02, replacement_year=10) == 1.0
+    assert _bess_factor(11, 0.02, replacement_year=10) == pytest.approx(0.98)
+    assert _bess_factor(15, 0.02, replacement_year=10) == pytest.approx(0.98 ** 5)
+
+
+def test_lifetime_dispatch_bess_replacement():
+    """End-to-end: bess_dis_load_kwh ratio resets to 1 at replacement year."""
+    res1 = _make_year1_dispatch()
+    capacities = {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    econ = _econ()
+    econ["project_lifecycle_years"] = 12
+    econ["bess_replacement_year"] = 10
+    econ["bess_degradation_annual_pct"] = 2.0
+    lifetime = build_lifetime_dispatch(res1, econ, capacities)
+    y1 = float(lifetime.loc[lifetime["project_year"] == 1, "bess_dis_load_kwh"].sum())
+    y10 = float(lifetime.loc[lifetime["project_year"] == 10, "bess_dis_load_kwh"].sum())
+    y11 = float(lifetime.loc[lifetime["project_year"] == 11, "bess_dis_load_kwh"].sum())
+    assert abs(y10 / y1 - 1.0) < 1e-3
+    assert abs(y11 / y1 - 0.98) < 1e-3

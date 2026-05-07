@@ -25,11 +25,22 @@ Scaling rules (per year :math:`y`)
 
 * **BESS-origin flows** (``bess_dis_load_kwh``, ``bess_dis_grid_kwh``,
   ``bess_charge_grid_kwh``, ``soc_kwh``, etc.) and the SOC trace are
-  multiplied by
+  multiplied by a piecewise factor that resets to 1.0 at the
+  ``bess_replacement_year`` (when set) and degrades fresh from there:
 
   .. math::
 
-     \text{bess\_factor}(y) = (1 - d_{\text{bess}})^{y-1}
+     \text{bess\_factor}(y) =
+     \begin{cases}
+       1 & y = \text{replacement\_year} \\
+       (1 - d_{\text{bess}})^{y - \text{replacement\_year}}
+            & y > \text{replacement\_year} > 0 \\
+       (1 - d_{\text{bess}})^{y-1} & \text{otherwise}
+     \end{cases}
+
+  The replacement CAPEX line is added separately by
+  :func:`pvbess_opt.economics.build_yearly_cashflow` at year
+  ``bess_replacement_year``.
 
 * **Load** and **grid prices** are unchanged across years.
 * **Mixed flows** (``grid_to_load_kwh``) pass through Year-1 values;
