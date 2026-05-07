@@ -68,6 +68,8 @@ from pvbess_opt.plotting import (
     plot_daily_supply,
     plot_daily_surplus,
     plot_irr_tornado,
+    plot_lcoe_lcos_summary,
+    plot_lifetime_cycles,
     plot_lifetime_summary,
     plot_monthly_cashflow_year1,
     plot_monthly_combined,
@@ -79,6 +81,7 @@ from pvbess_opt.plotting import (
     plot_npv_tornado,
     plot_npv_waterfall,
     plot_payback,
+    plot_revenue_stack_yearly,
     plot_rolling_horizon_distribution,
     plot_yearly_cashflow_bars,
     plot_yearly_combined,
@@ -412,6 +415,10 @@ def _generate_financial_plots(
     rolling_compare_mc: pd.DataFrame | None = None,
     uncertainty_dir: Path | None = None,
     pf_profit_eur: float | None = None,
+    *,
+    year1_kpis: dict[str, Any] | None = None,
+    lifetime_yearly: pd.DataFrame | None = None,
+    capacities: dict[str, float] | None = None,
 ) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
     start = int(econ.get("project_start_year", 2026) or 2026)
@@ -470,6 +477,25 @@ def _generate_financial_plots(
                 rolling_compare_mc,
                 target_dir / "rolling_horizon_foresight_gap_comparison.pdf",
             )
+        # v0.6 lifecycle plots
+        if year1_kpis is not None:
+            plot_revenue_stack_yearly(
+                yearly_cf, year1_kpis,
+                plots_dir / f"revenue_stack_yearly_{start}-{end}.pdf",
+                econ=econ,
+            )
+        if lifetime_yearly is not None and capacities is not None:
+            plot_lifetime_cycles(
+                lifetime_yearly,
+                float(capacities.get("bess_kwh", 0.0) or 0.0),
+                plots_dir / f"lifetime_cycles_{start}-{end}.pdf",
+                bess_present=float(capacities.get("bess_kw", 0.0) or 0.0) > 0.0,
+            )
+        if fin_kpis is not None and capacities is not None:
+            plot_lcoe_lcos_summary(
+                fin_kpis, sensitivity_df, capacities, econ,
+                plots_dir / "lcoe_lcos_summary.pdf",
+            )
     except Exception:
         logger.exception("Financial plot generation failed")
 
@@ -493,9 +519,14 @@ def _build_financials(
     capacities = derive_asset_capacities(econ, params, ts, e_cap_kwh)
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
-    fin_kpis = compute_financial_kpis(yearly_cf, econ)
     lifetime_df = build_lifetime_dispatch(res, econ, capacities)
     lifetime_yearly = aggregate_lifetime_to_yearly(lifetime_df)
+    fin_kpis = compute_financial_kpis(
+        yearly_cf, econ,
+        capacities=capacities,
+        lifetime_yearly=lifetime_yearly,
+        year1_kpis=kpis,
+    )
     sensitivity_df: pd.DataFrame | None
     if bool(econ.get("sensitivity_enabled", True)):
         sensitivity_df = run_sensitivity_analysis(
@@ -821,6 +852,9 @@ def _run_one(
                 rolling_compare_mc=rolling_compare_df,
                 uncertainty_dir=layout["uncertainty_plots"],
                 pf_profit_eur=float(kpis.get("profit_total_eur", 0.0)),
+                year1_kpis=kpis,
+                lifetime_yearly=bundle.get("lifetime_yearly"),
+                capacities=bundle.get("capacities"),
             )
 
         _generate_all_energy_plots(

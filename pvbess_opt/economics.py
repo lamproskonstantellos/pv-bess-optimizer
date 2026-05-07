@@ -427,8 +427,14 @@ def derive_monthly_cashflow(
 def compute_financial_kpis(
     yearly_cf: pd.DataFrame,
     econ: dict[str, Any],
+    *,
+    capacities: dict[str, float] | None = None,
+    lifetime_yearly: pd.DataFrame | None = None,
+    year1_kpis: dict[str, Any] | None = None,
 ) -> dict[str, float]:
-    """Compute the headline NPV / IRR / ROI / BCR / payback metrics.
+    """Compute the headline NPV / IRR / ROI / BCR / payback metrics
+    plus the v0.6 LCOE / LCOS / capacity-factor / cycles metrics when
+    ``capacities``, ``lifetime_yearly``, and ``year1_kpis`` are provided.
 
     KPI keys are lowercase snake_case.
     """
@@ -508,7 +514,143 @@ def compute_financial_kpis(
     payback_rounded = (
         float("nan") if np.isnan(payback) else float(round(payback, 4))
     )
-    return {
+
+    # ---- v0.6 LCOE / LCOS / capacity-factor / cycles ----------------------
+    extras: dict[str, float] = {
+        "lcoe_eur_per_mwh": float("nan"),
+        "lcos_eur_per_mwh": float("nan"),
+        "pv_capacity_factor": float("nan"),
+        "bess_lifetime_cycles": float("nan"),
+    }
+    if capacities is not None and lifetime_yearly is not None:
+        pv_kwp = float(capacities.get("pv_kwp", 0.0) or 0.0)
+        bess_kw = float(capacities.get("bess_kw", 0.0) or 0.0)
+        bess_kwh = float(capacities.get("bess_kwh", 0.0) or 0.0)
+        op_mask = df[project_year_col] >= 1
+
+        if pv_kwp > 0.0 and "pv_generation_mwh" in lifetime_yearly.columns:
+            ly = lifetime_yearly.set_index("project_year") \
+                if "project_year" in lifetime_yearly.columns else None
+            disc = df.set_index(project_year_col)["discount_factor"]
+            disc_costs = float(
+                (disc.loc[op_mask.values] * (
+                    -df.loc[op_mask, "opex_eur"].astype(float).values
+                )).sum()
+            )
+            disc_capex = float((-df["capex_eur"].astype(float)
+                                * df["discount_factor"].astype(float)).sum())
+            disc_total = disc_capex + disc_costs
+            disc_pv_mwh = 0.0
+            if ly is not None:
+                for y in df.loc[op_mask, project_year_col]:
+                    yi = int(y)
+                    if yi in ly.index:
+                        disc_pv_mwh += float(disc.loc[yi]) * float(
+                            ly.loc[yi, "pv_generation_mwh"],
+                        )
+            if disc_pv_mwh > 1e-9:
+                extras["lcoe_eur_per_mwh"] = float(
+                    round(disc_total / disc_pv_mwh, 4),
+                )
+
+        if (
+            bess_kw > 0.0 and bess_kwh > 0.0
+            and "bess_discharge_mwh" in lifetime_yearly.columns
+        ):
+            # BESS-attributable CAPEX share: BESS power-block + share of
+            # licensing CAPEX proportional to bess_kw / (pv_kwp + bess_kw).
+            bess_capex_y0 = float(econ.get("capex_bess_eur_per_kw", 0.0)) * bess_kw
+            denom_kw = pv_kwp + bess_kw
+            bess_lic_share = (
+                float(econ.get("capex_licenses_eur_per_kw", 0.0)) * bess_kw
+                * (bess_kw / denom_kw if denom_kw > 0 else 1.0)
+            )
+            bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
+            bess_repl_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
+
+            disc_y0 = float(
+                df.loc[df[project_year_col] == 0, "discount_factor"].iloc[0]
+            ) if (df[project_year_col] == 0).any() else 1.0
+            disc_bess_capex = (bess_capex_y0 + bess_lic_share) * disc_y0
+
+            if bess_repl_year > 0 and (
+                df[project_year_col] == bess_repl_year
+            ).any():
+                disc_repl = float(
+                    df.loc[df[project_year_col] == bess_repl_year,
+                           "discount_factor"].iloc[0]
+                )
+                disc_bess_capex += (
+                    bess_capex_y0 * (bess_repl_pct / 100.0) * disc_repl
+                )
+
+            opex_bess_per_kw = float(econ.get("opex_bess_eur_per_kw", 0.0))
+            disc_bess_opex = 0.0
+            disc_bess_mwh = 0.0
+            ly = lifetime_yearly.set_index("project_year") \
+                if "project_year" in lifetime_yearly.columns else None
+            disc_series = df.set_index(project_year_col)["discount_factor"]
+            opex_infl = float(econ.get("opex_inflation_pct", 0.0)) / 100.0
+            for y in df.loc[op_mask, project_year_col]:
+                yi = int(y)
+                if yi == 0:
+                    continue
+                disc_y = float(disc_series.loc[yi])
+                opex_bess_y = (
+                    opex_bess_per_kw * bess_kw * (1.0 + opex_infl) ** (yi - 1)
+                )
+                disc_bess_opex += disc_y * opex_bess_y
+                if ly is not None and yi in ly.index:
+                    disc_bess_mwh += disc_y * float(
+                        ly.loc[yi, "bess_discharge_mwh"],
+                    )
+
+            disc_bess_total = disc_bess_capex + disc_bess_opex
+            if disc_bess_mwh > 1e-9:
+                extras["lcos_eur_per_mwh"] = float(
+                    round(disc_bess_total / disc_bess_mwh, 4),
+                )
+
+            # bess_lifetime_cycles: sum of (degraded discharge / nameplate)
+            # — discharge is already scaled by bess_factor in lifetime.py.
+            if bess_kwh > 0.0:
+                cycles = float(
+                    lifetime_yearly["bess_discharge_mwh"].sum() * 1000.0
+                    / bess_kwh
+                )
+                extras["bess_lifetime_cycles"] = float(round(cycles, 4))
+
+    if (
+        year1_kpis is not None and capacities is not None
+        and float(capacities.get("pv_kwp", 0.0) or 0.0) > 0.0
+    ):
+        pv_gen_y1 = float(year1_kpis.get("pv_generation_mwh", 0.0) or 0.0)
+        max_y1 = float(capacities["pv_kwp"]) * 8760.0 / 1000.0
+        if max_y1 > 1e-9:
+            extras["pv_capacity_factor"] = float(round(pv_gen_y1 / max_y1, 4))
+
+    # ---- v0.6 Year-1 revenue breakdown ------------------------------------
+    breakdown: dict[str, float] = {}
+    if year1_kpis is not None:
+        breakdown = {
+            "revenue_breakdown_y1_load_pv_eur": float(
+                year1_kpis.get("profit_load_from_pv_eur", 0.0) or 0.0,
+            ),
+            "revenue_breakdown_y1_load_bess_eur": float(
+                year1_kpis.get("profit_load_from_bess_eur", 0.0) or 0.0,
+            ),
+            "revenue_breakdown_y1_export_pv_eur": float(
+                year1_kpis.get("profit_export_from_pv_eur", 0.0) or 0.0,
+            ),
+            "revenue_breakdown_y1_export_bess_eur": float(
+                year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0,
+            ),
+            "revenue_breakdown_y1_grid_charge_cost_eur": float(
+                year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0,
+            ),
+        }
+
+    out: dict[str, float] = {
         "npv_eur": float(round(npv, 2)),
         "irr_pct": float("nan") if np.isnan(irr_pct) else float(round(irr_pct, 4)),
         "roi_pct": float("nan") if np.isnan(roi_pct) else float(round(roi_pct, 4)),
@@ -525,6 +667,9 @@ def compute_financial_kpis(
         "project_start_year": int(project_start_year),
         "project_end_year": int(project_end_year),
     }
+    out.update(extras)
+    out.update(breakdown)
+    return out
 
 
 def _payback_year(

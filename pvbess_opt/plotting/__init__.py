@@ -51,6 +51,11 @@ from .style import (
     set_scenario_label,
     set_show_titles,
 )
+from .lifecycle import (
+    plot_lcoe_lcos_summary,
+    plot_lifetime_cycles,
+    plot_revenue_stack_yearly,
+)
 from .uncertainty import (
     plot_foresight_gap_comparison,
     plot_rolling_horizon_distribution,
@@ -98,6 +103,9 @@ __all__ = [
     "plot_irr_tornado",
     "plot_rolling_horizon_distribution",
     "plot_foresight_gap_comparison",
+    "plot_revenue_stack_yearly",
+    "plot_lifetime_cycles",
+    "plot_lcoe_lcos_summary",
     "plot_input_forecast_band",
     "plot_input_seasonal_boxplot",
     "plot_dam_intraday_heatmap",
