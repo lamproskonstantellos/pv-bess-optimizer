@@ -1,4 +1,4 @@
-# PV + BESS Optimizer
+# PV & BESS Optimizer
 
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 [![version](https://img.shields.io/badge/version-0.5.0-blue)](#)
