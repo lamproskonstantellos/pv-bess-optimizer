@@ -2,7 +2,7 @@
 
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
 [![version](https://img.shields.io/badge/version-0.6.0-blue)](pvbess_opt/__init__.py)
-[![python](https://img.shields.io/badge/python-3.9%20%7C%203.11%20%7C%203.12-blue)](pyproject.toml)
+[![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
 Mixed-integer linear programming model for PV + BESS sizing and 15-minute
@@ -27,7 +27,7 @@ The asset mode is read literally from the workbook in v0.6 — set
 for a PV-only project, both > 0 for a hybrid PV+BESS project.
 
 The codebase is pure Python and runs on **Linux, macOS, and Windows** with
-Python ≥ 3.9.  All plots are exported as IEEE-styled PDFs.
+Python ≥ 3.11.  All plots are exported as IEEE-styled PDFs.
 
 ## Repository layout
 

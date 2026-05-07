@@ -29,7 +29,7 @@ If the count crosses 12, future PRs should subpackage by responsibility:
 
 ## Style
 
-* Pure Python, runs on Python ≥ 3.9 across Linux, macOS, Windows.
+* Pure Python, runs on Python ≥ 3.11 across Linux, macOS, Windows.
 * All file paths via `pathlib`.  No shell escapes.
 * Lowercase snake_case for every variable, parameter, KPI key, and
   workbook key.
@@ -46,7 +46,7 @@ python -m pycodestyle --max-line-length=100 --select=E9,W6,E501 pvbess_opt/ main
 python -m pytest tests/ -v
 ```
 
-CI runs the same three commands across Python 3.9 / 3.11 / 3.12 on
+CI runs the same three commands across Python 3.11 / 3.12 on
 Ubuntu / macOS / Windows.
 
 ## Naming conventions

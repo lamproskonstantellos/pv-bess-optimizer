@@ -1,7 +1,7 @@
 Installation
 ============
 
-Pure-Python; runs on Linux, macOS, Windows with Python ≥ 3.9.
+Pure-Python; runs on Linux, macOS, Windows with Python ≥ 3.11.
 
 .. code-block:: bash
 

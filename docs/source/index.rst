@@ -17,7 +17,7 @@ The hard static curtailment cap on grid-bound flows is enforced in both
 modes per **MD YPEN/DAPEEK/53563/1556/2023**.
 
 The codebase is pure Python and runs on Windows, macOS, and Linux with
-Python ≥ 3.9.
+Python ≥ 3.11.
 
 .. toctree::
    :maxdepth: 2
