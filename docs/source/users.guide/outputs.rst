@@ -17,8 +17,10 @@ A run produces a single result directory under ``results/``.
   waterfall, payback visualisation, monthly cashflow Year-1, NPV /
   IRR tornados, rolling-horizon distribution (when active).
 * ``05_energy_plots/<calendar_year>/`` — daily / monthly / yearly
-  PDFs.  Year-1 daily plots are gated by the ``plot_daily_year1``
-  flag in the ``economic`` sheet.
+  PDFs.  Each resolution is gated by its scope flag on the
+  ``economic`` sheet (``plot_daily_scope`` /
+  ``plot_monthly_scope`` / ``plot_yearly_scope``); each accepts
+  ``none`` | ``year1_only`` | ``all``.
 
 All plots are PDF-only (IEEE preset) and titles are off by default;
 toggle with ``show_titles`` in the ``economic`` sheet.

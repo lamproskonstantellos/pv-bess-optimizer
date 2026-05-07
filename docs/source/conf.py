@@ -26,7 +26,7 @@ copyright = f"{datetime.now().year}, {author}"
 try:
     from pvbess_opt import __version__ as release  # type: ignore
 except Exception:
-    release = "0.5.0"
+    release = "0.6.0"
 version = ".".join(release.split(".")[:2])
 
 # -- General configuration --------------------------------------------------

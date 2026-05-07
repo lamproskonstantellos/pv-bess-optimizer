@@ -3,8 +3,9 @@ Multi-year financial pipeline
 
 The ``economic`` sheet drives the project-finance pipeline:
 
-* **CAPEX** is paid in Year 0 (HOMER / Gridcog / Aurora convention:
-  Year 0 and Year 1 share the same calendar year).
+* **CAPEX** is paid in Year 0 (calendar
+  ``project_start_year - 1``); operating Years 1..N cover
+  ``project_start_year .. project_start_year + N - 1``.
 * **OPEX** scales by ``(1 + opex_inflation_pct/100)^(y-1)``.
 * **Revenue** uses the Year-1 ``profit_total_eur`` from the dispatch
   KPIs as the base, scaled by the PV degradation curve and revenue

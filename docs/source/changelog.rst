@@ -15,7 +15,7 @@ diff and the five-line v0.5 → v0.6 migration summary.
   ``--time-limit``); the curtail-tiebreaker and cycles-bonus weights
   become module-level constants in :mod:`pvbess_opt.optimization`.
   The ``economic`` sheet adds an ``# uncertainty`` group (11 keys)
-  and renames ``plot_daily_year1`` (bool) to ``plot_daily_scope``
+  and renames the v0.5 daily-Year-1 bool to ``plot_daily_scope``
   (``none`` | ``year1_only`` | ``all``).  ``plot_yearly_scope`` is
   widened to the same vocabulary.  Legacy v0.5 keys produce explicit
   WARNINGs and are ignored — no silent translation.
@@ -72,8 +72,9 @@ Initial release.
   :func:`pvbess_opt.optimization.verify_dispatch_invariants`.
 * Multi-year project-finance pipeline: cashflow projection, NPV / IRR /
   ROI / BCR / simple+discounted payback, four-driver tornado sensitivity.
-* HOMER / Gridcog / Aurora calendar convention (Year 0 and Year 1 share
-  the same calendar year).
+* Shared-calendar convention (Year 0 and Year 1 both at
+  ``project_start_year``).  Replaced in v0.6 by the Year-0 / Year-1
+  split — see the 0.6.0 entry above.
 * Single ``02_dispatch/dispatch_hourly.xlsx`` with one sheet per calendar
   year.
 * Rolling-horizon dispatch with imperfect foresight + Monte Carlo over
