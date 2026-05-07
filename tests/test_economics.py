@@ -39,7 +39,7 @@ def _econ() -> dict:
         "sensitivity_discount_rate_delta_pp": 2.0,
         "show_titles": False,
         "currency_format": "auto",
-        "plot_daily_year1": True,
+        "plot_daily_scope": "year1_only",
         "plot_monthly_scope": "all",
         "plot_yearly_scope": "all",
     }

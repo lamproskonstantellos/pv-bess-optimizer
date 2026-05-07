@@ -5,11 +5,12 @@ The schema is three sheets:
 * ``timeseries`` — per-step data with lowercase snake_case column
   names: ``timestamp``, ``load_kwh``, ``pv_kwh``,
   ``dam_price_eur_per_mwh``, optional ``retail_price_eur_per_mwh``.
-* ``project``    — physical system + regulatory framework +
-  optimization behavior, in three logical groups (separator rows
-  allowed).  Keys: see :data:`PROJECT_DEFAULTS`.
-* ``economic``   — project finance + plot preferences, in six
-  logical groups.  Mandatory.
+* ``project``    — physical system + BESS operating envelope +
+  regulatory framework, in three logical groups
+  ``# system_sizing`` / ``# bess_operation`` / ``# regulatory``
+  (separator rows allowed).  Keys: see :data:`PROJECT_DEFAULTS`.
+* ``economic``   — project finance + uncertainty + plot preferences,
+  in eight logical groups.  Mandatory.
 
 Public loader API
 -----------------
@@ -19,14 +20,14 @@ Public loader API
   .. code-block:: python
 
      {
-         "ts": pd.DataFrame,           # lowercase snake_case
+         "ts": pd.DataFrame,               # lowercase snake_case
          "project": {
-             "system":         {...},  # efficiency_charge, p_charge_max_kw, ...
-             "regulatory":     {...},  # mode, retail_tariff_eur_per_mwh, ...
-             "optimization":   {...},  # solver_mip_gap, weight_curtail_tiebreak, ...
+             "system_sizing":   {...},  # capacities and power limits
+             "bess_operation":  {...},  # efficiency, soc bounds, cycles
+             "regulatory":      {...},  # mode, tariffs, curtailment, ...
          },
-         "economic": {...},
-         "dt_minutes": int,            # auto-detected from the timeseries
+         "economic": {...},                # 8 groups including uncertainty
+         "dt_minutes": int,                # auto-detected from the timeseries
      }
 
 * :func:`read_inputs` returns a flat ``(params, ts)`` tuple suitable for
@@ -38,6 +39,18 @@ Mode-specific timeseries semantics
 * In ``vnb`` mode the ``load_kwh`` column is required; missing → ValueError.
 * In ``merchant`` mode ``load_kwh`` is optional — if present, the loader
   logs an INFO message and the optimizer pins all load-coverage flows to 0.
+
+Legacy v0.5 keys
+----------------
+
+The v0.5 ``# optimization`` group keys
+(``weight_curtail_tiebreak``, ``weight_cycles_term``,
+``solver_mip_gap``, ``solver_time_limit_seconds``) and the v0.5
+``plot_daily_year1`` flag are no longer accepted.  When present in a
+legacy workbook the loader logs WARNINGs and ignores them — there is
+no silent translation.  Solver gap / time limit are CLI-only (see
+``--mip-gap`` / ``--time-limit``).  The two weight terms are private
+constants in :mod:`pvbess_opt.optimization`.
 """
 
 from __future__ import annotations
@@ -61,21 +74,24 @@ _COERCE_FAILED = object()
 # Canonical defaults (single source of truth)
 # ---------------------------------------------------------------------------
 
-_SYSTEM_DEFAULTS: dict[str, Any] = {
+_SYSTEM_SIZING_DEFAULTS: dict[str, Any] = {
     "pv_nameplate_kwp": 0.0,
     "bess_power_kw": 0.0,
     "bess_capacity_kwh": 0.0,
+    "battery_hours": 4.0,
+    "p_charge_max_kw": 0.0,
+    "p_dis_max_kw": 0.0,
+    "p_grid_export_max_kw": 8000.0,
+}
+
+_BESS_OPERATION_DEFAULTS: dict[str, Any] = {
     "efficiency_charge": 0.97,
     "efficiency_discharge": 0.97,
     "soc_min_frac": 0.20,
     "soc_max_frac": 0.95,
     "initial_soc_frac": 0.50,
     "terminal_soc_equal": True,
-    "p_charge_max_kw": 0.0,
-    "p_dis_max_kw": 0.0,
-    "battery_hours": 4.0,
     "max_cycles_per_day": 1.0,
-    "p_grid_export_max_kw": 8000.0,
 }
 
 _REGULATORY_DEFAULTS: dict[str, Any] = {
@@ -86,18 +102,23 @@ _REGULATORY_DEFAULTS: dict[str, Any] = {
     "settlement_minutes": 15,
 }
 
-_OPTIMIZATION_DEFAULTS: dict[str, Any] = {
-    "weight_curtail_tiebreak": 1.0e-5,
-    "weight_cycles_term": 0.0,
-    "solver_mip_gap": 0.001,
-    "solver_time_limit_seconds": 1800,
+PROJECT_DEFAULTS: dict[str, dict[str, Any]] = {
+    "system_sizing": dict(_SYSTEM_SIZING_DEFAULTS),
+    "bess_operation": dict(_BESS_OPERATION_DEFAULTS),
+    "regulatory": dict(_REGULATORY_DEFAULTS),
 }
 
-PROJECT_DEFAULTS: dict[str, dict[str, Any]] = {
-    "system": dict(_SYSTEM_DEFAULTS),
-    "regulatory": dict(_REGULATORY_DEFAULTS),
-    "optimization": dict(_OPTIMIZATION_DEFAULTS),
-}
+# Legacy v0.5 ``# optimization`` group keys.  Encountering any of these
+# in a workbook triggers a single WARNING listing them all; the values
+# are then ignored.  Solver gap / time limit live on the CLI;
+# ``weight_curtail_tiebreak`` / ``weight_cycles_term`` live as
+# module-level constants in :mod:`pvbess_opt.optimization`.
+_LEGACY_OPTIMIZATION_KEYS: frozenset[str] = frozenset({
+    "weight_curtail_tiebreak",
+    "weight_cycles_term",
+    "solver_mip_gap",
+    "solver_time_limit_seconds",
+})
 
 ECON_DEFAULTS: dict[str, Any] = {
     "project_lifecycle_years": 25,
@@ -120,9 +141,22 @@ ECON_DEFAULTS: dict[str, Any] = {
     "sensitivity_opex_delta_pct": 10.0,
     "sensitivity_revenue_delta_pct": 10.0,
     "sensitivity_discount_rate_delta_pp": 2.0,
+    # Uncertainty group (rolling-horizon Monte Carlo configuration).
+    "uncertainty_enabled": False,
+    "uncertainty_compare_sources": False,
+    "uncertainty_n_seeds": 30,
+    "uncertainty_window_hours": 48,
+    "uncertainty_commit_hours": 24,
+    "uncertainty_dam_enabled": True,
+    "uncertainty_pv_enabled": True,
+    "uncertainty_load_enabled": True,
+    "uncertainty_sigma_dam": 0.20,
+    "uncertainty_sigma_pv": 0.12,
+    "uncertainty_sigma_load": 0.05,
+    # Output / plotting controls.
     "show_titles": False,
     "currency_format": "auto",
-    "plot_daily_year1": True,
+    "plot_daily_scope": "year1_only",
     "plot_monthly_scope": "all",
     "plot_yearly_scope": "all",
 }
@@ -131,21 +165,30 @@ _ECON_INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
     "project_start_year",
     "bess_replacement_year",
+    "uncertainty_n_seeds",
+    "uncertainty_window_hours",
+    "uncertainty_commit_hours",
 })
 _ECON_BOOL_KEYS: frozenset[str] = frozenset({
     "sensitivity_enabled",
     "show_titles",
-    "plot_daily_year1",
+    "uncertainty_enabled",
+    "uncertainty_compare_sources",
+    "uncertainty_dam_enabled",
+    "uncertainty_pv_enabled",
+    "uncertainty_load_enabled",
 })
 _ECON_STR_KEYS: frozenset[str] = frozenset({
     "currency_format",
+    "plot_daily_scope",
     "plot_monthly_scope",
     "plot_yearly_scope",
 })
 _ECON_ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "currency_format": frozenset({"auto", "millions", "raw"}),
+    "plot_daily_scope": frozenset({"none", "year1_only", "all"}),
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
-    "plot_yearly_scope": frozenset({"none", "all"}),
+    "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
 }
 
 _PROJECT_BOOL_KEYS: frozenset[str] = frozenset({
@@ -154,7 +197,6 @@ _PROJECT_BOOL_KEYS: frozenset[str] = frozenset({
 })
 _PROJECT_INT_KEYS: frozenset[str] = frozenset({
     "settlement_minutes",
-    "solver_time_limit_seconds",
 })
 _PROJECT_STR_KEYS: frozenset[str] = frozenset({"mode"})
 _PROJECT_ALLOWED_VALUES: dict[str, frozenset[str]] = {
@@ -171,18 +213,29 @@ for _grp, _keys in PROJECT_DEFAULTS.items():
 # Sheet row templates (shared with build_input_xlsx.py)
 # ---------------------------------------------------------------------------
 
-_PROJECT_SYSTEM_ROWS: tuple[tuple[str, object, str, str], ...] = (
+_PROJECT_SYSTEM_SIZING_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("pv_nameplate_kwp", 0, "kWp",
-     "Declared PV nameplate capacity. If 0, inferred from max(pv_kwh)/dt_h."),
+     "PV nameplate capacity. 0 = no PV in this project."),
     ("bess_power_kw", 0, "kW",
-     "Declared BESS power. If 0, falls back to p_dis_max_kw."),
+     "BESS power rating. 0 = no BESS in this project."),
     ("bess_capacity_kwh", 0, "kWh",
-     "Declared BESS energy capacity. If 0, derived from "
+     "BESS energy capacity. 0 = derive from "
      "bess_power_kw * battery_hours."),
+    ("battery_hours", 4, "h",
+     "E/P ratio cap; sets bess_capacity_kwh if not given."),
+    ("p_charge_max_kw", 8000, "kW",
+     "Maximum battery charge power (kW)."),
+    ("p_dis_max_kw", 8000, "kW",
+     "Maximum battery discharge power (kW)."),
+    ("p_grid_export_max_kw", 8000, "kW",
+     "Grid-connection export limit (kW)."),
+)
+
+_PROJECT_BESS_OPERATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("efficiency_charge", 0.97, "-",
-     "Battery charging efficiency (0-1). Round-trip = efficiency_charge * efficiency_discharge."),
+     "Charge efficiency (0..1). Round-trip = efficiency_charge * efficiency_discharge."),
     ("efficiency_discharge", 0.97, "-",
-     "Battery discharging efficiency (0-1)."),
+     "Discharge efficiency (0..1)."),
     ("soc_min_frac", 0.20, "-",
      "Minimum SOC as fraction of nominal capacity (0.20 = 20 %)."),
     ("soc_max_frac", 0.95, "-",
@@ -191,16 +244,8 @@ _PROJECT_SYSTEM_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "SOC at the first timestep, as a fraction of capacity."),
     ("terminal_soc_equal", True, "bool",
      "If TRUE, force final SOC == initial SOC (closed cycle)."),
-    ("p_charge_max_kw", 8000, "kW",
-     "Maximum battery charge power (kW)."),
-    ("p_dis_max_kw", 8000, "kW",
-     "Maximum battery discharge power (kW)."),
-    ("battery_hours", 4, "h",
-     "E/P ratio cap; sets bess_capacity_kwh if not given."),
-    ("max_cycles_per_day", 1, "-",
+    ("max_cycles_per_day", 1.0, "-",
      "Daily equivalent-cycle cap (sum of discharge / capacity)."),
-    ("p_grid_export_max_kw", 8000, "kW",
-     "Grid-connection export limit (kW)."),
 )
 
 _PROJECT_REGULATORY_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -221,24 +266,12 @@ _PROJECT_REGULATORY_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Currently informational; the MILP timestep is auto-detected."),
 )
 
-_PROJECT_OPTIMIZATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("weight_curtail_tiebreak", 1.0e-5, "EUR/kWh",
-     "Tiny tie-breaker on pv_curtail for determinism under degeneracy. "
-     "NOT a constraint substitute. Set 0 to disable."),
-    ("weight_cycles_term", 0.0, "EUR/MWh",
-     "Optional bonus per discharged MWh."),
-    ("solver_mip_gap", 0.001, "-",
-     "Solver MIP relative gap (CLI --mip-gap overrides)."),
-    ("solver_time_limit_seconds", 1800, "s",
-     "Solver wall-time limit (CLI --time-limit overrides)."),
-)
-
 _PROJECT_GROUPS_TEMPLATE: tuple[
     tuple[str, str, tuple[tuple[str, object, str, str], ...]], ...
 ] = (
-    ("# system",       "system",       _PROJECT_SYSTEM_ROWS),
-    ("# regulatory",   "regulatory",   _PROJECT_REGULATORY_ROWS),
-    ("# optimization", "optimization", _PROJECT_OPTIMIZATION_ROWS),
+    ("# system_sizing",   "system_sizing",   _PROJECT_SYSTEM_SIZING_ROWS),
+    ("# bess_operation",  "bess_operation",  _PROJECT_BESS_OPERATION_ROWS),
+    ("# regulatory",      "regulatory",      _PROJECT_REGULATORY_ROWS),
 )
 
 _ECON_HORIZON_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -298,17 +331,44 @@ _ECON_SENSITIVITY_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "NPV tornado only - drops out of IRR tornado by definition."),
 )
 
+_ECON_UNCERTAINTY_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("uncertainty_enabled", False, "bool",
+     "Run rolling-horizon Monte Carlo. Default FALSE (perfect-foresight only)."),
+    ("uncertainty_compare_sources", False, "bool",
+     "When TRUE run 4 ensembles (DAM-only, PV-only, Load-only, "
+     "All-combined) and emit a comparison plot. When FALSE run a "
+     "single ensemble using the enabled sources below."),
+    ("uncertainty_n_seeds", 30, "int",
+     "Monte Carlo seeds per ensemble."),
+    ("uncertainty_window_hours", 48, "int",
+     "Rolling window length."),
+    ("uncertainty_commit_hours", 24, "int",
+     "Commit slice."),
+    ("uncertainty_dam_enabled", True, "bool",
+     "Apply DAM noise."),
+    ("uncertainty_pv_enabled", True, "bool",
+     "Apply PV noise."),
+    ("uncertainty_load_enabled", True, "bool",
+     "Apply Load noise (ignored in merchant mode)."),
+    ("uncertainty_sigma_dam", 0.20, "-",
+     "Log-normal sigma for DAM. Default 0.20 (ENTSO-E D+1 benchmark)."),
+    ("uncertainty_sigma_pv", 0.12, "-",
+     "Log-normal sigma for PV. Default 0.12 (NREL day-ahead PV study)."),
+    ("uncertainty_sigma_load", 0.05, "-",
+     "Log-normal sigma for Load. Default 0.05 (predictable customer benchmark)."),
+)
+
 _ECON_OUTPUT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("show_titles", False, "bool",
      "Render plot titles. IEEE figures normally rely on the figure caption."),
     ("currency_format", "auto", "enum",
      "auto | millions | raw."),
-    ("plot_daily_year1", True, "bool",
-     "Render Year-1 daily plots (~1100 PDFs). FALSE for fast iterations."),
+    ("plot_daily_scope", "year1_only", "scope",
+     "none | year1_only | all. 'all' produces ~365 * N_years * 3 daily PDFs."),
     ("plot_monthly_scope", "all", "scope",
      "none | year1_only | all."),
     ("plot_yearly_scope", "all", "scope",
-     "none | all."),
+     "none | year1_only | all."),
 )
 
 _ECON_GROUPS_TEMPLATE: tuple[
@@ -319,6 +379,7 @@ _ECON_GROUPS_TEMPLATE: tuple[
     ("# opex", _ECON_OPEX_ROWS),
     ("# degradation_replacement", _ECON_DEGRADATION_ROWS),
     ("# sensitivity", _ECON_SENSITIVITY_ROWS),
+    ("# uncertainty", _ECON_UNCERTAINTY_ROWS),
     ("# output", _ECON_OUTPUT_ROWS),
 )
 
@@ -519,16 +580,28 @@ def _parse_project_value(group: str, key: str, raw: Any) -> Any:
 def _parse_project_sheet(flat: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Build the typed ``project`` dict from a flat ``key: value`` mapping."""
     project: dict[str, dict[str, Any]] = {
-        "system": dict(_SYSTEM_DEFAULTS),
+        "system_sizing": dict(_SYSTEM_SIZING_DEFAULTS),
+        "bess_operation": dict(_BESS_OPERATION_DEFAULTS),
         "regulatory": dict(_REGULATORY_DEFAULTS),
-        "optimization": dict(_OPTIMIZATION_DEFAULTS),
     }
+    legacy_optimization_seen: list[str] = []
     for key, raw in flat.items():
         group = _PROJECT_KEY_TO_GROUP.get(key)
         if group is None:
+            if key in _LEGACY_OPTIMIZATION_KEYS:
+                legacy_optimization_seen.append(key)
+                continue
             logger.warning("Project sheet key %r is unknown; ignored.", key)
             continue
         project[group][key] = _parse_project_value(group, key, raw)
+    if legacy_optimization_seen:
+        logger.warning(
+            "Project sheet contains legacy v0.5 '# optimization' keys "
+            "%s; these are no longer accepted (solver gap / time limit "
+            "are CLI-only via --mip-gap / --time-limit; tie-breaker "
+            "weights live as private constants in pvbess_opt.optimization).",
+            sorted(legacy_optimization_seen),
+        )
     return project
 
 
@@ -536,6 +609,14 @@ def _parse_economic_sheet(flat: dict[str, Any]) -> dict[str, Any]:
     """Build the typed ``economic`` dict from a flat ``key: value`` mapping."""
     out = dict(ECON_DEFAULTS)
     for key, raw in flat.items():
+        if key == "plot_daily_year1":
+            logger.warning(
+                "Economic sheet key 'plot_daily_year1' was renamed to "
+                "'plot_daily_scope' in v0.6; use 'none' / 'year1_only' / "
+                "'all' explicitly. Value %r ignored.",
+                raw,
+            )
+            continue
         if key not in ECON_DEFAULTS:
             logger.warning("Economic sheet key %r is unknown; ignored.", key)
             continue
@@ -660,37 +741,37 @@ def _typed_to_flat(
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     """Translate the typed dict to the flat ``(params, ts)`` shape."""
     project = typed["project"]
-    sys_ = project["system"]
+    sizing = project["system_sizing"]
+    bess_op = project["bess_operation"]
     reg = project["regulatory"]
-    opt = project["optimization"]
     econ = typed["economic"]
     ts = typed["ts"]
 
     params: dict[str, Any] = {
         "dt_minutes": int(typed["dt_minutes"]),
-        "efficiency_charge": float(sys_["efficiency_charge"]),
-        "efficiency_discharge": float(sys_["efficiency_discharge"]),
-        "soc_min_frac": float(sys_["soc_min_frac"]),
-        "soc_max_frac": float(sys_["soc_max_frac"]),
-        "initial_soc_frac": float(sys_["initial_soc_frac"]),
-        "terminal_soc_equal": bool(sys_["terminal_soc_equal"]),
-        "p_charge_max_kw": float(sys_["p_charge_max_kw"]),
-        "p_dis_max_kw": float(sys_["p_dis_max_kw"]),
-        "battery_hours": float(sys_["battery_hours"]),
-        "max_cycles_per_day": float(sys_["max_cycles_per_day"]),
-        "p_grid_export_max_kw": float(sys_["p_grid_export_max_kw"]),
-        "pv_nameplate_kwp": float(sys_["pv_nameplate_kwp"]),
-        "bess_power_kw": float(sys_["bess_power_kw"]),
-        "bess_capacity_kwh": float(sys_["bess_capacity_kwh"]),
+        # # bess_operation
+        "efficiency_charge": float(bess_op["efficiency_charge"]),
+        "efficiency_discharge": float(bess_op["efficiency_discharge"]),
+        "soc_min_frac": float(bess_op["soc_min_frac"]),
+        "soc_max_frac": float(bess_op["soc_max_frac"]),
+        "initial_soc_frac": float(bess_op["initial_soc_frac"]),
+        "terminal_soc_equal": bool(bess_op["terminal_soc_equal"]),
+        "max_cycles_per_day": float(bess_op["max_cycles_per_day"]),
+        # # system_sizing
+        "p_charge_max_kw": float(sizing["p_charge_max_kw"]),
+        "p_dis_max_kw": float(sizing["p_dis_max_kw"]),
+        "battery_hours": float(sizing["battery_hours"]),
+        "p_grid_export_max_kw": float(sizing["p_grid_export_max_kw"]),
+        "pv_nameplate_kwp": float(sizing["pv_nameplate_kwp"]),
+        "bess_power_kw": float(sizing["bess_power_kw"]),
+        "bess_capacity_kwh": float(sizing["bess_capacity_kwh"]),
+        # # regulatory
         "curtailment_frac": _parse_curtailment(reg["curtailment_pct"]),
         "retail_tariff_eur_per_mwh": float(reg["retail_tariff_eur_per_mwh"]),
         "settlement_minutes": int(reg["settlement_minutes"]),
         "mode": str(reg["mode"]),
         "allow_bess_grid_charging": bool(reg["allow_bess_grid_charging"]),
-        "weight_curtail_tiebreak": float(opt["weight_curtail_tiebreak"]),
-        "weight_cycles_term": float(opt["weight_cycles_term"]),
-        "solver_mip_gap": float(opt["solver_mip_gap"]),
-        "solver_time_limit_seconds": int(opt["solver_time_limit_seconds"]),
+        # # economic carry-over
         "show_titles": bool(econ.get("show_titles", False)),
     }
     return params, ts
@@ -735,9 +816,20 @@ _ECON_UNITS: dict[str, str] = {
     "sensitivity_opex_delta_pct": "%",
     "sensitivity_revenue_delta_pct": "%",
     "sensitivity_discount_rate_delta_pp": "pp",
+    "uncertainty_enabled": "bool",
+    "uncertainty_compare_sources": "bool",
+    "uncertainty_n_seeds": "int",
+    "uncertainty_window_hours": "int",
+    "uncertainty_commit_hours": "int",
+    "uncertainty_dam_enabled": "bool",
+    "uncertainty_pv_enabled": "bool",
+    "uncertainty_load_enabled": "bool",
+    "uncertainty_sigma_dam": "-",
+    "uncertainty_sigma_pv": "-",
+    "uncertainty_sigma_load": "-",
     "show_titles": "bool",
     "currency_format": "enum",
-    "plot_daily_year1": "bool",
+    "plot_daily_scope": "scope",
     "plot_monthly_scope": "scope",
     "plot_yearly_scope": "scope",
 }

@@ -37,6 +37,16 @@ Audit invariants
 After every solve :func:`verify_dispatch_invariants` checks the nine
 mandatory invariants.  Residuals are returned and logged at INFO; the
 ``--strict`` CLI flag turns violations into errors.
+
+Module-level tuning constants
+-----------------------------
+
+The two weight terms below are tie-breakers / debug levers, not
+project knobs.  They are intentionally NOT exposed in the workbook —
+the v0.5 ``# optimization`` group has been removed in v0.6.  Solver
+``mip_gap`` and ``time_limit`` are exposed via the CLI flags
+``--mip-gap`` / ``--time-limit``; these two weights stay private to
+keep the user-facing surface small.
 """
 
 from __future__ import annotations
@@ -50,6 +60,15 @@ import pyomo.environ as pyo
 from pyomo.opt import SolverStatus, TerminationCondition
 
 logger = logging.getLogger(__name__)
+
+
+# Tiny tie-breaker on ``pv_curtail`` for determinism under degeneracy.
+# Set to 0.0 to disable.  NOT a constraint substitute.
+_WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH: float = 1.0e-5
+
+# Optional bonus per discharged MWh.  Default 0 — turn on only when
+# debugging the BESS-utilisation balance versus the curtailment penalty.
+_WEIGHT_CYCLES_TERM_EUR_PER_MWH: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -491,10 +510,9 @@ def build_model(
         )
 
     # --- Objective: profit -----------------------------------------------
-    weight_curtail = float(params.get("weight_curtail_tiebreak", 0.0) or 0.0)
-    weight_cycles = float(params.get("weight_cycles_term", 0.0) or 0.0)
-
-    curtail_tiebreak_term = weight_curtail * sum(m.pv_curtail[t] for t in time_index)
+    curtail_tiebreak_term = _WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH * sum(
+        m.pv_curtail[t] for t in time_index
+    )
 
     if mode == "vnb":
         avoided_cost = sum(
@@ -515,7 +533,7 @@ def build_model(
     grid_charge_cost = sum(
         dam_price[t] * m.grid_to_bess[t] / 1000.0 for t in time_index
     )
-    cycles_bonus = weight_cycles * sum(
+    cycles_bonus = _WEIGHT_CYCLES_TERM_EUR_PER_MWH * sum(
         (m.bess_dis_load[t] + m.bess_dis_grid[t]) / 1000.0 for t in time_index
     )
     profit_eur = avoided_cost + export_revenue - grid_charge_cost + cycles_bonus
