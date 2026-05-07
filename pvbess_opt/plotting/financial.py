@@ -22,6 +22,7 @@ from typing import Any, Callable
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.transforms import offset_copy
 
 from ._currency import euro_axis_formatter, format_eur
 from .style import save_figure, show_titles
@@ -175,7 +176,10 @@ def plot_yearly_cashflow_bars(
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Yearly Cash-flow Stack — {start}-{end}")
-    ax.legend(loc="best", framealpha=0.9, ncol=2, fontsize=7)
+    # Pin to the lower right — the post-payback region is roughly
+    # horizontal there, so the legend stays clear of the bars and the
+    # Year-0 CAPEX stack on the left.
+    ax.legend(loc="lower right", framealpha=0.9, ncol=2, fontsize=7)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     return save_figure(out_path)
 
@@ -209,23 +213,36 @@ def plot_npv_waterfall(
     )
     ax.axhline(0.0, color="black", linewidth=0.6)
 
-    # Year-0 step gets a "CAPEX" label.
+    # Year-0 step gets a "CAPEX" label, offset off the left edge of the
+    # bar so it can't get clipped or overlap the Year-0 stack.
     if "project_year" in yearly_cf.columns and (yearly_cf["project_year"] == 0).any():
         capex_y0 = float(
             yearly_cf.loc[yearly_cf["project_year"] == 0, "discounted_cf_eur"].iloc[0]
         )
+        trans_left = offset_copy(
+            ax.transData, fig=ax.figure, x=-5, y=0, units="points",
+        )
         ax.text(
-            float(years[0]), capex_y0, "  CAPEX",
-            ha="left", va="top" if capex_y0 < 0 else "bottom",
+            float(years[0]), capex_y0, "CAPEX",
+            ha="right", va="top" if capex_y0 < 0 else "bottom",
             fontsize=7, color=_COLOR_CAPEX,
+            transform=trans_left, clip_on=False,
         )
 
     final_npv = float(cum[-1]) if len(cum) > 0 else 0.0
+    trans_right = offset_copy(
+        ax.transData, fig=ax.figure, x=+5, y=0, units="points",
+    )
     ax.text(
         float(years[-1]), final_npv,
-        f"  NPV = {format_eur(final_npv, fmt_mode)}",
+        f"NPV = {format_eur(final_npv, fmt_mode)}",
         ha="left", va="center", fontsize=7,
+        transform=trans_right, clip_on=False,
     )
+
+    # Extend the x-axis a touch so the right-edge NPV label is fully visible.
+    xmin, xmax = ax.get_xlim()
+    ax.set_xlim(xmin, xmax + 1.5)
 
     start, end = _start_end_years(yearly_cf)
     ax.set_xlabel(
@@ -282,6 +299,9 @@ def plot_payback(
             alpha=0.8,
             label=f"Simple payback: {simple_payback_years:.1f} yr",
         )
+        # Filled marker at the cross-zero point so simple and discounted
+        # markers stay distinguishable when they overlap.
+        ax.scatter([x], [0.0], color=_COLOR_NET, s=20, zorder=5)
     if (
         discounted_payback_years is not None
         and not np.isnan(discounted_payback_years)
@@ -292,6 +312,7 @@ def plot_payback(
             alpha=0.8,
             label=f"Discounted payback: {discounted_payback_years:.1f} yr",
         )
+        ax.scatter([x], [0.0], color=_COLOR_DISCOUNTED, s=20, zorder=5)
 
     start, end = _start_end_years(yearly_cf)
     ax.set_xlabel("Calendar year" if using_calendar else "Project year")
@@ -342,7 +363,19 @@ def plot_monthly_cashflow_year1(
         _maybe_set_title(ax, f"Year-1 Monthly Cash-flow — {cy}")
     else:
         _maybe_set_title(ax, "Year-1 Monthly Cash-flow")
-    ax.legend(loc="best", framealpha=0.9, ncol=3, fontsize=7)
+
+    # Reorder the legend so Net comes last (Revenue / OPEX / Net) and
+    # drop to two columns to avoid the cramped three-column layout.
+    handles, labels = ax.get_legend_handles_labels()
+    ordered = [(h, lbl)
+               for target in ("Revenue", "OPEX", "Net")
+               for h, lbl in zip(handles, labels) if lbl == target]
+    if ordered:
+        h_ord, l_ord = zip(*ordered)
+        ax.legend(h_ord, l_ord, loc="best",
+                  framealpha=0.9, ncol=2, fontsize=7)
+    else:
+        ax.legend(loc="best", framealpha=0.9, ncol=2, fontsize=7)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     return save_figure(out_path)
 
@@ -446,17 +479,29 @@ def _tornado_plot(
                 i, above_right - above_left, left=above_left, height=0.5,
                 color=_COLOR_TORNADO_HIGH, edgecolor="black", linewidth=0.6,
             )
-        # Annotate endpoints with the value formatter.
-        ax.text(low, i, f"  {value_formatter(low)}",
-                ha="right", va="center", fontsize=7)
-        ax.text(high, i, f"  {value_formatter(high)}",
-                ha="left", va="center", fontsize=7)
+        # Annotate endpoints with the value formatter.  Use a small
+        # pixel-space offset so labels never overlap the bars or the
+        # central Base line.
+        trans_left = offset_copy(
+            ax.transData, fig=ax.figure, x=-4, y=0, units="points",
+        )
+        trans_right = offset_copy(
+            ax.transData, fig=ax.figure, x=+4, y=0, units="points",
+        )
+        ax.text(low, i, value_formatter(low),
+                ha="right", va="center", fontsize=7, transform=trans_left)
+        ax.text(high, i, value_formatter(high),
+                ha="left", va="center", fontsize=7, transform=trans_right)
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels)
     ax.set_xlabel(xlabel)
     if apply_eur_xaxis:
         _apply_eur_xaxis(ax, econ)
+    # Pad the x-axis a touch so the offset annotations have headroom.
+    xmin, xmax = ax.get_xlim()
+    pad = 0.05 * (xmax - xmin) if xmax > xmin else 1.0
+    ax.set_xlim(xmin - pad, xmax + pad)
     _maybe_set_title(ax, title)
     ax.legend(loc="lower right", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
