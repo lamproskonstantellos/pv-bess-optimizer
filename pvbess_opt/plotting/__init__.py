@@ -35,7 +35,12 @@ from .monthly import (
     plot_monthly_supply,
     plot_monthly_surplus,
 )
-from .style import apply_ieee_style, set_scenario_label, set_show_titles
+from .style import (
+    apply_ieee_style,
+    set_project_mode_label,
+    set_scenario_label,
+    set_show_titles,
+)
 from .uncertainty import plot_rolling_horizon_distribution
 from .yearly import (
     plot_lifetime_summary,
@@ -46,6 +51,7 @@ from .yearly import (
 
 __all__ = [
     "apply_ieee_style",
+    "set_project_mode_label",
     "set_scenario_label",
     "set_show_titles",
     "plot_daily_supply",

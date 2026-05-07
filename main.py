@@ -72,6 +72,7 @@ from pvbess_opt.plotting import (
     plot_yearly_combined,
     plot_yearly_supply,
     plot_yearly_surplus,
+    set_project_mode_label,
     set_scenario_label,
     set_show_titles,
 )
@@ -476,6 +477,19 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
         )
 
 
+def _project_mode_label(params: dict[str, Any]) -> str:
+    """Return ``"PV-only"`` / ``"BESS-only"`` / ``"Hybrid PV+BESS"``."""
+    pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
+    bess_present = float(params.get("bess_power_kw", 0.0) or 0.0) > 0.0
+    if pv_present and bess_present:
+        return "Hybrid PV+BESS"
+    if pv_present:
+        return "PV-only"
+    if bess_present:
+        return "BESS-only"
+    return ""
+
+
 def _run_one(
     params: dict[str, Any],
     ts: pd.DataFrame,
@@ -486,6 +500,7 @@ def _run_one(
     """Solve, post-process, archive and plot a single scenario."""
     slug = _scenario_slug(params)
     set_scenario_label(slug)
+    set_project_mode_label(_project_mode_label(params))
 
     folder = f"{base_name}_{slug}_{timestamp}"
     out_dir = Path(args.outdir) / folder

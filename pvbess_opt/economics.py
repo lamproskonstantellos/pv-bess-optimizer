@@ -146,28 +146,23 @@ def derive_asset_capacities(
 ) -> dict[str, float]:
     """Resolve the PV nameplate and BESS power that drive EUR/kW math.
 
-    Pulls from the ``project.system`` group first (declared values in
-    the workbook), falls back to inference from the timeseries / dispatch
-    params when zero is supplied.
+    v0.6: ``pv_nameplate_kwp = 0`` and ``bess_power_kw = 0`` mean the
+    asset is not part of the project — values are passed through
+    exactly.  No inference from the timeseries or from
+    ``p_dis_max_kw``.
+
+    ``bess_kwh`` follows ``bess_kw``: zero when the BESS is absent,
+    the solver-reported energy capacity otherwise.  ``econ`` and
+    ``ts`` are kept in the signature for API symmetry with the rest
+    of the multi-year helpers.
     """
-    dt_h = float(params.get("dt_minutes", 60)) / 60.0
-
-    pv_kwp = float(params.get("pv_nameplate_kwp", 0.0) or 0.0)
-    if pv_kwp <= 0.0:
-        if "pv_kwh" in ts.columns and len(ts) > 0:
-            pv_peak_kwh_per_step = float(ts["pv_kwh"].max())
-            pv_kwp = max(pv_peak_kwh_per_step / dt_h, 0.0)
-        else:
-            pv_kwp = 0.0
-
-    bess_kw = float(params.get("bess_power_kw", 0.0) or 0.0)
-    if bess_kw <= 0.0:
-        bess_kw = float(params.get("p_dis_max_kw", 0.0) or 0.0)
-
+    _ = econ, ts  # accepted for API symmetry
+    pv_kwp = max(float(params.get("pv_nameplate_kwp", 0.0) or 0.0), 0.0)
+    bess_kw = max(float(params.get("bess_power_kw", 0.0) or 0.0), 0.0)
     return {
         "pv_kwp": pv_kwp,
         "bess_kw": bess_kw,
-        "bess_kwh": float(e_cap_kwh),
+        "bess_kwh": float(e_cap_kwh) if bess_kw > 0 else 0.0,
     }
 
 

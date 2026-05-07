@@ -22,6 +22,7 @@ from ..config import IEEE_RCPARAMS, LEGEND_ORDER, assert_unique_colors
 
 SHOW_TITLES: bool = False
 SCENARIO_LABEL: str = ""
+PROJECT_MODE_LABEL: str = ""  # "PV-only" | "BESS-only" | "Hybrid PV+BESS" | ""
 
 # Validate the colour map once on import.
 assert_unique_colors()
@@ -52,6 +53,21 @@ def set_scenario_label(label: str) -> None:
 def get_scenario_label() -> str:
     """Return the currently configured scenario label."""
     return SCENARIO_LABEL
+
+
+def set_project_mode_label(label: str) -> None:
+    """Set the project-mode label injected into plot titles.
+
+    One of ``"PV-only"`` / ``"BESS-only"`` / ``"Hybrid PV+BESS"`` /
+    ``""`` (the empty default suppresses the annotation).
+    """
+    global PROJECT_MODE_LABEL
+    PROJECT_MODE_LABEL = str(label or "").strip()
+
+
+def get_project_mode_label() -> str:
+    """Return the currently configured project-mode label."""
+    return PROJECT_MODE_LABEL
 
 
 # ---------------------------------------------------------------------------

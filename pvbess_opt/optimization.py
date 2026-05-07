@@ -259,7 +259,11 @@ def build_model(
         raise ValueError("timeseries is empty; nothing to optimise.")
     time_index = range(n_steps)
     mode = _resolve_mode(params)
-    allow_grid_charge = bool(params.get("allow_bess_grid_charging", False))
+    pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
+    bess_present = float(params.get("bess_power_kw", 0.0) or 0.0) > 0.0
+    allow_grid_charge = (
+        bool(params.get("allow_bess_grid_charging", False)) and bess_present
+    )
 
     if pd.api.types.is_datetime64_any_dtype(ts["timestamp"]):
         day_labels = ts["timestamp"].dt.date.tolist()
@@ -272,7 +276,11 @@ def build_model(
         t: float(ts.loc[t, "load_kwh"]) if "load_kwh" in ts.columns else 0.0
         for t in time_index
     }
-    pv = {t: float(ts.loc[t, "pv_kwh"]) for t in time_index}
+    if pv_present:
+        pv = {t: float(ts.loc[t, "pv_kwh"]) for t in time_index}
+    else:
+        # PV not part of the project — override the timeseries column.
+        pv = {t: 0.0 for t in time_index}
     dam_price = {
         t: float(ts.loc[t, "dam_price_eur_per_mwh"])
         if "dam_price_eur_per_mwh" in ts.columns
@@ -331,17 +339,64 @@ def build_model(
             m.T, rule=lambda m, t: m.grid_to_load[t] == 0,
         )
 
-    if not allow_grid_charge:
+    # PV-only / BESS-only / hybrid asset support — see Phase 3 of the
+    # v0.6 changelog.  Pin all flows for an absent asset to zero.
+    if not pv_present:
+        m.NOPV_TO_LOAD = pyo.Constraint(
+            m.T, rule=lambda m, t: m.pv_to_load[t] == 0,
+        )
+        m.NOPV_TO_BESS = pyo.Constraint(
+            m.T, rule=lambda m, t: m.pv_to_bess[t] == 0,
+        )
+        m.NOPV_TO_GRID = pyo.Constraint(
+            m.T, rule=lambda m, t: m.pv_to_grid[t] == 0,
+        )
+        m.NOPV_CURTAIL = pyo.Constraint(
+            m.T, rule=lambda m, t: m.pv_curtail[t] == 0,
+        )
+
+    if bess_present and not allow_grid_charge:
         m.NO_GRID_CHARGE = pyo.Constraint(
             m.T, rule=lambda m, t: m.grid_to_bess[t] == 0,
         )
 
     m.y_charge = pyo.Var(m.T, domain=pyo.Binary)
     m.y_dis = pyo.Var(m.T, domain=pyo.Binary)
-    # Section 4 of the VNB spec — no charge + discharge simultaneously.
-    m.MODE_LINK = pyo.Constraint(
-        m.T, rule=lambda m, t: m.y_charge[t] + m.y_dis[t] <= 1,
-    )
+    if bess_present:
+        # Section 4 of the VNB spec — no charge + discharge simultaneously.
+        m.MODE_LINK = pyo.Constraint(
+            m.T, rule=lambda m, t: m.y_charge[t] + m.y_dis[t] <= 1,
+        )
+
+    if not bess_present:
+        # BESS not part of the project — pin every BESS-related variable
+        # to zero (incl. binary mode flags) and skip the BESS-only
+        # constraints further down.
+        m.E_CAP_ZERO = pyo.Constraint(expr=m.e_cap == 0.0)
+        m.NOBESS_SOC = pyo.Constraint(
+            m.T, rule=lambda m, t: m.soc[t] == 0,
+        )
+        if pv_present:
+            # When PV is also absent we already pinned pv_to_bess above —
+            # avoid a duplicate constraint name.
+            m.NOBESS_PV_TO_BESS = pyo.Constraint(
+                m.T, rule=lambda m, t: m.pv_to_bess[t] == 0,
+            )
+        m.NOBESS_GRID_TO_BESS = pyo.Constraint(
+            m.T, rule=lambda m, t: m.grid_to_bess[t] == 0,
+        )
+        m.NOBESS_DIS_LOAD = pyo.Constraint(
+            m.T, rule=lambda m, t: m.bess_dis_load[t] == 0,
+        )
+        m.NOBESS_DIS_GRID = pyo.Constraint(
+            m.T, rule=lambda m, t: m.bess_dis_grid[t] == 0,
+        )
+        m.NOBESS_Y_CHARGE = pyo.Constraint(
+            m.T, rule=lambda m, t: m.y_charge[t] == 0,
+        )
+        m.NOBESS_Y_DIS = pyo.Constraint(
+            m.T, rule=lambda m, t: m.y_dis[t] == 0,
+        )
 
     m.grid_export_total = pyo.Expression(
         m.T, rule=lambda m, t: m.pv_to_grid[t] + m.bess_dis_grid[t],
@@ -392,59 +447,62 @@ def build_model(
         m.T, rule=lambda m, t: m.soc[t] <= params["soc_max_frac"] * m.e_cap,
     )
 
-    if initial_soc_kwh is not None:
-        m.SOC_INIT = pyo.Constraint(expr=m.soc[0] == float(initial_soc_kwh))
-    else:
-        m.SOC_INIT = pyo.Constraint(
-            expr=m.soc[0] == params["initial_soc_frac"] * m.e_cap,
+    if bess_present:
+        if initial_soc_kwh is not None:
+            m.SOC_INIT = pyo.Constraint(
+                expr=m.soc[0] == float(initial_soc_kwh),
+            )
+        else:
+            m.SOC_INIT = pyo.Constraint(
+                expr=m.soc[0] == params["initial_soc_frac"] * m.e_cap,
+            )
+
+        final_charge = eta_c * (
+            m.pv_to_bess[n_steps - 1] + m.grid_to_bess[n_steps - 1]
+        )
+        final_discharge = (
+            m.bess_dis_load[n_steps - 1] + m.bess_dis_grid[n_steps - 1]
+        ) / eta_d
+        final_soc_expr = m.soc[n_steps - 1] + final_charge - final_discharge
+
+        if terminal_soc_free is None:
+            terminal_soc_free = not bool(params.get("terminal_soc_equal", True))
+        if not terminal_soc_free:
+            m.SOC_TERM = pyo.Constraint(expr=final_soc_expr == m.soc[0])
+        else:
+            m.SOC_TERM_MIN = pyo.Constraint(
+                expr=final_soc_expr >= params["soc_min_frac"] * m.e_cap,
+            )
+            m.SOC_TERM_MAX = pyo.Constraint(
+                expr=final_soc_expr <= params["soc_max_frac"] * m.e_cap,
+            )
+
+        # --- Charge / discharge power limits ---------------------------------
+        ch_lim = p_charge * dt_h
+        dis_lim = p_dis * dt_h
+        m.CH_LIM = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.pv_to_bess[t] + m.grid_to_bess[t] <= ch_lim * m.y_charge[t]
+            ),
+        )
+        m.DIS_LIM = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.bess_dis_load[t] + m.bess_dis_grid[t] <= dis_lim * m.y_dis[t]
+            ),
         )
 
-    final_charge = eta_c * (
-        m.pv_to_bess[n_steps - 1] + m.grid_to_bess[n_steps - 1]
-    )
-    final_discharge = (
-        m.bess_dis_load[n_steps - 1] + m.bess_dis_grid[n_steps - 1]
-    ) / eta_d
-    final_soc_expr = m.soc[n_steps - 1] + final_charge - final_discharge
+        if params.get("battery_hours") is not None:
+            m.EP = pyo.Constraint(
+                expr=m.e_cap <= p_dis * float(params["battery_hours"]),
+            )
 
-    if terminal_soc_free is None:
-        terminal_soc_free = not bool(params.get("terminal_soc_equal", True))
-    if not terminal_soc_free:
-        m.SOC_TERM = pyo.Constraint(expr=final_soc_expr == m.soc[0])
-    else:
-        m.SOC_TERM_MIN = pyo.Constraint(
-            expr=final_soc_expr >= params["soc_min_frac"] * m.e_cap,
-        )
-        m.SOC_TERM_MAX = pyo.Constraint(
-            expr=final_soc_expr <= params["soc_max_frac"] * m.e_cap,
-        )
-
-    # --- Charge / discharge power limits ---------------------------------
-    ch_lim = p_charge * dt_h
-    dis_lim = p_dis * dt_h
-    m.CH_LIM = pyo.Constraint(
-        m.T,
-        rule=lambda m, t: (
-            m.pv_to_bess[t] + m.grid_to_bess[t] <= ch_lim * m.y_charge[t]
-        ),
-    )
-    m.DIS_LIM = pyo.Constraint(
-        m.T,
-        rule=lambda m, t: (
-            m.bess_dis_load[t] + m.bess_dis_grid[t] <= dis_lim * m.y_dis[t]
-        ),
-    )
-
-    if params.get("battery_hours") is not None:
-        m.EP = pyo.Constraint(
-            expr=m.e_cap <= p_dis * float(params["battery_hours"]),
-        )
-
-    # --- Daily cycle limit ------------------------------------------------
-    m.CYC = pyo.ConstraintList()
-    for indices in day_to_idx.values():
-        lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
-        m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * m.e_cap)
+        # --- Daily cycle limit ------------------------------------------------
+        m.CYC = pyo.ConstraintList()
+        for indices in day_to_idx.values():
+            lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
+            m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * m.e_cap)
 
     # --- Static curtailment cap (HARD constraint, BOTH modes) -------------
     # Section 8 of the VNB spec — regulatory grid-connection limit per

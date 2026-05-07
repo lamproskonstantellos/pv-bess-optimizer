@@ -779,9 +779,22 @@ def _typed_to_flat(
 
 
 def read_inputs(xlsx_path: str | Path) -> tuple[dict[str, Any], pd.DataFrame]:
-    """Return ``(params, ts)`` — the flat shape used by the optimizer."""
+    """Return ``(params, ts)`` — the flat shape used by the optimizer.
+
+    Raises ``ValueError`` when both ``pv_nameplate_kwp`` and
+    ``bess_power_kw`` are zero (no asset to optimise).
+    """
     typed = read_workbook(xlsx_path)
-    return _typed_to_flat(typed)
+    params, ts = _typed_to_flat(typed)
+    if (
+        float(params.get("pv_nameplate_kwp", 0.0) or 0.0) <= 0.0
+        and float(params.get("bess_power_kw", 0.0) or 0.0) <= 0.0
+    ):
+        raise ValueError(
+            "Both pv_nameplate_kwp and bess_power_kw are zero — "
+            "nothing to optimise."
+        )
+    return params, ts
 
 
 # ---------------------------------------------------------------------------
