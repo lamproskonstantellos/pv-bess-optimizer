@@ -15,11 +15,16 @@ Plot titles default to off; toggle with ``show_titles`` in the
 ``economic`` sheet.
 
 Plot-scope flags in ``economic`` control how many energy PDFs are
-produced (a 25-year run with daily-all would be ~9 000 PDFs):
+produced.  All three share the same vocabulary in v0.6:
 
-* ``plot_daily_year1``   — render Year-1 daily plots (TRUE/FALSE)
+* ``plot_daily_scope``   — none / year1_only / all   (default ``year1_only``)
 * ``plot_monthly_scope`` — none / year1_only / all   (default ``all``)
-* ``plot_yearly_scope``  — none / all                 (default ``all``)
+* ``plot_yearly_scope``  — none / year1_only / all   (default ``all``)
+
+A 25-year run with ``plot_daily_scope = "all"`` produces ~9 000 daily
+PDFs (3 figures × 365 days × 25 years).  The runner emits a WARNING
+at run start in that case so the user can interrupt before the
+post-solve fan-out kicks in.
 """
 
 from __future__ import annotations
@@ -284,7 +289,7 @@ def _generate_all_energy_plots(
     energy_plots_dir: Path,
 ) -> None:
     """Drive the energy-plot fan-out across the project lifetime."""
-    daily_year1 = bool(econ.get("plot_daily_year1", True))
+    daily_scope = str(econ.get("plot_daily_scope", "year1_only"))
     monthly_scope = str(econ.get("plot_monthly_scope", "all"))
     yearly_scope = str(econ.get("plot_yearly_scope", "all"))
     project_start_year = int(econ.get("project_start_year", 2026) or 2026)
@@ -297,7 +302,7 @@ def _generate_all_energy_plots(
             cal_year = project_start_year
         _generate_energy_plots_for_year(
             res_year1, cal_year, energy_plots_dir,
-            daily=daily_year1,
+            daily=_scope_active_for_year(daily_scope, 1),
             monthly=_scope_active_for_year(monthly_scope, 1),
             yearly=_scope_active_for_year(yearly_scope, 1),
         )
@@ -308,10 +313,9 @@ def _generate_all_energy_plots(
             lifetime_df["calendar_year"] == int(cal_year)
         ].copy()
         proj_year = int(sub["project_year"].iloc[0])
-        daily_active = daily_year1 and proj_year == 1
         _generate_energy_plots_for_year(
             sub, int(cal_year), energy_plots_dir,
-            daily=daily_active,
+            daily=_scope_active_for_year(daily_scope, proj_year),
             monthly=_scope_active_for_year(monthly_scope, proj_year),
             yearly=_scope_active_for_year(yearly_scope, proj_year),
         )
@@ -592,6 +596,19 @@ def _run_one(
     unc_cfg = _resolve_uncertainty_config(
         args, econ_pre, mode=str(params.get("mode", "vnb")).lower(),
     )
+
+    # plot_daily_scope = "all" with a long horizon produces ~9 000 PDFs
+    # for a 25-year run.  Warn loudly so the user can interrupt before
+    # the post-solve fan-out kicks in.
+    if str(econ_pre.get("plot_daily_scope", "year1_only")).strip().lower() == "all":
+        n_years = int(econ_pre.get("project_lifecycle_years", 25) or 25)
+        approx_pdfs = 365 * max(n_years, 1) * 3
+        logger.warning(
+            "plot_daily_scope='all' selected: ~%d daily PDFs will be "
+            "generated across %d operating years (3 figures/day). "
+            "Set plot_daily_scope=year1_only to keep iteration fast.",
+            approx_pdfs, n_years,
+        )
 
     with _tee_stdout_to_log(log_path):
         print(f"[run] mode={params.get('mode')}  "
