@@ -61,17 +61,22 @@ def add_forecast_noise(
     sigma_dam: float = 0.20,
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
+    enable_dam: bool = True,
+    enable_pv: bool = True,
+    enable_load: bool = True,
 ) -> pd.DataFrame:
     """Apply log-normal multiplicative noise BEYOND the commit horizon.
 
     Rows ``[0, commit_hours)`` are byte-identical to the input — those
     are the committed decisions for the current window.  Rows
     ``[commit_hours, len(ts))`` get independent multiplicative log-normal
-    noise on ``dam_price_eur_per_mwh``, ``pv_kwh``, ``load_kwh``.
+    noise on the enabled source columns.
 
-    Negative DAM prices are sign-aware: noise is applied to the absolute
-    value and the sign is restored.  ``load_kwh`` is skipped when absent
-    (merchant mode).
+    The three ``enable_*`` flags toggle each source independently.  A
+    disabled source forces its sigma to 0 internally — the column is
+    left exactly as in the input.  Negative DAM prices are sign-aware:
+    noise is applied to the absolute value and the sign is restored.
+    ``load_kwh`` is skipped when absent (merchant mode).
     """
     if commit_hours < 0:
         raise ValueError(f"commit_hours must be non-negative, got {commit_hours!r}")
@@ -82,23 +87,27 @@ def add_forecast_noise(
 
     n_perturb = n - commit_hours
 
+    eff_sigma_dam = sigma_dam if enable_dam else 0.0
+    eff_sigma_pv = sigma_pv if enable_pv else 0.0
+    eff_sigma_load = sigma_load if enable_load else 0.0
+
     if "dam_price_eur_per_mwh" in out.columns:
         prices = out["dam_price_eur_per_mwh"].to_numpy(dtype=float).copy()
         sign = np.where(prices < 0, -1.0, 1.0)
         magnitude = np.abs(prices)
-        mult = _lognormal_multiplier(rng, sigma_dam, n_perturb)
+        mult = _lognormal_multiplier(rng, eff_sigma_dam, n_perturb)
         magnitude[commit_hours:] = magnitude[commit_hours:] * mult
         out["dam_price_eur_per_mwh"] = sign * magnitude
 
     if "pv_kwh" in out.columns:
         pv = out["pv_kwh"].to_numpy(dtype=float).copy()
-        mult = _lognormal_multiplier(rng, sigma_pv, n_perturb)
+        mult = _lognormal_multiplier(rng, eff_sigma_pv, n_perturb)
         pv[commit_hours:] = np.maximum(pv[commit_hours:] * mult, 0.0)
         out["pv_kwh"] = pv
 
     if "load_kwh" in out.columns:
         load = out["load_kwh"].to_numpy(dtype=float).copy()
-        mult = _lognormal_multiplier(rng, sigma_load, n_perturb)
+        mult = _lognormal_multiplier(rng, eff_sigma_load, n_perturb)
         load[commit_hours:] = np.maximum(load[commit_hours:] * mult, 0.0)
         out["load_kwh"] = load
 
@@ -125,6 +134,9 @@ def rolling_horizon_dispatch(
     sigma_dam: float = 0.20,
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
+    enable_dam: bool = True,
+    enable_pv: bool = True,
+    enable_load: bool = True,
     evaluate_with_actuals: bool = True,
     solver_name: str = "highs",
     **solve_kwargs: Any,
@@ -195,6 +207,9 @@ def rolling_horizon_dispatch(
                 sigma_dam=sigma_dam,
                 sigma_pv=sigma_pv,
                 sigma_load=sigma_load,
+                enable_dam=enable_dam,
+                enable_pv=enable_pv,
+                enable_load=enable_load,
             )
         else:
             window_noisy = window_ts
@@ -296,6 +311,9 @@ def monte_carlo_rolling(
     sigma_dam: float = 0.20,
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
+    enable_dam: bool = True,
+    enable_pv: bool = True,
+    enable_load: bool = True,
     window_hours: int = 48,
     commit_hours: int = 24,
     solver_name: str = "highs",
@@ -330,6 +348,9 @@ def monte_carlo_rolling(
             sigma_dam=sigma_dam,
             sigma_pv=sigma_pv,
             sigma_load=sigma_load,
+            enable_dam=enable_dam,
+            enable_pv=enable_pv,
+            enable_load=enable_load,
             evaluate_with_actuals=True,
             solver_name=solver_name,
             **solve_kwargs,

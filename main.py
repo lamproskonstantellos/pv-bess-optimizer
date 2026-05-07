@@ -41,6 +41,7 @@ from pvbess_opt.economics import (
     derive_monthly_cashflow,
     read_economic_params,
 )
+from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
 from pvbess_opt.io import (
     copy_input_snapshot,
     make_run_layout,
@@ -117,27 +118,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tee", action="store_true",
                         help="Print solver output.")
 
-    # Rolling-horizon (Phase B) flags.
+    # Rolling-horizon flags.  In v0.6 these become CLI overrides of
+    # the workbook ``# uncertainty`` group; when omitted, the workbook
+    # value applies (None sentinel signals "not provided").
     parser.add_argument(
-        "--rolling-horizon", action="store_true",
-        help="Run a rolling-horizon dispatch with imperfect foresight.",
+        "--rolling-horizon", action="store_true", default=False,
+        help="Force-enable rolling-horizon dispatch with imperfect "
+             "foresight (overrides workbook uncertainty_enabled).",
     )
     parser.add_argument(
-        "--window-hours", type=int, default=48,
-        help="Rolling-horizon window length in hours (default 48).",
+        "--window-hours", type=int, default=None,
+        help="Rolling-horizon window length in hours "
+             "(overrides workbook uncertainty_window_hours).",
     )
     parser.add_argument(
-        "--commit-hours", type=int, default=24,
-        help="Rolling-horizon commit slice in hours (default 24).",
+        "--commit-hours", type=int, default=None,
+        help="Rolling-horizon commit slice in hours "
+             "(overrides workbook uncertainty_commit_hours).",
     )
     parser.add_argument(
-        "--monte-carlo", type=int, default=0,
-        help="Number of Monte Carlo seeds for the rolling-horizon run "
-             "(0 = single deterministic noiseless rolling horizon).",
+        "--monte-carlo", type=int, default=None,
+        help="Number of Monte Carlo seeds (overrides workbook "
+             "uncertainty_n_seeds; 0 = single deterministic noiseless RH).",
     )
     parser.add_argument(
         "--seed", type=int, default=42,
         help="Base seed for the Monte Carlo rolling-horizon ensemble.",
+    )
+    parser.add_argument(
+        "--compare-uncertainty-sources", action="store_true", default=False,
+        help="Run four MC ensembles (DAM-only, PV-only, Load-only, "
+             "All-combined) and emit a comparison plot "
+             "(overrides workbook uncertainty_compare_sources).",
     )
     return parser.parse_args(argv)
 
@@ -358,6 +370,8 @@ def _generate_financial_plots(
     econ: dict[str, Any],
     plots_dir: Path,
     rolling_mc: pd.DataFrame | None = None,
+    rolling_compare_mc: pd.DataFrame | None = None,
+    uncertainty_dir: Path | None = None,
     pf_profit_eur: float | None = None,
 ) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -404,6 +418,18 @@ def _generate_financial_plots(
                 rolling_mc,
                 plots_dir / "rolling_horizon_distribution.pdf",
                 pf_profit_eur=pf_profit_eur,
+            )
+        if rolling_compare_mc is not None and not rolling_compare_mc.empty:
+            plot_rolling_horizon_distribution(
+                rolling_compare_mc,
+                plots_dir / "rolling_horizon_distribution_compare.pdf",
+                pf_profit_eur=pf_profit_eur,
+            )
+            target_dir = uncertainty_dir or plots_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            plot_foresight_gap_comparison(
+                rolling_compare_mc,
+                target_dir / "rolling_horizon_foresight_gap_comparison.pdf",
             )
     except Exception:
         logger.exception("Financial plot generation failed")
@@ -490,6 +516,59 @@ def _project_mode_label(params: dict[str, Any]) -> str:
     return ""
 
 
+_COMPARE_SOURCE_FLAGS: tuple[tuple[str, bool, bool, bool], ...] = (
+    ("dam", True, False, False),
+    ("pv", False, True, False),
+    ("load", False, False, True),
+    ("all", True, True, True),
+)
+
+
+def _resolve_uncertainty_config(
+    args: argparse.Namespace, econ: dict[str, Any], mode: str,
+) -> dict[str, Any]:
+    """Merge CLI overrides on top of the workbook ``# uncertainty`` group."""
+    enabled = bool(args.rolling_horizon) or bool(econ.get("uncertainty_enabled", False))
+    compare = (
+        bool(args.compare_uncertainty_sources)
+        or bool(econ.get("uncertainty_compare_sources", False))
+    )
+    n_seeds = (
+        int(args.monte_carlo) if args.monte_carlo is not None
+        else int(econ.get("uncertainty_n_seeds", 30) or 30)
+    )
+    window = (
+        int(args.window_hours) if args.window_hours is not None
+        else int(econ.get("uncertainty_window_hours", 48) or 48)
+    )
+    commit = (
+        int(args.commit_hours) if args.commit_hours is not None
+        else int(econ.get("uncertainty_commit_hours", 24) or 24)
+    )
+    enable_dam = bool(econ.get("uncertainty_dam_enabled", True))
+    enable_pv = bool(econ.get("uncertainty_pv_enabled", True))
+    enable_load = bool(econ.get("uncertainty_load_enabled", True))
+    if mode == "merchant" and enable_load:
+        logger.info(
+            "merchant mode: ignoring uncertainty_load_enabled (no load to perturb)"
+        )
+        enable_load = False
+    return {
+        "enabled": enabled,
+        "compare_sources": compare,
+        "n_seeds": n_seeds,
+        "window_hours": window,
+        "commit_hours": commit,
+        "enable_dam": enable_dam,
+        "enable_pv": enable_pv,
+        "enable_load": enable_load,
+        "sigma_dam": float(econ.get("uncertainty_sigma_dam", 0.20) or 0.20),
+        "sigma_pv": float(econ.get("uncertainty_sigma_pv", 0.12) or 0.12),
+        "sigma_load": float(econ.get("uncertainty_sigma_load", 0.05) or 0.05),
+        "base_seed": int(args.seed),
+    }
+
+
 def _run_one(
     params: dict[str, Any],
     ts: pd.DataFrame,
@@ -506,6 +585,13 @@ def _run_one(
     out_dir = Path(args.outdir) / folder
     layout = make_run_layout(out_dir)
     log_path = layout["summary"] / "run_log.txt"
+
+    # Load the economic group up front so the uncertainty config can be
+    # resolved before the perfect-foresight solve produces its KPIs.
+    econ_pre = read_economic_params(Path(args.excel))
+    unc_cfg = _resolve_uncertainty_config(
+        args, econ_pre, mode=str(params.get("mode", "vnb")).lower(),
+    )
 
     with _tee_stdout_to_log(log_path):
         print(f"[run] mode={params.get('mode')}  "
@@ -546,39 +632,84 @@ def _run_one(
         # Optional rolling-horizon run (writes its KPIs alongside the
         # perfect-foresight benchmark for comparison).
         rolling_mc_df: pd.DataFrame | None = None
-        if args.rolling_horizon:
+        rolling_compare_df: pd.DataFrame | None = None
+        if unc_cfg["enabled"]:
             pf_profit_eur = float(kpis.get("profit_total_eur", 0.0))
-            n_seeds = int(args.monte_carlo)
-            if n_seeds > 0:
-                print(f"[rolling] running {n_seeds} MC seeds "
-                      f"(window={args.window_hours}h, commit={args.commit_hours}h, "
-                      f"base_seed={args.seed})")
+            n_seeds = int(unc_cfg["n_seeds"])
+            window_h = int(unc_cfg["window_hours"])
+            commit_h = int(unc_cfg["commit_hours"])
+            base_seed = int(unc_cfg["base_seed"])
+
+            if unc_cfg["compare_sources"] and n_seeds > 0:
+                print(
+                    f"[rolling] compare-sources mode: 4 ensembles x {n_seeds} seeds "
+                    f"(window={window_h}h, commit={commit_h}h, base_seed={base_seed})"
+                )
+                ensembles: list[pd.DataFrame] = []
+                for src, en_dam, en_pv, en_load in _COMPARE_SOURCE_FLAGS:
+                    sub = monte_carlo_rolling(
+                        params, ts,
+                        n_seeds=n_seeds,
+                        base_seed=base_seed,
+                        pf_profit_eur=pf_profit_eur,
+                        sigma_dam=unc_cfg["sigma_dam"],
+                        sigma_pv=unc_cfg["sigma_pv"],
+                        sigma_load=unc_cfg["sigma_load"],
+                        enable_dam=en_dam,
+                        enable_pv=en_pv,
+                        enable_load=en_load,
+                        window_hours=window_h,
+                        commit_hours=commit_h,
+                        solver_name=args.solver,
+                        mip_gap=args.mip_gap,
+                        time_limit_seconds=args.time_limit,
+                        tee=args.tee,
+                    )
+                    sub.insert(0, "source_set", src)
+                    ensembles.append(sub)
+                    p50 = float(sub["foresight_gap_pct"].quantile(0.50))
+                    kpis[f"foresight_gap_pct_p50_{src}"] = float(round(p50, 4))
+                rolling_compare_df = pd.concat(ensembles, ignore_index=True)
+                kpis["mc_n_seeds"] = int(n_seeds)
+                kpis["mc_window_hours"] = int(window_h)
+                kpis["mc_commit_hours"] = int(commit_h)
+            elif n_seeds > 0:
+                print(
+                    f"[rolling] running {n_seeds} MC seeds "
+                    f"(window={window_h}h, commit={commit_h}h, "
+                    f"base_seed={base_seed})"
+                )
                 rolling_mc_df = monte_carlo_rolling(
                     params, ts,
                     n_seeds=n_seeds,
-                    base_seed=int(args.seed),
+                    base_seed=base_seed,
                     pf_profit_eur=pf_profit_eur,
-                    window_hours=int(args.window_hours),
-                    commit_hours=int(args.commit_hours),
+                    sigma_dam=unc_cfg["sigma_dam"],
+                    sigma_pv=unc_cfg["sigma_pv"],
+                    sigma_load=unc_cfg["sigma_load"],
+                    enable_dam=unc_cfg["enable_dam"],
+                    enable_pv=unc_cfg["enable_pv"],
+                    enable_load=unc_cfg["enable_load"],
+                    window_hours=window_h,
+                    commit_hours=commit_h,
                     solver_name=args.solver,
                     mip_gap=args.mip_gap,
                     time_limit_seconds=args.time_limit,
                     tee=args.tee,
                 )
-                # Add P10/P50/P90 KPIs.
                 gap_p = rolling_mc_df["foresight_gap_pct"].quantile([0.10, 0.50, 0.90])
                 kpis["foresight_gap_pct_p10"] = float(round(gap_p.loc[0.10], 4))
                 kpis["foresight_gap_pct_p50"] = float(round(gap_p.loc[0.50], 4))
                 kpis["foresight_gap_pct_p90"] = float(round(gap_p.loc[0.90], 4))
                 kpis["mc_n_seeds"] = int(n_seeds)
-                kpis["mc_window_hours"] = int(args.window_hours)
-                kpis["mc_commit_hours"] = int(args.commit_hours)
+                kpis["mc_window_hours"] = int(window_h)
+                kpis["mc_commit_hours"] = int(commit_h)
             else:
                 # Single deterministic noiseless rolling horizon.
-                rh_full, rh_kpis = rolling_horizon_dispatch(
+                _rh_full, rh_kpis = rolling_horizon_dispatch(
                     params, ts,
-                    window_hours=int(args.window_hours),
-                    commit_hours=int(args.commit_hours),
+                    window_hours=window_h,
+                    commit_hours=commit_h,
                     forecast_seed=None,
                     evaluate_with_actuals=True,
                     solver_name=args.solver,
@@ -623,6 +754,7 @@ def _run_one(
             lifetime_yearly=bundle.get("lifetime_yearly"),
             economic_assumptions=econ,
             rolling_horizon_mc=rolling_mc_df,
+            rolling_horizon_compare_mc=rolling_compare_df,
         )
 
         if bundle.get("yearly_cf") is not None:
@@ -634,6 +766,8 @@ def _run_one(
                 econ,
                 layout["financial_plots"],
                 rolling_mc=rolling_mc_df,
+                rolling_compare_mc=rolling_compare_df,
+                uncertainty_dir=layout["uncertainty_plots"],
                 pf_profit_eur=float(kpis.get("profit_total_eur", 0.0)),
             )
 

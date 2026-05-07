@@ -41,7 +41,10 @@ from .style import (
     set_scenario_label,
     set_show_titles,
 )
-from .uncertainty import plot_rolling_horizon_distribution
+from .uncertainty import (
+    plot_foresight_gap_comparison,
+    plot_rolling_horizon_distribution,
+)
 from .yearly import (
     plot_lifetime_summary,
     plot_yearly_combined,
@@ -72,6 +75,7 @@ __all__ = [
     "plot_npv_tornado",
     "plot_irr_tornado",
     "plot_rolling_horizon_distribution",
+    "plot_foresight_gap_comparison",
     "plot_input_forecast_band",
     "plot_input_seasonal_boxplot",
     "plot_dam_intraday_heatmap",

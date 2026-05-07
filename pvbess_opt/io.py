@@ -960,6 +960,7 @@ def write_results_workbook(
     lifetime_yearly: pd.DataFrame | None = None,
     economic_assumptions: dict[str, Any] | None = None,
     rolling_horizon_mc: pd.DataFrame | None = None,
+    rolling_horizon_compare_mc: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -996,6 +997,13 @@ def write_results_workbook(
         if rolling_horizon_mc is not None and not rolling_horizon_mc.empty:
             rolling_horizon_mc.to_excel(
                 writer, sheet_name="rolling_horizon_mc", index=False,
+            )
+        if (
+            rolling_horizon_compare_mc is not None
+            and not rolling_horizon_compare_mc.empty
+        ):
+            rolling_horizon_compare_mc.to_excel(
+                writer, sheet_name="rolling_horizon_compare_mc", index=False,
             )
         if economic_assumptions:
             _format_assumptions(economic_assumptions).to_excel(
