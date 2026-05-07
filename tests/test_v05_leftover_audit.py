@@ -74,7 +74,7 @@ REQUIRED_TOKENS: tuple[str, ...] = (
     "lcos_eur_per_mwh",
     "pv_capacity_factor",
     "bess_lifetime_cycles",
-    '"0.6.0"',
+    '"0.7.0"',
 )
 
 REQUIRED_FILES: tuple[str, ...] = (
@@ -225,6 +225,6 @@ def test_inputs_xlsx_uses_v06_schema():
 # ---------------------------------------------------------------------------
 
 
-def test_pvbess_version_string_is_exactly_0_6_0():
+def test_pvbess_version_string_is_exactly_0_7_0():
     import pvbess_opt
-    assert pvbess_opt.__version__ == "0.6.0"
+    assert pvbess_opt.__version__ == "0.7.0"

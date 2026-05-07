@@ -27,4 +27,4 @@ The hard static curtailment cap on grid-bound flows is enforced in
 both modes per MD YPEN/DAPEEK/53563/1556/2023.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
