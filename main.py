@@ -39,6 +39,7 @@ from typing import Any, Iterator
 
 import pandas as pd
 
+from pvbess_opt.availability import apply_unavailability_derate
 from pvbess_opt.economics import (
     build_yearly_cashflow,
     compute_financial_kpis,
@@ -520,6 +521,23 @@ def _build_financials(
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
     lifetime_df = build_lifetime_dispatch(res, econ, capacities)
     lifetime_yearly = aggregate_lifetime_to_yearly(lifetime_df)
+    # v0.8 Phase 4: post-solve unavailability derate on the lifetime
+    # totals (PV generation and BESS discharge) so LCOE / LCOS
+    # denominators reflect the realistic operating envelope.
+    avail_factor = max(
+        0.0,
+        min(1.0, 1.0 - float(econ.get("unavailability_pct", 0.0) or 0.0) / 100.0),
+    )
+    if avail_factor < 1.0 and not lifetime_yearly.empty:
+        for col in (
+            "pv_generation_mwh", "bess_discharge_mwh", "bess_charge_mwh",
+            "pv_to_load_mwh", "pv_to_grid_mwh", "import_to_load_mwh",
+            "export_total_mwh", "revenue_eur_total",
+        ):
+            if col in lifetime_yearly.columns:
+                lifetime_yearly[col] = (
+                    lifetime_yearly[col].astype(float) * avail_factor
+                )
     fin_kpis = compute_financial_kpis(
         yearly_cf, econ,
         capacities=capacities,
@@ -707,6 +725,11 @@ def _run_one(
             _check_strict_invariants(invariants)
 
         kpis = compute_kpis(res, params, verify_balance=False)
+        # v0.8 Phase 4: post-solve unavailability derate.  Multiplies a
+        # curated set of MWh / EUR keys by (1 - unavailability_pct/100).
+        kpis = apply_unavailability_derate(
+            kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
+        )
         kpis_monthly = compute_monthly_kpis(res)
 
         # Optional rolling-horizon run (writes its KPIs alongside the

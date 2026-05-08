@@ -68,52 +68,43 @@ def variables_for_irr_sensitivity(
 # ---------------------------------------------------------------------------
 
 
-def _scale_capex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
-    df = yearly_cf.copy()
-    df["capex_eur"] = df["capex_eur"].astype(float) * float(factor)
-    df["net_cashflow_eur"] = (
-        df["revenue_eur"].astype(float)
-        + df["opex_eur"].astype(float)
-        + df["capex_eur"].astype(float)
-    )
+def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
+    """Refresh net / discounted / cumulative columns after a column edit."""
+    components = ["revenue_eur", "opex_eur", "capex_eur"]
+    if "devex_eur" in df.columns:
+        components.append("devex_eur")
+    df["net_cashflow_eur"] = sum(df[c].astype(float) for c in components)
     df["discounted_cf_eur"] = (
         df["net_cashflow_eur"] * df["discount_factor"].astype(float)
     )
     df["cumulative_cf_eur"] = df["net_cashflow_eur"].cumsum()
     df["cumulative_dcf_eur"] = df["discounted_cf_eur"].cumsum()
     return df
+
+
+def _scale_capex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
+    """Scale CAPEX *and* DEVEX by the same factor (v0.8 folds DEVEX in)."""
+    df = yearly_cf.copy()
+    df["capex_eur"] = df["capex_eur"].astype(float) * float(factor)
+    if "devex_eur" in df.columns:
+        df["devex_eur"] = df["devex_eur"].astype(float) * float(factor)
+    return _recompute_net(df)
 
 
 def _scale_opex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     df = yearly_cf.copy()
     df["opex_eur"] = df["opex_eur"].astype(float) * float(factor)
-    df["net_cashflow_eur"] = (
-        df["revenue_eur"].astype(float)
-        + df["opex_eur"].astype(float)
-        + df["capex_eur"].astype(float)
-    )
-    df["discounted_cf_eur"] = (
-        df["net_cashflow_eur"] * df["discount_factor"].astype(float)
-    )
-    df["cumulative_cf_eur"] = df["net_cashflow_eur"].cumsum()
-    df["cumulative_dcf_eur"] = df["discounted_cf_eur"].cumsum()
-    return df
+    return _recompute_net(df)
 
 
 def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     df = yearly_cf.copy()
     df["revenue_eur"] = df["revenue_eur"].astype(float) * float(factor)
-    df["net_cashflow_eur"] = (
-        df["revenue_eur"].astype(float)
-        + df["opex_eur"].astype(float)
-        + df["capex_eur"].astype(float)
-    )
-    df["discounted_cf_eur"] = (
-        df["net_cashflow_eur"] * df["discount_factor"].astype(float)
-    )
-    df["cumulative_cf_eur"] = df["net_cashflow_eur"].cumsum()
-    df["cumulative_dcf_eur"] = df["discounted_cf_eur"].cumsum()
-    return df
+    if "aggregator_fee_eur" in df.columns:
+        df["aggregator_fee_eur"] = (
+            df["aggregator_fee_eur"].astype(float) * float(factor)
+        )
+    return _recompute_net(df)
 
 
 def _rebuild_with_discount_rate(
@@ -144,7 +135,10 @@ def run_sensitivity_analysis(
     rows: list[dict[str, Any]] = []
 
     base_yearly_cf = build_yearly_cashflow(year1_kpis, econ, capacities)
+    # v0.8: CAPEX driver folds in DEVEX (single-asset Year-0 outlay).
     base_capex_total = float(base_yearly_cf["capex_eur"].sum())
+    if "devex_eur" in base_yearly_cf.columns:
+        base_capex_total += float(base_yearly_cf["devex_eur"].sum())
     base_opex_total = float(
         base_yearly_cf.loc[
             base_yearly_cf["project_year"] >= 1, "opex_eur"

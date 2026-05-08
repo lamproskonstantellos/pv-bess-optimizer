@@ -203,13 +203,20 @@ def build_yearly_cashflow(
 
     capex_pv_y0 = -float(econ["capex_pv_eur_per_kw"]) * pv_kwp
     capex_bess_y0 = -float(econ["capex_bess_eur_per_kw"]) * bess_kw
+    capex_total_y0 = capex_pv_y0 + capex_bess_y0
+
     devex_pv_y0 = -float(econ.get("devex_pv_eur_per_kw", 0.0) or 0.0) * pv_kwp
     devex_bess_y0 = -float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
-    capex_total_y0 = (
-        capex_pv_y0 + capex_bess_y0 + devex_pv_y0 + devex_bess_y0
-    )
+    devex_total_y0 = devex_pv_y0 + devex_bess_y0
 
-    revenue_1 = float(year1_kpis.get("profit_total_eur", 0.0))
+    # v0.8: revenue is derated by the aggregator fee (Gridcog /
+    # merchant-aggregator convention).  The unavailability factor is
+    # already baked into ``year1_kpis['profit_total_eur']`` upstream
+    # (see :mod:`pvbess_opt.availability`), so it is NOT re-applied here.
+    aggregator_fee_pct = float(econ.get("aggregator_fee_pct_revenue", 0.0) or 0.0)
+    aggregator_fee_frac = max(0.0, min(1.0, aggregator_fee_pct / 100.0))
+
+    revenue_1_gross = float(year1_kpis.get("profit_total_eur", 0.0))
     opex_pv_1 = float(econ["opex_pv_eur_per_kwp"]) * pv_kwp
     opex_bess_1 = float(econ["opex_bess_eur_per_kw"]) * bess_kw
     opex_1 = -(opex_pv_1 + opex_bess_1)
@@ -229,27 +236,32 @@ def build_yearly_cashflow(
         if y == 0:
             pv_factor = 1.0
             bess_factor = 1.0
-            revenue_y = 0.0
+            revenue_gross_y = 0.0
             opex_y = 0.0
             capex_y = capex_total_y0
+            devex_y = devex_total_y0
+            aggregator_fee_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
             else:
                 pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
             bess_factor = (1.0 - bess_deg_annual) ** (y - 1)
-            # Revenue scaling is intentionally PV-driven only — see the
-            # documented "revenue ~ pv_factor" simplification in
-            # :mod:`pvbess_opt.lifetime`.  No bess_factor reset on
-            # ``bess_replacement_year`` is applied here.
-            revenue_y = revenue_1 * pv_factor * (1.0 + rev_infl) ** (y - 1)
+            revenue_gross_y = (
+                revenue_1_gross
+                * pv_factor
+                * (1.0 + rev_infl) ** (y - 1)
+            )
+            aggregator_fee_y = -revenue_gross_y * aggregator_fee_frac
             opex_y = opex_1 * (1.0 + opex_infl) ** (y - 1)
             if bess_repl_year > 0 and y == bess_repl_year:
                 capex_y = capex_bess_y0 * (bess_repl_cost_pct / 100.0)
             else:
                 capex_y = 0.0
+            devex_y = 0.0
 
-        net_cf = revenue_y + opex_y + capex_y
+        revenue_net_y = revenue_gross_y + aggregator_fee_y
+        net_cf = revenue_net_y + opex_y + capex_y + devex_y
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
         rows.append(
             {
@@ -257,9 +269,11 @@ def build_yearly_cashflow(
                 "calendar_year": int(project_start_year + y - 1),
                 "pv_production_factor": float(pv_factor),
                 "bess_capacity_factor": float(bess_factor),
-                "revenue_eur": float(revenue_y),
+                "revenue_eur": float(revenue_net_y),
+                "aggregator_fee_eur": float(aggregator_fee_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
+                "devex_eur": float(devex_y),
                 "net_cashflow_eur": float(net_cf),
                 "discount_factor": float(discount_factor),
                 "discounted_cf_eur": float(net_cf * discount_factor),
@@ -483,6 +497,10 @@ def compute_financial_kpis(
 
     total_capex_eur = float(df["capex_eur"].sum()) if "capex_eur" in df.columns \
         else float(capex_y0)
+    total_devex_eur = (
+        float(df["devex_eur"].sum()) if "devex_eur" in df.columns else 0.0
+    )
+    total_capex_devex_eur = total_capex_eur + total_devex_eur
     total_opex_eur_lifecycle = (
         float(df.loc[after_y0_mask, "opex_eur"].sum())
         if "opex_eur" in df.columns else 0.0
@@ -490,6 +508,10 @@ def compute_financial_kpis(
     total_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "revenue_eur"].sum())
         if "revenue_eur" in df.columns else 0.0
+    )
+    total_aggregator_fee_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "aggregator_fee_eur"].sum())
+        if "aggregator_fee_eur" in df.columns else 0.0
     )
 
     if "calendar_year" in df.columns and (df["project_year"] >= 1).any():
@@ -541,6 +563,12 @@ def compute_financial_kpis(
             )
             disc_capex = float((-df["capex_eur"].astype(float)
                                 * df["discount_factor"].astype(float)).sum())
+            # v0.8: DEVEX is part of the Year-0 outlay too.
+            if "devex_eur" in df.columns:
+                disc_capex += float(
+                    (-df["devex_eur"].astype(float)
+                     * df["discount_factor"].astype(float)).sum()
+                )
             disc_total = disc_capex + disc_costs
             disc_pv_mwh = 0.0
             if ly is not None:
@@ -660,8 +688,13 @@ def compute_financial_kpis(
             else float(round(discounted_payback, 4))
         ),
         "total_capex_eur": float(round(total_capex_eur, 2)),
+        "total_devex_eur": float(round(total_devex_eur, 2)),
+        "total_capex_devex_eur": float(round(total_capex_devex_eur, 2)),
         "total_opex_eur_lifecycle": float(round(total_opex_eur_lifecycle, 2)),
         "total_revenue_eur_lifecycle": float(round(total_revenue_eur_lifecycle, 2)),
+        "total_aggregator_fee_eur_lifecycle": float(round(
+            total_aggregator_fee_eur_lifecycle, 2,
+        )),
         "capex_year": int(capex_year),
         "project_start_year": int(project_start_year),
         "project_end_year": int(project_end_year),
