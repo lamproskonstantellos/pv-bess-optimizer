@@ -12,7 +12,6 @@ smoke test in test_input_workbook_smoke.py).
 
 from __future__ import annotations
 
-import pandas as pd
 import pytest
 
 from main import _scope_active_for_year
@@ -48,14 +47,13 @@ def test_scope_combinations_3x3_truth_table():
 
 
 def test_econ_defaults_use_unified_vocabulary():
-    from pvbess_opt.io import ECON_DEFAULTS, _ECON_ALLOWED_VALUES
-    daily_default = str(ECON_DEFAULTS["plot_daily_scope"]).lower()
+    from pvbess_opt.io import SIMULATION_SHEET_DEFAULTS, _ALLOWED_VALUES
+    daily_default = str(SIMULATION_SHEET_DEFAULTS["plot_daily_scope"]).lower()
     assert daily_default in {"none", "year1_only", "all"}
-    # All three resolution flags share the same allowed-set.
     expected = frozenset({"none", "year1_only", "all"})
-    assert _ECON_ALLOWED_VALUES["plot_daily_scope"] == expected
-    assert _ECON_ALLOWED_VALUES["plot_monthly_scope"] == expected
-    assert _ECON_ALLOWED_VALUES["plot_yearly_scope"] == expected
+    assert _ALLOWED_VALUES["plot_daily_scope"] == expected
+    assert _ALLOWED_VALUES["plot_monthly_scope"] == expected
+    assert _ALLOWED_VALUES["plot_yearly_scope"] == expected
 
 
 def test_main_dispatcher_drops_legacy_token():

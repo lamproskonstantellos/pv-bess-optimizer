@@ -15,16 +15,17 @@ through exactly.
 
 from __future__ import annotations
 
-import logging
-
 import numpy as np
 import pandas as pd
 import pytest
 
 from pvbess_opt.economics import derive_asset_capacities
 from pvbess_opt.io import (
-    ECON_DEFAULTS,
-    PROJECT_DEFAULTS,
+    BESS_SHEET_DEFAULTS,
+    ECONOMICS_SHEET_DEFAULTS,
+    PROJECT_SHEET_DEFAULTS,
+    PV_SHEET_DEFAULTS,
+    SIMULATION_SHEET_DEFAULTS,
     read_inputs,
     write_workbook,
 )
@@ -33,7 +34,8 @@ from pvbess_opt.optimization import run_scenario
 
 def _highs_available() -> bool:
     try:
-        import highspy  # noqa: F401
+        import importlib
+        importlib.import_module("highspy")
     except ImportError:
         return False
     return True
@@ -50,20 +52,24 @@ def test_derive_asset_capacities_no_inference():
         "dt_minutes": 60,
         "pv_nameplate_kwp": 0.0,   # absent
         "bess_power_kw": 5000.0,   # present
-        "p_dis_max_kw": 8000.0,    # IGNORED — must not back-fill bess_kw
+        "bess_capacity_kwh": 20000.0,
     }
     ts = pd.DataFrame({"pv_kwh": [9999.0, 0.0]})  # would have inferred 9999 kWp
-    caps = derive_asset_capacities({}, params, ts, e_cap_kwh=20000.0)
+    caps = derive_asset_capacities({}, params, ts)
     assert caps["pv_kwp"] == 0.0
     assert caps["bess_kw"] == 5000.0
     assert caps["bess_kwh"] == 20000.0
 
 
 def test_derive_asset_capacities_bess_kwh_zero_when_absent():
-    """No BESS → reported energy capacity is zero."""
-    params = {"dt_minutes": 60, "pv_nameplate_kwp": 4500.0, "bess_power_kw": 0.0}
-    caps = derive_asset_capacities({}, params, pd.DataFrame({"pv_kwh": [0.0]}),
-                                   e_cap_kwh=999.0)
+    """No BESS → reported energy capacity is zero (regardless of capacity field)."""
+    params = {
+        "dt_minutes": 60,
+        "pv_nameplate_kwp": 4500.0,
+        "bess_power_kw": 0.0,
+        "bess_capacity_kwh": 999.0,  # ignored when bess_power_kw == 0
+    }
+    caps = derive_asset_capacities({}, params, pd.DataFrame({"pv_kwh": [0.0]}))
     assert caps["bess_kw"] == 0.0
     assert caps["bess_kwh"] == 0.0
 
@@ -75,6 +81,7 @@ def test_derive_asset_capacities_bess_kwh_zero_when_absent():
 
 def test_read_inputs_raises_when_both_assets_zero(tmp_path):
     """Both pv and bess at 0 → ValueError."""
+    import numpy as np
     typed = {
         "ts": pd.DataFrame({
             "timestamp": pd.date_range("2026-01-01", periods=24, freq="h"),
@@ -82,16 +89,14 @@ def test_read_inputs_raises_when_both_assets_zero(tmp_path):
             "load_kwh": [100.0] * 24,
             "dam_price_eur_per_mwh": [80.0] * 24,
         }),
-        "project": {
-            "system_sizing": dict(
-                PROJECT_DEFAULTS["system_sizing"],
-                pv_nameplate_kwp=0.0,
-                bess_power_kw=0.0,
-            ),
-            "bess_operation": dict(PROJECT_DEFAULTS["bess_operation"]),
-            "regulatory": dict(PROJECT_DEFAULTS["regulatory"]),
-        },
-        "economic": dict(ECON_DEFAULTS),
+        "project": dict(PROJECT_SHEET_DEFAULTS),
+        "pv": dict(PV_SHEET_DEFAULTS, pv_nameplate_kwp=0.0),
+        "bess": dict(
+            BESS_SHEET_DEFAULTS, bess_power_kw=0.0, bess_capacity_kwh=0.0,
+        ),
+        "economics": dict(ECONOMICS_SHEET_DEFAULTS),
+        "simulation": dict(SIMULATION_SHEET_DEFAULTS),
+        "curtailment_profile": np.full(24, 27.0, dtype=float),
     }
     dst = tmp_path / "no_assets.xlsx"
     write_workbook(typed, dst)
@@ -128,9 +133,6 @@ def _params(pv_kwp: float, bess_kw: float, *, mode: str = "vnb") -> dict:
         "soc_max_frac": 0.95,
         "initial_soc_frac": 0.50,
         "terminal_soc_equal": True,
-        "p_charge_max_kw": bess_kw,
-        "p_dis_max_kw": bess_kw,
-        "battery_hours": 4.0,
         "max_cycles_per_day": 1.0,
         "p_grid_export_max_kw": 5000.0,
         "pv_nameplate_kwp": pv_kwp,
@@ -147,18 +149,16 @@ def _params(pv_kwp: float, bess_kw: float, *, mode: str = "vnb") -> dict:
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_pv_only_run_pins_bess_to_zero():
-    """PV-only: bess_power_kw = 0 → all BESS variables zero, e_cap = 0."""
+    """PV-only: bess_power_kw = 0 → all BESS variables zero."""
     params = _params(pv_kwp=4500.0, bess_kw=0.0, mode="vnb")
     ts = _make_ts()
-    res, e_cap, _solver = run_scenario(
+    res, _solver = run_scenario(
         params, ts, solver_name="highs",
         mip_gap=0.01, time_limit_seconds=60,
     )
-    assert e_cap == pytest.approx(0.0, abs=1e-6)
     for col in ("pv_to_bess_kwh", "bess_dis_load_kwh", "bess_dis_grid_kwh",
                 "bess_charge_grid_kwh", "soc_kwh"):
         assert float(res[col].abs().max()) < 1e-6
-    # PV must still flow somewhere — to load, grid, or curtailment.
     assert float(res["pv_kwh"].sum()) > 0.0
 
 
@@ -168,9 +168,7 @@ def test_bess_only_run_pins_pv_to_zero():
     params = _params(pv_kwp=0.0, bess_kw=5000.0, mode="vnb")
     params["allow_bess_grid_charging"] = True
     ts = _make_ts()
-    # The optimizer overrides pv to 0 internally; the timeseries column is
-    # not trusted.  Verify by forcing the column non-zero.
-    res, e_cap, _ = run_scenario(
+    res, _ = run_scenario(
         params, ts, solver_name="highs",
         mip_gap=0.01, time_limit_seconds=60,
     )
@@ -178,22 +176,18 @@ def test_bess_only_run_pins_pv_to_zero():
     assert float(res["pv_to_bess_kwh"].abs().max()) < 1e-6
     assert float(res["pv_to_grid_kwh"].abs().max()) < 1e-6
     assert float(res["pv_curtail_kwh"].abs().max()) < 1e-6
-    # BESS still operates (some discharge expected).
-    assert e_cap > 0.0
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_hybrid_run_unaffected():
-    """Hybrid: both > 0 → behaves identically to v0.5 base case."""
+    """Hybrid: both > 0 → behaves identically to v0.7 base case."""
     params = _params(pv_kwp=4500.0, bess_kw=5000.0, mode="vnb")
     ts = _make_ts()
-    res, e_cap, _ = run_scenario(
+    res, _ = run_scenario(
         params, ts, solver_name="highs",
         mip_gap=0.01, time_limit_seconds=60,
     )
-    assert e_cap > 0.0
     assert float(res["pv_kwh"].sum()) > 0.0
-    # Some BESS activity expected.
     total_charge = float(res["pv_to_bess_kwh"].sum()
                          + res["bess_charge_grid_kwh"].sum())
     total_discharge = float(res["bess_dis_load_kwh"].sum()
@@ -207,13 +201,11 @@ def test_pv_only_no_pv_in_timeseries_still_works():
     """Override behaviour: if pv column is non-zero but pv_kwp=0, pv pinned."""
     params = _params(pv_kwp=0.0, bess_kw=5000.0, mode="merchant")
     params["allow_bess_grid_charging"] = True
-    ts = _make_ts(with_load=False)  # merchant mode
-    res, _e_cap, _ = run_scenario(
+    ts = _make_ts(with_load=False)
+    res, _ = run_scenario(
         params, ts, solver_name="highs",
         mip_gap=0.01, time_limit_seconds=60,
     )
-    # With pv_present=False the pv dict is overridden to 0 — even though
-    # ts["pv_kwh"] is non-zero, the dispatch must show zero PV flow.
     pv_total_flow = (
         float(res["pv_to_load_kwh"].sum())
         + float(res["pv_to_bess_kwh"].sum())

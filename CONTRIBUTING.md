@@ -2,12 +2,12 @@
 
 ## Package layout
 
-The `pvbess_opt/` package keeps a **flat module layout** (≤ 10 top-level
+The `pvbess_opt/` package keeps a **flat module layout** (≤ 12 top-level
 modules).  This is a deliberate ceiling: re-evaluate subpackaging into
 `solve/` / `finance/` / `uncertainty/` / `plotting/` only when the module
 count crosses **12**.
 
-Current modules (8 + plotting subpackage):
+Current modules (10 + plotting subpackage):
 
 ```
 pvbess_opt/
@@ -20,12 +20,23 @@ pvbess_opt/
 ├── economics.py
 ├── sensitivity.py
 ├── rolling_horizon.py
+├── availability.py
+├── curtailment.py
 └── plotting/
 ```
 
 If the count crosses 12, future PRs should subpackage by responsibility:
-`solve/` (optimization, lifetime), `finance/` (economics, sensitivity),
-`uncertainty/` (rolling_horizon), `plotting/` (already a subpackage).
+`solve/` (optimization, lifetime, curtailment), `finance/` (economics,
+sensitivity, availability), `uncertainty/` (rolling_horizon),
+`plotting/` (already a subpackage).
+
+## Workbook schema
+
+The v0.8 input workbook is split across **seven themed sheets**:
+`timeseries`, `project`, `pv`, `bess`, `economics`, `simulation`,
+`curtailment_profile`.  See `docs/source/users.guide/inputs.rst` for
+the full reference and `docs/v0.8_changelog.md` for the v0.7 → v0.8
+migration notes.
 
 ## Style
 

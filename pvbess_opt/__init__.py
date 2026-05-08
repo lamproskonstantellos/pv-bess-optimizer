@@ -6,6 +6,8 @@ Public entry points:
     pvbess_opt.optimization.run_scenario(params, ts, solver_name)
     pvbess_opt.optimization.verify_dispatch_invariants(res, params)
     pvbess_opt.kpis.compute_kpis(res, params)
+    pvbess_opt.availability.apply_unavailability_derate(...)
+    pvbess_opt.curtailment.build_per_step_curtailment_frac(...)
     pvbess_opt.rolling_horizon.rolling_horizon_dispatch(...)
     pvbess_opt.rolling_horizon.monte_carlo_rolling(...)
     pvbess_opt.plotting.* — figure generation per resolution
@@ -14,17 +16,24 @@ Two regulatory modes are supported:
     * vnb       — Greek Virtual Net Billing with co-located load.
     * merchant  — pure utility-scale DAM dispatch (no co-located load).
 
-Three asset modes are first-class in v0.6:
+Three asset modes are first-class:
     * Hybrid PV+BESS — both pv_nameplate_kwp and bess_power_kw > 0.
-    * PV-only        — bess_power_kw = 0; the optimizer pins all BESS
-                       variables to zero and skips the BESS-only
-                       constraints.
-    * BESS-only      — pv_nameplate_kwp = 0; the optimizer pins all PV
-                       variables to zero (most useful with
+    * PV-only        — bess_power_kw = 0.
+    * BESS-only      — pv_nameplate_kwp = 0 (most useful with
                        allow_bess_grid_charging = TRUE).
 
-The hard static curtailment cap on grid-bound flows is enforced in
-both modes per MD YPEN/DAPEEK/53563/1556/2023.
+v0.8 highlights:
+    * Seven-sheet input workbook (project / pv / bess / economics /
+      simulation / curtailment_profile / timeseries) — one theme per
+      sheet for human readability.
+    * Symmetric BESS power limit (bess_power_kw) and pinned energy
+      capacity (bess_capacity_kwh).  e_cap is no longer a decision
+      variable.
+    * Hour-of-day curtailment cap profile (optional monthly axis).
+    * DEVEX (per-asset development CAPEX), unavailability_pct,
+      aggregator_fee_pct_revenue.
+    * Redesigned IRR tornado (dumbbell) and LCOE/LCOS summary
+      (single panel against Lazard 2024 benchmark bands).
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"

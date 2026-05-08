@@ -33,7 +33,8 @@ def _econ(start: int = 2026, n_years: int = 20) -> dict:
         "revenue_inflation_pct": 2.0,
         "capex_pv_eur_per_kw": 525.0,
         "capex_bess_eur_per_kw": 200.0,
-        "capex_licenses_eur_per_kw": 90.0,
+        "devex_pv_eur_per_kw": 60.0,
+        "devex_bess_eur_per_kw": 30.0,
         "opex_pv_eur_per_kwp": 7.0,
         "opex_bess_eur_per_kw": 14.0,
         "pv_degradation_year1_pct": 2.5,
@@ -180,8 +181,6 @@ def test_sensitivity_rows_use_year0_to_n_range():
 
 def test_plot_payback_marker_axis_v06():
     """A simple payback of 5.0 yr with start=2026 must land at calendar 2031."""
-    from pvbess_opt.plotting.financial import _start_end_years  # noqa: F401
-    # _to_axis is local to plot_payback; verify the formula directly.
     base_year = 2025.0  # Year 0 calendar
     payback = 5.0
     # v0.6 mapping: base_year + payback

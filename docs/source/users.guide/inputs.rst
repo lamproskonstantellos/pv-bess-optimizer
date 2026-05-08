@@ -1,8 +1,9 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook with three sheets:
-``timeseries``, ``project``, ``economic``.  All keys use lowercase
+The optimiser consumes a single Excel workbook with **seven sheets**
+(v0.8): ``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
+``simulation``, ``curtailment_profile``.  All keys use lowercase
 snake_case.
 
 Sheet ``timeseries``
@@ -33,83 +34,108 @@ Column                      Required   Notes
                                        the ``project`` sheet.
 ==========================  =========  ====================================
 
-Sheet ``project`` (v0.6)
-------------------------
+Sheet ``project``
+-----------------
 
-Three logical groups (separator rows starting with ``#`` are allowed and
-ignored by the loader).  v0.6 splits the v0.5 ``# system`` group into
-sizing-only and BESS-internal-behaviour halves and removes the
-``# optimization`` group entirely (solver gap / time limit are CLI-
-only via ``--mip-gap`` / ``--time-limit``; the curtail-tiebreaker and
-cycles-bonus weights are private constants in
-:mod:`pvbess_opt.optimization`):
+High-level run configuration:
 
-**system_sizing**
-    ``pv_nameplate_kwp``, ``bess_power_kw``, ``bess_capacity_kwh``,
-    ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw``,
-    ``p_grid_export_max_kw``.
+* ``project_lifecycle_years`` — total project horizon (years).
+* ``project_start_year`` — calendar year of Year 1 (first operating
+  year).  CAPEX is paid in Year 0 (``project_start_year - 1``).
+* ``mode`` — ``vnb`` | ``merchant``.
+* ``settlement_minutes`` — informational; the MILP timestep is
+  auto-detected from the timeseries.
+* ``p_grid_export_max_kw`` — grid-connection export limit (kW).
+* ``retail_tariff_eur_per_mwh`` — retail tariff used in vnb mode.
+* ``allow_bess_grid_charging`` — TRUE → BESS may charge from grid in
+  PV-zero periods.
+* ``unavailability_pct`` (NEW in v0.8) — annual outage / maintenance
+  factor (default 1 %).  Applied as a post-solve derate on PV
+  generation, BESS discharge, and revenue.
+* ``currency_format`` — ``auto`` | ``millions`` | ``raw`` for
+  financial-axis labels.
+* ``show_titles`` — TRUE → render plot titles.
 
-**bess_operation**
-    ``efficiency_charge``, ``efficiency_discharge``, ``soc_min_frac``,
-    ``soc_max_frac``, ``initial_soc_frac``, ``terminal_soc_equal``,
-    ``max_cycles_per_day``.
+Sheet ``pv``
+------------
 
-**regulatory**
-    ``mode`` (``vnb`` | ``merchant``), ``retail_tariff_eur_per_mwh``,
-    ``curtailment_pct``, ``allow_bess_grid_charging``,
-    ``settlement_minutes``.
+* ``pv_nameplate_kwp`` — PV nameplate.  ``0`` ⇒ no PV in this project.
+* ``specific_production_kwh_per_kwp`` — annual specific production
+  (informational; the MILP consumes the timeseries directly).
+* ``pv_degradation_year1_pct`` — initial light-induced degradation
+  (LID) applied at start of Year 2.
+* ``pv_degradation_annual_pct`` — linear PV degradation after Year 1.
+* ``capex_pv_eur_per_kw`` — per-kWp PV CAPEX.
+* ``devex_pv_eur_per_kw`` (NEW in v0.8) — per-kWp PV DEVEX
+  (development / permitting).  Paid in Year 0 alongside CAPEX.
+* ``opex_pv_eur_per_kwp`` — annual O&M for PV.
 
-A zero ``pv_nameplate_kwp`` means **no PV in the project**; a zero
-``bess_power_kw`` means **no BESS in the project**.  Setting both to
-zero raises ``ValueError`` from :func:`pvbess_opt.io.read_inputs`.
+Sheet ``bess``
+--------------
 
-Sheet ``economic`` (v0.6)
--------------------------
+* ``bess_power_kw`` — symmetric charge / discharge limit.  ``0`` ⇒ no
+  BESS in this project.
+* ``bess_capacity_kwh`` — pinned energy capacity (industry standard
+  for sizing-as-input projects).
+* ``efficiency_charge`` / ``efficiency_discharge`` — one-way
+  efficiencies.
+* ``soc_min_frac`` / ``soc_max_frac`` / ``initial_soc_frac`` /
+  ``terminal_soc_equal`` / ``max_cycles_per_day`` — operating
+  envelope.
+* ``capex_bess_eur_per_kw`` / ``devex_bess_eur_per_kw`` (NEW in v0.8;
+  default 30 EUR/kW) / ``opex_bess_eur_per_kw``.
+* ``bess_replacement_year`` / ``bess_replacement_cost_pct`` —
+  Year-N replacement (0 disables).
+* ``bess_degradation_annual_pct`` — linear BESS capacity fade.
 
-Eight logical groups (separator rows allowed):
+Sheet ``economics``
+-------------------
 
-**horizon**
-    ``project_lifecycle_years``, ``project_start_year``,
-    ``discount_rate_pct``, ``opex_inflation_pct``,
-    ``revenue_inflation_pct``.
+* ``discount_rate_pct`` — WACC.
+* ``opex_inflation_pct`` / ``revenue_inflation_pct`` — annual
+  escalation rates.
+* ``aggregator_fee_pct_revenue`` (NEW in v0.8; default 10 %, Gridcog
+  convention) — reduces gross revenue post-solve.  Surfaces as a
+  signed ``aggregator_fee_eur`` column on ``cashflow_yearly``.
+* ``sensitivity_enabled`` / ``sensitivity_capex_delta_pct`` /
+  ``sensitivity_opex_delta_pct`` /
+  ``sensitivity_revenue_delta_pct`` /
+  ``sensitivity_discount_rate_delta_pp`` — tornado configuration.
 
-**capex**
-    ``capex_pv_eur_per_kw``, ``capex_bess_eur_per_kw``,
-    ``capex_licenses_eur_per_kw``.
+Sheet ``simulation``
+--------------------
 
-**opex**
-    ``opex_pv_eur_per_kwp``, ``opex_bess_eur_per_kw``.
+* The 11 ``uncertainty_*`` keys driving the rolling-horizon Monte
+  Carlo (see
+  ``docs/technical.documentation/uncertainty_modelling.md``).
+* ``plot_daily_scope`` / ``plot_monthly_scope`` /
+  ``plot_yearly_scope`` ∈ ``none | year1_only | all``.
 
-**degradation_replacement**
-    ``pv_degradation_year1_pct``, ``pv_degradation_annual_pct``,
-    ``bess_degradation_annual_pct``, ``bess_replacement_year``,
-    ``bess_replacement_cost_pct``.
+Sheet ``curtailment_profile`` (NEW in v0.8)
+-------------------------------------------
 
-**sensitivity**
-    ``sensitivity_enabled``, ``sensitivity_capex_delta_pct``,
-    ``sensitivity_opex_delta_pct``, ``sensitivity_revenue_delta_pct``,
-    ``sensitivity_discount_rate_delta_pp``.
+Hour-of-day curtailment cap profile.  Two supported shapes (auto-
+detected by the loader from the column names):
 
-**uncertainty** (new in v0.6)
-    ``uncertainty_enabled``, ``uncertainty_compare_sources``,
-    ``uncertainty_n_seeds``, ``uncertainty_window_hours``,
-    ``uncertainty_commit_hours``, ``uncertainty_dam_enabled``,
-    ``uncertainty_pv_enabled``, ``uncertainty_load_enabled``,
-    ``uncertainty_sigma_dam``, ``uncertainty_sigma_pv``,
-    ``uncertainty_sigma_load``.  See
-    ``docs/technical.documentation/uncertainty_modelling.md``.
+* **24 × 1** — column ``hour_of_day`` (0..23) plus ``curtailment_pct``
+  (0..100); applied to every day of the year.
+* **24 × 13** — ``hour_of_day`` plus 12 monthly columns
+  ``curtailment_pct_jan`` … ``curtailment_pct_dec``; the cell at
+  ``(hour_of_day, month - 1)`` is the cap for that hour-of-day in
+  that calendar month.
 
-**output**
-    ``show_titles``, ``currency_format``, ``plot_daily_scope``,
-    ``plot_monthly_scope``, ``plot_yearly_scope``.  All three plot
-    scope flags share the same vocabulary in v0.6:
-    ``none`` | ``year1_only`` | ``all``.
+If the sheet is missing the loader logs an INFO message and falls
+back to a flat 27 % cap (legacy v0.7 default).
 
-The canonical defaults live in :data:`pvbess_opt.io.PROJECT_DEFAULTS`
-and :data:`pvbess_opt.io.ECON_DEFAULTS`.  Run::
+The canonical defaults live in
+:data:`pvbess_opt.io.PROJECT_SHEET_DEFAULTS`,
+:data:`pvbess_opt.io.PV_SHEET_DEFAULTS`,
+:data:`pvbess_opt.io.BESS_SHEET_DEFAULTS`,
+:data:`pvbess_opt.io.ECONOMICS_SHEET_DEFAULTS`, and
+:data:`pvbess_opt.io.SIMULATION_SHEET_DEFAULTS`.  Run::
 
     python scripts/build_input_xlsx.py
 
 to regenerate the case-study ``inputs/input.xlsx`` from the defaults
 (35 040 fifteen-minute rows for 2026, 4 500 kWp PV, 5 MW / 20 MWh BESS,
-``vnb`` mode, 27 % curtailment cap).
+``vnb`` mode, flat 27 % curtailment cap).

@@ -35,7 +35,7 @@ def _make_short_ts(n_hours: int = 48, *, with_load: bool = True, seed: int = 0) 
 
 
 def _short_params(mode: str = "vnb") -> dict:
-    """Minimal valid param dict for a 48-hour test (v0.6 schema)."""
+    """Minimal valid param dict for a 48-hour test (v0.8 schema)."""
     return {
         "dt_minutes": 60,
         "efficiency_charge": 0.97,
@@ -44,9 +44,6 @@ def _short_params(mode: str = "vnb") -> dict:
         "soc_max_frac": 0.95,
         "initial_soc_frac": 0.50,
         "terminal_soc_equal": True,
-        "p_charge_max_kw": 5000.0,
-        "p_dis_max_kw": 5000.0,
-        "battery_hours": 4.0,
         "max_cycles_per_day": 1.0,
         "p_grid_export_max_kw": 5000.0,
         "pv_nameplate_kwp": 4500.0,

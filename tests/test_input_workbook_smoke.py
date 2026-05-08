@@ -29,9 +29,12 @@ def test_repo_input_xlsx_exists():
     assert (ROOT / "inputs" / "input.xlsx").exists()
 
 
-def test_repo_input_xlsx_has_three_sheets():
+def test_repo_input_xlsx_has_seven_sheets():
     sheets = pd.ExcelFile(ROOT / "inputs" / "input.xlsx").sheet_names
-    assert set(sheets) == {"timeseries", "project", "economic"}
+    assert set(sheets) == {
+        "timeseries", "project", "pv", "bess", "economics",
+        "simulation", "curtailment_profile",
+    }
 
 
 def test_repo_input_xlsx_has_35040_timeseries_rows():
@@ -64,8 +67,8 @@ def test_read_workbook_round_trip_after_build_script():
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     assert typed["dt_minutes"] == 15
-    assert typed["project"]["regulatory"]["mode"] == "vnb"
-    assert typed["economic"]["project_lifecycle_years"] == 25
+    assert typed["project"]["mode"] == "vnb"
+    assert typed["project"]["project_lifecycle_years"] == 25
     assert "load_kwh" in typed["ts"].columns
 
 
@@ -96,7 +99,7 @@ def test_main_merchant_short_horizon(tmp_path, monkeypatch):
     from pvbess_opt.io import read_workbook, write_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)  # 1 day @ 15 min
-    typed["project"]["regulatory"]["mode"] = "merchant"
+    typed["project"]["mode"] = "merchant"
     short_xlsx = tmp_path / "short_merchant.xlsx"
     write_workbook(typed, short_xlsx)
 

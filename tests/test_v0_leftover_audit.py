@@ -1,20 +1,20 @@
-"""v0.5 leftover audit (Phase 10).
+"""v0 leftover audit (consolidated v0.5 / v0.6 / v0.7 / v0.8 contract).
 
 Codifies the forbidden-tokens / required-tokens / files-must-exist
-contract from the v0.6 feature-pack spec.  The grep is implemented in
-pure Python so it works offline and on Windows without external tools.
+contract.  The grep is implemented in pure Python so it works offline
+and on Windows without external tools.
 
 Allowed locations for forbidden tokens:
 
-* The v0.5-warning path inside :func:`pvbess_opt.io._parse_project_sheet`
-  / :func:`pvbess_opt.io._parse_economic_sheet` (and the module-level
-  ``_LEGACY_OPTIMIZATION_KEYS`` constant + the docstring that
-  describes them).
-* ``docs/v0.6_changelog.md`` — the v0.6 changelog itself naturally
-  enumerates the removed v0.5 symbols.
-* Test files that exercise the legacy paths
-  (``tests/test_io.py``, ``tests/test_io_v06_schema.py``,
-  ``tests/test_plot_scopes.py``) and this audit file itself.
+* The legacy-warning paths inside :func:`pvbess_opt.io._parse_kv_sheet`
+  (and the module-level ``_LEGACY_OPTIMIZATION_KEYS`` /
+  ``_LEGACY_V08_REMOVED`` constants + their docstrings).
+* The historical ``docs/v0.6_changelog.md`` and the new
+  ``docs/v0.8_changelog.md`` migration files.
+* The README's "What's new" diff and the Sphinx changelog entry.
+* Migration / asset-mode docs that retain a side-by-side diff.
+* Test files that exercise the legacy paths and this audit file
+  itself.
 """
 
 from __future__ import annotations
@@ -45,10 +45,17 @@ FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
     Path(p) for p in (
         "pvbess_opt/io.py",
         "docs/v0.6_changelog.md",
+        "docs/v0.8_changelog.md",
+        "docs/source/changelog.rst",
+        "docs/technical.documentation/asset_modes.md",
+        "README.md",
         "tests/test_io.py",
-        "tests/test_io_v06_schema.py",
+        "tests/test_io_v08_schema.py",
         "tests/test_plot_scopes.py",
-        "tests/test_v05_leftover_audit.py",
+        "tests/test_v0_leftover_audit.py",
+        "tests/test_economics_v08.py",
+        "tests/test_bess_spec.py",
+        "tests/test_asset_modes.py",
     )
 )
 
@@ -62,6 +69,12 @@ FORBIDDEN_TOKENS: tuple[str, ...] = (
     "HOMER convention",
     "HOMER / Gridcog",
     '"0.5.0"',
+    '"0.6.0"',
+    '"0.7.0"',
+    "capex_licenses_eur_per_kw",
+    "battery_hours",
+    "p_charge_max_kw",
+    "p_dis_max_kw",
 )
 
 REQUIRED_TOKENS: tuple[str, ...] = (
@@ -74,7 +87,12 @@ REQUIRED_TOKENS: tuple[str, ...] = (
     "lcos_eur_per_mwh",
     "pv_capacity_factor",
     "bess_lifetime_cycles",
-    '"0.7.0"',
+    "unavailability_pct",
+    "aggregator_fee_pct_revenue",
+    "devex_pv_eur_per_kw",
+    "devex_bess_eur_per_kw",
+    "curtailment_profile",
+    '"0.8.0"',
 )
 
 REQUIRED_FILES: tuple[str, ...] = (
@@ -82,7 +100,7 @@ REQUIRED_FILES: tuple[str, ...] = (
     "docs/technical.documentation/uncertainty_modelling.md",
     "docs/technical.documentation/asset_modes.md",
     "pvbess_opt/plotting/lifecycle.py",
-    "tests/test_io_v06_schema.py",
+    "tests/test_io_v08_schema.py",
     "tests/test_year0_convention.py",
     "tests/test_asset_modes.py",
     "tests/test_uncertainty_config.py",
@@ -142,7 +160,7 @@ def test_forbidden_token_returns_zero_hits(token: str) -> None:
                 if token in line:
                     hits.append(f"{rel}:{i}: {line.rstrip()}")
     assert not hits, (
-        f"Forbidden v0.5 token {token!r} found outside allowed paths:\n"
+        f"Forbidden token {token!r} found outside allowed paths:\n"
         + "\n".join(hits)
     )
 
@@ -159,7 +177,7 @@ def test_required_token_appears_at_least_once(token: str) -> None:
         if token in _read_text(path):
             found = True
             break
-    assert found, f"Required v0.6 token {token!r} not found anywhere."
+    assert found, f"Required token {token!r} not found anywhere."
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +189,7 @@ def test_required_token_appears_at_least_once(token: str) -> None:
 def test_required_file_exists(relpath: str) -> None:
     target = ROOT / relpath
     assert target.exists() and target.is_file(), (
-        f"Required v0.6 file missing: {relpath}"
+        f"Required file missing: {relpath}"
     )
 
 
@@ -180,9 +198,9 @@ def test_required_file_exists(relpath: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_repo_input_xlsx_round_trips_through_v06_loader_cleanly(caplog):
+def test_repo_input_xlsx_round_trips_through_v08_loader_cleanly(caplog):
     """Inputs/input.xlsx must load through read_workbook with no
-    legacy-key warnings — i.e. it carries the v0.6 schema."""
+    legacy-key warnings — i.e. it carries the v0.8 schema."""
     import logging
     from pvbess_opt.io import read_workbook
 
@@ -193,31 +211,35 @@ def test_repo_input_xlsx_round_trips_through_v06_loader_cleanly(caplog):
         if rec.levelno >= logging.WARNING
         and rec.name.startswith("pvbess_opt.io")
         and any(re.search(t, rec.getMessage())
-                for t in ("legacy v0.5", "plot_daily_year1"))
+                for t in (
+                    "legacy v0.5", "plot_daily_year1",
+                    "v0.7 two-sheet layout", "v0.8 dropped this",
+                ))
     ]
     assert not legacy_warnings, (
-        "inputs/input.xlsx still emits v0.5 legacy warnings: "
+        "inputs/input.xlsx still emits legacy-schema warnings: "
         + " | ".join(rec.getMessage() for rec in legacy_warnings)
     )
 
 
-def test_inputs_xlsx_uses_v06_schema():
-    """inputs/input.xlsx must expose the v0.6 group structure."""
+def test_inputs_xlsx_uses_v08_schema():
+    """inputs/input.xlsx must expose the v0.8 seven-sheet typed dict."""
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
-    assert set(typed["project"]) == {
-        "system_sizing", "bess_operation", "regulatory",
-    }
-    assert "uncertainty_enabled" in typed["economic"]
-    assert "plot_daily_scope" in typed["economic"]
+    for section in ("project", "pv", "bess", "economics", "simulation"):
+        assert section in typed
+    assert "uncertainty_enabled" in typed["simulation"]
+    assert "plot_daily_scope" in typed["simulation"]
     # No legacy keys leak through.
-    assert "plot_daily_year1" not in typed["economic"]
-    for grp in typed["project"].values():
+    for section in ("project", "pv", "bess", "economics", "simulation"):
         for legacy in (
+            "plot_daily_year1",
             "weight_curtail_tiebreak", "weight_cycles_term",
             "solver_mip_gap", "solver_time_limit_seconds",
+            "capex_licenses_eur_per_kw",
+            "battery_hours", "p_charge_max_kw", "p_dis_max_kw",
         ):
-            assert legacy not in grp
+            assert legacy not in typed[section]
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +247,6 @@ def test_inputs_xlsx_uses_v06_schema():
 # ---------------------------------------------------------------------------
 
 
-def test_pvbess_version_string_is_exactly_0_7_0():
+def test_pvbess_version_string_is_exactly_0_8_0():
     import pvbess_opt
-    assert pvbess_opt.__version__ == "0.7.0"
+    assert pvbess_opt.__version__ == "0.8.0"

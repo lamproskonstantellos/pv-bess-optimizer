@@ -1,16 +1,23 @@
 """Excel input parsing and output writing for the PV+BESS optimizer.
 
-The schema is three sheets:
+The v0.8 schema is **seven sheets**, one logical theme per sheet:
 
-* ``timeseries`` — per-step data with lowercase snake_case column
-  names: ``timestamp``, ``load_kwh``, ``pv_kwh``,
-  ``dam_price_eur_per_mwh``, optional ``retail_price_eur_per_mwh``.
-* ``project``    — physical system + BESS operating envelope +
-  regulatory framework, in three logical groups
-  ``# system_sizing`` / ``# bess_operation`` / ``# regulatory``
-  (separator rows allowed).  Keys: see :data:`PROJECT_DEFAULTS`.
-* ``economic``   — project finance + uncertainty + plot preferences,
-  in eight logical groups.  Mandatory.
+* ``timeseries`` — per-step data with lowercase snake_case column names:
+  ``timestamp``, ``load_kwh``, ``pv_kwh``, ``dam_price_eur_per_mwh``,
+  optional ``retail_price_eur_per_mwh``.
+* ``project`` — high-level run config (lifecycle horizon, mode,
+  settlement, retail tariff, grid export limit, currency / title flags).
+* ``pv`` — PV nameplate, specific production, degradation, CAPEX /
+  DEVEX / OPEX.
+* ``bess`` — BESS power and capacity, efficiency, SOC bounds, cycles,
+  CAPEX / DEVEX / OPEX, replacement and degradation.
+* ``economics`` — discount rate, inflation indices, aggregator fee,
+  sensitivity deltas.
+* ``simulation`` — uncertainty (rolling-horizon Monte Carlo) and plot
+  scope flags.
+* ``curtailment_profile`` — hour-of-day curtailment cap profile (24
+  rows), optionally with one column per calendar month.  Missing →
+  fall back to a constant 27 % (legacy v0.7 behaviour) and log INFO.
 
 Public loader API
 -----------------
@@ -21,12 +28,12 @@ Public loader API
 
      {
          "ts": pd.DataFrame,               # lowercase snake_case
-         "project": {
-             "system_sizing":   {...},  # capacities and power limits
-             "bess_operation":  {...},  # efficiency, soc bounds, cycles
-             "regulatory":      {...},  # mode, tariffs, curtailment, ...
-         },
-         "economic": {...},                # 8 groups including uncertainty
+         "project":            {...},
+         "pv":                 {...},
+         "bess":               {...},
+         "economics":          {...},
+         "simulation":         {...},
+         "curtailment_profile": np.ndarray,  # shape (24,) or (24, 12)
          "dt_minutes": int,                # auto-detected from the timeseries
      }
 
@@ -40,17 +47,30 @@ Mode-specific timeseries semantics
 * In ``merchant`` mode ``load_kwh`` is optional — if present, the loader
   logs an INFO message and the optimizer pins all load-coverage flows to 0.
 
-Legacy v0.5 keys
-----------------
+Legacy v0.7 / v0.5 keys
+-----------------------
+
+A v0.7-style workbook (single ``project`` + ``economic`` sheets with
+the v0.6 ``# system_sizing`` / ``# bess_operation`` group structure)
+still loads — the loader logs a single WARNING listing the affected
+file plus the migration command (``python scripts/build_input_xlsx.py``)
+and reads what it can.  No silent translation.
 
 The v0.5 ``# optimization`` group keys
 (``weight_curtail_tiebreak``, ``weight_cycles_term``,
 ``solver_mip_gap``, ``solver_time_limit_seconds``) and the v0.5
-``plot_daily_year1`` flag are no longer accepted.  When present in a
-legacy workbook the loader logs WARNINGs and ignores them — there is
-no silent translation.  Solver gap / time limit are CLI-only (see
-``--mip-gap`` / ``--time-limit``).  The two weight terms are private
-constants in :mod:`pvbess_opt.optimization`.
+``plot_daily_year1`` flag are still rejected with a WARNING.
+
+Several v0.7 keys were dropped or renamed in v0.8:
+
+* ``capex_licenses_eur_per_kw`` — replaced by per-asset DEVEX
+  (``devex_pv_eur_per_kw`` / ``devex_bess_eur_per_kw``).
+* ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw`` — replaced
+  by the symmetric ``bess_power_kw`` and ``bess_capacity_kwh`` pair
+  (industry standard; see Phase 2 of the v0.8 changelog).
+
+Encountering any of these in a workbook triggers a friendly WARNING and
+the value is ignored.
 """
 
 from __future__ import annotations
@@ -74,17 +94,32 @@ _COERCE_FAILED = object()
 # Canonical defaults (single source of truth)
 # ---------------------------------------------------------------------------
 
-_SYSTEM_SIZING_DEFAULTS: dict[str, Any] = {
-    "pv_nameplate_kwp": 0.0,
-    "bess_power_kw": 0.0,
-    "bess_capacity_kwh": 0.0,
-    "battery_hours": 4.0,
-    "p_charge_max_kw": 0.0,
-    "p_dis_max_kw": 0.0,
-    "p_grid_export_max_kw": 8000.0,
+PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
+    "project_lifecycle_years": 25,
+    "project_start_year": 2026,
+    "mode": "vnb",
+    "settlement_minutes": 15,
+    "p_grid_export_max_kw": 5000.0,
+    "retail_tariff_eur_per_mwh": 132.0,
+    "allow_bess_grid_charging": False,
+    "unavailability_pct": 1.0,
+    "currency_format": "auto",
+    "show_titles": False,
 }
 
-_BESS_OPERATION_DEFAULTS: dict[str, Any] = {
+PV_SHEET_DEFAULTS: dict[str, Any] = {
+    "pv_nameplate_kwp": 0.0,
+    "specific_production_kwh_per_kwp": 1500.0,
+    "pv_degradation_year1_pct": 2.5,
+    "pv_degradation_annual_pct": 0.55,
+    "capex_pv_eur_per_kw": 525.0,
+    "devex_pv_eur_per_kw": 60.0,
+    "opex_pv_eur_per_kwp": 7.0,
+}
+
+BESS_SHEET_DEFAULTS: dict[str, Any] = {
+    "bess_power_kw": 0.0,
+    "bess_capacity_kwh": 0.0,
     "efficiency_charge": 0.97,
     "efficiency_discharge": 0.97,
     "soc_min_frac": 0.20,
@@ -92,56 +127,27 @@ _BESS_OPERATION_DEFAULTS: dict[str, Any] = {
     "initial_soc_frac": 0.50,
     "terminal_soc_equal": True,
     "max_cycles_per_day": 1.0,
+    "capex_bess_eur_per_kw": 200.0,
+    "devex_bess_eur_per_kw": 30.0,
+    "opex_bess_eur_per_kw": 14.0,
+    "bess_replacement_year": 0,
+    "bess_replacement_cost_pct": 50.0,
+    "bess_degradation_annual_pct": 2.0,
 }
 
-_REGULATORY_DEFAULTS: dict[str, Any] = {
-    "mode": "vnb",
-    "retail_tariff_eur_per_mwh": 132.0,
-    "curtailment_pct": 27.0,
-    "allow_bess_grid_charging": False,
-    "settlement_minutes": 15,
-}
-
-PROJECT_DEFAULTS: dict[str, dict[str, Any]] = {
-    "system_sizing": dict(_SYSTEM_SIZING_DEFAULTS),
-    "bess_operation": dict(_BESS_OPERATION_DEFAULTS),
-    "regulatory": dict(_REGULATORY_DEFAULTS),
-}
-
-# Legacy v0.5 ``# optimization`` group keys.  Encountering any of these
-# in a workbook triggers a single WARNING listing them all; the values
-# are then ignored.  Solver gap / time limit live on the CLI;
-# ``weight_curtail_tiebreak`` / ``weight_cycles_term`` live as
-# module-level constants in :mod:`pvbess_opt.optimization`.
-_LEGACY_OPTIMIZATION_KEYS: frozenset[str] = frozenset({
-    "weight_curtail_tiebreak",
-    "weight_cycles_term",
-    "solver_mip_gap",
-    "solver_time_limit_seconds",
-})
-
-ECON_DEFAULTS: dict[str, Any] = {
-    "project_lifecycle_years": 25,
-    "project_start_year": 2026,
+ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "discount_rate_pct": 7.0,
     "opex_inflation_pct": 1.0,
     "revenue_inflation_pct": 2.0,
-    "capex_pv_eur_per_kw": 525.0,
-    "capex_bess_eur_per_kw": 200.0,
-    "capex_licenses_eur_per_kw": 90.0,
-    "opex_pv_eur_per_kwp": 7.0,
-    "opex_bess_eur_per_kw": 14.0,
-    "pv_degradation_year1_pct": 2.5,
-    "pv_degradation_annual_pct": 0.55,
-    "bess_degradation_annual_pct": 2.0,
-    "bess_replacement_year": 0,
-    "bess_replacement_cost_pct": 50.0,
+    "aggregator_fee_pct_revenue": 10.0,
     "sensitivity_enabled": True,
     "sensitivity_capex_delta_pct": 10.0,
     "sensitivity_opex_delta_pct": 10.0,
     "sensitivity_revenue_delta_pct": 10.0,
     "sensitivity_discount_rate_delta_pp": 2.0,
-    # Uncertainty group (rolling-horizon Monte Carlo configuration).
+}
+
+SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_enabled": False,
     "uncertainty_compare_sources": False,
     "uncertainty_n_seeds": 30,
@@ -153,87 +159,155 @@ ECON_DEFAULTS: dict[str, Any] = {
     "uncertainty_sigma_dam": 0.20,
     "uncertainty_sigma_pv": 0.12,
     "uncertainty_sigma_load": 0.05,
-    # Output / plotting controls.
-    "show_titles": False,
-    "currency_format": "auto",
     "plot_daily_scope": "year1_only",
     "plot_monthly_scope": "all",
     "plot_yearly_scope": "all",
 }
 
-_ECON_INT_KEYS: frozenset[str] = frozenset({
-    "project_lifecycle_years",
-    "project_start_year",
-    "bess_replacement_year",
-    "uncertainty_n_seeds",
-    "uncertainty_window_hours",
-    "uncertainty_commit_hours",
+# Sheet → defaults map.  Used by the loader to validate keys per sheet.
+_SHEET_DEFAULTS: dict[str, dict[str, Any]] = {
+    "project": PROJECT_SHEET_DEFAULTS,
+    "pv": PV_SHEET_DEFAULTS,
+    "bess": BESS_SHEET_DEFAULTS,
+    "economics": ECONOMICS_SHEET_DEFAULTS,
+    "simulation": SIMULATION_SHEET_DEFAULTS,
+}
+
+_KEY_TO_SHEET: dict[str, str] = {}
+for _sheet_name, _sheet_defaults in _SHEET_DEFAULTS.items():
+    for _key in _sheet_defaults:
+        _KEY_TO_SHEET[_key] = _sheet_name
+
+
+# Legacy v0.5 ``# optimization`` group keys.
+_LEGACY_OPTIMIZATION_KEYS: frozenset[str] = frozenset({
+    "weight_curtail_tiebreak",
+    "weight_cycles_term",
+    "solver_mip_gap",
+    "solver_time_limit_seconds",
 })
-_ECON_BOOL_KEYS: frozenset[str] = frozenset({
-    "sensitivity_enabled",
+
+# Keys removed in v0.8.  Each maps to a one-line user-facing hint.
+_LEGACY_V08_REMOVED: dict[str, str] = {
+    "capex_licenses_eur_per_kw": (
+        "v0.8 dropped this — use devex_pv_eur_per_kw / "
+        "devex_bess_eur_per_kw instead"
+    ),
+    "battery_hours": (
+        "v0.8 dropped this — set bess_power_kw / bess_capacity_kwh "
+        "instead (capacity is pinned to the workbook value)"
+    ),
+    "p_charge_max_kw": (
+        "v0.8 dropped this — set bess_power_kw instead "
+        "(symmetric charge / discharge limit)"
+    ),
+    "p_dis_max_kw": (
+        "v0.8 dropped this — set bess_power_kw instead "
+        "(symmetric charge / discharge limit)"
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# Per-key parsing metadata
+# ---------------------------------------------------------------------------
+
+_BOOL_KEYS: frozenset[str] = frozenset({
     "show_titles",
+    "allow_bess_grid_charging",
+    "terminal_soc_equal",
+    "sensitivity_enabled",
     "uncertainty_enabled",
     "uncertainty_compare_sources",
     "uncertainty_dam_enabled",
     "uncertainty_pv_enabled",
     "uncertainty_load_enabled",
 })
-_ECON_STR_KEYS: frozenset[str] = frozenset({
+_INT_KEYS: frozenset[str] = frozenset({
+    "project_lifecycle_years",
+    "project_start_year",
+    "settlement_minutes",
+    "bess_replacement_year",
+    "uncertainty_n_seeds",
+    "uncertainty_window_hours",
+    "uncertainty_commit_hours",
+})
+_STR_KEYS: frozenset[str] = frozenset({
+    "mode",
     "currency_format",
     "plot_daily_scope",
     "plot_monthly_scope",
     "plot_yearly_scope",
 })
-_ECON_ALLOWED_VALUES: dict[str, frozenset[str]] = {
+_ALLOWED_VALUES: dict[str, frozenset[str]] = {
+    "mode": frozenset({"vnb", "merchant"}),
     "currency_format": frozenset({"auto", "millions", "raw"}),
     "plot_daily_scope": frozenset({"none", "year1_only", "all"}),
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
 }
 
-_PROJECT_BOOL_KEYS: frozenset[str] = frozenset({
-    "terminal_soc_equal",
-    "allow_bess_grid_charging",
-})
-_PROJECT_INT_KEYS: frozenset[str] = frozenset({
-    "settlement_minutes",
-})
-_PROJECT_STR_KEYS: frozenset[str] = frozenset({"mode"})
-_PROJECT_ALLOWED_VALUES: dict[str, frozenset[str]] = {
-    "mode": frozenset({"vnb", "merchant"}),
-}
-
-_PROJECT_KEY_TO_GROUP: dict[str, str] = {}
-for _grp, _keys in PROJECT_DEFAULTS.items():
-    for _k in _keys:
-        _PROJECT_KEY_TO_GROUP[_k] = _grp
-
 
 # ---------------------------------------------------------------------------
 # Sheet row templates (shared with build_input_xlsx.py)
 # ---------------------------------------------------------------------------
 
-_PROJECT_SYSTEM_SIZING_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("pv_nameplate_kwp", 0, "kWp",
-     "PV nameplate capacity. 0 = no PV in this project."),
-    ("bess_power_kw", 0, "kW",
-     "BESS power rating. 0 = no BESS in this project."),
-    ("bess_capacity_kwh", 0, "kWh",
-     "BESS energy capacity. 0 = derive from "
-     "bess_power_kw * battery_hours."),
-    ("battery_hours", 4, "h",
-     "E/P ratio cap; sets bess_capacity_kwh if not given."),
-    ("p_charge_max_kw", 8000, "kW",
-     "Maximum battery charge power (kW)."),
-    ("p_dis_max_kw", 8000, "kW",
-     "Maximum battery discharge power (kW)."),
-    ("p_grid_export_max_kw", 8000, "kW",
+_PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("project_lifecycle_years", 25, "years",
+     "Total project horizon used to project Years 0..N."),
+    ("project_start_year", 2026, "year",
+     "Calendar year of Year 1 (first operating year). CAPEX is paid in "
+     "Year 0 (calendar = project_start_year - 1)."),
+    ("mode", "vnb", "enum",
+     "vnb | merchant. vnb requires a co-located load and enforces load "
+     "priority + no simultaneous grid I/O. merchant has no load; PV/BESS "
+     "dispatch entirely to DAM."),
+    ("settlement_minutes", 15, "int",
+     "Greek VNB settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
+     "Currently informational; the MILP timestep is auto-detected."),
+    ("p_grid_export_max_kw", 5000, "kW",
      "Grid-connection export limit (kW)."),
+    ("retail_tariff_eur_per_mwh", 132, "EUR/MWh",
+     "Retail tariff used in vnb mode for load coverage."),
+    ("allow_bess_grid_charging", False, "bool",
+     "If TRUE the BESS may charge from the grid in periods with pv_kwh ~ 0."),
+    ("unavailability_pct", 1.0, "%",
+     "Annual unavailability (outages / scheduled maintenance) applied as "
+     "a post-solve derate on PV generation, BESS discharge, and revenue."),
+    ("currency_format", "auto", "enum",
+     "auto | millions | raw — financial-axis label format."),
+    ("show_titles", False, "bool",
+     "Render plot titles. IEEE figures normally rely on the figure caption."),
 )
 
-_PROJECT_BESS_OPERATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
+_PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("pv_nameplate_kwp", 0, "kWp",
+     "PV nameplate capacity. 0 = no PV in this project."),
+    ("specific_production_kwh_per_kwp", 1500, "kWh/kWp/yr",
+     "Annual specific production of the PV array. Used for documentation "
+     "and as a sanity check; the MILP consumes the timeseries directly."),
+    ("pv_degradation_year1_pct", 2.5, "%",
+     "Initial light-induced degradation (LID) applied at start of Year 2."),
+    ("pv_degradation_annual_pct", 0.55, "%",
+     "Linear PV degradation after Year 1 (Tier-1 warranty)."),
+    ("capex_pv_eur_per_kw", 525, "EUR/kWp",
+     "Per-kWp PV CAPEX. Set 0 if PV already exists."),
+    ("devex_pv_eur_per_kw", 60, "EUR/kWp",
+     "Per-kWp PV DEVEX (development / permitting). Paid in Year 0."),
+    ("opex_pv_eur_per_kwp", 7, "EUR/kWp/yr",
+     "Annual O&M for PV."),
+)
+
+_BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("bess_power_kw", 0, "kW",
+     "BESS power rating (symmetric charge / discharge limit). "
+     "0 = no BESS in this project."),
+    ("bess_capacity_kwh", 0, "kWh",
+     "BESS energy capacity. Pinned to the workbook value (industry "
+     "standard for sizing-as-input projects)."),
     ("efficiency_charge", 0.97, "-",
-     "Charge efficiency (0..1). Round-trip = efficiency_charge * efficiency_discharge."),
+     "Charge efficiency (0..1). Round-trip = "
+     "efficiency_charge * efficiency_discharge."),
     ("efficiency_discharge", 0.97, "-",
      "Discharge efficiency (0..1)."),
     ("soc_min_frac", 0.20, "-",
@@ -246,83 +320,34 @@ _PROJECT_BESS_OPERATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "If TRUE, force final SOC == initial SOC (closed cycle)."),
     ("max_cycles_per_day", 1.0, "-",
      "Daily equivalent-cycle cap (sum of discharge / capacity)."),
+    ("capex_bess_eur_per_kw", 200, "EUR/kW",
+     "Per-kW BESS CAPEX (DC + PCS). Set 0 if BESS already exists."),
+    ("devex_bess_eur_per_kw", 30, "EUR/kW",
+     "Per-kW BESS DEVEX (development / permitting). Paid in Year 0."),
+    ("opex_bess_eur_per_kw", 14, "EUR/kW/yr",
+     "Annual O&M for BESS."),
+    ("bess_replacement_year", 0, "year",
+     "Year of BESS cell replacement (0 = no replacement). Typical 10 or 15."),
+    ("bess_replacement_cost_pct", 50, "%",
+     "Replacement cost as percent of original BESS CAPEX."),
+    ("bess_degradation_annual_pct", 2.0, "%",
+     "Linear BESS capacity fade. Approximate Tier-1 LFP cell warranty."),
 )
 
-_PROJECT_REGULATORY_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("mode", "vnb", "enum",
-     "vnb | merchant. vnb requires a co-located load and enforces load "
-     "priority + no simultaneous grid I/O. merchant has no load; PV/BESS "
-     "dispatch entirely to DAM."),
-    ("retail_tariff_eur_per_mwh", 132, "EUR/MWh",
-     "Retail tariff used in vnb mode for load coverage."),
-    ("curtailment_pct", 27, "%",
-     "Static curtailment cap as percent. Default 27 = distribution-"
-     "connected per MD YPEN/DAPEEK/53563/1556/2023. Applies to grid-"
-     "bound flows in BOTH vnb and merchant modes."),
-    ("allow_bess_grid_charging", False, "bool",
-     "If TRUE the BESS may charge from the grid in periods with pv_kwh ~ 0."),
-    ("settlement_minutes", 15, "int",
-     "Greek VNB settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
-     "Currently informational; the MILP timestep is auto-detected."),
-)
-
-_PROJECT_GROUPS_TEMPLATE: tuple[
-    tuple[str, str, tuple[tuple[str, object, str, str], ...]], ...
-] = (
-    ("# system_sizing",   "system_sizing",   _PROJECT_SYSTEM_SIZING_ROWS),
-    ("# bess_operation",  "bess_operation",  _PROJECT_BESS_OPERATION_ROWS),
-    ("# regulatory",      "regulatory",      _PROJECT_REGULATORY_ROWS),
-)
-
-_ECON_HORIZON_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("project_lifecycle_years", 25, "years",
-     "Total project horizon used to project Years 0..N."),
-    ("project_start_year", 2026, "year",
-     "Calendar year of Year 1 (first operating year). CAPEX is paid in "
-     "Year 0 (calendar = project_start_year - 1). Operating horizon is "
-     "Years 1..N covering project_start_year..project_start_year + N - 1."),
+_ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("discount_rate_pct", 7.0, "%",
      "WACC. Typical EU RES band 6-8 %."),
     ("opex_inflation_pct", 1.0, "%",
      "Annual OPEX escalation rate."),
     ("revenue_inflation_pct", 2.0, "%",
      "Annual revenue escalation rate (ECB target). Set 0 to disable."),
-)
-
-_ECON_CAPEX_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("capex_pv_eur_per_kw", 525, "EUR/kWp",
-     "Per-kWp PV CAPEX. Set 0 if PV already exists."),
-    ("capex_bess_eur_per_kw", 200, "EUR/kW",
-     "Per-kW BESS CAPEX (DC + PCS). Set 0 if BESS already exists."),
-    ("capex_licenses_eur_per_kw", 90, "EUR/kW",
-     "Licensing / permitting CAPEX, applied to (pv_kwp + bess_kw)."),
-)
-
-_ECON_OPEX_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("opex_pv_eur_per_kwp", 7, "EUR/kWp/yr",
-     "Annual O&M for PV."),
-    ("opex_bess_eur_per_kw", 14, "EUR/kW/yr",
-     "Annual O&M for BESS."),
-)
-
-_ECON_DEGRADATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("pv_degradation_year1_pct", 2.5, "%",
-     "Initial light-induced degradation (LID) applied at start of Year 2."),
-    ("pv_degradation_annual_pct", 0.55, "%",
-     "Linear PV degradation after Year 1 (Tier-1 warranty)."),
-    ("bess_degradation_annual_pct", 2.0, "%",
-     "Linear BESS capacity fade. Approximate Tier-1 LFP cell warranty."),
-    ("bess_replacement_year", 0, "year",
-     "Year of BESS cell replacement (0 = no replacement). Typical 10 or 15."),
-    ("bess_replacement_cost_pct", 50, "%",
-     "Replacement cost as percent of original BESS CAPEX."),
-)
-
-_ECON_SENSITIVITY_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("aggregator_fee_pct_revenue", 10.0, "%",
+     "Aggregator fee on gross revenue (Gridcog convention; see public "
+     "Gridcog cost / pricing docs)."),
     ("sensitivity_enabled", True, "bool",
      "Run a one-at-a-time tornado sensitivity after the base run."),
     ("sensitivity_capex_delta_pct", 10, "%",
-     "Symmetric +/- delta on total CAPEX."),
+     "Symmetric +/- delta on total CAPEX (incl. DEVEX)."),
     ("sensitivity_opex_delta_pct", 10, "%",
      "Symmetric +/- delta on total annual OPEX."),
     ("sensitivity_revenue_delta_pct", 10, "%",
@@ -332,13 +357,12 @@ _ECON_SENSITIVITY_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "NPV tornado only - drops out of IRR tornado by definition."),
 )
 
-_ECON_UNCERTAINTY_ROWS: tuple[tuple[str, object, str, str], ...] = (
+_SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("uncertainty_enabled", False, "bool",
      "Run rolling-horizon Monte Carlo. Default FALSE (perfect-foresight only)."),
     ("uncertainty_compare_sources", False, "bool",
      "When TRUE run 4 ensembles (DAM-only, PV-only, Load-only, "
-     "All-combined) and emit a comparison plot. When FALSE run a "
-     "single ensemble using the enabled sources below."),
+     "All-combined) and emit a comparison plot."),
     ("uncertainty_n_seeds", 30, "int",
      "Monte Carlo seeds per ensemble."),
     ("uncertainty_window_hours", 48, "int",
@@ -357,13 +381,6 @@ _ECON_UNCERTAINTY_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Log-normal sigma for PV. Default 0.12 (NREL day-ahead PV study)."),
     ("uncertainty_sigma_load", 0.05, "-",
      "Log-normal sigma for Load. Default 0.05 (predictable customer benchmark)."),
-)
-
-_ECON_OUTPUT_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("show_titles", False, "bool",
-     "Render plot titles. IEEE figures normally rely on the figure caption."),
-    ("currency_format", "auto", "enum",
-     "auto | millions | raw."),
     ("plot_daily_scope", "year1_only", "scope",
      "none | year1_only | all. 'all' produces ~365 * N_years * 3 daily PDFs."),
     ("plot_monthly_scope", "all", "scope",
@@ -372,57 +389,107 @@ _ECON_OUTPUT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "none | year1_only | all."),
 )
 
-_ECON_GROUPS_TEMPLATE: tuple[
-    tuple[str, tuple[tuple[str, object, str, str], ...]], ...
-] = (
-    ("# horizon", _ECON_HORIZON_ROWS),
-    ("# capex", _ECON_CAPEX_ROWS),
-    ("# opex", _ECON_OPEX_ROWS),
-    ("# degradation_replacement", _ECON_DEGRADATION_ROWS),
-    ("# sensitivity", _ECON_SENSITIVITY_ROWS),
-    ("# uncertainty", _ECON_UNCERTAINTY_ROWS),
-    ("# output", _ECON_OUTPUT_ROWS),
+_SHEET_ROW_TEMPLATES: dict[
+    str, tuple[tuple[str, object, str, str], ...]
+] = {
+    "project": _PROJECT_ROWS,
+    "pv": _PV_ROWS,
+    "bess": _BESS_ROWS,
+    "economics": _ECONOMICS_ROWS,
+    "simulation": _SIMULATION_ROWS,
+}
+
+# Default constant 27 % curtailment cap (24 hourly rows) — reproduces
+# v0.7 scalar behaviour exactly.
+_DEFAULT_CURTAILMENT_PCT_HOURLY: float = 27.0
+_LEGACY_DEFAULT_CURTAILMENT_PCT: float = 27.0
+
+
+# ---------------------------------------------------------------------------
+# Sheet builders
+# ---------------------------------------------------------------------------
+
+
+def _build_kv_sheet(
+    typed_section: dict[str, Any],
+    rows: tuple[tuple[str, object, str, str], ...],
+) -> pd.DataFrame:
+    out: list[dict[str, Any]] = []
+    for key, default, unit, notes in rows:
+        value = typed_section.get(key, default)
+        out.append(
+            {"key": key, "value": value, "unit": unit, "notes": notes},
+        )
+    return pd.DataFrame(out, columns=["key", "value", "unit", "notes"])
+
+
+def _build_curtailment_sheet(profile: Any) -> pd.DataFrame:
+    """Render the ``curtailment_profile`` sheet from a 1-D or 2-D array.
+
+    Accepts:
+    * shape ``(24,)`` → single ``curtailment_pct`` column.
+    * shape ``(24, 12)`` → per-month columns (``curtailment_pct_jan`` ..
+      ``curtailment_pct_dec``).
+    """
+    arr = np.asarray(profile, dtype=float)
+    if arr.ndim == 1:
+        if arr.shape[0] != 24:
+            raise ValueError(
+                "curtailment_profile must have 24 rows "
+                f"(got {arr.shape[0]})."
+            )
+        return pd.DataFrame({
+            "hour_of_day": np.arange(24, dtype=int),
+            "curtailment_pct": arr,
+        })
+    if arr.ndim == 2:
+        if arr.shape != (24, 12):
+            raise ValueError(
+                "curtailment_profile (2-D) must be shape (24, 12) "
+                f"(got {arr.shape})."
+            )
+        cols: dict[str, Any] = {"hour_of_day": np.arange(24, dtype=int)}
+        for m_idx, m_name in enumerate(_MONTH_TOKENS):
+            cols[f"curtailment_pct_{m_name}"] = arr[:, m_idx]
+        return pd.DataFrame(cols)
+    raise ValueError(
+        "curtailment_profile must be 1-D (24,) or 2-D (24, 12); "
+        f"got shape {arr.shape}."
+    )
+
+
+_MONTH_TOKENS: tuple[str, ...] = (
+    "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec",
 )
 
 
-def _build_project_sheet(typed_project: dict[str, dict[str, Any]]) -> pd.DataFrame:
-    """Assemble the ``project`` sheet from a typed project dict."""
-    rows: list[dict[str, Any]] = []
-    for label, group, group_rows in _PROJECT_GROUPS_TEMPLATE:
-        rows.append({"key": label, "value": "", "unit": "", "notes": ""})
-        for key, _default, unit, notes in group_rows:
-            value = typed_project[group].get(key, _default)
-            rows.append({"key": key, "value": value, "unit": unit, "notes": notes})
-    return pd.DataFrame(rows, columns=["key", "value", "unit", "notes"])
-
-
-def _build_economic_sheet(typed_econ: dict[str, Any]) -> pd.DataFrame:
-    """Assemble the ``economic`` sheet from a typed economic dict."""
-    rows: list[dict[str, Any]] = []
-    for label, group_rows in _ECON_GROUPS_TEMPLATE:
-        rows.append({"key": label, "value": "", "unit": "", "notes": ""})
-        for key, _default, unit, notes in group_rows:
-            value = typed_econ.get(key, _default)
-            rows.append({"key": key, "value": value, "unit": unit, "notes": notes})
-    return pd.DataFrame(rows, columns=["key", "value", "unit", "notes"])
-
-
 def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
-    """Write a workbook from a typed nested dict.
-
-    Output sheets are ``timeseries``, ``project`` (three logical groups),
-    and ``economic`` (six logical groups).  Separator rows are inserted
-    between groups for human readability — the loader skips any row whose
-    ``key`` is empty / NaN or starts with ``#``.
-    """
+    """Write a workbook from a typed nested dict (v0.8 seven-sheet schema)."""
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    project = _build_project_sheet(typed["project"])
-    econ_df = _build_economic_sheet(typed["economic"])
+
+    project_df = _build_kv_sheet(typed["project"], _PROJECT_ROWS)
+    pv_df = _build_kv_sheet(typed["pv"], _PV_ROWS)
+    bess_df = _build_kv_sheet(typed["bess"], _BESS_ROWS)
+    economics_df = _build_kv_sheet(typed["economics"], _ECONOMICS_ROWS)
+    simulation_df = _build_kv_sheet(typed["simulation"], _SIMULATION_ROWS)
+
+    profile = typed.get("curtailment_profile")
+    if profile is None:
+        profile = np.full(24, _DEFAULT_CURTAILMENT_PCT_HOURLY, dtype=float)
+    curtailment_df = _build_curtailment_sheet(profile)
+
     with pd.ExcelWriter(dst, engine="openpyxl") as writer:
         typed["ts"].to_excel(writer, sheet_name="timeseries", index=False)
-        project.to_excel(writer, sheet_name="project", index=False)
-        econ_df.to_excel(writer, sheet_name="economic", index=False)
+        project_df.to_excel(writer, sheet_name="project", index=False)
+        pv_df.to_excel(writer, sheet_name="pv", index=False)
+        bess_df.to_excel(writer, sheet_name="bess", index=False)
+        economics_df.to_excel(writer, sheet_name="economics", index=False)
+        simulation_df.to_excel(writer, sheet_name="simulation", index=False)
+        curtailment_df.to_excel(
+            writer, sheet_name="curtailment_profile", index=False,
+        )
     return dst
 
 
@@ -545,103 +612,126 @@ def _flat_dict_from_sheet(df: pd.DataFrame) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Sheet parsers
+# Per-sheet typed parser
 # ---------------------------------------------------------------------------
 
 
-def _parse_project_value(group: str, key: str, raw: Any) -> Any:
-    """Type-coerce a single project-sheet value into its canonical type."""
-    default = PROJECT_DEFAULTS[group][key]
-    if key in _PROJECT_BOOL_KEYS:
+def _parse_value(key: str, raw: Any, default: Any) -> Any:
+    if key in _BOOL_KEYS:
         return _parse_bool(raw, bool(default))
-    if key in _PROJECT_INT_KEYS:
+    if key in _STR_KEYS:
+        return _parse_string_enum(
+            raw, str(default), _ALLOWED_VALUES.get(key, frozenset()), key,
+        )
+    if key in _INT_KEYS:
         coerced = _coerce(raw, int, default)
         if coerced is _COERCE_FAILED:
             logger.warning(
-                "Workbook value for %r could not be parsed as int (got %r); "
-                "using default %r.", key, raw, default,
+                "Workbook value for %r could not be parsed as int "
+                "(got %r); using default %r.", key, raw, default,
             )
             return default
         return coerced
-    if key in _PROJECT_STR_KEYS:
-        return _parse_string_enum(
-            raw, str(default), _PROJECT_ALLOWED_VALUES.get(key, frozenset()),
-            key,
-        )
     coerced = _coerce(raw, float, default)
     if coerced is _COERCE_FAILED:
         logger.warning(
-            "Workbook value for %r could not be parsed as float (got %r); "
-            "using default %r.", key, raw, default,
+            "Workbook value for %r could not be parsed as float "
+            "(got %r); using default %r.", key, raw, default,
         )
         return default
     return coerced
 
 
-def _parse_project_sheet(flat: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Build the typed ``project`` dict from a flat ``key: value`` mapping."""
-    project: dict[str, dict[str, Any]] = {
-        "system_sizing": dict(_SYSTEM_SIZING_DEFAULTS),
-        "bess_operation": dict(_BESS_OPERATION_DEFAULTS),
-        "regulatory": dict(_REGULATORY_DEFAULTS),
-    }
-    legacy_optimization_seen: list[str] = []
+def _parse_kv_sheet(
+    sheet_name: str, flat: dict[str, Any],
+) -> dict[str, Any]:
+    defaults = _SHEET_DEFAULTS[sheet_name]
+    out = dict(defaults)
     for key, raw in flat.items():
-        group = _PROJECT_KEY_TO_GROUP.get(key)
-        if group is None:
-            if key in _LEGACY_OPTIMIZATION_KEYS:
-                legacy_optimization_seen.append(key)
-                continue
-            logger.warning("Project sheet key %r is unknown; ignored.", key)
+        if key in defaults:
+            out[key] = _parse_value(key, raw, defaults[key])
             continue
-        project[group][key] = _parse_project_value(group, key, raw)
-    if legacy_optimization_seen:
-        logger.warning(
-            "Project sheet contains legacy v0.5 '# optimization' keys "
-            "%s; these are no longer accepted (solver gap / time limit "
-            "are CLI-only via --mip-gap / --time-limit; tie-breaker "
-            "weights live as private constants in pvbess_opt.optimization).",
-            sorted(legacy_optimization_seen),
-        )
-    return project
-
-
-def _parse_economic_sheet(flat: dict[str, Any]) -> dict[str, Any]:
-    """Build the typed ``economic`` dict from a flat ``key: value`` mapping."""
-    out = dict(ECON_DEFAULTS)
-    for key, raw in flat.items():
+        if key in _LEGACY_V08_REMOVED:
+            logger.warning(
+                "%s sheet key %r was dropped in v0.8: %s. Value %r ignored.",
+                sheet_name, key, _LEGACY_V08_REMOVED[key], raw,
+            )
+            continue
+        if key in _LEGACY_OPTIMIZATION_KEYS:
+            logger.warning(
+                "%s sheet contains legacy v0.5 '# optimization' key %r; "
+                "no longer accepted (solver gap / time limit are CLI-only "
+                "via --mip-gap / --time-limit; tie-breaker weights live as "
+                "private constants in pvbess_opt.optimization). Value %r ignored.",
+                sheet_name, key, raw,
+            )
+            continue
         if key == "plot_daily_year1":
             logger.warning(
-                "Economic sheet key 'plot_daily_year1' was renamed to "
+                "%s sheet key 'plot_daily_year1' was renamed to "
                 "'plot_daily_scope' in v0.6; use 'none' / 'year1_only' / "
-                "'all' explicitly. Value %r ignored.",
-                raw,
+                "'all' explicitly. Value %r ignored.", sheet_name, raw,
             )
             continue
-        if key not in ECON_DEFAULTS:
-            logger.warning("Economic sheet key %r is unknown; ignored.", key)
-            continue
-        if key in _ECON_BOOL_KEYS:
-            out[key] = _parse_bool(raw, bool(ECON_DEFAULTS[key]))
-        elif key in _ECON_STR_KEYS:
-            out[key] = _parse_string_enum(
-                raw, str(ECON_DEFAULTS[key]),
-                _ECON_ALLOWED_VALUES.get(key, frozenset()),
-                key,
+        # Unknown key for this sheet — but maybe it belongs to another v0.8 sheet?
+        if key in _KEY_TO_SHEET:
+            logger.warning(
+                "Key %r found on %r sheet but belongs to %r sheet; ignored.",
+                key, sheet_name, _KEY_TO_SHEET[key],
             )
-        else:
-            cast: type = int if key in _ECON_INT_KEYS else float
-            coerced = _coerce(raw, cast, ECON_DEFAULTS[key])
-            if coerced is _COERCE_FAILED:
-                logger.warning(
-                    "Economic sheet %r could not be parsed as %s (got %r); "
-                    "using default %r.",
-                    key, cast.__name__, raw, ECON_DEFAULTS[key],
-                )
-                out[key] = ECON_DEFAULTS[key]
-            else:
-                out[key] = coerced
+            continue
+        logger.warning(
+            "%s sheet key %r is unknown; ignored.", sheet_name, key,
+        )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Curtailment-profile parser
+# ---------------------------------------------------------------------------
+
+
+def _parse_curtailment_profile_sheet(df: pd.DataFrame) -> np.ndarray:
+    """Parse a curtailment_profile sheet into a (24,) or (24, 12) array."""
+    if df is None or df.empty:
+        raise ValueError("curtailment_profile sheet is empty.")
+
+    cols = {c.strip().lower() for c in df.columns}
+    if "hour_of_day" not in cols:
+        raise ValueError(
+            "curtailment_profile sheet must contain a 'hour_of_day' column."
+        )
+
+    df_norm = df.rename(columns={c: c.strip().lower() for c in df.columns})
+    df_norm = df_norm.sort_values("hour_of_day").reset_index(drop=True)
+    if len(df_norm) != 24:
+        raise ValueError(
+            "curtailment_profile sheet must have exactly 24 rows "
+            f"(got {len(df_norm)})."
+        )
+    hours = df_norm["hour_of_day"].astype(int).to_numpy()
+    if not np.array_equal(hours, np.arange(24)):
+        raise ValueError(
+            "curtailment_profile 'hour_of_day' column must contain 0..23 "
+            f"in order; got {hours.tolist()}."
+        )
+
+    monthly_cols = [f"curtailment_pct_{m}" for m in _MONTH_TOKENS]
+    has_monthly = all(col in df_norm.columns for col in monthly_cols)
+    if has_monthly:
+        arr = np.zeros((24, 12), dtype=float)
+        for m_idx, m_name in enumerate(_MONTH_TOKENS):
+            arr[:, m_idx] = (
+                df_norm[f"curtailment_pct_{m_name}"].astype(float).to_numpy()
+            )
+        return arr
+    if "curtailment_pct" in df_norm.columns:
+        return df_norm["curtailment_pct"].astype(float).to_numpy()
+    raise ValueError(
+        "curtailment_profile sheet must contain either a "
+        "'curtailment_pct' column (24x1) or all 12 "
+        "'curtailment_pct_<month>' columns (24x12)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -650,13 +740,7 @@ def _parse_economic_sheet(flat: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
-    """Validate timeseries columns and forward-fill numeric NaNs.
-
-    In ``vnb`` mode the ``load_kwh`` column is required.
-    In ``merchant`` mode ``load_kwh`` is optional; if present the loader
-    logs an INFO message and the column is preserved (the optimizer pins
-    all load-coverage flows to zero).
-    """
+    """Validate timeseries columns and forward-fill numeric NaNs."""
     if "timestamp" not in ts.columns:
         raise ValueError("timeseries sheet must contain a 'timestamp' column.")
     if "pv_kwh" not in ts.columns:
@@ -676,10 +760,7 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
 
 
 def detect_timestep_minutes(ts: pd.DataFrame) -> int:
-    """Auto-detect the MILP timestep (in minutes) from the timeseries.
-
-    Raises ``ValueError`` when timestamps are irregular.
-    """
+    """Auto-detect the MILP timestep (in minutes) from the timeseries."""
     idx = pd.to_datetime(ts["timestamp"]).sort_values()
     diffs = idx.diff().dropna()
     if diffs.empty:
@@ -703,38 +784,133 @@ def detect_timestep_minutes(ts: pd.DataFrame) -> int:
 # ---------------------------------------------------------------------------
 
 
+_V08_REQUIRED_SHEETS: frozenset[str] = frozenset({
+    "timeseries", "project", "pv", "bess", "economics", "simulation",
+})
+_V07_LEGACY_SHEETS: frozenset[str] = frozenset({
+    "timeseries", "project", "economic",
+})
+
+
+def _read_v07_legacy_workbook(xlsx_path: Path) -> dict[str, Any]:
+    """Best-effort read of a v0.7 workbook (project + economic).
+
+    The loader logs a single WARNING listing the affected file plus the
+    migration command, then translates the v0.7 grouped flat dict into
+    v0.8 typed sections.  No silent translation: keys it cannot place
+    are surfaced via the normal warning channels.
+    """
+    logger.warning(
+        "%s uses the legacy v0.7 two-sheet layout (project + economic). "
+        "v0.8 expects seven sheets — please regenerate via "
+        "`python scripts/build_input_xlsx.py`. Proceeding with best-effort "
+        "translation; values that don't map will be ignored with a per-key "
+        "warning.",
+        xlsx_path,
+    )
+
+    project_flat = _flat_dict_from_sheet(
+        pd.read_excel(xlsx_path, sheet_name="project"),
+    )
+    econ_flat = _flat_dict_from_sheet(
+        pd.read_excel(xlsx_path, sheet_name="economic"),
+    )
+
+    routed: dict[str, dict[str, Any]] = {
+        "project": {}, "pv": {}, "bess": {}, "economics": {}, "simulation": {},
+    }
+    unplaced: list[tuple[str, Any]] = []
+    for src in (project_flat, econ_flat):
+        for key, value in src.items():
+            sheet = _KEY_TO_SHEET.get(key)
+            if sheet is not None:
+                routed[sheet][key] = value
+            else:
+                unplaced.append((key, value))
+
+    typed: dict[str, Any] = {}
+    for sheet_name in ("project", "pv", "bess", "economics", "simulation"):
+        typed[sheet_name] = _parse_kv_sheet(sheet_name, routed[sheet_name])
+
+    # Run unplaced keys through the normal per-sheet path so the
+    # legacy / removed warnings are emitted exactly once.
+    for key, value in unplaced:
+        # Pretend they came from the most likely sheet (project) just
+        # for the warning message.
+        _parse_kv_sheet("project", {key: value})
+
+    profile = np.full(24, _LEGACY_DEFAULT_CURTAILMENT_PCT, dtype=float)
+    legacy_curtailment_pct = econ_flat.get("curtailment_pct")
+    if legacy_curtailment_pct is None:
+        legacy_curtailment_pct = project_flat.get("curtailment_pct")
+    if legacy_curtailment_pct is not None:
+        try:
+            profile = np.full(24, float(legacy_curtailment_pct), dtype=float)
+        except (TypeError, ValueError):
+            pass
+
+    mode = str(typed["project"]["mode"]).lower()
+    ts = _normalise_timeseries(
+        pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
+        mode=mode,
+    )
+    out: dict[str, Any] = {
+        "ts": ts,
+        "curtailment_profile": profile,
+        "dt_minutes": detect_timestep_minutes(ts),
+    }
+    out.update(typed)
+    return out
+
+
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the input workbook and return the typed nested dict."""
     xlsx_path = Path(xlsx_path)
     sheets = set(pd.ExcelFile(xlsx_path).sheet_names)
 
-    required = {"project", "timeseries", "economic"}
-    missing = required - sheets
+    missing = _V08_REQUIRED_SHEETS - sheets
+    if missing and _V07_LEGACY_SHEETS.issubset(sheets):
+        return _read_v07_legacy_workbook(xlsx_path)
     if missing:
         raise ValueError(
-            f"Workbook {xlsx_path!s} is missing required sheets: {sorted(missing)}. "
-            f"Found: {sorted(sheets)}."
+            f"Workbook {xlsx_path!s} is missing required sheets: "
+            f"{sorted(missing)}. Found: {sorted(sheets)}."
         )
 
-    project_flat = _flat_dict_from_sheet(
-        pd.read_excel(xlsx_path, sheet_name="project"),
-    )
-    project = _parse_project_sheet(project_flat)
-    econ_flat = _flat_dict_from_sheet(
-        pd.read_excel(xlsx_path, sheet_name="economic"),
-    )
-    economic = _parse_economic_sheet(econ_flat)
-    mode = str(project["regulatory"]["mode"]).lower()
+    typed: dict[str, Any] = {}
+    for sheet_name in ("project", "pv", "bess", "economics", "simulation"):
+        flat = _flat_dict_from_sheet(
+            pd.read_excel(xlsx_path, sheet_name=sheet_name),
+        )
+        typed[sheet_name] = _parse_kv_sheet(sheet_name, flat)
+
+    if "curtailment_profile" in sheets:
+        try:
+            profile = _parse_curtailment_profile_sheet(
+                pd.read_excel(xlsx_path, sheet_name="curtailment_profile"),
+            )
+        except ValueError as exc:
+            raise ValueError(f"curtailment_profile: {exc}") from exc
+    else:
+        logger.info(
+            "curtailment_profile sheet not found in %s; falling back to "
+            "constant %.1f %% for every hour (legacy v0.7 default).",
+            xlsx_path, _LEGACY_DEFAULT_CURTAILMENT_PCT,
+        )
+        profile = np.full(24, _LEGACY_DEFAULT_CURTAILMENT_PCT, dtype=float)
+
+    mode = str(typed["project"]["mode"]).lower()
     ts = _normalise_timeseries(
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
     )
-    return {
+    out: dict[str, Any] = {
         "ts": ts,
-        "project": project,
-        "economic": economic,
+        "curtailment_profile": profile,
         "dt_minutes": detect_timestep_minutes(ts),
     }
+    out.update(typed)
+    return out
 
 
 def _typed_to_flat(
@@ -742,38 +918,50 @@ def _typed_to_flat(
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     """Translate the typed dict to the flat ``(params, ts)`` shape."""
     project = typed["project"]
-    sizing = project["system_sizing"]
-    bess_op = project["bess_operation"]
-    reg = project["regulatory"]
-    econ = typed["economic"]
+    pv = typed["pv"]
+    bess = typed["bess"]
+    sim = typed["simulation"]
     ts = typed["ts"]
+
+    bess_power_kw = float(bess["bess_power_kw"])
+    bess_capacity_kwh = float(bess["bess_capacity_kwh"])
+
+    profile = typed.get("curtailment_profile")
+    if profile is not None:
+        curtailment_frac = float(np.mean(np.asarray(profile, dtype=float))) / 100.0
+    else:
+        curtailment_frac = _LEGACY_DEFAULT_CURTAILMENT_PCT / 100.0
+    curtailment_frac = float(np.clip(curtailment_frac, 0.0, 1.0))
 
     params: dict[str, Any] = {
         "dt_minutes": int(typed["dt_minutes"]),
-        # # bess_operation
-        "efficiency_charge": float(bess_op["efficiency_charge"]),
-        "efficiency_discharge": float(bess_op["efficiency_discharge"]),
-        "soc_min_frac": float(bess_op["soc_min_frac"]),
-        "soc_max_frac": float(bess_op["soc_max_frac"]),
-        "initial_soc_frac": float(bess_op["initial_soc_frac"]),
-        "terminal_soc_equal": bool(bess_op["terminal_soc_equal"]),
-        "max_cycles_per_day": float(bess_op["max_cycles_per_day"]),
-        # # system_sizing
-        "p_charge_max_kw": float(sizing["p_charge_max_kw"]),
-        "p_dis_max_kw": float(sizing["p_dis_max_kw"]),
-        "battery_hours": float(sizing["battery_hours"]),
-        "p_grid_export_max_kw": float(sizing["p_grid_export_max_kw"]),
-        "pv_nameplate_kwp": float(sizing["pv_nameplate_kwp"]),
-        "bess_power_kw": float(sizing["bess_power_kw"]),
-        "bess_capacity_kwh": float(sizing["bess_capacity_kwh"]),
-        # # regulatory
-        "curtailment_frac": _parse_curtailment(reg["curtailment_pct"]),
-        "retail_tariff_eur_per_mwh": float(reg["retail_tariff_eur_per_mwh"]),
-        "settlement_minutes": int(reg["settlement_minutes"]),
-        "mode": str(reg["mode"]),
-        "allow_bess_grid_charging": bool(reg["allow_bess_grid_charging"]),
-        # # economic carry-over
-        "show_titles": bool(econ.get("show_titles", False)),
+        # bess
+        "efficiency_charge": float(bess["efficiency_charge"]),
+        "efficiency_discharge": float(bess["efficiency_discharge"]),
+        "soc_min_frac": float(bess["soc_min_frac"]),
+        "soc_max_frac": float(bess["soc_max_frac"]),
+        "initial_soc_frac": float(bess["initial_soc_frac"]),
+        "terminal_soc_equal": bool(bess["terminal_soc_equal"]),
+        "max_cycles_per_day": float(bess["max_cycles_per_day"]),
+        "bess_power_kw": bess_power_kw,
+        "bess_capacity_kwh": bess_capacity_kwh,
+        # pv
+        "pv_nameplate_kwp": float(pv["pv_nameplate_kwp"]),
+        # project
+        "p_grid_export_max_kw": float(project["p_grid_export_max_kw"]),
+        "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
+        "settlement_minutes": int(project["settlement_minutes"]),
+        "mode": str(project["mode"]),
+        "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
+        "unavailability_pct": float(project["unavailability_pct"]),
+        "show_titles": bool(project["show_titles"]),
+        # curtailment — scalar fraction for Phase 2; per-step profile for Phase 3.
+        "curtailment_frac": curtailment_frac,
+        "curtailment_profile": typed.get("curtailment_profile"),
+        # simulation
+        "plot_daily_scope": str(sim["plot_daily_scope"]),
+        "plot_monthly_scope": str(sim["plot_monthly_scope"]),
+        "plot_yearly_scope": str(sim["plot_yearly_scope"]),
     }
     return params, ts
 
@@ -802,51 +990,17 @@ def read_inputs(xlsx_path: str | Path) -> tuple[dict[str, Any], pd.DataFrame]:
 # ---------------------------------------------------------------------------
 
 
+_ECON_UNITS: dict[str, str] = {}
+for _rows in _SHEET_ROW_TEMPLATES.values():
+    for _key, _default, _unit, _notes in _rows:
+        _ECON_UNITS.setdefault(_key, _unit)
+
+
 def _format_assumptions(econ: dict[str, Any]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for key, value in econ.items():
         rows.append({"key": key, "value": value, "unit": _ECON_UNITS.get(key, "")})
     return pd.DataFrame(rows, columns=["key", "value", "unit"])
-
-
-_ECON_UNITS: dict[str, str] = {
-    "project_lifecycle_years": "years",
-    "project_start_year": "year",
-    "discount_rate_pct": "%",
-    "opex_inflation_pct": "%",
-    "revenue_inflation_pct": "%",
-    "capex_pv_eur_per_kw": "EUR/kWp",
-    "capex_bess_eur_per_kw": "EUR/kW",
-    "capex_licenses_eur_per_kw": "EUR/kW",
-    "opex_pv_eur_per_kwp": "EUR/kWp/yr",
-    "opex_bess_eur_per_kw": "EUR/kW/yr",
-    "pv_degradation_year1_pct": "%",
-    "pv_degradation_annual_pct": "%",
-    "bess_degradation_annual_pct": "%",
-    "bess_replacement_year": "year",
-    "bess_replacement_cost_pct": "%",
-    "sensitivity_enabled": "bool",
-    "sensitivity_capex_delta_pct": "%",
-    "sensitivity_opex_delta_pct": "%",
-    "sensitivity_revenue_delta_pct": "%",
-    "sensitivity_discount_rate_delta_pp": "pp",
-    "uncertainty_enabled": "bool",
-    "uncertainty_compare_sources": "bool",
-    "uncertainty_n_seeds": "int",
-    "uncertainty_window_hours": "int",
-    "uncertainty_commit_hours": "int",
-    "uncertainty_dam_enabled": "bool",
-    "uncertainty_pv_enabled": "bool",
-    "uncertainty_load_enabled": "bool",
-    "uncertainty_sigma_dam": "-",
-    "uncertainty_sigma_pv": "-",
-    "uncertainty_sigma_load": "-",
-    "show_titles": "bool",
-    "currency_format": "enum",
-    "plot_daily_scope": "scope",
-    "plot_monthly_scope": "scope",
-    "plot_yearly_scope": "scope",
-}
 
 
 def copy_input_snapshot(src_xlsx: Path, out_dir: Path, tag: str) -> Path | None:
@@ -900,6 +1054,10 @@ def write_assumptions_summary(
     for key in sorted(params):
         if key.startswith("_"):
             continue
+        # Hide the array-valued curtailment_profile from the snapshot —
+        # it's already in the workbook's curtailment_profile sheet.
+        if key == "curtailment_profile":
+            continue
         lines.append(f"  {key} = {params[key]!r}")
     lines.append("")
     lines.append("[economic]")
@@ -917,11 +1075,7 @@ def write_dispatch_artifacts(
     *,
     project_start_year: int = 2026,
 ) -> dict[str, Path]:
-    """Write the ``02_dispatch/`` artefacts.
-
-    The single file ``dispatch_hourly.xlsx`` carries one sheet per
-    calendar year (sheet name = the calendar year as a 4-digit string).
-    """
+    """Write the ``02_dispatch/`` artefacts."""
     dispatch_dir = Path(dispatch_dir)
     dispatch_dir.mkdir(parents=True, exist_ok=True)
     out = dispatch_dir / "dispatch_hourly.xlsx"

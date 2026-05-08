@@ -1,0 +1,334 @@
+"""v0.8 workbook-schema tests.
+
+Covers:
+
+* The seven-sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
+  ``economics`` / ``simulation`` / ``curtailment_profile``).
+* Round-trip preservation through ``write_workbook`` /
+  ``read_workbook``.
+* Sheet-aware unknown-key warnings.
+* Legacy v0.7 two-sheet (project + economic) workbooks load with a
+  single migration WARNING.
+* The four legacy v0.5 ``# optimization`` keys still warn.
+* The new "removed in v0.8" warnings for ``capex_licenses_eur_per_kw``,
+  ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw``.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from pvbess_opt.io import (
+    BESS_SHEET_DEFAULTS,
+    ECONOMICS_SHEET_DEFAULTS,
+    PROJECT_SHEET_DEFAULTS,
+    PV_SHEET_DEFAULTS,
+    SIMULATION_SHEET_DEFAULTS,
+    _LEGACY_OPTIMIZATION_KEYS,
+    _parse_kv_sheet,
+    read_workbook,
+    write_workbook,
+)
+
+
+# ---------------------------------------------------------------------------
+# Sheet defaults — keys per sheet
+# ---------------------------------------------------------------------------
+
+
+def test_project_sheet_keys():
+    expected = {
+        "project_lifecycle_years", "project_start_year", "mode",
+        "settlement_minutes", "p_grid_export_max_kw",
+        "retail_tariff_eur_per_mwh", "allow_bess_grid_charging",
+        "unavailability_pct", "currency_format", "show_titles",
+    }
+    assert set(PROJECT_SHEET_DEFAULTS) == expected
+
+
+def test_pv_sheet_keys():
+    expected = {
+        "pv_nameplate_kwp", "specific_production_kwh_per_kwp",
+        "pv_degradation_year1_pct", "pv_degradation_annual_pct",
+        "capex_pv_eur_per_kw", "devex_pv_eur_per_kw",
+        "opex_pv_eur_per_kwp",
+    }
+    assert set(PV_SHEET_DEFAULTS) == expected
+
+
+def test_bess_sheet_keys():
+    expected = {
+        "bess_power_kw", "bess_capacity_kwh",
+        "efficiency_charge", "efficiency_discharge",
+        "soc_min_frac", "soc_max_frac", "initial_soc_frac",
+        "terminal_soc_equal", "max_cycles_per_day",
+        "capex_bess_eur_per_kw", "devex_bess_eur_per_kw",
+        "opex_bess_eur_per_kw",
+        "bess_replacement_year", "bess_replacement_cost_pct",
+        "bess_degradation_annual_pct",
+    }
+    assert set(BESS_SHEET_DEFAULTS) == expected
+
+
+def test_economics_sheet_keys():
+    expected = {
+        "discount_rate_pct", "opex_inflation_pct", "revenue_inflation_pct",
+        "aggregator_fee_pct_revenue",
+        "sensitivity_enabled", "sensitivity_capex_delta_pct",
+        "sensitivity_opex_delta_pct", "sensitivity_revenue_delta_pct",
+        "sensitivity_discount_rate_delta_pp",
+    }
+    assert set(ECONOMICS_SHEET_DEFAULTS) == expected
+
+
+def test_simulation_sheet_keys():
+    expected = {
+        "uncertainty_enabled", "uncertainty_compare_sources",
+        "uncertainty_n_seeds", "uncertainty_window_hours",
+        "uncertainty_commit_hours",
+        "uncertainty_dam_enabled", "uncertainty_pv_enabled",
+        "uncertainty_load_enabled",
+        "uncertainty_sigma_dam", "uncertainty_sigma_pv",
+        "uncertainty_sigma_load",
+        "plot_daily_scope", "plot_monthly_scope", "plot_yearly_scope",
+    }
+    assert set(SIMULATION_SHEET_DEFAULTS) == expected
+
+
+# ---------------------------------------------------------------------------
+# Repository workbook — seven sheets exposed
+# ---------------------------------------------------------------------------
+
+
+def test_seven_sheets_present(repo_input_xlsx):
+    sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
+    assert set(sheets) == {
+        "timeseries", "project", "pv", "bess", "economics",
+        "simulation", "curtailment_profile",
+    }
+
+
+def test_repo_workbook_loads_typed_dict(repo_input_xlsx):
+    typed = read_workbook(repo_input_xlsx)
+    for section in ("project", "pv", "bess", "economics", "simulation"):
+        assert section in typed and isinstance(typed[section], dict)
+    assert typed["project"]["mode"] == "vnb"
+    assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(4500.0)
+    assert typed["bess"]["bess_power_kw"] == pytest.approx(5000.0)
+    assert "curtailment_profile" in typed
+    profile = np.asarray(typed["curtailment_profile"])
+    assert profile.shape == (24,) or profile.shape == (24, 12)
+
+
+# ---------------------------------------------------------------------------
+# Round-trip
+# ---------------------------------------------------------------------------
+
+
+def _build_minimal_typed(year: int = 2026) -> dict:
+    n = 24
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range(f"{year}-01-01", periods=n, freq="h"),
+        "pv_kwh": [100.0] * n,
+        "load_kwh": [50.0] * n,
+        "dam_price_eur_per_mwh": [80.0] * n,
+    })
+    return {
+        "ts": ts,
+        "project": dict(PROJECT_SHEET_DEFAULTS),
+        "pv": dict(PV_SHEET_DEFAULTS, pv_nameplate_kwp=1000.0),
+        "bess": dict(
+            BESS_SHEET_DEFAULTS, bess_power_kw=500.0, bess_capacity_kwh=2000.0,
+        ),
+        "economics": dict(ECONOMICS_SHEET_DEFAULTS),
+        "simulation": dict(SIMULATION_SHEET_DEFAULTS),
+        "curtailment_profile": np.full(24, 27.0, dtype=float),
+    }
+
+
+def test_round_trip_v08(tmp_path):
+    typed = _build_minimal_typed()
+    dst = tmp_path / "v08.xlsx"
+    write_workbook(typed, dst)
+    out = read_workbook(dst)
+    for section in ("project", "pv", "bess", "economics", "simulation"):
+        for key in typed[section]:
+            assert out[section][key] == typed[section][key], (
+                f"section={section} key={key}"
+            )
+
+
+def test_round_trip_v08_emits_no_warnings(tmp_path, caplog):
+    typed = _build_minimal_typed()
+    dst = tmp_path / "v08_clean.xlsx"
+    write_workbook(typed, dst)
+    with caplog.at_level("WARNING", logger="pvbess_opt.io"):
+        read_workbook(dst)
+    assert not any(
+        rec.levelno >= logging.WARNING and rec.name.startswith("pvbess_opt.io")
+        for rec in caplog.records
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-sheet unknown-key warnings
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_keys_warn_per_sheet(caplog):
+    flat = {"discount_rate_pct": 8.0, "definitely_not_a_real_key": 1.0}
+    with caplog.at_level("WARNING"):
+        parsed = _parse_kv_sheet("economics", flat)
+    assert parsed["discount_rate_pct"] == 8.0
+    assert any(
+        "definitely_not_a_real_key" in rec.getMessage()
+        and "economics" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+def test_misplaced_key_routes_warning_to_correct_sheet(caplog):
+    """capex_pv_eur_per_kw on the economics sheet warns about pv sheet."""
+    flat = {"capex_pv_eur_per_kw": 525.0}
+    with caplog.at_level("WARNING"):
+        _parse_kv_sheet("economics", flat)
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert "capex_pv_eur_per_kw" in msgs
+    assert "pv" in msgs
+
+
+# ---------------------------------------------------------------------------
+# Legacy paths
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_v05_optimization_keys_still_warn(caplog):
+    """Phase-1 carries the v0.5 # optimization warning forward unchanged."""
+    flat = {
+        "weight_curtail_tiebreak": 1e-5,
+        "weight_cycles_term": 0.0,
+        "solver_mip_gap": 0.001,
+        "solver_time_limit_seconds": 1800,
+    }
+    with caplog.at_level("WARNING"):
+        _parse_kv_sheet("project", flat)
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    for key in _LEGACY_OPTIMIZATION_KEYS:
+        assert key in msgs
+    assert "legacy v0.5" in msgs.lower()
+
+
+def test_legacy_plot_daily_year1_still_warns(caplog):
+    flat = {"plot_daily_year1": True}
+    with caplog.at_level("WARNING"):
+        _parse_kv_sheet("simulation", flat)
+    assert any(
+        "plot_daily_year1" in r.getMessage()
+        and "plot_daily_scope" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+@pytest.mark.parametrize("removed_key", [
+    "capex_licenses_eur_per_kw",
+    "battery_hours",
+    "p_charge_max_kw",
+    "p_dis_max_kw",
+])
+def test_v07_removed_keys_warn(removed_key, caplog):
+    flat = {removed_key: 42.0}
+    with caplog.at_level("WARNING"):
+        _parse_kv_sheet("bess", flat)
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert removed_key in msgs
+    assert "v0.8" in msgs
+
+
+def test_v07_legacy_workbook_logs_warning(tmp_path, caplog):
+    """A v0.7 two-sheet workbook still loads, with a one-line WARNING."""
+    n = 24
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=n, freq="h"),
+        "pv_kwh": [100.0] * n,
+        "load_kwh": [50.0] * n,
+        "dam_price_eur_per_mwh": [80.0] * n,
+    })
+    project_rows = [
+        {"key": "# system_sizing", "value": "", "unit": "", "notes": ""},
+        {"key": "pv_nameplate_kwp", "value": 1000.0, "unit": "", "notes": ""},
+        {"key": "bess_power_kw", "value": 500.0, "unit": "", "notes": ""},
+        {"key": "bess_capacity_kwh", "value": 2000.0, "unit": "", "notes": ""},
+        {"key": "p_charge_max_kw", "value": 500.0, "unit": "", "notes": ""},
+        {"key": "p_dis_max_kw", "value": 500.0, "unit": "", "notes": ""},
+        {"key": "battery_hours", "value": 4.0, "unit": "", "notes": ""},
+        {"key": "p_grid_export_max_kw", "value": 500.0, "unit": "", "notes": ""},
+        {"key": "# bess_operation", "value": "", "unit": "", "notes": ""},
+        {"key": "efficiency_charge", "value": 0.95, "unit": "", "notes": ""},
+        {"key": "# regulatory", "value": "", "unit": "", "notes": ""},
+        {"key": "mode", "value": "vnb", "unit": "", "notes": ""},
+        {"key": "curtailment_pct", "value": 27.0, "unit": "", "notes": ""},
+    ]
+    econ_rows = [
+        {"key": "project_lifecycle_years", "value": 5, "unit": "", "notes": ""},
+        {"key": "project_start_year", "value": 2026, "unit": "", "notes": ""},
+        {"key": "discount_rate_pct", "value": 7.0, "unit": "", "notes": ""},
+        {"key": "capex_pv_eur_per_kw", "value": 525.0, "unit": "", "notes": ""},
+        {"key": "capex_bess_eur_per_kw", "value": 200.0, "unit": "", "notes": ""},
+        {"key": "capex_licenses_eur_per_kw", "value": 90.0, "unit": "", "notes": ""},
+        {"key": "opex_pv_eur_per_kwp", "value": 7.0, "unit": "", "notes": ""},
+        {"key": "opex_bess_eur_per_kw", "value": 14.0, "unit": "", "notes": ""},
+    ]
+    dst = tmp_path / "legacy_v07.xlsx"
+    with pd.ExcelWriter(dst, engine="openpyxl") as writer:
+        ts.to_excel(writer, sheet_name="timeseries", index=False)
+        pd.DataFrame(project_rows).to_excel(
+            writer, sheet_name="project", index=False,
+        )
+        pd.DataFrame(econ_rows).to_excel(
+            writer, sheet_name="economic", index=False,
+        )
+    with caplog.at_level("WARNING"):
+        out = read_workbook(dst)
+    assert out["project"]["mode"] == "vnb"
+    assert out["pv"]["pv_nameplate_kwp"] == pytest.approx(1000.0)
+    assert out["bess"]["bess_power_kw"] == pytest.approx(500.0)
+    assert out["bess"]["bess_capacity_kwh"] == pytest.approx(2000.0)
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    # Migration WARNING references the build-script.
+    assert "build_input_xlsx" in msgs
+    # capex_licenses_eur_per_kw should be flagged as v0.8-removed.
+    assert "capex_licenses_eur_per_kw" in msgs
+    # Curtailment fallback applied.
+    assert np.allclose(np.asarray(out["curtailment_profile"]), 27.0)
+
+
+# ---------------------------------------------------------------------------
+# Curtailment-profile loader
+# ---------------------------------------------------------------------------
+
+
+def test_curtailment_profile_missing_logs_info(tmp_path, caplog):
+    typed = _build_minimal_typed()
+    dst = tmp_path / "v08_no_curt.xlsx"
+    write_workbook(typed, dst)
+    # Re-open and drop the curtailment_profile sheet.
+    with pd.ExcelFile(dst) as xls:
+        keep = {
+            name: pd.read_excel(dst, sheet_name=name)
+            for name in xls.sheet_names if name != "curtailment_profile"
+        }
+    with pd.ExcelWriter(dst, engine="openpyxl") as writer:
+        for name, df in keep.items():
+            df.to_excel(writer, sheet_name=name, index=False)
+    with caplog.at_level("INFO", logger="pvbess_opt.io"):
+        out = read_workbook(dst)
+    # Constant 27 % default applied.
+    assert np.allclose(np.asarray(out["curtailment_profile"]), 27.0)
+    assert any(
+        "curtailment_profile" in rec.getMessage().lower()
+        for rec in caplog.records
+    )
