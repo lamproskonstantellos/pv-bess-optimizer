@@ -1,12 +1,24 @@
-"""Lifecycle plots — added in v0.6.
+"""Lifecycle plots — added in v0.6, redesigned in v0.8.
 
 * :func:`plot_revenue_stack_yearly` — stacked yearly revenue source
   decomposition with the net line overlaid.
 * :func:`plot_lifetime_cycles` — equivalent BESS cycles per operating
   year (post-degradation).  Skipped when no BESS is in the project.
-* :func:`plot_lcoe_lcos_summary` — two-panel summary card (LCOE on
-  the left, LCOS on the right) with base markers and shaded ranges
-  derived from the sensitivity DataFrame.
+* :func:`plot_lcoe_lcos_summary` — single horizontal-bar comparison
+  panel (LCOE top, LCOS bottom) with the project sensitivity range
+  overlaid on Lazard 2024 industry benchmark bands.  PV-only / BESS-
+  only projects show an italic "N/A" line for the missing row.
+
+Industry benchmark constants (update annually):
+
+* :data:`BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH`
+  — Lazard *Levelized Cost of Energy+ 2024*, utility-scale PV band.
+* :data:`BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH`
+  — Lazard *Levelized Cost of Storage v9 2024*, four-hour
+  lithium-ion utility-scale band.
+
+These are hard-coded at module level so the engineering team can
+update them once a year without re-running an external lookup.
 
 EUR axes use the compact ``EUR 12.3M`` / ``EUR 45k`` formatter via
 :func:`pvbess_opt.plotting._currency.euro_axis_formatter`.
@@ -24,12 +36,27 @@ import pandas as pd
 from ._currency import euro_axis_formatter
 from .style import save_figure, show_titles
 
+# ---------------------------------------------------------------------------
+# Industry benchmark bands (Lazard 2024 — update annually)
+# ---------------------------------------------------------------------------
+
+# Lazard *Levelized Cost of Energy+ 2024*, utility-scale PV (EUR/MWh).
+BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH: tuple[float, float] = (30.0, 50.0)
+
+# Lazard *Levelized Cost of Storage v9 2024*, four-hour
+# lithium-ion utility-scale (EUR/MWh).
+BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH: tuple[float, float] = (100.0, 250.0)
+
 _COLOR_LOAD_PV = "#2E7D32"      # green
 _COLOR_LOAD_BESS = "#388E3C"    # darker green
 _COLOR_EXPORT_PV = "#1565C0"    # blue
 _COLOR_EXPORT_BESS = "#0D47A1"  # darker blue
 _COLOR_GRID_COST = "#C62828"    # red (negative stack)
 _COLOR_NET = "#6A1B9A"          # purple
+_COLOR_LCOE_BAR = "#EF6C00"     # warm orange
+_COLOR_LCOS_BAR = "#1565C0"     # cool blue
+_COLOR_BASE_DIAMOND = "#000000"
+_COLOR_BENCHMARK = "#BDBDBD"    # light grey
 
 
 def _resolve_currency_format(econ: dict[str, Any] | None) -> str:
@@ -177,12 +204,21 @@ def plot_lcoe_lcos_summary(
     econ: dict[str, Any],
     out_path: Path,
 ) -> Path:
-    """Two-panel summary card with LCOE on the left, LCOS on the right.
+    """Single horizontal-bar comparison panel with industry benchmark bands.
 
-    Each panel shows the base-case marker plus a shaded range derived
-    by re-evaluating the LCOE / LCOS formula with ±CAPEX / ±OPEX
-    deltas from the sensitivity configuration.  PV-only / BESS-only
-    projects show an N/A placeholder for the missing panel.
+    LCOE on the top row, LCOS on the bottom row, both rendered against
+    the same EUR/MWh axis.  Each row shows:
+
+    * a saturated bar over the project's sensitivity range
+      ``[base × low_factor, base × high_factor]``;
+    * a black diamond marker at the base value;
+    * a light-grey shaded band behind the bar showing the Lazard 2024
+      industry benchmark range (LCOE: 30–50, LCOS: 100–250 EUR/MWh).
+
+    PV-only projects show an italic "BESS not part of this project —
+    LCOS N/A" line in place of the LCOS row; BESS-only swaps the
+    other way.  Hybrid projects render both rows at figsize=(7, 4);
+    single-row projects render at (7, 2.5).
     """
     out_path = Path(out_path)
     pv_kwp = float(capacities.get("pv_kwp", 0.0) or 0.0)
@@ -191,24 +227,39 @@ def plot_lcoe_lcos_summary(
     base_lcos = float(fin_kpis.get("lcos_eur_per_mwh", float("nan")))
     capex_d = float(econ.get("sensitivity_capex_delta_pct", 10.0)) / 100.0
     opex_d = float(econ.get("sensitivity_opex_delta_pct", 10.0)) / 100.0
-    # Combined ± range: high = (1+capex_d)(1+opex_d) - 1, low symmetric.
     high_factor = (1.0 + capex_d) * (1.0 + opex_d)
     low_factor = (1.0 - capex_d) * (1.0 - opex_d)
     _ = sensitivity_df  # kept for API symmetry; range derived directly above
 
-    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
-    _draw_panel(
-        axes[0], base_lcoe, low_factor, high_factor,
-        title="LCOE", unit="EUR/MWh", asset_present=pv_kwp > 0.0,
-        absent_message="No PV — LCOE N/A",
+    pv_present = pv_kwp > 0.0 and not np.isnan(base_lcoe)
+    bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
+    figsize = (7, 4) if (pv_present and bess_present) else (7, 2.5)
+
+    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+    _draw_benchmark_row(
+        axes[0],
+        base=base_lcoe,
+        low=base_lcoe * low_factor if pv_present else float("nan"),
+        high=base_lcoe * high_factor if pv_present else float("nan"),
+        bar_colour=_COLOR_LCOE_BAR,
+        benchmark=BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH,
+        label="LCOE", asset_present=pv_present,
+        absent_message="PV not part of this project — LCOE N/A",
     )
-    _draw_panel(
-        axes[1], base_lcos, low_factor, high_factor,
-        title="LCOS", unit="EUR/MWh", asset_present=bess_kw > 0.0,
-        absent_message="No BESS — LCOS N/A",
+    _draw_benchmark_row(
+        axes[1],
+        base=base_lcos,
+        low=base_lcos * low_factor if bess_present else float("nan"),
+        high=base_lcos * high_factor if bess_present else float("nan"),
+        bar_colour=_COLOR_LCOS_BAR,
+        benchmark=BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH,
+        label="LCOS", asset_present=bess_present,
+        absent_message="BESS not part of this project — LCOS N/A",
     )
+    axes[1].set_xlabel("EUR/MWh")
+
     if show_titles():
-        fig.suptitle("Levelized Cost Summary")
+        fig.suptitle("Levelized Cost Summary — Lazard 2024 benchmark")
     fig.tight_layout()
     out = Path(out_path).with_suffix(".pdf")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -232,38 +283,79 @@ def _empty_placeholder(out_path: Path, message: str) -> Path:
     return save_figure(out_path)
 
 
-def _draw_panel(
+def _draw_benchmark_row(
     ax,
-    base_value: float,
-    low_factor: float,
-    high_factor: float,
     *,
-    title: str,
-    unit: str,
+    base: float,
+    low: float,
+    high: float,
+    bar_colour: str,
+    benchmark: tuple[float, float],
+    label: str,
     asset_present: bool,
     absent_message: str,
 ) -> None:
-    ax.set_title(title, fontsize=10)
-    if not asset_present or np.isnan(base_value):
-        ax.text(0.5, 0.5, absent_message, ha="center", va="center",
-                fontsize=10, transform=ax.transAxes)
-        ax.set_xticks([])
+    """Single LCOE/LCOS row: benchmark band + project bar + base marker."""
+    if not asset_present or np.isnan(base):
+        ax.text(
+            0.5, 0.5, absent_message, ha="center", va="center",
+            fontsize=9, fontstyle="italic", transform=ax.transAxes,
+        )
         ax.set_yticks([])
+        ax.set_ylim(-0.5, 0.5)
+        ax.set_xlabel("")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_ylabel(label, rotation=0, ha="right", va="center", labelpad=20)
         return
-    low = base_value * low_factor
-    high = base_value * high_factor
-    ax.barh([0], [high - low], left=low, height=0.4,
-            color="#90CAF9", edgecolor="black", linewidth=0.6,
-            label="±CAPEX·±OPEX range")
-    ax.scatter([base_value], [0], color="#0D47A1", s=80, zorder=5,
-               label="Base")
-    ax.set_yticks([])
-    ax.set_xlabel(unit)
-    ax.legend(loc="upper right", framealpha=0.9, fontsize=7)
-    ax.grid(True, axis="x", linestyle="--", alpha=0.5)
-    ax.text(
-        0.02, 0.95, f"Base: {base_value:,.1f} {unit}",
-        ha="left", va="top", fontsize=8, transform=ax.transAxes,
-        bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "grey",
-              "linewidth": 0.5},
+
+    bench_low, bench_high = float(benchmark[0]), float(benchmark[1])
+    bar_low = float(min(low, high))
+    bar_high = float(max(low, high))
+
+    # Reference benchmark band behind the project bar.
+    ax.barh(
+        [0], [bench_high - bench_low], left=bench_low, height=0.6,
+        color=_COLOR_BENCHMARK, alpha=0.45, edgecolor="grey", linewidth=0.4,
+        label=f"Lazard 2024 {label} band ({bench_low:.0f}–{bench_high:.0f} EUR/MWh)",
+        zorder=1,
     )
+    # Project sensitivity range (saturated colour).
+    ax.barh(
+        [0], [bar_high - bar_low], left=bar_low, height=0.35,
+        color=bar_colour, edgecolor="black", linewidth=0.6,
+        label=f"{label} range",
+        zorder=3,
+    )
+    # Base marker.
+    ax.scatter(
+        [base], [0], marker="D", s=64,
+        color=_COLOR_BASE_DIAMOND, edgecolor="white", linewidth=0.5,
+        label=f"Base {label}",
+        zorder=5,
+    )
+
+    # Right-aligned annotation past the high end of the project bar.
+    label_text = (
+        f"{base:.0f} EUR/MWh "
+        f"(range {bar_low:.0f}–{bar_high:.0f})"
+    )
+    ax.annotate(
+        label_text, xy=(bar_high, 0), xytext=(8, 0),
+        textcoords="offset points",
+        ha="left", va="center", fontsize=7,
+        bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "grey",
+              "linewidth": 0.5, "boxstyle": "round,pad=0.2"},
+    )
+
+    ax.set_yticks([])
+    ax.set_ylim(-0.5, 0.5)
+    ax.set_ylabel(label, rotation=0, ha="right", va="center", labelpad=20)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(True, axis="x", linestyle="--", alpha=0.5)
+    ax.legend(loc="upper right", framealpha=0.9, fontsize=6, ncol=1)
+    # Pad the x-axis so the annotation has room.
+    xmin = min(bench_low, bar_low) * 0.85 if bench_low > 0 else min(bench_low, bar_low) - 5
+    xmax = max(bench_high, bar_high) * 1.35
+    ax.set_xlim(xmin, xmax)
