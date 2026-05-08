@@ -582,29 +582,177 @@ def plot_npv_tornado(
     )
 
 
+def _irr_dumbbell_plot(
+    sens_df: pd.DataFrame,
+    base_irr: float,
+    out_path: Path,
+    *,
+    title: str,
+    drop_labels: tuple[str, ...] = ("Discount rate",),
+    footer_note: str | None = None,
+) -> Path:
+    """Dumbbell-style IRR tornado.
+
+    One horizontal line per driver, end-capped with filled markers and
+    above-line numeric labels — Phase 5 redesign of the v0.7 stacked
+    half-bar IRR tornado.
+    """
+    out_path = Path(out_path)
+
+    if sens_df.empty:
+        plt.figure(figsize=(7, 4))
+        ax = plt.gca()
+        ax.text(0.5, 0.5, "Sensitivity disabled or empty.",
+                ha="center", va="center", fontsize=10,
+                transform=ax.transAxes)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        return save_figure(out_path)
+
+    pivot = sens_df.pivot_table(
+        index="label", columns="scenario", values="irr_pct", aggfunc="first",
+    )
+    if "low" not in pivot.columns:
+        pivot["low"] = base_irr
+    if "high" not in pivot.columns:
+        pivot["high"] = base_irr
+    pivot["impact"] = (pivot["high"] - pivot["low"]).abs()
+
+    drop_set = {label.strip().lower() for label in drop_labels}
+    if drop_set:
+        keep_mask = ~pivot.index.str.strip().str.lower().isin(drop_set)
+        dropped_rows = (~keep_mask).any()
+        pivot = pivot.loc[keep_mask]
+    else:
+        dropped_rows = False
+    pivot = pivot.loc[pivot["impact"] > 1.0e-9]
+    pivot = pivot.sort_values("impact", ascending=True)
+
+    if pivot.empty:
+        plt.figure(figsize=(7, 4))
+        ax = plt.gca()
+        ax.text(0.5, 0.5, "No drivers with non-zero impact.",
+                ha="center", va="center", fontsize=10,
+                transform=ax.transAxes)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        return save_figure(out_path)
+
+    labels = pivot.index.tolist()
+    y_pos = np.arange(len(labels))
+    lows = pivot["low"].astype(float).to_numpy()
+    highs = pivot["high"].astype(float).to_numpy()
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    ax.axvline(
+        base_irr, color="black", linewidth=0.8, linestyle="--",
+        alpha=0.6, label=f"Base = {base_irr:.1f}%",
+    )
+
+    red = "#C62828"
+    green = "#2E7D32"
+
+    for i, (low, high) in enumerate(zip(lows, highs)):
+        left, right = sorted((low, high))
+        if right <= base_irr:
+            colour_left = colour_right = red
+        elif left >= base_irr:
+            colour_left = colour_right = green
+        else:
+            colour_left, colour_right = red, green
+            ax.plot(
+                [left, base_irr], [i, i],
+                color=red, linewidth=2.0, solid_capstyle="round",
+            )
+            ax.plot(
+                [base_irr, right], [i, i],
+                color=green, linewidth=2.0, solid_capstyle="round",
+            )
+            ax.scatter([left], [i], s=64, color=colour_left,
+                       edgecolor="black", linewidth=0.4, zorder=5)
+            ax.scatter([right], [i], s=64, color=colour_right,
+                       edgecolor="black", linewidth=0.4, zorder=5)
+            _annotate_dumbbell_endpoints(ax, left, right, i, low, high)
+            continue
+        # Same-side branch.
+        ax.plot(
+            [left, right], [i, i],
+            color=colour_left, linewidth=2.0, solid_capstyle="round",
+        )
+        ax.scatter([left, right], [i, i], s=64, color=colour_left,
+                   edgecolor="black", linewidth=0.4, zorder=5)
+        _annotate_dumbbell_endpoints(ax, left, right, i, low, high)
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("IRR (%)")
+    xmin, xmax = ax.get_xlim()
+    pad = 0.08 * (xmax - xmin) if xmax > xmin else 1.0
+    # Add headroom above so above-line labels aren't clipped.
+    ax.set_xlim(xmin - pad, xmax + pad)
+    ax.set_ylim(-0.6, len(labels) - 0.4)
+    _maybe_set_title(ax, title)
+    ax.legend(loc="lower right", framealpha=0.9, fontsize=7)
+    ax.grid(True, axis="x", linestyle="--", alpha=0.5)
+
+    if dropped_rows and footer_note:
+        ax.text(
+            0.5, -0.22, footer_note,
+            ha="center", va="top", fontsize=7, fontstyle="italic",
+            transform=ax.transAxes,
+        )
+
+    return save_figure(out_path)
+
+
+def _annotate_dumbbell_endpoints(
+    ax,
+    left: float,
+    right: float,
+    row: int,
+    low_value: float,
+    high_value: float,
+) -> None:
+    """Place the low / high IRR labels above each endpoint."""
+    above = offset_copy(ax.transData, fig=ax.figure, x=0, y=10, units="points")
+    bbox_kwargs = {
+        "facecolor": "white", "edgecolor": "grey", "alpha": 0.8,
+        "linewidth": 0.5, "boxstyle": "round,pad=0.15",
+    }
+    ax.text(
+        left, row, f"{low_value:.1f}%",
+        ha="left", va="bottom", fontsize=7, transform=above,
+        bbox=bbox_kwargs,
+    )
+    ax.text(
+        right, row, f"{high_value:.1f}%",
+        ha="right", va="bottom", fontsize=7, transform=above,
+        bbox=bbox_kwargs,
+    )
+
+
 def plot_irr_tornado(
     sens_df: pd.DataFrame,
     base_kpis: dict[str, Any],
     econ: dict[str, Any],
     out_path: Path,
 ) -> Path:
-    """Sorted IRR tornado.  Drops the ``Discount rate`` row.
+    """Sorted IRR tornado, dumbbell layout (v0.8 redesign).
 
     The IRR is by definition the discount rate that zeroes the NPV, so
-    varying the discount rate does not move the IRR.  The row is filtered
-    out and an italic footer note is added when the filter actually fired.
+    varying the discount rate does not move the IRR — that row is
+    filtered out and an italic footer note is added when the filter
+    actually fired.
     """
     base_irr = float(base_kpis.get("irr_pct", 0.0) or 0.0)
     window = _econ_title_window(econ)
     title = f"IRR Sensitivity — {window}" if window else "IRR Sensitivity"
-    return _tornado_plot(
-        sens_df, base_irr, "irr_pct", out_path,
+    return _irr_dumbbell_plot(
+        sens_df, base_irr, out_path,
         title=title,
-        xlabel="IRR (%)",
-        value_formatter=lambda v: f"{float(v):.1f}%",
         drop_labels=("Discount rate",),
         footer_note=(
             "Discount rate omitted — does not affect IRR by definition."
         ),
-        econ=econ,
     )
