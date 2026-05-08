@@ -509,14 +509,13 @@ def _build_financials(
     excel_path: Path,
     params: dict[str, Any],
     ts: pd.DataFrame,
-    e_cap_kwh: float,
     kpis: dict[str, Any],
     res: pd.DataFrame,
 ) -> dict[str, Any]:
     """Run the multi-year cash-flow + sensitivity + lifetime pipeline."""
     econ = read_economic_params(excel_path)
 
-    capacities = derive_asset_capacities(econ, params, ts, e_cap_kwh)
+    capacities = derive_asset_capacities(econ, params, ts)
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
     lifetime_df = build_lifetime_dispatch(res, econ, capacities)
@@ -684,7 +683,7 @@ def _run_one(
 
         # Perfect-foresight base run (also serves as the rolling-horizon
         # benchmark when --rolling-horizon is on).
-        res, e_cap_kwh, resolved_solver = run_scenario(
+        res, resolved_solver = run_scenario(
             params, ts, solver_name=args.solver,
             mip_gap=args.mip_gap, time_limit_seconds=args.time_limit,
             tee=args.tee,
@@ -707,9 +706,7 @@ def _run_one(
         if args.strict:
             _check_strict_invariants(invariants)
 
-        kpis = compute_kpis(
-            res, params, e_cap_kwh, verify_balance=False,
-        )
+        kpis = compute_kpis(res, params, verify_balance=False)
         kpis_monthly = compute_monthly_kpis(res)
 
         # Optional rolling-horizon run (writes its KPIs alongside the
@@ -805,7 +802,7 @@ def _run_one(
                 )
 
         bundle = _build_financials(
-            Path(args.excel), params, ts, e_cap_kwh, kpis, res,
+            Path(args.excel), params, ts, kpis, res,
         )
         econ = bundle["econ"]
 

@@ -238,17 +238,21 @@ def _safe_div(numerator: float, denominator: float) -> float:
 def compute_kpis(
     res: pd.DataFrame,
     params: dict[str, Any],
-    e_cap_kwh: float,
     *,
     verify_balance: bool = True,
 ) -> dict[str, Any]:
-    """Compute the headline KPI dictionary for a solved scenario."""
+    """Compute the headline KPI dictionary for a solved scenario.
+
+    In v0.8 ``e_cap`` is no longer a decision variable — the BESS
+    energy capacity is pinned to ``params['bess_capacity_kwh']``.
+    """
     if verify_balance:
         verify_energy_balance(res, params, raise_on_failure=False)
     attribute_green_discharge(res, params)
     add_economic_columns(res, params)
 
     mode = str(params.get("mode", "vnb") or "vnb").lower()
+    e_cap_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
     pv_gen = _sum_mwh(res, "pv_kwh")
     load_en = _sum_mwh(res, "load_kwh") if mode == "vnb" else 0.0
@@ -328,7 +332,7 @@ def compute_kpis(
     kpis: dict[str, Any] = {
         "mode": mode,
         "allow_bess_grid_charging": bool(params.get("allow_bess_grid_charging", False)),
-        "e_cap_opt_mwh": round(e_cap_kwh / 1000.0, 4),
+        "e_cap_mwh": round(e_cap_kwh / 1000.0, 4),
         "system_total_import_mwh": round(total_import, 4),
         "system_total_export_mwh": round(total_export, 4),
         "bess_total_charge_mwh": round(total_charge, 4),

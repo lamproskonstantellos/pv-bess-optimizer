@@ -945,12 +945,6 @@ def _typed_to_flat(
         "max_cycles_per_day": float(bess["max_cycles_per_day"]),
         "bess_power_kw": bess_power_kw,
         "bess_capacity_kwh": bess_capacity_kwh,
-        # Phase-1 backward-compat for optimization.py — Phase 2 drops them.
-        "p_charge_max_kw": bess_power_kw,
-        "p_dis_max_kw": bess_power_kw,
-        "battery_hours": (
-            bess_capacity_kwh / bess_power_kw if bess_power_kw > 0.0 else 0.0
-        ),
         # pv
         "pv_nameplate_kwp": float(pv["pv_nameplate_kwp"]),
         # project
@@ -961,7 +955,7 @@ def _typed_to_flat(
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
         "unavailability_pct": float(project["unavailability_pct"]),
         "show_titles": bool(project["show_titles"]),
-        # curtailment — scalar fraction for Phase 1; profile for Phase 3.
+        # curtailment — scalar fraction for Phase 2; per-step profile for Phase 3.
         "curtailment_frac": curtailment_frac,
         "curtailment_profile": typed.get("curtailment_profile"),
         # simulation

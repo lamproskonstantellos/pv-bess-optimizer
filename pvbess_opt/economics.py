@@ -145,27 +145,23 @@ def derive_asset_capacities(
     econ: dict[str, Any],
     params: dict[str, Any],
     ts: pd.DataFrame,
-    e_cap_kwh: float,
 ) -> dict[str, float]:
-    """Resolve the PV nameplate and BESS power that drive EUR/kW math.
+    """Resolve the PV nameplate and BESS sizing that drive EUR/kW math.
 
-    v0.6: ``pv_nameplate_kwp = 0`` and ``bess_power_kw = 0`` mean the
-    asset is not part of the project — values are passed through
-    exactly.  No inference from the timeseries or from
-    ``p_dis_max_kw``.
-
-    ``bess_kwh`` follows ``bess_kw``: zero when the BESS is absent,
-    the solver-reported energy capacity otherwise.  ``econ`` and
-    ``ts`` are kept in the signature for API symmetry with the rest
-    of the multi-year helpers.
+    v0.8: ``pv_nameplate_kwp``, ``bess_power_kw`` and
+    ``bess_capacity_kwh`` are workbook inputs (no inference, no
+    decision-variable read-back).  ``bess_kwh`` follows ``bess_kw``:
+    zero when the BESS is absent, otherwise the workbook value.
+    ``econ`` and ``ts`` are kept in the signature for API symmetry.
     """
     _ = econ, ts  # accepted for API symmetry
     pv_kwp = max(float(params.get("pv_nameplate_kwp", 0.0) or 0.0), 0.0)
     bess_kw = max(float(params.get("bess_power_kw", 0.0) or 0.0), 0.0)
+    bess_kwh = max(float(params.get("bess_capacity_kwh", 0.0) or 0.0), 0.0)
     return {
         "pv_kwp": pv_kwp,
         "bess_kw": bess_kw,
-        "bess_kwh": float(e_cap_kwh) if bess_kw > 0 else 0.0,
+        "bess_kwh": bess_kwh if bess_kw > 0 else 0.0,
     }
 
 

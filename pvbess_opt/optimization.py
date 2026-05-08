@@ -24,11 +24,12 @@ there is no load to "be green about".
 Tight big-M values
 ------------------
 
-Big-Ms are derived per-instance:
+Big-Ms are derived per-instance using the symmetric ``bess_power_kw``
+limit (v0.8 dropped the asymmetric p_charge_max / p_dis_max pair):
 
-* ``M_imp = (load_max + p_charge_max × dt_h) × 1.001``
+* ``M_imp = (load_max + bess_power_kw × dt_h) × 1.001``
 * ``M_exp = p_grid_export_max × dt_h × (1 − curtailment_frac) × 1.001``
-* ``M_charge = p_charge_max × dt_h × 1.001`` (only when grid-charging)
+* ``M_charge = bess_power_kw × dt_h × 1.001`` (only when grid-charging)
 * ``M_pv = max(pv_kwh) × 1.001`` (only when grid-charging)
 
 Audit invariants
@@ -183,9 +184,13 @@ def _resolve_curtailment_frac(value: Any) -> float:
 def derive_tight_big_m(
     params: dict[str, Any], ts: pd.DataFrame, *, dt_h: float, mode: str,
 ) -> dict[str, float]:
-    """Compute the tight big-M values."""
+    """Compute the tight big-M values.
+
+    Charge / discharge limits are symmetric in v0.8 — both come from
+    ``bess_power_kw``.
+    """
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
-    p_charge = float(params.get("p_charge_max_kw", 0.0) or 0.0)
+    p_bess = float(params.get("bess_power_kw", 0.0) or 0.0)
     curtail_frac = _resolve_curtailment_frac(params.get("curtailment_frac", 0.0))
 
     if mode == "vnb" and "load_kwh" in ts.columns:
@@ -195,9 +200,9 @@ def derive_tight_big_m(
     pv_max = float(ts["pv_kwh"].max()) if "pv_kwh" in ts.columns else 0.0
 
     return {
-        "M_imp": (load_max + p_charge * dt_h) * 1.001,
+        "M_imp": (load_max + p_bess * dt_h) * 1.001,
         "M_exp": p_export * dt_h * (1.0 - curtail_frac) * 1.001,
-        "M_charge": p_charge * dt_h * 1.001,
+        "M_charge": p_bess * dt_h * 1.001,
         "M_pv": pv_max * 1.001,
     }
 
@@ -301,8 +306,9 @@ def build_model(
 
     curtail_frac = _resolve_curtailment_frac(params.get("curtailment_frac", 0.0))
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
-    p_charge = float(params.get("p_charge_max_kw", 0.0) or 0.0)
-    p_dis = float(params.get("p_dis_max_kw", 0.0) or 0.0)
+    # v0.8: symmetric charge / discharge limit from bess_power_kw.
+    p_bess = float(params.get("bess_power_kw", 0.0) or 0.0)
+    bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
 
@@ -313,8 +319,12 @@ def build_model(
     m.T = pyo.RangeSet(0, n_steps - 1)
     m.mode = pyo.Param(initialize=mode, within=pyo.Any, mutable=False)
 
-    # --- Decision variables (kWh per step) -------------------------------
-    m.e_cap = pyo.Var(domain=pyo.NonNegativeReals)
+    # --- BESS energy capacity is a parameter, not a decision variable.
+    # v0.8 pins e_cap to bess_capacity_kwh (industry standard for
+    # sizing-as-input projects; matches Gridcog / Aurora Chronos /
+    # HOMER).  When BESS is absent the value is 0 and the SOC pins
+    # below take effect.
+    e_cap_param = bess_capacity_kwh if bess_present else 0.0
     m.soc = pyo.Var(m.T, domain=pyo.NonNegativeReals)
 
     m.pv_to_load = pyo.Var(m.T, domain=pyo.NonNegativeReals)
@@ -371,8 +381,8 @@ def build_model(
     if not bess_present:
         # BESS not part of the project — pin every BESS-related variable
         # to zero (incl. binary mode flags) and skip the BESS-only
-        # constraints further down.
-        m.E_CAP_ZERO = pyo.Constraint(expr=m.e_cap == 0.0)
+        # constraints further down.  e_cap_param is already 0 in this
+        # branch (see top of build_model); SOC pinned to 0.
         m.NOBESS_SOC = pyo.Constraint(
             m.T, rule=lambda m, t: m.soc[t] == 0,
         )
@@ -441,10 +451,12 @@ def build_model(
 
     m.SOC_DYN = pyo.Constraint(m.T, rule=soc_dynamics)
     m.SOC_MIN = pyo.Constraint(
-        m.T, rule=lambda m, t: m.soc[t] >= params["soc_min_frac"] * m.e_cap,
+        m.T,
+        rule=lambda m, t: m.soc[t] >= params["soc_min_frac"] * e_cap_param,
     )
     m.SOC_MAX = pyo.Constraint(
-        m.T, rule=lambda m, t: m.soc[t] <= params["soc_max_frac"] * m.e_cap,
+        m.T,
+        rule=lambda m, t: m.soc[t] <= params["soc_max_frac"] * e_cap_param,
     )
 
     if bess_present:
@@ -454,7 +466,7 @@ def build_model(
             )
         else:
             m.SOC_INIT = pyo.Constraint(
-                expr=m.soc[0] == params["initial_soc_frac"] * m.e_cap,
+                expr=m.soc[0] == params["initial_soc_frac"] * e_cap_param,
             )
 
         final_charge = eta_c * (
@@ -471,38 +483,34 @@ def build_model(
             m.SOC_TERM = pyo.Constraint(expr=final_soc_expr == m.soc[0])
         else:
             m.SOC_TERM_MIN = pyo.Constraint(
-                expr=final_soc_expr >= params["soc_min_frac"] * m.e_cap,
+                expr=final_soc_expr >= params["soc_min_frac"] * e_cap_param,
             )
             m.SOC_TERM_MAX = pyo.Constraint(
-                expr=final_soc_expr <= params["soc_max_frac"] * m.e_cap,
+                expr=final_soc_expr <= params["soc_max_frac"] * e_cap_param,
             )
 
-        # --- Charge / discharge power limits ---------------------------------
-        ch_lim = p_charge * dt_h
-        dis_lim = p_dis * dt_h
+        # --- Charge / discharge power limits (symmetric in v0.8) -----------
+        bess_step_lim = p_bess * dt_h
         m.CH_LIM = pyo.Constraint(
             m.T,
             rule=lambda m, t: (
-                m.pv_to_bess[t] + m.grid_to_bess[t] <= ch_lim * m.y_charge[t]
+                m.pv_to_bess[t] + m.grid_to_bess[t]
+                <= bess_step_lim * m.y_charge[t]
             ),
         )
         m.DIS_LIM = pyo.Constraint(
             m.T,
             rule=lambda m, t: (
-                m.bess_dis_load[t] + m.bess_dis_grid[t] <= dis_lim * m.y_dis[t]
+                m.bess_dis_load[t] + m.bess_dis_grid[t]
+                <= bess_step_lim * m.y_dis[t]
             ),
         )
-
-        if params.get("battery_hours") is not None:
-            m.EP = pyo.Constraint(
-                expr=m.e_cap <= p_dis * float(params["battery_hours"]),
-            )
 
         # --- Daily cycle limit ------------------------------------------------
         m.CYC = pyo.ConstraintList()
         for indices in day_to_idx.values():
             lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
-            m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * m.e_cap)
+            m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * e_cap_param)
 
     # --- Static curtailment cap (HARD constraint, BOTH modes) -------------
     # Section 8 of the VNB spec — regulatory grid-connection limit per
@@ -631,17 +639,15 @@ def model_to_dataframe(
     model: pyo.ConcreteModel,
     ts: pd.DataFrame,
     params: dict[str, Any],
-) -> tuple[pd.DataFrame, float]:
-    """Convert the solved model to a dispatch DataFrame.
-
-    Returns ``(res, e_cap_kwh)``.
-    """
+) -> pd.DataFrame:
+    """Convert the solved model to a dispatch DataFrame."""
     n_steps = len(ts)
     time_index = range(n_steps)
     dt_h = params["dt_minutes"] / 60.0
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
     curtail_frac = _resolve_curtailment_frac(params.get("curtailment_frac", 0.0))
     export_cap_kwh = p_export * dt_h * (1.0 - curtail_frac)
+    bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
     res = pd.DataFrame(index=ts.index)
     res["timestamp"] = ts["timestamp"].values
@@ -663,10 +669,9 @@ def model_to_dataframe(
     ]
     res["grid_export_cap_kwh"] = export_cap_kwh
 
-    e_cap_kwh = float(pyo.value(model.e_cap))
     res["soc_kwh"] = [pyo.value(model.soc[t]) for t in time_index]
-    if e_cap_kwh > 1e-9:
-        res["soc_pct"] = res["soc_kwh"] / e_cap_kwh * 100.0
+    if bess_capacity_kwh > 1e-9:
+        res["soc_pct"] = res["soc_kwh"] / bess_capacity_kwh * 100.0
     else:
         res["soc_pct"] = 0.0
 
@@ -677,7 +682,7 @@ def model_to_dataframe(
 
     numeric_cols = [c for c in res.columns if c != "timestamp"]
     res[numeric_cols] = res[numeric_cols].astype(float).round(4)
-    return res, e_cap_kwh
+    return res
 
 
 def run_scenario(
@@ -690,10 +695,13 @@ def run_scenario(
     tee: bool = False,
     initial_soc_kwh: float | None = None,
     terminal_soc_free: bool | None = None,
-) -> tuple[pd.DataFrame, float, str]:
+) -> tuple[pd.DataFrame, str]:
     """Build, solve and extract dispatch for a single scenario.
 
-    Returns ``(res, e_cap_kwh, resolved_solver_name)``.
+    Returns ``(res, resolved_solver_name)``.  In v0.8 ``e_cap`` is a
+    parameter pinned to ``params['bess_capacity_kwh']`` (industry
+    standard for sizing-as-input projects), so it is no longer a
+    decision variable and no longer returned.
     """
     model = build_model(
         params, ts,
@@ -704,8 +712,8 @@ def run_scenario(
         model, solver_name,
         mip_gap=mip_gap, time_limit_seconds=time_limit_seconds, tee=tee,
     )
-    res, e_cap_kwh = model_to_dataframe(solved, ts, params)
-    return res, e_cap_kwh, resolved
+    res = model_to_dataframe(solved, ts, params)
+    return res, resolved
 
 
 # ---------------------------------------------------------------------------

@@ -67,12 +67,12 @@ def test_read_economic_params_via_workbook(repo_input_xlsx):
 def test_derive_asset_capacities():
     params = {
         "dt_minutes": 60,
-        "p_dis_max_kw": 5000.0,
         "pv_nameplate_kwp": 4500.0,
         "bess_power_kw": 5000.0,
+        "bess_capacity_kwh": 20000.0,
     }
     ts = pd.DataFrame({"pv_kwh": [4500.0, 0.0]})
-    caps = derive_asset_capacities(_econ(), params, ts, e_cap_kwh=20000.0)
+    caps = derive_asset_capacities(_econ(), params, ts)
     assert caps["pv_kwp"] == 4500.0
     assert caps["bess_kw"] == 5000.0
     assert caps["bess_kwh"] == 20000.0

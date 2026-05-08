@@ -180,15 +180,11 @@ def rolling_horizon_dispatch(
         if forecast_seed is not None else None
     )
 
-    # Pin the BESS energy capacity after the first window so each window
-    # operates against the same physical asset (the optimizer can't size
-    # up "for free" mid-year).  Implemented by inflating ``soc_min_frac``
-    # on the params copy used in subsequent windows.
+    # v0.8: BESS energy capacity is pinned to params['bess_capacity_kwh']
+    # in build_model, so every window automatically uses the same asset
+    # — no need to plumb a fixed_e_cap_kwh through.
     initial_soc_kwh: float | None = None
-    fixed_e_cap_kwh: float | None = None
-
     committed_chunks: list[pd.DataFrame] = []
-    last_e_cap_kwh: float | None = None
 
     cursor = 0
     while cursor < n:
@@ -214,28 +210,13 @@ def rolling_horizon_dispatch(
         else:
             window_noisy = window_ts
 
-        # Pin the BESS energy capacity from the first window.  We pass
-        # the fixed e_cap by tightening the bounds: SOC_MIN ≥ soc_min_frac
-        # × e_cap and SOC_MAX ≤ soc_max_frac × e_cap, plus E_P (e_cap ≤
-        # p_dis × battery_hours).  Setting battery_hours = e_cap / p_dis
-        # forces the upper E/P bound to the desired value; combined with
-        # SOC_MIN/SOC_MAX, the optimizer has a single feasible e_cap.
-        win_params = dict(params)
-        if fixed_e_cap_kwh is not None and float(params.get("p_dis_max_kw", 0.0)) > 0.0:
-            win_params["battery_hours"] = (
-                fixed_e_cap_kwh / float(params["p_dis_max_kw"])
-            )
-
-        res_window, e_cap_kwh, _solver = run_scenario(
-            win_params, window_noisy,
+        res_window, _solver = run_scenario(
+            params, window_noisy,
             solver_name=solver_name,
             initial_soc_kwh=initial_soc_kwh,
             terminal_soc_free=True,  # do not close the cycle within a window
             **solve_kwargs,
         )
-        if fixed_e_cap_kwh is None:
-            fixed_e_cap_kwh = e_cap_kwh
-        last_e_cap_kwh = e_cap_kwh
 
         # Keep the first ``commit_hours`` slice of the solved dispatch.
         local_commit_n = commit_end_global - cursor
@@ -245,12 +226,7 @@ def rolling_horizon_dispatch(
         committed["timestamp"] = ts["timestamp"].iloc[cursor:commit_end_global].values
         committed_chunks.append(committed)
 
-        # SOC carryover: take the SOC at the end of the committed slice,
-        # which is the "starting SOC" for the next window.  When we
-        # commit n hours, the SOC at hour n (the start of hour n) is
-        # res_window["soc_kwh"].iloc[local_commit_n] if the window is
-        # longer; if not (last window) we walk one step from
-        # iloc[-1] using the dynamics.
+        # SOC carryover.
         if local_commit_n < len(res_window):
             initial_soc_kwh = float(res_window["soc_kwh"].iloc[local_commit_n])
         else:
@@ -268,9 +244,6 @@ def rolling_horizon_dispatch(
 
     full = pd.concat(committed_chunks, ignore_index=True)
 
-    # Re-evaluate against actuals if requested: replace the price columns
-    # carried in the noisy result with the original prices, then re-run
-    # ``add_economic_columns`` and ``compute_kpis``.
     if evaluate_with_actuals:
         if "dam_price_eur_per_mwh" in ts.columns:
             full["dam_price_eur_per_mwh"] = (
@@ -280,7 +253,6 @@ def rolling_horizon_dispatch(
             full["retail_price_eur_per_mwh"] = (
                 ts["retail_price_eur_per_mwh"].iloc[: len(full)].values
             )
-        # Drop any prior eur columns and recompute.
         price_cols = ("retail_price_eur_per_mwh", "dam_price_eur_per_mwh")
         eur_cols = [
             c for c in full.columns
@@ -290,9 +262,7 @@ def rolling_horizon_dispatch(
             full = full.drop(columns=eur_cols)
         full = add_economic_columns(full, params)
 
-    if last_e_cap_kwh is None:
-        last_e_cap_kwh = 0.0
-    kpis = compute_kpis(full, params, float(last_e_cap_kwh), verify_balance=False)
+    kpis = compute_kpis(full, params, verify_balance=False)
     return full, kpis
 
 
