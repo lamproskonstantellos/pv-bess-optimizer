@@ -1,6 +1,44 @@
 Changelog
 =========
 
+0.8.0 (2026-05-08)
+------------------
+
+Feature pack — see ``docs/v0.8_changelog.md`` for the full as-built
+diff and the five-line v0.7 → v0.8 migration summary.
+
+* **Workbook schema (breaking)** — the two-sheet ``project +
+  economic`` layout is replaced by seven themed sheets:
+  ``project``, ``pv``, ``bess``, ``economics``, ``simulation``,
+  ``curtailment_profile`` (plus the existing ``timeseries``).  The
+  loader reads legacy v0.7 workbooks with a single migration WARNING.
+* **BESS spec rationalisation** — ``battery_hours``,
+  ``p_charge_max_kw``, ``p_dis_max_kw`` are dropped.
+  ``bess_power_kw`` is the symmetric charge / discharge limit and
+  ``bess_capacity_kwh`` pins the energy capacity (industry standard
+  for sizing-as-input projects).  ``e_cap`` is no longer a decision
+  variable; ``run_scenario`` returns
+  ``(res, resolved_solver_name)`` and the KPI key
+  ``e_cap_opt_mwh`` is renamed to ``e_cap_mwh``.
+* **Hourly curtailment cap profile** — the v0.7 scalar
+  ``curtailment_pct`` becomes a 24-row hour-of-day profile, optionally
+  with one column per calendar month.  Missing sheet ⇒ flat 27 %.
+  Implemented in :mod:`pvbess_opt.curtailment`.
+* **DEVEX (NEW)** — per-asset ``devex_pv_eur_per_kw`` (default 60
+  EUR/kWp) and ``devex_bess_eur_per_kw`` (default 30 EUR/kW) replace
+  ``capex_licenses_eur_per_kw``.  Surfaces as a ``devex_eur`` column
+  on ``cashflow_yearly`` and as ``total_devex_eur`` /
+  ``total_capex_devex_eur`` financial KPIs.
+* **Unavailability (NEW)** — ``unavailability_pct`` (default 1 %)
+  applies a post-solve derate to PV generation, BESS discharge, and
+  revenue.  Implemented in :mod:`pvbess_opt.availability`.
+* **Aggregator fee (NEW)** — ``aggregator_fee_pct_revenue`` (default
+  10 %, Gridcog convention) reduces gross revenue.
+* **IRR tornado redesign** — dumbbell layout with above-line endpoint
+  labels (no more inline numbers on the central Base line).
+* **LCOE/LCOS panel redesign** — single comparison panel showing the
+  project sensitivity range overlaid on Lazard 2024 benchmark bands.
+
 0.6.0 (2026-05-07)
 ------------------
 

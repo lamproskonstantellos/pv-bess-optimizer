@@ -1,7 +1,7 @@
 # PV & BESS Optimizer
 
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.7.0-blue)](pvbess_opt/__init__.py)
+[![version](https://img.shields.io/badge/version-0.8.0-blue)](pvbess_opt/__init__.py)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
@@ -42,7 +42,7 @@ pv-bess-optimizer/
 │   ├── dev.txt                   # Linters + pytest + base + solvers
 │   └── docs.txt                  # Sphinx + RTD theme
 ├── inputs/
-│   └── input.xlsx                # Three-sheet workbook (timeseries + project + economic)
+│   └── input.xlsx                # Seven-sheet workbook (v0.8 schema)
 ├── scripts/
 │   ├── build_input_xlsx.py       # Regenerate inputs/input.xlsx
 │   └── resample_timeseries.py    # Mixed-resolution timeseries harmoniser
@@ -54,16 +54,18 @@ pv-bess-optimizer/
     ├── io.py                     # Excel I/O, output workbook, layout
     ├── optimization.py           # Pyomo MILP, solver dispatch, 9 audit invariants
     ├── kpis.py                   # KPIs, green attribution, energy verification
-    ├── economics.py              # Cashflow + NPV/IRR/ROI/BCR
+    ├── economics.py              # Cashflow + NPV/IRR/ROI/BCR + DEVEX + fee
+    ├── availability.py           # Post-solve unavailability derate (v0.8)
+    ├── curtailment.py            # Hour-of-day cap profile expander (v0.8)
     ├── lifetime.py               # Multi-year analytical hourly dispatch projection
     ├── sensitivity.py            # One-at-a-time tornado sensitivity
     ├── rolling_horizon.py        # Rolling-horizon dispatch + Monte Carlo
     └── plotting/                 # IEEE-styled PDFs (energy + financial + uncertainty)
 ```
 
-The package keeps a flat module layout (≤ 10 top-level modules).  Once the
-count crosses 12 we will subpackage by responsibility (`solve/`, `finance/`,
-`uncertainty/`, `plotting/`).  See `CONTRIBUTING.md`.
+The package keeps a flat module layout (≤ 12 top-level modules; see
+`CONTRIBUTING.md`).  Once the count crosses 12 we will subpackage by
+responsibility (`solve/`, `finance/`, `uncertainty/`, `plotting/`).
 
 ## Quick start
 
@@ -86,36 +88,47 @@ A run produces, under `results/<input>_<scenario>_<timestamp>/`:
 06_uncertainty_plots/ inputs_forecast_band, inputs_seasonal_boxplot, dam_intraday_heatmap
 ```
 
-## Workbook schema (v0.6)
+## Workbook schema (v0.8)
 
-Three sheets:
+Seven themed sheets:
 
-* **`timeseries`** — per-step data with lowercase snake_case column
-  names: `timestamp`, `load_kwh` (required for `vnb`, optional for
-  `merchant`), `pv_kwh`, `dam_price_eur_per_mwh`, optional
-  `retail_price_eur_per_mwh`.  The case-study workbook ships at
-  15-minute cadence (35 040 rows for one year) per
+* **`timeseries`** — per-step data: `timestamp`, `load_kwh` (required
+  for `vnb`, optional for `merchant`), `pv_kwh`,
+  `dam_price_eur_per_mwh`, optional `retail_price_eur_per_mwh`.
+  Case-study fixture is 35 040 rows at 15-minute cadence per
   MD YPEN/DAPEEK/93976/2772/2024; the MILP timestep is auto-detected.
-* **`project`** — three logical groups (separator rows allowed):
-    * `# system_sizing` — `pv_nameplate_kwp`, `bess_power_kw`,
-      `bess_capacity_kwh`, `battery_hours`, `p_charge_max_kw`,
-      `p_dis_max_kw`, `p_grid_export_max_kw`.
-    * `# bess_operation` — `efficiency_charge`, `efficiency_discharge`,
-      `soc_min_frac`, `soc_max_frac`, `initial_soc_frac`,
-      `terminal_soc_equal`, `max_cycles_per_day`.
-    * `# regulatory` — `mode`, `retail_tariff_eur_per_mwh`,
-      `curtailment_pct`, `allow_bess_grid_charging`, `settlement_minutes`.
-* **`economic`** — eight logical groups: `# horizon`, `# capex`,
-  `# opex`, `# degradation_replacement`, `# sensitivity`,
-  `# uncertainty` (new), `# output`.  The output group's plot scope
-  flags share the same vocabulary in v0.6:
-  `plot_daily_scope` / `plot_monthly_scope` / `plot_yearly_scope` ∈
+* **`project`** — high-level run config:
+  `project_lifecycle_years`, `project_start_year`, `mode`,
+  `settlement_minutes`, `p_grid_export_max_kw`,
+  `retail_tariff_eur_per_mwh`, `allow_bess_grid_charging`,
+  `unavailability_pct`, `currency_format`, `show_titles`.
+* **`pv`** — `pv_nameplate_kwp`, `specific_production_kwh_per_kwp`,
+  `pv_degradation_year1_pct`, `pv_degradation_annual_pct`,
+  `capex_pv_eur_per_kw`, `devex_pv_eur_per_kw`, `opex_pv_eur_per_kwp`.
+* **`bess`** — `bess_power_kw` (symmetric charge / discharge limit),
+  `bess_capacity_kwh` (pinned), efficiency / SOC bounds / cycle cap,
+  `capex_bess_eur_per_kw`, `devex_bess_eur_per_kw`,
+  `opex_bess_eur_per_kw`, `bess_replacement_year`,
+  `bess_replacement_cost_pct`, `bess_degradation_annual_pct`.
+* **`economics`** — `discount_rate_pct`, `opex_inflation_pct`,
+  `revenue_inflation_pct`, `aggregator_fee_pct_revenue`,
+  `sensitivity_*` (5 keys).
+* **`simulation`** — `uncertainty_*` (11 keys), `plot_daily_scope` /
+  `plot_monthly_scope` / `plot_yearly_scope` ∈
   `none | year1_only | all`.
+* **`curtailment_profile`** — 24 hourly rows × 1 col
+  (`curtailment_pct`) for a constant-by-month cap, or 24 rows × 12
+  cols (`curtailment_pct_jan` … `curtailment_pct_dec`) for a per-month
+  hour-of-day cap.
+
+Setting `pv_nameplate_kwp = 0` makes the project BESS-only;
+`bess_power_kw = 0` makes it PV-only; both > 0 ⇒ hybrid.  Setting both
+to zero raises `ValueError` from `read_inputs`.
 
 See `docs/source/users.guide/inputs.rst` for the full reference,
-`docs/v0.6_changelog.md` for the v0.5 → v0.6 migration notes, and
+`docs/v0.8_changelog.md` for the v0.7 → v0.8 migration notes, and
 `docs/technical.documentation/uncertainty_modelling.md` plus
-`docs/technical.documentation/asset_modes.md` for the new groups.
+`docs/technical.documentation/asset_modes.md`.
 
 ## CLI
 
@@ -179,34 +192,40 @@ Forecast-noise sigmas (defensible from literature):
 
 See `docs/source/users.guide/rolling_horizon.rst` for the full guide.
 
-## What's new in v0.6
+## What's new in v0.8
 
-* **Three asset modes** — set `pv_nameplate_kwp = 0` for BESS-only,
-  `bess_power_kw = 0` for PV-only, both > 0 for hybrid.  Setting both
-  to zero raises `ValueError` from `read_inputs`.
-* **Year-0 / Year-1 calendar split** — a 20-year run with
-  `project_start_year = 2026` produces 21 yearly cashflow rows: Year 0
-  (CAPEX) at calendar 2025; Years 1..20 at 2026..2045.  The new
-  `capex_year` financial KPI surfaces 2025 explicitly.
-* **Workbook-driven uncertainty** — the new `# uncertainty` group on
-  the economic sheet drives rolling-horizon Monte Carlo.  Set
-  `uncertainty_compare_sources = TRUE` to run four ensembles
-  (DAM-only, PV-only, Load-only, All-combined) and emit a foresight-
-  gap comparison plot plus four P50 KPIs.
-* **Unified plot scopes** — `plot_daily_scope`, `plot_monthly_scope`,
-  `plot_yearly_scope` all accept the same `none | year1_only | all`
-  vocabulary.  Selecting `all` for the daily resolution warns about
-  the ~9 000 PDFs a 25-year run would emit.
-* **Merchant-mode plots** — dispatch / SOC / revenue trio per
-  resolution replaces the empty supply / surplus / combined plots
-  that the load-pinned merchant runs used to produce.
-* **New financial KPIs** — `lcoe_eur_per_mwh`, `lcos_eur_per_mwh`,
-  `pv_capacity_factor`, `bess_lifetime_cycles`, plus five Year-1
-  revenue-breakdown keys.  Three new lifecycle plots:
-  `revenue_stack_yearly`, `lifetime_cycles`, `lcoe_lcos_summary`.
+* **Seven-sheet workbook schema (breaking)** — `project` and
+  `economic` split into seven themed sheets: `project`, `pv`, `bess`,
+  `economics`, `simulation`, `curtailment_profile`, plus the existing
+  `timeseries` sheet.
+* **BESS spec rationalisation** — `battery_hours`, `p_charge_max_kw`
+  and `p_dis_max_kw` are dropped.  `bess_power_kw` is the symmetric
+  charge / discharge limit and `bess_capacity_kwh` pins the energy
+  capacity (industry standard for sizing-as-input projects).  `e_cap`
+  is no longer a decision variable; `run_scenario` returns
+  `(res, resolved_solver_name)`.
+* **Hourly curtailment cap profile** — the old scalar
+  `curtailment_pct` becomes a 24-row hour-of-day profile, optionally
+  with one column per calendar month.  Missing sheet ⇒ flat 27 %.
+* **DEVEX (NEW)** — per-asset `devex_pv_eur_per_kw` and
+  `devex_bess_eur_per_kw` replace the v0.7 `capex_licenses_eur_per_kw`.
+  Paid in Year 0 alongside CAPEX, surfaces as a `devex_eur` column on
+  `cashflow_yearly` and as `total_devex_eur` /
+  `total_capex_devex_eur` financial KPIs.
+* **Unavailability (NEW)** — `unavailability_pct` (default 1 %)
+  applies a post-solve derate to PV generation, BESS discharge, and
+  revenue.  Implemented in `pvbess_opt.availability`.
+* **Aggregator fee (NEW)** — `aggregator_fee_pct_revenue` (default
+  10 %, Gridcog convention) reduces gross revenue and shows up as a
+  signed `aggregator_fee_eur` column on `cashflow_yearly`.
+* **Plot redesigns** — IRR tornado switches to a dumbbell layout for
+  unambiguous endpoint labels; LCOE/LCOS summary becomes a single
+  panel with the project sensitivity range overlaid on the Lazard
+  2024 industry benchmark band (LCOE 30–50 EUR/MWh; LCOS
+  100–250 EUR/MWh).
 
-See `docs/v0.6_changelog.md` for the full list of breaking changes
-and the five-line v0.5 → v0.6 migration summary.
+See `docs/v0.8_changelog.md` for the full breaking-changes contract
+and the five-line v0.7 → v0.8 migration summary.
 
 ## Documentation
 
