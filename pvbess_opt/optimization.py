@@ -181,17 +181,38 @@ def _resolve_curtailment_frac(value: Any) -> float:
     return max(0.0, min(1.0, raw))
 
 
+def _resolve_curtailment_per_step(
+    params: dict[str, Any], ts: pd.DataFrame,
+) -> np.ndarray:
+    """Return a per-step curtailment fraction array aligned with ``ts``.
+
+    Falls back to the scalar ``curtailment_frac`` (Phase-1 backward-
+    compat) when ``curtailment_profile`` is missing.
+    """
+    from .curtailment import build_per_step_curtailment_frac
+
+    profile = params.get("curtailment_profile")
+    if profile is not None and "timestamp" in ts.columns:
+        return build_per_step_curtailment_frac(ts["timestamp"], profile)
+    scalar = _resolve_curtailment_frac(params.get("curtailment_frac", 0.0))
+    return np.full(len(ts), scalar, dtype=float)
+
+
 def derive_tight_big_m(
     params: dict[str, Any], ts: pd.DataFrame, *, dt_h: float, mode: str,
 ) -> dict[str, float]:
     """Compute the tight big-M values.
 
     Charge / discharge limits are symmetric in v0.8 — both come from
-    ``bess_power_kw``.
+    ``bess_power_kw``.  The export big-M uses the worst-case (smallest)
+    curtailment cap across the timeseries — a single global cap that
+    over-bounds the per-step constraint.
     """
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
     p_bess = float(params.get("bess_power_kw", 0.0) or 0.0)
-    curtail_frac = _resolve_curtailment_frac(params.get("curtailment_frac", 0.0))
+    per_step_curt = _resolve_curtailment_per_step(params, ts)
+    # Worst-case (largest export-cap) → smallest curtailment fraction.
+    tightest_curt_frac = float(per_step_curt.min()) if len(per_step_curt) else 0.0
 
     if mode == "vnb" and "load_kwh" in ts.columns:
         load_max = float(ts["load_kwh"].max())
@@ -201,7 +222,7 @@ def derive_tight_big_m(
 
     return {
         "M_imp": (load_max + p_bess * dt_h) * 1.001,
-        "M_exp": p_export * dt_h * (1.0 - curtail_frac) * 1.001,
+        "M_exp": p_export * dt_h * (1.0 - tightest_curt_frac) * 1.001,
         "M_charge": p_bess * dt_h * 1.001,
         "M_pv": pv_max * 1.001,
     }
@@ -304,7 +325,7 @@ def build_model(
     else:
         retail_price = {t: retail_default for t in time_index}
 
-    curtail_frac = _resolve_curtailment_frac(params.get("curtailment_frac", 0.0))
+    curtail_per_step = _resolve_curtailment_per_step(params, ts)
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
     # v0.8: symmetric charge / discharge limit from bess_power_kw.
     p_bess = float(params.get("bess_power_kw", 0.0) or 0.0)
@@ -312,7 +333,11 @@ def build_model(
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
 
-    export_cap_kwh = p_export * dt_h * (1.0 - curtail_frac)
+    # Per-step export cap derived from the curtailment profile (Phase 3).
+    export_cap_kwh_per_step = {
+        t: float(p_export * dt_h * (1.0 - curtail_per_step[t]))
+        for t in time_index
+    }
     big_m = derive_tight_big_m(params, ts, dt_h=dt_h, mode=mode)
 
     m = pyo.ConcreteModel()
@@ -512,11 +537,14 @@ def build_model(
             lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
             m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * e_cap_param)
 
-    # --- Static curtailment cap (HARD constraint, BOTH modes) -------------
+    # --- Hourly curtailment cap (HARD constraint, BOTH modes) -------------
     # Section 8 of the VNB spec — regulatory grid-connection limit per
     # MD YPEN/DAPEEK/53563/1556/2023.  Applies in vnb AND merchant modes.
+    # v0.8: cap may vary by hour-of-day (and optionally by month) via the
+    # ``curtailment_profile`` workbook sheet.
     m.EXPORT_CAP = pyo.Constraint(
-        m.T, rule=lambda m, t: m.grid_export_total[t] <= export_cap_kwh,
+        m.T,
+        rule=lambda m, t: m.grid_export_total[t] <= export_cap_kwh_per_step[t],
     )
 
     # --- vnb-only constraints --------------------------------------------
@@ -645,8 +673,10 @@ def model_to_dataframe(
     time_index = range(n_steps)
     dt_h = params["dt_minutes"] / 60.0
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
-    curtail_frac = _resolve_curtailment_frac(params.get("curtailment_frac", 0.0))
-    export_cap_kwh = p_export * dt_h * (1.0 - curtail_frac)
+    curtail_per_step = _resolve_curtailment_per_step(params, ts)
+    export_cap_kwh_per_step = (
+        p_export * dt_h * (1.0 - curtail_per_step)
+    )
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
     res = pd.DataFrame(index=ts.index)
@@ -667,7 +697,7 @@ def model_to_dataframe(
     res["grid_export_total_kwh"] = [
         pyo.value(model.grid_export_total[t]) for t in time_index
     ]
-    res["grid_export_cap_kwh"] = export_cap_kwh
+    res["grid_export_cap_kwh"] = export_cap_kwh_per_step
 
     res["soc_kwh"] = [pyo.value(model.soc[t]) for t in time_index]
     if bess_capacity_kwh > 1e-9:
@@ -812,8 +842,11 @@ def verify_dispatch_invariants(
         inv_6 = 0.0
 
     # Invariant 7 — curtail behavior, checked in BOTH modes per spec:
-    # cap not binding ⇒ curtail = 0.
-    cap = float(res["grid_export_cap_kwh"].iloc[0]) if "grid_export_cap_kwh" in res.columns else 0.0
+    # cap not binding ⇒ curtail = 0.  v0.8: cap is per-step.
+    if "grid_export_cap_kwh" in res.columns:
+        cap = res["grid_export_cap_kwh"].to_numpy(dtype=float)
+    else:
+        cap = np.zeros_like(pv_to_grid)
     export = pv_to_grid + bess_dis_grid
     cap_residual = cap - export
     not_binding_violation = float(
