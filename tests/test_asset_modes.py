@@ -110,12 +110,14 @@ def test_read_inputs_raises_when_both_assets_zero(tmp_path):
 
 
 def _make_ts(n: int = 48, *, with_load: bool = True) -> pd.DataFrame:
+    """Short fixture timeseries; PV is strictly zero outside daylight."""
     rng = np.random.default_rng(0)
     timestamps = pd.date_range("2026-06-01 00:00", periods=n, freq="h")
     h = np.arange(n).astype(float) % 24
-    pv = 4000.0 * np.where((h >= 6) & (h <= 18),
-                            np.sin(np.pi * (h - 6) / 12.0), 0.0)
-    pv = np.maximum(pv + rng.normal(0, 30, n), 0.0)
+    daylight = (h >= 6) & (h <= 18)
+    pv_clean = 4000.0 * np.where(daylight, np.sin(np.pi * (h - 6) / 12.0), 0.0)
+    pv_noise = np.where(daylight, rng.normal(1.0, 0.05, n), 1.0)
+    pv = np.where(daylight, np.maximum(pv_clean * pv_noise, 0.0), 0.0)
     dam = 100.0 - 50.0 * np.sin(np.pi * (h - 6) / 12.0) + rng.normal(0, 5, n)
     df = {"timestamp": timestamps, "pv_kwh": pv, "dam_price_eur_per_mwh": dam}
     if with_load:
