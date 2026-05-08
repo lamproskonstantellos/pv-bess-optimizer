@@ -121,16 +121,19 @@ def calculate_irr(
 
 
 def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
-    """Read the ``economic`` sheet via the typed loader.
+    """Read the project / pv / bess / economics / simulation sheets.
 
-    The sheet is mandatory in the v0.5 schema; this is a thin
-    convenience wrapper around :func:`pvbess_opt.io.read_workbook` that
-    returns just the economic dict (with no ``enabled`` flag — the sheet
-    is always present and active).
+    Returns a single flat dict combining every key from the five
+    parameter sheets — the financial helpers downstream expect a flat
+    mapping (e.g. ``econ['discount_rate_pct']``,
+    ``econ['capex_pv_eur_per_kw']``).
     """
     from .io import read_workbook
     typed = read_workbook(xlsx_path)
-    return dict(typed["economic"])
+    merged: dict[str, Any] = {}
+    for section in ("project", "pv", "bess", "economics", "simulation"):
+        merged.update(typed[section])
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -204,8 +207,11 @@ def build_yearly_cashflow(
 
     capex_pv_y0 = -float(econ["capex_pv_eur_per_kw"]) * pv_kwp
     capex_bess_y0 = -float(econ["capex_bess_eur_per_kw"]) * bess_kw
-    capex_lic_y0 = -float(econ["capex_licenses_eur_per_kw"]) * (pv_kwp + bess_kw)
-    capex_total_y0 = capex_pv_y0 + capex_bess_y0 + capex_lic_y0
+    devex_pv_y0 = -float(econ.get("devex_pv_eur_per_kw", 0.0) or 0.0) * pv_kwp
+    devex_bess_y0 = -float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
+    capex_total_y0 = (
+        capex_pv_y0 + capex_bess_y0 + devex_pv_y0 + devex_bess_y0
+    )
 
     revenue_1 = float(year1_kpis.get("profit_total_eur", 0.0))
     opex_pv_1 = float(econ["opex_pv_eur_per_kwp"]) * pv_kwp
@@ -557,13 +563,10 @@ def compute_financial_kpis(
             bess_kw > 0.0 and bess_kwh > 0.0
             and "bess_discharge_mwh" in lifetime_yearly.columns
         ):
-            # BESS-attributable CAPEX share: BESS power-block + share of
-            # licensing CAPEX proportional to bess_kw / (pv_kwp + bess_kw).
+            # BESS-attributable CAPEX share: BESS power-block + BESS DEVEX.
             bess_capex_y0 = float(econ.get("capex_bess_eur_per_kw", 0.0)) * bess_kw
-            denom_kw = pv_kwp + bess_kw
-            bess_lic_share = (
-                float(econ.get("capex_licenses_eur_per_kw", 0.0)) * bess_kw
-                * (bess_kw / denom_kw if denom_kw > 0 else 1.0)
+            bess_devex_y0 = (
+                float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
             )
             bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
             bess_repl_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
@@ -571,7 +574,7 @@ def compute_financial_kpis(
             disc_y0 = float(
                 df.loc[df[project_year_col] == 0, "discount_factor"].iloc[0]
             ) if (df[project_year_col] == 0).any() else 1.0
-            disc_bess_capex = (bess_capex_y0 + bess_lic_share) * disc_y0
+            disc_bess_capex = (bess_capex_y0 + bess_devex_y0) * disc_y0
 
             if bess_repl_year > 0 and (
                 df[project_year_col] == bess_repl_year

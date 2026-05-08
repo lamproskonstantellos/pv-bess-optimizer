@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvbess_opt.io import ECON_DEFAULTS
+from pvbess_opt.io import SIMULATION_SHEET_DEFAULTS
 from pvbess_opt.rolling_horizon import (
     add_forecast_noise,
     monte_carlo_rolling,
@@ -25,7 +25,8 @@ from pvbess_opt.rolling_horizon import (
 
 def _highs_available() -> bool:
     try:
-        import highspy  # noqa: F401
+        import importlib
+        importlib.import_module("highspy")
     except ImportError:
         return False
     return True
@@ -38,17 +39,17 @@ def _highs_available() -> bool:
 
 def test_uncertainty_defaults_reproduce_v05_behaviour():
     """Default config must NOT enable rolling-horizon."""
-    assert ECON_DEFAULTS["uncertainty_enabled"] is False
-    assert ECON_DEFAULTS["uncertainty_compare_sources"] is False
-    assert ECON_DEFAULTS["uncertainty_n_seeds"] == 30
-    assert ECON_DEFAULTS["uncertainty_window_hours"] == 48
-    assert ECON_DEFAULTS["uncertainty_commit_hours"] == 24
-    assert ECON_DEFAULTS["uncertainty_dam_enabled"] is True
-    assert ECON_DEFAULTS["uncertainty_pv_enabled"] is True
-    assert ECON_DEFAULTS["uncertainty_load_enabled"] is True
-    assert ECON_DEFAULTS["uncertainty_sigma_dam"] == pytest.approx(0.20)
-    assert ECON_DEFAULTS["uncertainty_sigma_pv"] == pytest.approx(0.12)
-    assert ECON_DEFAULTS["uncertainty_sigma_load"] == pytest.approx(0.05)
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_enabled"] is False
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_compare_sources"] is False
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_n_seeds"] == 30
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_window_hours"] == 48
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_commit_hours"] == 24
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_dam_enabled"] is True
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_pv_enabled"] is True
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_load_enabled"] is True
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_sigma_dam"] == pytest.approx(0.20)
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_sigma_pv"] == pytest.approx(0.12)
+    assert SIMULATION_SHEET_DEFAULTS["uncertainty_sigma_load"] == pytest.approx(0.05)
 
 
 # ---------------------------------------------------------------------------

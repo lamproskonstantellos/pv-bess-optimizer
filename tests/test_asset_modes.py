@@ -15,16 +15,17 @@ through exactly.
 
 from __future__ import annotations
 
-import logging
-
 import numpy as np
 import pandas as pd
 import pytest
 
 from pvbess_opt.economics import derive_asset_capacities
 from pvbess_opt.io import (
-    ECON_DEFAULTS,
-    PROJECT_DEFAULTS,
+    BESS_SHEET_DEFAULTS,
+    ECONOMICS_SHEET_DEFAULTS,
+    PROJECT_SHEET_DEFAULTS,
+    PV_SHEET_DEFAULTS,
+    SIMULATION_SHEET_DEFAULTS,
     read_inputs,
     write_workbook,
 )
@@ -33,7 +34,8 @@ from pvbess_opt.optimization import run_scenario
 
 def _highs_available() -> bool:
     try:
-        import highspy  # noqa: F401
+        import importlib
+        importlib.import_module("highspy")
     except ImportError:
         return False
     return True
@@ -75,6 +77,7 @@ def test_derive_asset_capacities_bess_kwh_zero_when_absent():
 
 def test_read_inputs_raises_when_both_assets_zero(tmp_path):
     """Both pv and bess at 0 → ValueError."""
+    import numpy as np
     typed = {
         "ts": pd.DataFrame({
             "timestamp": pd.date_range("2026-01-01", periods=24, freq="h"),
@@ -82,16 +85,14 @@ def test_read_inputs_raises_when_both_assets_zero(tmp_path):
             "load_kwh": [100.0] * 24,
             "dam_price_eur_per_mwh": [80.0] * 24,
         }),
-        "project": {
-            "system_sizing": dict(
-                PROJECT_DEFAULTS["system_sizing"],
-                pv_nameplate_kwp=0.0,
-                bess_power_kw=0.0,
-            ),
-            "bess_operation": dict(PROJECT_DEFAULTS["bess_operation"]),
-            "regulatory": dict(PROJECT_DEFAULTS["regulatory"]),
-        },
-        "economic": dict(ECON_DEFAULTS),
+        "project": dict(PROJECT_SHEET_DEFAULTS),
+        "pv": dict(PV_SHEET_DEFAULTS, pv_nameplate_kwp=0.0),
+        "bess": dict(
+            BESS_SHEET_DEFAULTS, bess_power_kw=0.0, bess_capacity_kwh=0.0,
+        ),
+        "economics": dict(ECONOMICS_SHEET_DEFAULTS),
+        "simulation": dict(SIMULATION_SHEET_DEFAULTS),
+        "curtailment_profile": np.full(24, 27.0, dtype=float),
     }
     dst = tmp_path / "no_assets.xlsx"
     write_workbook(typed, dst)

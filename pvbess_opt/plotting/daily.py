@@ -28,12 +28,10 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 from ..config import XTICK_ROT
 from .helpers import (
-    bar_stacked_bins,
     fill_stacked_above,
     line_if_nonzero,
     pad_right_to_end,

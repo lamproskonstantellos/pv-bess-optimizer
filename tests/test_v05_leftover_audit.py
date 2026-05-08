@@ -46,7 +46,7 @@ FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
         "pvbess_opt/io.py",
         "docs/v0.6_changelog.md",
         "tests/test_io.py",
-        "tests/test_io_v06_schema.py",
+        "tests/test_io_v08_schema.py",
         "tests/test_plot_scopes.py",
         "tests/test_v05_leftover_audit.py",
     )
@@ -82,7 +82,7 @@ REQUIRED_FILES: tuple[str, ...] = (
     "docs/technical.documentation/uncertainty_modelling.md",
     "docs/technical.documentation/asset_modes.md",
     "pvbess_opt/plotting/lifecycle.py",
-    "tests/test_io_v06_schema.py",
+    "tests/test_io_v08_schema.py",
     "tests/test_year0_convention.py",
     "tests/test_asset_modes.py",
     "tests/test_uncertainty_config.py",
@@ -201,23 +201,24 @@ def test_repo_input_xlsx_round_trips_through_v06_loader_cleanly(caplog):
     )
 
 
-def test_inputs_xlsx_uses_v06_schema():
-    """inputs/input.xlsx must expose the v0.6 group structure."""
+def test_inputs_xlsx_uses_v08_schema():
+    """inputs/input.xlsx must expose the v0.8 seven-sheet typed dict."""
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
-    assert set(typed["project"]) == {
-        "system_sizing", "bess_operation", "regulatory",
-    }
-    assert "uncertainty_enabled" in typed["economic"]
-    assert "plot_daily_scope" in typed["economic"]
+    for section in ("project", "pv", "bess", "economics", "simulation"):
+        assert section in typed
+    assert "uncertainty_enabled" in typed["simulation"]
+    assert "plot_daily_scope" in typed["simulation"]
     # No legacy keys leak through.
-    assert "plot_daily_year1" not in typed["economic"]
-    for grp in typed["project"].values():
+    for section in ("project", "pv", "bess", "economics", "simulation"):
         for legacy in (
+            "plot_daily_year1",
             "weight_curtail_tiebreak", "weight_cycles_term",
             "solver_mip_gap", "solver_time_limit_seconds",
+            "capex_licenses_eur_per_kw",
+            "battery_hours", "p_charge_max_kw", "p_dis_max_kw",
         ):
-            assert legacy not in grp
+            assert legacy not in typed[section]
 
 
 # ---------------------------------------------------------------------------

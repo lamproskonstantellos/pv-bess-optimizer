@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from pvbess_opt.plotting import (
     plot_daily_dispatch,

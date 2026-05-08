@@ -254,7 +254,7 @@ def _draw_panel(
     high = base_value * high_factor
     ax.barh([0], [high - low], left=low, height=0.4,
             color="#90CAF9", edgecolor="black", linewidth=0.6,
-            label=f"±CAPEX·±OPEX range")
+            label="±CAPEX·±OPEX range")
     ax.scatter([base_value], [0], color="#0D47A1", s=80, zorder=5,
                label="Base")
     ax.set_yticks([])
