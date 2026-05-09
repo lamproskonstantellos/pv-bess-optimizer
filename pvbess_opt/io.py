@@ -423,6 +423,11 @@ def _build_kv_sheet(
     return pd.DataFrame(out, columns=["key", "value", "unit", "notes"])
 
 
+def _hour_interval_labels() -> list[str]:
+    """24 strings of the form ``HH:00-HH:00`` covering 00:00 → 24:00."""
+    return [f"{h:02d}:00-{(h + 1):02d}:00" for h in range(24)]
+
+
 def _build_curtailment_sheet(profile: Any) -> pd.DataFrame:
     """Render the ``curtailment_profile`` sheet from a 1-D or 2-D array.
 
@@ -430,8 +435,14 @@ def _build_curtailment_sheet(profile: Any) -> pd.DataFrame:
     * shape ``(24,)`` → single ``curtailment_pct`` column.
     * shape ``(24, 12)`` → per-month columns (``curtailment_pct_jan`` ..
       ``curtailment_pct_dec``).
+
+    The ``hour_of_day`` column is rendered as **24-hour interval
+    strings** (``"00:00-01:00"`` … ``"23:00-24:00"``) for human
+    readability.  The loader (:func:`_parse_curtailment_profile_sheet`)
+    accepts both this string format and the legacy integer format.
     """
     arr = np.asarray(profile, dtype=float)
+    hour_labels = _hour_interval_labels()
     if arr.ndim == 1:
         if arr.shape[0] != 24:
             raise ValueError(
@@ -439,7 +450,7 @@ def _build_curtailment_sheet(profile: Any) -> pd.DataFrame:
                 f"(got {arr.shape[0]})."
             )
         return pd.DataFrame({
-            "hour_of_day": np.arange(24, dtype=int),
+            "hour_of_day": hour_labels,
             "curtailment_pct": arr,
         })
     if arr.ndim == 2:
@@ -448,7 +459,7 @@ def _build_curtailment_sheet(profile: Any) -> pd.DataFrame:
                 "curtailment_profile (2-D) must be shape (24, 12) "
                 f"(got {arr.shape})."
             )
-        cols: dict[str, Any] = {"hour_of_day": np.arange(24, dtype=int)}
+        cols: dict[str, Any] = {"hour_of_day": hour_labels}
         for m_idx, m_name in enumerate(_MONTH_TOKENS):
             cols[f"curtailment_pct_{m_name}"] = arr[:, m_idx]
         return pd.DataFrame(cols)
@@ -691,6 +702,41 @@ def _parse_kv_sheet(
 # ---------------------------------------------------------------------------
 
 
+import re as _re  # noqa: E402
+
+_HOUR_PARSE_RE = _re.compile(r"^\s*(\d{1,2})")
+
+
+def _parse_hour_of_day(value: Any) -> int:
+    """Coerce an ``hour_of_day`` cell into an integer 0..23.
+
+    Accepts the legacy integer format and the v0.8 24-hour interval
+    string format (``"00:00-01:00"`` … ``"23:00-24:00"``).  The
+    parser is forgiving: any leading 1-2 digit run is taken as the
+    start hour.  Out-of-range values raise ``ValueError``.
+    """
+    if isinstance(value, (int, np.integer)):
+        h = int(value)
+    elif isinstance(value, (float, np.floating)):
+        if np.isnan(value):
+            raise ValueError("hour_of_day cell is NaN")
+        h = int(value)
+    else:
+        s = str(value).strip()
+        m = _HOUR_PARSE_RE.match(s)
+        if not m:
+            raise ValueError(
+                f"cannot parse hour_of_day value {value!r}; "
+                "expected an integer 0..23 or an interval like '00:00-01:00'"
+            )
+        h = int(m.group(1))
+    if h < 0 or h > 23:
+        raise ValueError(
+            f"hour_of_day must be in 0..23 (got {h} from {value!r})"
+        )
+    return h
+
+
 def _parse_curtailment_profile_sheet(df: pd.DataFrame) -> np.ndarray:
     """Parse a curtailment_profile sheet into a (24,) or (24, 12) array."""
     if df is None or df.empty:
@@ -703,6 +749,7 @@ def _parse_curtailment_profile_sheet(df: pd.DataFrame) -> np.ndarray:
         )
 
     df_norm = df.rename(columns={c: c.strip().lower() for c in df.columns})
+    df_norm["hour_of_day"] = df_norm["hour_of_day"].map(_parse_hour_of_day)
     df_norm = df_norm.sort_values("hour_of_day").reset_index(drop=True)
     if len(df_norm) != 24:
         raise ValueError(
@@ -712,8 +759,8 @@ def _parse_curtailment_profile_sheet(df: pd.DataFrame) -> np.ndarray:
     hours = df_norm["hour_of_day"].astype(int).to_numpy()
     if not np.array_equal(hours, np.arange(24)):
         raise ValueError(
-            "curtailment_profile 'hour_of_day' column must contain 0..23 "
-            f"in order; got {hours.tolist()}."
+            "curtailment_profile 'hour_of_day' column must cover 0..23 "
+            f"exactly once; got {hours.tolist()}."
         )
 
     monthly_cols = [f"curtailment_pct_{m}" for m in _MONTH_TOKENS]
@@ -792,6 +839,58 @@ _V07_LEGACY_SHEETS: frozenset[str] = frozenset({
 })
 
 
+# Tolerance for "the workbook PV total already matches the user's
+# pv_nameplate_kwp × specific_production_kwh_per_kwp target" — below
+# this relative threshold the loader does **not** rescale.
+_PV_RESCALE_REL_TOLERANCE: float = 1.0e-12
+
+
+def _rescale_pv_to_user_target(
+    ts: pd.DataFrame,
+    *,
+    pv_nameplate_kwp: float,
+    specific_production_kwh_per_kwp: float,
+) -> pd.DataFrame:
+    """Rescale ``ts['pv_kwh']`` to match the user's
+    ``pv_nameplate_kwp × specific_production_kwh_per_kwp`` target.
+
+    The shape is preserved exactly (multiplicative scaling).  Returns
+    a new DataFrame.  Skipped (pass-through) when:
+
+    * either knob is zero or negative (PV is "absent" or unspecified);
+    * the workbook PV column sums to zero;
+    * the current annual total already matches the target within
+      ``1e-12`` relative.
+    """
+    if "pv_kwh" not in ts.columns:
+        return ts
+    if pv_nameplate_kwp <= 0.0 or specific_production_kwh_per_kwp <= 0.0:
+        return ts
+
+    current_total = float(ts["pv_kwh"].astype(float).sum())
+    if current_total <= 0.0:
+        return ts
+
+    target_total = (
+        float(pv_nameplate_kwp) * float(specific_production_kwh_per_kwp)
+    )
+    rel_diff = abs(current_total - target_total) / max(target_total, 1.0e-9)
+    if rel_diff <= _PV_RESCALE_REL_TOLERANCE:
+        return ts
+
+    factor = target_total / current_total
+    out = ts.copy()
+    out["pv_kwh"] = out["pv_kwh"].astype(float) * factor
+    logger.info(
+        "PV column rescaled: workbook annual %.1f kWh → user target %.1f "
+        "kWh (factor %.6f) from pv_nameplate_kwp=%.1f kWp × "
+        "specific_production=%.4f kWh/kWp.",
+        current_total, target_total, factor,
+        pv_nameplate_kwp, specific_production_kwh_per_kwp,
+    )
+    return out
+
+
 def _read_v07_legacy_workbook(xlsx_path: Path) -> dict[str, Any]:
     """Best-effort read of a v0.7 workbook (project + economic).
 
@@ -854,6 +953,13 @@ def _read_v07_legacy_workbook(xlsx_path: Path) -> dict[str, Any]:
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
     )
+    ts = _rescale_pv_to_user_target(
+        ts,
+        pv_nameplate_kwp=float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0),
+        specific_production_kwh_per_kwp=float(
+            typed["pv"].get("specific_production_kwh_per_kwp", 0.0) or 0.0,
+        ),
+    )
     out: dict[str, Any] = {
         "ts": ts,
         "curtailment_profile": profile,
@@ -903,6 +1009,13 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     ts = _normalise_timeseries(
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
+    )
+    ts = _rescale_pv_to_user_target(
+        ts,
+        pv_nameplate_kwp=float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0),
+        specific_production_kwh_per_kwp=float(
+            typed["pv"].get("specific_production_kwh_per_kwp", 0.0) or 0.0,
+        ),
     )
     out: dict[str, Any] = {
         "ts": ts,

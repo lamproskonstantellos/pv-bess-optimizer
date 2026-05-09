@@ -19,13 +19,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+from tests._pv_helpers import hourly_canonical_pv_window  # noqa: E402
+
+
 def _make_short_ts(n_hours: int = 48, *, with_load: bool = True, seed: int = 0) -> pd.DataFrame:
-    """Synthetic short timeseries for unit tests."""
+    """Synthetic short timeseries for unit tests.
+
+    PV is **deterministic** — a downsampled hourly slice of the
+    canonical 8 MW reference shape (``data/pv_shape_15min.csv``)
+    scaled to 4500 kWp.  No randomness in the PV column whatsoever.
+    Load and DAM remain seeded synthetic curves (their tests don't
+    require data-driven realism).
+    """
     rng = np.random.default_rng(seed)
     timestamps = pd.date_range("2026-06-01 00:00", periods=n_hours, freq="h")
     h = np.arange(n_hours).astype(float) % 24
-    pv = 4000.0 * np.where((h >= 6) & (h <= 18), np.sin(np.pi * (h - 6) / 12.0), 0.0)
-    pv = np.maximum(pv + rng.normal(0, 30, n_hours), 0.0)
+    pv = hourly_canonical_pv_window(n_hours, pv_nameplate_kwp=4500.0)
     dam = 100.0 - 50.0 * np.sin(np.pi * (h - 6) / 12.0) + rng.normal(0, 5, n_hours)
     df = {"timestamp": timestamps, "pv_kwh": pv, "dam_price_eur_per_mwh": dam}
     if with_load:

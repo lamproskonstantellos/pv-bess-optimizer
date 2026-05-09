@@ -1,20 +1,33 @@
 """Build the case-study ``inputs/input.xlsx`` workbook (v0.8 schema).
 
-Generates a synthetic-but-realistic Greek profile at 15-minute cadence
-(35 040 rows for a full year — Greek VNB settles every 15 min per
-MD YPEN/DAPEEK/93976/2772/2024):
+PV column policy
+----------------
 
-* 4 500 kWp PV with sinusoidal seasonal envelope x diurnal sine
-* 5 MW peak load (residential / commercial mix)
-* DAM curve avg ~100 EUR/MWh +/- 50 EUR/MWh diurnal, piecewise
-  constant per hour (each hourly value repeats four times)
-* 4 negative-price hours (16 negative quarter-hour steps) seeded so
-  the no-sim-IO logic and the sign-aware noise (Phase B) actually
-  exercise
+The canonical reference at ``data/pv_shape_15min.csv`` is the
+real-world 8 MW site shape (35 040 rows @ 15-min cadence, 12 568
+961,75 kWh annual ⇒ 1571,12 kWh/kWp specific production).  The
+case-study workbook ships **scaled to 1 MW × 1500 kWh/kWp/year**
+(1 500 000 kWh annual) — a tidy round-number default for new users.
+The shape (every per-step ratio) is identical to the canonical 8 MW
+reference; only the multiplicative scale differs.
 
-The v0.8 workbook layout is seven sheets:
-``timeseries`` / ``project`` / ``pv`` / ``bess`` / ``economics`` /
-``simulation`` / ``curtailment_profile``.
+The ``pv_nameplate_kwp`` and ``specific_production_kwh_per_kwp``
+defaults on the ``pv`` sheet are pinned to ``1000.0`` and ``1500.0``
+so they exactly match the shape that lives next to them in the
+``timeseries`` sheet.
+
+When a user later opens the workbook and changes
+``pv_nameplate_kwp`` and / or ``specific_production_kwh_per_kwp`` to
+their own project numbers, the ``timeseries`` sheet is **NOT** edited
+— the rescaling happens **inside the model loader**
+(:func:`pvbess_opt.io.read_workbook`) at runtime: the workbook shape
+is multiplied by ``new_target_total / current_total`` so the
+optimiser sees a series whose annual sum equals the user's
+``pv_nameplate_kwp * specific_production_kwh_per_kwp`` exactly,
+shape preserved.
+
+Load and DAM remain synthetic with their own deterministic seed
+(unrelated to the PV path).
 
 Run from the repo root::
 
@@ -31,6 +44,8 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INPUT_XLSX = REPO_ROOT / "inputs" / "input.xlsx"
+PV_SHAPE_CSV = REPO_ROOT / "data" / "pv_shape_15min.csv"
+PV_SHAPE_EXPECTED_ROWS = 35040  # full year @ 15-minute cadence
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -38,15 +53,82 @@ if str(REPO_ROOT) not in sys.path:
 from pvbess_opt.io import write_workbook  # noqa: E402
 
 
-def build_timeseries(year: int = 2026, target_minutes: int = 15) -> pd.DataFrame:
-    """Generate a ``target_minutes`` cadence timeseries for ``year``."""
-    if target_minutes <= 0 or 60 % target_minutes != 0:
+def generate_pv_timeseries(
+    pv_nameplate_kwp: float,
+    specific_production_kwh_per_kwp: float,
+    *,
+    shape_csv: Path = PV_SHAPE_CSV,
+) -> np.ndarray:
+    """Deterministic data-driven PV generator.
+
+    Loads the canonical 15-min shape from ``data/pv_shape_15min.csv``,
+    normalises it to unit sum, scales by
+    ``pv_nameplate_kwp * specific_production_kwh_per_kwp``.
+
+    No noise.  No randomness.  Same inputs → identical bit-exact output.
+    """
+    shape_raw = pd.read_csv(shape_csv)["pv_kwh_8mw_reference"].to_numpy(
+        dtype=float,
+    )
+    assert len(shape_raw) == PV_SHAPE_EXPECTED_ROWS, (
+        f"Expected {PV_SHAPE_EXPECTED_ROWS} rows, got {len(shape_raw)}"
+    )
+    assert (shape_raw >= 0).all(), "Shape must be non-negative"
+
+    if pv_nameplate_kwp <= 0.0:
+        return np.zeros_like(shape_raw)
+
+    shape_sum = float(shape_raw.sum())
+    if shape_sum <= 0.0:
+        return np.zeros_like(shape_raw)
+    shape_unit = shape_raw / shape_sum
+    annual_kwh = float(pv_nameplate_kwp) * float(specific_production_kwh_per_kwp)
+    return shape_unit * annual_kwh
+
+
+# The canonical reference (data/pv_shape_15min.csv) is from a real
+# 8 MW site with 1571,12 kWh/kWp specific production.
+CANONICAL_PV_NAMEPLATE_KWP: float = 8000.0
+# Implied by the reference dataset: 12 568 961,75 kWh / 8 000 kWp.
+CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP: float = 1571.12021875
+
+# The case-study default workbook ships with a tidy 1 MW × 1500 kWh/kWp
+# scaling (1 500 000 kWh annual) — same shape, different magnitude.
+DEFAULT_PV_NAMEPLATE_KWP: float = 1000.0
+DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP: float = 1500.0
+
+
+def build_timeseries(
+    year: int = 2026,
+    target_minutes: int = 15,
+    *,
+    pv_nameplate_kwp: float = DEFAULT_PV_NAMEPLATE_KWP,
+    specific_production_kwh_per_kwp: float = (
+        DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
+    ),
+    seed: int = 20260101,
+) -> pd.DataFrame:
+    """Generate a 35 040-step (15-minute) timeseries for ``year``.
+
+    PV is **deterministic**, derived from the canonical shape at
+    ``data/pv_shape_15min.csv`` and scaled to
+    ``pv_nameplate_kwp * specific_production_kwh_per_kwp`` exactly.
+
+    Load and DAM remain synthetic with the documented seed (this
+    script is the case-study fixture builder; downstream the user
+    supplies real load / DAM in their own workbook).
+
+    Only ``target_minutes = 15`` is supported now that the PV path is
+    data-driven on the 15-minute reference shape.
+    """
+    if target_minutes != 15:
         raise ValueError(
-            "target_minutes must be a positive divisor of 60 "
-            f"(got {target_minutes!r})."
+            "data-driven PV path supports target_minutes=15 only "
+            f"(got {target_minutes!r}); the canonical shape is at "
+            "data/pv_shape_15min.csv."
         )
 
-    rng = np.random.default_rng(seed=20260101)
+    rng = np.random.default_rng(seed=seed)
     n_steps_per_day = 24 * 60 // target_minutes
     n_steps = 365 * n_steps_per_day
     dt_hours = target_minutes / 60.0
@@ -55,19 +137,12 @@ def build_timeseries(year: int = 2026, target_minutes: int = 15) -> pd.DataFrame
         start=f"{year}-01-01 00:00", periods=n_steps, freq=f"{target_minutes}min",
     )
     step_idx = np.arange(n_steps, dtype=float)
-    day_of_year = (step_idx // n_steps_per_day).astype(int) + 1
-    h_of_day = (step_idx % n_steps_per_day) * dt_hours  # continuous 0..24
+    h_of_day = (step_idx % n_steps_per_day) * dt_hours
 
-    seasonal = 0.55 + 0.45 * np.cos(2 * np.pi * (day_of_year - 172) / 365.25)
-    diurnal = np.where(
-        (h_of_day >= 6) & (h_of_day <= 18),
-        np.sin(np.pi * (h_of_day - 6) / 12.0),
-        0.0,
+    pv_kwh = generate_pv_timeseries(
+        pv_nameplate_kwp=pv_nameplate_kwp,
+        specific_production_kwh_per_kwp=specific_production_kwh_per_kwp,
     )
-    pv_kwp = 4500.0
-    pv_kwh = pv_kwp * seasonal * diurnal * dt_hours
-    pv_kwh += rng.normal(0.0, 30.0 * dt_hours, size=n_steps)
-    pv_kwh = np.maximum(pv_kwh, 0.0)
 
     base_kw = 3000.0
     morning_kw = 1500.0 * np.exp(-((h_of_day - 9) ** 2) / 8.0)
@@ -96,14 +171,22 @@ def build_timeseries(year: int = 2026, target_minutes: int = 15) -> pd.DataFrame
     return pd.DataFrame({
         "timestamp": timestamps,
         "load_kwh": np.round(load_kwh, 4),
-        "pv_kwh": np.round(pv_kwh, 4),
+        "pv_kwh": pv_kwh,
         "dam_price_eur_per_mwh": np.round(dam, 4),
     })
 
 
 def build_typed_dict() -> dict:
     """Assemble the typed nested dict for the case-study run (v0.8 schema)."""
-    ts = build_timeseries(2026)
+    pv_nameplate_kwp = DEFAULT_PV_NAMEPLATE_KWP
+    specific_production_kwh_per_kwp = (
+        DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
+    )
+    ts = build_timeseries(
+        2026,
+        pv_nameplate_kwp=pv_nameplate_kwp,
+        specific_production_kwh_per_kwp=specific_production_kwh_per_kwp,
+    )
     project = {
         "project_lifecycle_years": 25,
         "project_start_year": 2026,
@@ -117,8 +200,8 @@ def build_typed_dict() -> dict:
         "show_titles": False,
     }
     pv = {
-        "pv_nameplate_kwp": 4500.0,
-        "specific_production_kwh_per_kwp": 1500.0,
+        "pv_nameplate_kwp": pv_nameplate_kwp,
+        "specific_production_kwh_per_kwp": specific_production_kwh_per_kwp,
         "pv_degradation_year1_pct": 2.5,
         "pv_degradation_annual_pct": 0.55,
         "capex_pv_eur_per_kw": 525.0,
@@ -186,9 +269,16 @@ def main() -> int:
     typed = build_typed_dict()
     out = write_workbook(typed, INPUT_XLSX)
     n_neg = int((typed["ts"]["dam_price_eur_per_mwh"] < 0).sum())
+    pv_total_mwh = float(typed["ts"]["pv_kwh"].sum()) / 1000.0
+    pv_kwp = float(typed["pv"]["pv_nameplate_kwp"])
+    target = float(typed["pv"]["specific_production_kwh_per_kwp"])
+    realised = pv_total_mwh * 1000.0 / pv_kwp if pv_kwp > 0 else 0.0
     print(
         f"Wrote {out} (timeseries rows={len(typed['ts'])}, "
-        f"negative-price steps={n_neg})"
+        f"negative-price steps={n_neg}, "
+        f"pv annual={pv_total_mwh:.1f} MWh, "
+        f"specific production target={target:.0f} kWh/kWp, "
+        f"realised={realised:.6f} kWh/kWp)"
     )
     return 0
 
