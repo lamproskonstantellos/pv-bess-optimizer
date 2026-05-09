@@ -30,14 +30,12 @@ def _highs_available() -> bool:
 
 
 def _ts(n: int = 48, *, with_load: bool = True) -> pd.DataFrame:
-    """Short fixture timeseries; PV strict-zero outside daylight."""
+    """Short fixture timeseries; PV is the deterministic canonical slice."""
+    from tests._pv_helpers import hourly_canonical_pv_window
     rng = np.random.default_rng(0)
     timestamps = pd.date_range("2026-06-01 00:00", periods=n, freq="h")
     h = np.arange(n).astype(float) % 24
-    daylight = (h >= 6) & (h <= 18)
-    pv_clean = 4000.0 * np.where(daylight, np.sin(np.pi * (h - 6) / 12.0), 0.0)
-    pv_noise = np.where(daylight, rng.normal(1.0, 0.05, n), 1.0)
-    pv = np.where(daylight, np.maximum(pv_clean * pv_noise, 0.0), 0.0)
+    pv = hourly_canonical_pv_window(n, pv_nameplate_kwp=4500.0)
     dam = 100.0 - 50.0 * np.sin(np.pi * (h - 6) / 12.0) + rng.normal(0, 5, n)
     df = {"timestamp": timestamps, "pv_kwh": pv, "dam_price_eur_per_mwh": dam}
     if with_load:

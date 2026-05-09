@@ -1,26 +1,46 @@
-"""PV timeseries generator correctness tests.
+"""PV timeseries pipeline tests — workbook + loader rescaling.
 
-Six invariants the generator and the case-study fixture
-(``inputs/input.xlsx``) must satisfy:
+Architecture:
 
-1. PV is **exactly zero** outside the 06:00-18:00 daylight window —
-   no Gaussian-noise bleed at 03:00 / 04:00 / 21:00, etc.
-2. Annual yield equals ``pv_nameplate_kwp * specific_production_kwh_per_kwp``
-   exactly (the generator normalises the year).
-3. Doubling ``pv_nameplate_kwp`` doubles the realised PV everywhere.
-4. Doubling ``specific_production_kwh_per_kwp`` doubles the yearly
-   total (linear scaling).
-5. ``pv_nameplate_kwp = 0`` produces an all-zero PV array.
-6. The case-study ``inputs/input.xlsx`` ships with the post-fix
-   profile — no night-time PV, target specific production matched.
+* The case-study ``inputs/input.xlsx`` ships with the **canonical 8 MW
+  reference shape verbatim** in its ``timeseries::pv_kwh`` column
+  (35 040 rows, sum = 12 568 961,75 kWh, specific production
+  1571,12 kWh/kWp).  The matching ``pv::pv_nameplate_kwp`` and
+  ``pv::specific_production_kwh_per_kwp`` defaults pin to ``8000`` and
+  ``1571.12021875``.
+* The model **loader** (:func:`pvbess_opt.io.read_workbook`) rescales
+  ``pv_kwh`` on the fly to the user's
+  ``pv_nameplate_kwp × specific_production_kwh_per_kwp`` target.  The
+  shape (every per-step ratio) is preserved exactly; only the
+  multiplicative scale changes.
 
-A small leftover-artifact audit runs at the end to ensure the v0.7
-noise-bleed pattern (``np.maximum(pv + rng.normal(...), 0)`` without a
-daylight gate) does not creep back into ``scripts/`` or ``tests/``.
+Invariants checked here (10):
+
+1. Repository workbook PV sum equals the canonical 8 MW reference
+   total.
+2. Workbook ``pv_kwh`` column equals the reference vector bit-exactly.
+3. Workbook ``pv_nameplate_kwp`` and ``specific_production_kwh_per_kwp``
+   match the canonical defaults.
+4. ``read_workbook`` is **deterministic**: two consecutive calls
+   return ``np.array_equal`` PV vectors.
+5. Default workbook (workbook total == nameplate × SP) ⇒ loader
+   pass-through, no rescaling, ``pv_kwh`` byte-equal to reference.
+6. User changes nameplate only ⇒ loader rescales linearly; shape
+   ratios preserved.
+7. User changes specific production only ⇒ loader rescales linearly.
+8. Zero nameplate ⇒ loader skips rescaling (PV passes through; the
+   optimizer pins all PV variables to zero via its ``pv_present``
+   flag).
+9. Loader emits an INFO message containing the rescale factor only
+   when rescaling actually fires.
+10. The build-script's PV path contains no random / noise constructs
+    (AST audit).
 """
 
 from __future__ import annotations
 
+import inspect
+import logging
 import re
 from pathlib import Path
 
@@ -28,186 +48,278 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts.build_input_xlsx import _build_pv_kwh, build_timeseries
+from pvbess_opt.io import (
+    _PV_RESCALE_REL_TOLERANCE,
+    _rescale_pv_to_user_target,
+    read_workbook,
+    write_workbook,
+)
+from scripts.build_input_xlsx import (
+    CANONICAL_PV_NAMEPLATE_KWP,
+    CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP,
+    generate_pv_timeseries,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
+REFERENCE_CSV = ROOT / "data" / "pv_shape_15min.csv"
+REPO_INPUT_XLSX = ROOT / "inputs" / "input.xlsx"
 
 
-def _gen(
-    *,
-    pv_nameplate_kwp: float = 4500.0,
-    specific_production_kwh_per_kwp: float = 1500.0,
-    target_minutes: int = 60,
-    seed: int = 42,
-) -> pd.DataFrame:
-    return build_timeseries(
-        2026,
-        target_minutes=target_minutes,
-        pv_nameplate_kwp=pv_nameplate_kwp,
-        specific_production_kwh_per_kwp=specific_production_kwh_per_kwp,
-        seed=seed,
+def _reference_shape() -> np.ndarray:
+    return pd.read_csv(REFERENCE_CSV)["pv_kwh_8mw_reference"].to_numpy(
+        dtype=float,
     )
 
 
 # ---------------------------------------------------------------------------
-# Invariant 1 — strict zero outside the daylight window
+# 1-3. Repository workbook ships with the canonical 8 MW data verbatim
 # ---------------------------------------------------------------------------
 
 
-def test_pv_is_strictly_zero_outside_daylight_hourly():
-    ts = _gen(target_minutes=60)
-    hours = pd.to_datetime(ts["timestamp"]).dt.hour.to_numpy()
-    pv = ts["pv_kwh"].to_numpy(dtype=float)
-    night_mask = (hours < 6) | (hours > 18)
-    assert pv[night_mask].max() == 0.0, (
-        f"night-time PV must be exactly 0; got max "
-        f"{pv[night_mask].max():.6g} kWh at "
-        f"hour {hours[night_mask][np.argmax(pv[night_mask])]}"
-    )
-    assert pv[night_mask].sum() == 0.0
-
-
-def test_pv_is_strictly_zero_outside_daylight_quarter_hour():
-    ts = _gen(target_minutes=15)
-    timestamps = pd.to_datetime(ts["timestamp"])
-    hours = timestamps.dt.hour.to_numpy()
-    minutes = timestamps.dt.minute.to_numpy()
-    pv = ts["pv_kwh"].to_numpy(dtype=float)
-    # Daylight window is [06:00, 18:00] inclusive on the hour boundary.
-    h_decimal = hours + minutes / 60.0
-    night_mask = (h_decimal < 6.0) | (h_decimal > 18.0)
-    assert pv[night_mask].max() == 0.0
-    assert pv[night_mask].sum() == 0.0
-
-
-# ---------------------------------------------------------------------------
-# Invariant 2 — annual yield matches nameplate × specific production
-# ---------------------------------------------------------------------------
-
-
-def test_annual_yield_matches_specific_production_target():
-    pv_kwp = 8000.0  # match the user's 8 MW reference
-    sp = 1571.0      # 12 568 / 8
-    ts = _gen(
-        pv_nameplate_kwp=pv_kwp,
-        specific_production_kwh_per_kwp=sp,
-    )
-    target_kwh = pv_kwp * sp
-    realised_kwh = float(ts["pv_kwh"].sum())
-    # Exact normalisation is performed in the generator; a tiny rounding
-    # tolerance covers the 4-digit `np.round` applied after.
-    assert realised_kwh == pytest.approx(target_kwh, rel=2e-4), (
-        f"annual yield {realised_kwh:.1f} kWh does not match target "
-        f"{target_kwh:.1f} kWh (= {pv_kwp:.0f} kWp × {sp:.0f} kWh/kWp)"
+def test_repo_input_xlsx_pv_sum_equals_canonical_total():
+    ts = pd.read_excel(REPO_INPUT_XLSX, sheet_name="timeseries")
+    total = float(ts["pv_kwh"].sum())
+    expected = float(_reference_shape().sum())
+    assert total == pytest.approx(expected, rel=1e-9), (
+        f"workbook PV total {total:.4f} kWh does not match canonical "
+        f"reference {expected:.4f} kWh"
     )
 
 
-def test_annual_yield_matches_for_default_case_study():
-    ts = _gen(pv_nameplate_kwp=4500.0, specific_production_kwh_per_kwp=1500.0)
-    target_kwh = 4500.0 * 1500.0
-    assert float(ts["pv_kwh"].sum()) == pytest.approx(target_kwh, rel=2e-4)
-
-
-# ---------------------------------------------------------------------------
-# Invariant 3 — linear scaling in pv_nameplate_kwp
-# ---------------------------------------------------------------------------
-
-
-def test_doubling_nameplate_doubles_realised_pv():
-    seed = 123
-    ts_a = _gen(
-        pv_nameplate_kwp=2000.0,
-        specific_production_kwh_per_kwp=1500.0,
-        seed=seed,
-    )
-    ts_b = _gen(
-        pv_nameplate_kwp=4000.0,
-        specific_production_kwh_per_kwp=1500.0,
-        seed=seed,
-    )
-    a_total = float(ts_a["pv_kwh"].sum())
-    b_total = float(ts_b["pv_kwh"].sum())
-    assert b_total == pytest.approx(2.0 * a_total, rel=1e-6)
-
-
-# ---------------------------------------------------------------------------
-# Invariant 4 — linear scaling in specific_production_kwh_per_kwp
-# ---------------------------------------------------------------------------
-
-
-def test_doubling_specific_production_doubles_realised_pv():
-    seed = 123
-    ts_a = _gen(
-        pv_nameplate_kwp=3000.0,
-        specific_production_kwh_per_kwp=1200.0,
-        seed=seed,
-    )
-    ts_b = _gen(
-        pv_nameplate_kwp=3000.0,
-        specific_production_kwh_per_kwp=2400.0,
-        seed=seed,
-    )
-    a_total = float(ts_a["pv_kwh"].sum())
-    b_total = float(ts_b["pv_kwh"].sum())
-    assert b_total == pytest.approx(2.0 * a_total, rel=1e-6)
-
-
-# ---------------------------------------------------------------------------
-# Invariant 5 — pv_nameplate_kwp = 0 produces an all-zero PV array
-# ---------------------------------------------------------------------------
-
-
-def test_zero_nameplate_yields_all_zero_pv():
-    ts = _gen(pv_nameplate_kwp=0.0, specific_production_kwh_per_kwp=1500.0)
-    assert float(ts["pv_kwh"].sum()) == 0.0
-    assert float(ts["pv_kwh"].max()) == 0.0
-
-
-def test_build_pv_kwh_handles_zero_nameplate_directly():
-    rng = np.random.default_rng(0)
-    out = _build_pv_kwh(
-        n_steps=24,
-        n_steps_per_day=24,
-        dt_hours=1.0,
-        pv_nameplate_kwp=0.0,
-        specific_production_kwh_per_kwp=1500.0,
-        rng=rng,
-    )
-    assert out.shape == (24,)
-    assert (out == 0.0).all()
-
-
-# ---------------------------------------------------------------------------
-# Invariant 6 — case-study workbook ships with the post-fix profile
-# ---------------------------------------------------------------------------
-
-
-def test_repo_input_xlsx_pv_zero_at_night():
-    ts = pd.read_excel(ROOT / "inputs" / "input.xlsx", sheet_name="timeseries")
-    timestamps = pd.to_datetime(ts["timestamp"])
-    h_decimal = timestamps.dt.hour + timestamps.dt.minute / 60.0
-    night_mask = (h_decimal < 6.0) | (h_decimal > 18.0)
-    pv = ts["pv_kwh"].to_numpy(dtype=float)
-    assert pv[night_mask].max() == 0.0, (
-        "inputs/input.xlsx still has night-time PV — re-run "
-        "scripts/build_input_xlsx.py to regenerate the fixture."
+def test_repo_input_xlsx_pv_column_is_bit_identical_to_reference():
+    ts = pd.read_excel(REPO_INPUT_XLSX, sheet_name="timeseries")
+    diff = np.abs(ts["pv_kwh"].to_numpy(dtype=float) - _reference_shape())
+    assert float(diff.max()) < 1.0e-6, (
+        f"max abs difference {float(diff.max())} between workbook and "
+        f"reference exceeds 1e-6"
     )
 
 
-def test_repo_input_xlsx_pv_specific_production_matches_workbook():
-    ts = pd.read_excel(ROOT / "inputs" / "input.xlsx", sheet_name="timeseries")
-    pv_sheet = pd.read_excel(ROOT / "inputs" / "input.xlsx", sheet_name="pv")
-    keys = pv_sheet["key"].astype(str).tolist()
-    values = pv_sheet["value"].tolist()
-    pv_dict = dict(zip(keys, values))
-    pv_kwp = float(pv_dict["pv_nameplate_kwp"])
-    sp_target = float(pv_dict["specific_production_kwh_per_kwp"])
-    annual_total_kwh = float(ts["pv_kwh"].sum())
-    realised_sp = annual_total_kwh / pv_kwp
-    assert realised_sp == pytest.approx(sp_target, rel=2e-4), (
-        f"realised specific production {realised_sp:.1f} kWh/kWp does "
-        f"not match workbook target {sp_target:.1f} kWh/kWp"
+def test_repo_input_xlsx_pv_sheet_defaults_match_canonical():
+    pv_sheet = pd.read_excel(REPO_INPUT_XLSX, sheet_name="pv")
+    pv_dict = dict(zip(pv_sheet["key"].astype(str), pv_sheet["value"]))
+    assert float(pv_dict["pv_nameplate_kwp"]) == pytest.approx(
+        CANONICAL_PV_NAMEPLATE_KWP, rel=1e-12,
     )
+    assert float(pv_dict["specific_production_kwh_per_kwp"]) == pytest.approx(
+        CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP, rel=1e-9,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4. Determinism — two reads of the same workbook produce identical PV
+# ---------------------------------------------------------------------------
+
+
+def test_read_workbook_pv_is_deterministic():
+    a = read_workbook(REPO_INPUT_XLSX)["ts"]["pv_kwh"].to_numpy(dtype=float)
+    b = read_workbook(REPO_INPUT_XLSX)["ts"]["pv_kwh"].to_numpy(dtype=float)
+    assert np.array_equal(a, b)
+
+
+def test_generate_pv_timeseries_is_deterministic():
+    """Direct call to the build helper twice → bit-exact arrays."""
+    a = generate_pv_timeseries(
+        pv_nameplate_kwp=8000.0,
+        specific_production_kwh_per_kwp=1571.12021875,
+    )
+    b = generate_pv_timeseries(
+        pv_nameplate_kwp=8000.0,
+        specific_production_kwh_per_kwp=1571.12021875,
+    )
+    assert np.array_equal(a, b)
+
+
+# ---------------------------------------------------------------------------
+# 5. Default workbook ⇒ no rescaling, byte-equal pass-through
+# ---------------------------------------------------------------------------
+
+
+def test_default_workbook_loader_passes_pv_through_unchanged():
+    typed = read_workbook(REPO_INPUT_XLSX)
+    pv = typed["ts"]["pv_kwh"].to_numpy(dtype=float)
+    diff = np.abs(pv - _reference_shape())
+    assert float(diff.max()) < 1.0e-6, (
+        "loader changed the PV column even though defaults match"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6-7. Loader rescaling on user-supplied nameplate and SP
+# ---------------------------------------------------------------------------
+
+
+def _user_workbook(tmp_path: Path, *, pv_kwp: float, sp: float) -> Path:
+    typed = read_workbook(REPO_INPUT_XLSX)
+    typed["pv"]["pv_nameplate_kwp"] = float(pv_kwp)
+    typed["pv"]["specific_production_kwh_per_kwp"] = float(sp)
+    out = tmp_path / "user.xlsx"
+    write_workbook(typed, out)
+    return out
+
+
+def test_loader_rescales_to_user_nameplate_only(tmp_path):
+    out = _user_workbook(tmp_path, pv_kwp=2000.0, sp=1571.12021875)
+    pv = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
+    target_total = 2000.0 * 1571.12021875
+    assert float(pv.sum()) == pytest.approx(target_total, rel=1e-12)
+    # Shape preserved: ratio of any two non-zero indices is unchanged.
+    ref = _reference_shape()
+    nonzero = ref > 1.0e-9
+    ratios_loader = pv[nonzero] / ref[nonzero]
+    assert ratios_loader.std() < 1.0e-12  # all the same factor
+
+
+def test_loader_rescales_to_user_specific_production_only(tmp_path):
+    out = _user_workbook(tmp_path, pv_kwp=8000.0, sp=1600.0)
+    pv = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
+    target_total = 8000.0 * 1600.0
+    assert float(pv.sum()) == pytest.approx(target_total, rel=1e-12)
+
+
+def test_loader_rescales_to_user_both_axes(tmp_path):
+    """The exact case from the user message: 2 MW × 1600 kWh/kWp."""
+    out = _user_workbook(tmp_path, pv_kwp=2000.0, sp=1600.0)
+    pv = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
+    target_total = 2000.0 * 1600.0
+    assert float(pv.sum()) == pytest.approx(target_total, rel=1e-12)
+    # Shape preserved exactly.
+    ref = _reference_shape()
+    assert (pv == 0.0)[ref == 0.0].all()
+
+
+def test_doubling_user_nameplate_doubles_loaded_pv(tmp_path):
+    a = read_workbook(_user_workbook(tmp_path, pv_kwp=1000.0, sp=1500.0))
+    b = read_workbook(_user_workbook(tmp_path, pv_kwp=2000.0, sp=1500.0))
+    pv_a = a["ts"]["pv_kwh"].to_numpy(dtype=float)
+    pv_b = b["ts"]["pv_kwh"].to_numpy(dtype=float)
+    assert pv_b == pytest.approx(2.0 * pv_a, rel=1e-12)
+
+
+def test_doubling_user_specific_production_doubles_loaded_pv(tmp_path):
+    a = read_workbook(_user_workbook(tmp_path, pv_kwp=4000.0, sp=1200.0))
+    b = read_workbook(_user_workbook(tmp_path, pv_kwp=4000.0, sp=2400.0))
+    pv_a = a["ts"]["pv_kwh"].to_numpy(dtype=float)
+    pv_b = b["ts"]["pv_kwh"].to_numpy(dtype=float)
+    assert pv_b == pytest.approx(2.0 * pv_a, rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# 8. Zero / unspecified nameplate or SP ⇒ rescaling skipped
+# ---------------------------------------------------------------------------
+
+
+def test_zero_nameplate_skips_rescaling():
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=4, freq="h"),
+        "pv_kwh": [10.0, 20.0, 30.0, 40.0],
+        "load_kwh": [1.0] * 4,
+    })
+    out = _rescale_pv_to_user_target(
+        ts, pv_nameplate_kwp=0.0, specific_production_kwh_per_kwp=1500.0,
+    )
+    assert (out["pv_kwh"].to_numpy() == ts["pv_kwh"].to_numpy()).all()
+
+
+def test_zero_specific_production_skips_rescaling():
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=4, freq="h"),
+        "pv_kwh": [10.0, 20.0, 30.0, 40.0],
+        "load_kwh": [1.0] * 4,
+    })
+    out = _rescale_pv_to_user_target(
+        ts, pv_nameplate_kwp=4500.0, specific_production_kwh_per_kwp=0.0,
+    )
+    assert (out["pv_kwh"].to_numpy() == ts["pv_kwh"].to_numpy()).all()
+
+
+def test_zero_pv_column_skips_rescaling():
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=4, freq="h"),
+        "pv_kwh": [0.0] * 4,
+        "load_kwh": [1.0] * 4,
+    })
+    out = _rescale_pv_to_user_target(
+        ts, pv_nameplate_kwp=4500.0, specific_production_kwh_per_kwp=1500.0,
+    )
+    assert (out["pv_kwh"].to_numpy() == 0.0).all()
+
+
+# ---------------------------------------------------------------------------
+# 9. Loader logs the rescale factor only when rescaling actually fires
+# ---------------------------------------------------------------------------
+
+
+def test_loader_logs_rescale_factor_only_on_rescale(tmp_path, caplog):
+    # A) defaults: should NOT log a rescale.
+    with caplog.at_level(logging.INFO, logger="pvbess_opt.io"):
+        read_workbook(REPO_INPUT_XLSX)
+    rescaled = [r for r in caplog.records if "rescaled" in r.getMessage()]
+    assert not rescaled, "default workbook unexpectedly triggered rescaling"
+
+    caplog.clear()
+    # B) user-modified: SHOULD log exactly one rescale info.
+    out = _user_workbook(tmp_path, pv_kwp=2000.0, sp=1600.0)
+    with caplog.at_level(logging.INFO, logger="pvbess_opt.io"):
+        read_workbook(out)
+    rescaled = [r for r in caplog.records if "rescaled" in r.getMessage()]
+    assert len(rescaled) == 1
+    msg = rescaled[0].getMessage()
+    assert "2000.0 kWp" in msg
+    assert "1600.0000 kWh/kWp" in msg
+
+
+# ---------------------------------------------------------------------------
+# 10. AST audit — no random / noise constructs in the build-time PV path
+# ---------------------------------------------------------------------------
+
+
+_FORBIDDEN_RANDOM_PATTERNS = (
+    r"\brng\.",
+    r"\bnp\.random\.",
+    r"\.normal\s*\(",
+    r"\.beta\s*\(",
+    r"\.uniform\s*\(",
+    r"\.gauss\s*\(",
+    r"\.poisson\s*\(",
+    r"\.choice\s*\(",
+    r"\bseed\s*=",
+    r"\.seed\s*\(",
+    r"random_state\s*=",
+)
+
+
+def test_no_random_calls_in_pv_path():
+    src = inspect.getsource(generate_pv_timeseries)
+    hits: list[str] = []
+    for pat in _FORBIDDEN_RANDOM_PATTERNS:
+        for m in re.finditer(pat, src):
+            hits.append(f"{pat!r} → {m.group(0)!r}")
+    assert not hits, (
+        "generate_pv_timeseries contains forbidden randomness constructs:\n"
+        + "\n".join(hits) + "\n--- source ---\n" + src
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reference CSV invariants — guard the canonical data file
+# ---------------------------------------------------------------------------
+
+
+def test_reference_csv_has_expected_shape_and_header():
+    df = pd.read_csv(REFERENCE_CSV)
+    assert list(df.columns) == ["pv_kwh_8mw_reference"]
+    assert len(df) == 35040
+    col = df["pv_kwh_8mw_reference"]
+    assert (col >= 0).all()
+    # Real-world site: published total 12 568 961,7517 kWh.
+    assert col.sum() == pytest.approx(12_568_961.7517, rel=1e-9)
+
+
+def test_rescale_tolerance_constant_is_tight():
+    """Guard the rescale tolerance: 1e-12 is what the loader uses for
+    the "already matches" pass-through check."""
+    assert _PV_RESCALE_REL_TOLERANCE == 1.0e-12
 
 
 # ---------------------------------------------------------------------------
@@ -215,11 +327,13 @@ def test_repo_input_xlsx_pv_specific_production_matches_workbook():
 # ---------------------------------------------------------------------------
 
 
+_BAD_PATTERN = re.compile(
+    r"np\.maximum\(\s*pv\s*\+\s*rng\.normal",
+)
 _SELF_FILE = Path(__file__).resolve()
 
 
 def _scan_files() -> list[Path]:
-    """Yield every .py file under scripts/ + tests/ + main.py except this audit."""
     out: list[Path] = []
     for sub in ("scripts", "tests"):
         for path in (ROOT / sub).rglob("*.py"):
@@ -230,17 +344,7 @@ def _scan_files() -> list[Path]:
     return out
 
 
-_BAD_PATTERN = re.compile(
-    r"np\.maximum\(\s*pv\s*\+\s*rng\.normal",
-)
-
-
 def test_no_v07_noise_bleed_pattern_remains():
-    """The v0.7/v0.8 PR introduced ``pv = np.maximum(pv + rng.normal(...), 0)``
-    in four places.  All four should have been replaced by the
-    daylight-gated ``np.where(daylight, np.maximum(...), 0)`` form.
-    Catch any regressions before they hit ``inputs/input.xlsx``.
-    """
     hits: list[str] = []
     for path in _scan_files():
         text = path.read_text(encoding="utf-8")
@@ -249,6 +353,5 @@ def test_no_v07_noise_bleed_pattern_remains():
                 if _BAD_PATTERN.search(line):
                     hits.append(f"{path.relative_to(ROOT)}:{i}: {line.rstrip()}")
     assert not hits, (
-        "v0.7 noise-bleed pattern found (it leaks PV into the night) — "
-        "use daylight-gated noise instead:\n" + "\n".join(hits)
+        "v0.7 noise-bleed pattern found:\n" + "\n".join(hits)
     )

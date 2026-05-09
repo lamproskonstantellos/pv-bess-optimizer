@@ -1,23 +1,28 @@
 """Build the case-study ``inputs/input.xlsx`` workbook (v0.8 schema).
 
-The generator is **fully generic**: it reads the desired PV nameplate
-and annual specific production (and the BESS / load knobs) from the
-typed dict and produces a coherent yearly timeseries that:
+PV column policy
+----------------
 
-* respects the user's ``pv_nameplate_kwp`` (set by `build_typed_dict`),
-* respects the user's ``specific_production_kwh_per_kwp`` (annual
-  yield is normalised so ``sum(pv_kwh) == pv_kwp * specific_production``
-  *exactly*),
-* is **strictly zero outside the daylight window** (no noise bleed at
-  night — the v0.7/v0.8 fixture had this bug and produced ~3 kWh
-  bumps at 03:00),
-* carries realistic per-day variability (Beta(8, 2) cloud-cover
-  factor, range ~[0.4, 1.0], mean ~0.8) and per-step gentle
-  multiplicative noise applied **only** to active daylight steps.
+The case-study workbook ships with the **canonical 8 MW reference
+shape verbatim** (real-world site, 35 040 rows @ 15-min cadence,
+12 568 961,75 kWh annual ⇒ 1571,12 kWh/kWp specific production).  The
+``pv_nameplate_kwp`` and ``specific_production_kwh_per_kwp`` defaults
+on the ``pv`` sheet are pinned to ``8000.0`` and ``1571.12021875`` so
+they exactly match the shape that lives next to them in the
+``timeseries`` sheet.
 
-The script ships a 8 760-hour or 35 040-step timeseries depending on
-``target_minutes`` (case-study default: 15-minute cadence per
-MD YPEN/DAPEEK/93976/2772/2024).
+When a user later opens the workbook and changes
+``pv_nameplate_kwp`` and / or ``specific_production_kwh_per_kwp`` to
+their own project numbers, the ``timeseries`` sheet is **NOT** edited
+— the rescaling happens **inside the model loader**
+(:func:`pvbess_opt.io.read_workbook`) at runtime: the canonical shape
+is multiplied by ``new_target_total / current_total`` so the
+optimiser sees a series whose annual sum equals the user's
+``pv_nameplate_kwp * specific_production_kwh_per_kwp`` exactly,
+shape preserved.
+
+Load and DAM remain synthetic with their own deterministic seed
+(unrelated to the PV path).
 
 Run from the repo root::
 
@@ -34,109 +39,81 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INPUT_XLSX = REPO_ROOT / "inputs" / "input.xlsx"
+PV_SHAPE_CSV = REPO_ROOT / "data" / "pv_shape_15min.csv"
+PV_SHAPE_EXPECTED_ROWS = 35040  # full year @ 15-minute cadence
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from pvbess_opt.io import write_workbook  # noqa: E402
 
-# Daylight window (local hours).  Outside this window the PV signal is
-# pinned to exactly zero — no Gaussian-noise bleed.
-_PV_DAYLIGHT_START_HOUR: float = 6.0
-_PV_DAYLIGHT_END_HOUR: float = 18.0
 
-
-def _build_pv_kwh(
-    *,
-    n_steps: int,
-    n_steps_per_day: int,
-    dt_hours: float,
+def generate_pv_timeseries(
     pv_nameplate_kwp: float,
     specific_production_kwh_per_kwp: float,
-    rng: np.random.Generator,
+    *,
+    shape_csv: Path = PV_SHAPE_CSV,
 ) -> np.ndarray:
-    """Return a per-step PV energy (kWh) profile with the documented properties.
+    """Deterministic data-driven PV generator.
 
-    Shape construction (3 layers):
+    Loads the canonical 15-min shape from ``data/pv_shape_15min.csv``,
+    normalises it to unit sum, scales by
+    ``pv_nameplate_kwp * specific_production_kwh_per_kwp``.
 
-    1. **Diurnal** sine envelope between sunrise (06:00) and sunset
-       (18:00); strict zero outside.
-    2. **Seasonal** envelope peaking around DOY 172 (≈ 21 Jun) and
-       troughing around DOY 355 (≈ 21 Dec).
-    3. **Per-day cloud factor** Beta(8, 2) ~ U[0.4, 1.0] with mean
-       ~0.8.  Applied multiplicatively to all steps of a given day.
-    4. **Per-step daylight noise**: Gaussian(1.0, 0.10) multiplicative
-       factor applied **only** to daylight steps.  Night stays zero.
-
-    The full year is then normalised so that the annual sum equals
-    ``pv_nameplate_kwp * specific_production_kwh_per_kwp`` exactly.
+    No noise.  No randomness.  Same inputs → identical bit-exact output.
     """
+    shape_raw = pd.read_csv(shape_csv)["pv_kwh_8mw_reference"].to_numpy(
+        dtype=float,
+    )
+    assert len(shape_raw) == PV_SHAPE_EXPECTED_ROWS, (
+        f"Expected {PV_SHAPE_EXPECTED_ROWS} rows, got {len(shape_raw)}"
+    )
+    assert (shape_raw >= 0).all(), "Shape must be non-negative"
+
     if pv_nameplate_kwp <= 0.0:
-        return np.zeros(n_steps, dtype=float)
+        return np.zeros_like(shape_raw)
 
-    step_idx = np.arange(n_steps, dtype=float)
-    day_of_year = (step_idx // n_steps_per_day).astype(int) + 1
-    h_of_day = (step_idx % n_steps_per_day) * dt_hours
+    shape_sum = float(shape_raw.sum())
+    if shape_sum <= 0.0:
+        return np.zeros_like(shape_raw)
+    shape_unit = shape_raw / shape_sum
+    annual_kwh = float(pv_nameplate_kwp) * float(specific_production_kwh_per_kwp)
+    return shape_unit * annual_kwh
 
-    daylight_mask = (
-        (h_of_day >= _PV_DAYLIGHT_START_HOUR)
-        & (h_of_day <= _PV_DAYLIGHT_END_HOUR)
-    )
-    diurnal = np.where(
-        daylight_mask,
-        np.sin(
-            np.pi
-            * (h_of_day - _PV_DAYLIGHT_START_HOUR)
-            / (_PV_DAYLIGHT_END_HOUR - _PV_DAYLIGHT_START_HOUR)
-        ),
-        0.0,
-    )
-    seasonal = 0.55 + 0.45 * np.cos(2 * np.pi * (day_of_year - 172) / 365.25)
 
-    n_days = n_steps // n_steps_per_day
-    daily_cloud = rng.beta(8.0, 2.0, size=n_days)
-    cloud = np.repeat(daily_cloud, n_steps_per_day)
-    if cloud.size < n_steps:
-        cloud = np.concatenate(
-            [cloud, np.full(n_steps - cloud.size, float(daily_cloud[-1]))]
-        )
-
-    raw = diurnal * seasonal * cloud
-    daylight_noise = np.where(
-        daylight_mask, rng.normal(1.0, 0.10, size=n_steps), 1.0,
-    )
-    raw = raw * daylight_noise
-    raw = np.where(daylight_mask, np.maximum(raw, 0.0), 0.0)
-
-    target_total_kwh = (
-        float(pv_nameplate_kwp) * float(specific_production_kwh_per_kwp)
-    )
-    raw_total = float(raw.sum())
-    if raw_total > 0.0:
-        return raw * (target_total_kwh / raw_total)
-    return raw
+CANONICAL_PV_NAMEPLATE_KWP: float = 8000.0
+# Implied by the reference dataset: 12 568 961,75 kWh / 8 000 kWp.
+CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP: float = 1571.12021875
 
 
 def build_timeseries(
     year: int = 2026,
     target_minutes: int = 15,
     *,
-    pv_nameplate_kwp: float = 4500.0,
-    specific_production_kwh_per_kwp: float = 1500.0,
+    pv_nameplate_kwp: float = CANONICAL_PV_NAMEPLATE_KWP,
+    specific_production_kwh_per_kwp: float = (
+        CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
+    ),
     seed: int = 20260101,
 ) -> pd.DataFrame:
-    """Generate a ``target_minutes`` cadence timeseries for ``year``.
+    """Generate a 35 040-step (15-minute) timeseries for ``year``.
 
-    PV is normalised to
-    ``pv_nameplate_kwp * specific_production_kwh_per_kwp`` exactly,
-    with strict zero outside the daylight window.  Load and DAM are
-    unchanged from the v0.7 generator (only the PV branch had the
-    noise-bleed-at-night bug).
+    PV is **deterministic**, derived from the canonical shape at
+    ``data/pv_shape_15min.csv`` and scaled to
+    ``pv_nameplate_kwp * specific_production_kwh_per_kwp`` exactly.
+
+    Load and DAM remain synthetic with the documented seed (this
+    script is the case-study fixture builder; downstream the user
+    supplies real load / DAM in their own workbook).
+
+    Only ``target_minutes = 15`` is supported now that the PV path is
+    data-driven on the 15-minute reference shape.
     """
-    if target_minutes <= 0 or 60 % target_minutes != 0:
+    if target_minutes != 15:
         raise ValueError(
-            "target_minutes must be a positive divisor of 60 "
-            f"(got {target_minutes!r})."
+            "data-driven PV path supports target_minutes=15 only "
+            f"(got {target_minutes!r}); the canonical shape is at "
+            "data/pv_shape_15min.csv."
         )
 
     rng = np.random.default_rng(seed=seed)
@@ -150,13 +127,9 @@ def build_timeseries(
     step_idx = np.arange(n_steps, dtype=float)
     h_of_day = (step_idx % n_steps_per_day) * dt_hours
 
-    pv_kwh = _build_pv_kwh(
-        n_steps=n_steps,
-        n_steps_per_day=n_steps_per_day,
-        dt_hours=dt_hours,
+    pv_kwh = generate_pv_timeseries(
         pv_nameplate_kwp=pv_nameplate_kwp,
         specific_production_kwh_per_kwp=specific_production_kwh_per_kwp,
-        rng=rng,
     )
 
     base_kw = 3000.0
@@ -186,15 +159,17 @@ def build_timeseries(
     return pd.DataFrame({
         "timestamp": timestamps,
         "load_kwh": np.round(load_kwh, 4),
-        "pv_kwh": np.round(pv_kwh, 4),
+        "pv_kwh": pv_kwh,
         "dam_price_eur_per_mwh": np.round(dam, 4),
     })
 
 
 def build_typed_dict() -> dict:
     """Assemble the typed nested dict for the case-study run (v0.8 schema)."""
-    pv_nameplate_kwp = 4500.0
-    specific_production_kwh_per_kwp = 1500.0
+    pv_nameplate_kwp = CANONICAL_PV_NAMEPLATE_KWP
+    specific_production_kwh_per_kwp = (
+        CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
+    )
     ts = build_timeseries(
         2026,
         pv_nameplate_kwp=pv_nameplate_kwp,
@@ -291,7 +266,7 @@ def main() -> int:
         f"negative-price steps={n_neg}, "
         f"pv annual={pv_total_mwh:.1f} MWh, "
         f"specific production target={target:.0f} kWh/kWp, "
-        f"realised={realised:.0f} kWh/kWp)"
+        f"realised={realised:.6f} kWh/kWp)"
     )
     return 0
 

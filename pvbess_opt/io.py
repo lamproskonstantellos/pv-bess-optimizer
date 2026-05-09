@@ -792,6 +792,58 @@ _V07_LEGACY_SHEETS: frozenset[str] = frozenset({
 })
 
 
+# Tolerance for "the workbook PV total already matches the user's
+# pv_nameplate_kwp × specific_production_kwh_per_kwp target" — below
+# this relative threshold the loader does **not** rescale.
+_PV_RESCALE_REL_TOLERANCE: float = 1.0e-12
+
+
+def _rescale_pv_to_user_target(
+    ts: pd.DataFrame,
+    *,
+    pv_nameplate_kwp: float,
+    specific_production_kwh_per_kwp: float,
+) -> pd.DataFrame:
+    """Rescale ``ts['pv_kwh']`` to match the user's
+    ``pv_nameplate_kwp × specific_production_kwh_per_kwp`` target.
+
+    The shape is preserved exactly (multiplicative scaling).  Returns
+    a new DataFrame.  Skipped (pass-through) when:
+
+    * either knob is zero or negative (PV is "absent" or unspecified);
+    * the workbook PV column sums to zero;
+    * the current annual total already matches the target within
+      ``1e-12`` relative.
+    """
+    if "pv_kwh" not in ts.columns:
+        return ts
+    if pv_nameplate_kwp <= 0.0 or specific_production_kwh_per_kwp <= 0.0:
+        return ts
+
+    current_total = float(ts["pv_kwh"].astype(float).sum())
+    if current_total <= 0.0:
+        return ts
+
+    target_total = (
+        float(pv_nameplate_kwp) * float(specific_production_kwh_per_kwp)
+    )
+    rel_diff = abs(current_total - target_total) / max(target_total, 1.0e-9)
+    if rel_diff <= _PV_RESCALE_REL_TOLERANCE:
+        return ts
+
+    factor = target_total / current_total
+    out = ts.copy()
+    out["pv_kwh"] = out["pv_kwh"].astype(float) * factor
+    logger.info(
+        "PV column rescaled: workbook annual %.1f kWh → user target %.1f "
+        "kWh (factor %.6f) from pv_nameplate_kwp=%.1f kWp × "
+        "specific_production=%.4f kWh/kWp.",
+        current_total, target_total, factor,
+        pv_nameplate_kwp, specific_production_kwh_per_kwp,
+    )
+    return out
+
+
 def _read_v07_legacy_workbook(xlsx_path: Path) -> dict[str, Any]:
     """Best-effort read of a v0.7 workbook (project + economic).
 
@@ -854,6 +906,13 @@ def _read_v07_legacy_workbook(xlsx_path: Path) -> dict[str, Any]:
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
     )
+    ts = _rescale_pv_to_user_target(
+        ts,
+        pv_nameplate_kwp=float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0),
+        specific_production_kwh_per_kwp=float(
+            typed["pv"].get("specific_production_kwh_per_kwp", 0.0) or 0.0,
+        ),
+    )
     out: dict[str, Any] = {
         "ts": ts,
         "curtailment_profile": profile,
@@ -903,6 +962,13 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     ts = _normalise_timeseries(
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
+    )
+    ts = _rescale_pv_to_user_target(
+        ts,
+        pv_nameplate_kwp=float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0),
+        specific_production_kwh_per_kwp=float(
+            typed["pv"].get("specific_production_kwh_per_kwp", 0.0) or 0.0,
+        ),
     )
     out: dict[str, Any] = {
         "ts": ts,

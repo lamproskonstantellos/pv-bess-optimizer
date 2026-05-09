@@ -117,7 +117,9 @@ def test_repo_workbook_loads_typed_dict(repo_input_xlsx):
     for section in ("project", "pv", "bess", "economics", "simulation"):
         assert section in typed and isinstance(typed[section], dict)
     assert typed["project"]["mode"] == "vnb"
-    assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(4500.0)
+    # The case-study workbook ships with the canonical 8 MW reference
+    # (12 568 961,75 kWh annual ⇒ 1571,12 kWh/kWp specific production).
+    assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(8000.0)
     assert typed["bess"]["bess_power_kw"] == pytest.approx(5000.0)
     assert "curtailment_profile" in typed
     profile = np.asarray(typed["curtailment_profile"])
