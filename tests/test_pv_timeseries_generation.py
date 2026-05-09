@@ -57,6 +57,8 @@ from pvbess_opt.io import (
 from scripts.build_input_xlsx import (
     CANONICAL_PV_NAMEPLATE_KWP,
     CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP,
+    DEFAULT_PV_NAMEPLATE_KWP,
+    DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP,
     generate_pv_timeseries,
 )
 
@@ -76,34 +78,62 @@ def _reference_shape() -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def test_repo_input_xlsx_pv_sum_equals_canonical_total():
+def test_repo_input_xlsx_pv_sum_equals_default_target():
+    """The case-study workbook ships with 1 MW × 1500 kWh/kWp scaling
+    (1 500 000 kWh annual), derived from the canonical 8 MW shape."""
     ts = pd.read_excel(REPO_INPUT_XLSX, sheet_name="timeseries")
     total = float(ts["pv_kwh"].sum())
-    expected = float(_reference_shape().sum())
+    expected = (
+        DEFAULT_PV_NAMEPLATE_KWP
+        * DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
+    )
     assert total == pytest.approx(expected, rel=1e-9), (
-        f"workbook PV total {total:.4f} kWh does not match canonical "
-        f"reference {expected:.4f} kWh"
+        f"workbook PV total {total:.4f} kWh does not match default "
+        f"target {expected:.4f} kWh "
+        f"(= {DEFAULT_PV_NAMEPLATE_KWP:.0f} kWp × "
+        f"{DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP:.0f} kWh/kWp)"
     )
 
 
-def test_repo_input_xlsx_pv_column_is_bit_identical_to_reference():
+def test_repo_input_xlsx_pv_shape_matches_canonical_proportionally():
+    """The workbook PV vector equals ``reference × scale`` where
+    ``scale = (1 MW × 1500) / (8 MW × 1571.12)`` exactly.  Every
+    per-step ratio is preserved bit-for-bit (no synthetic noise)."""
     ts = pd.read_excel(REPO_INPUT_XLSX, sheet_name="timeseries")
-    diff = np.abs(ts["pv_kwh"].to_numpy(dtype=float) - _reference_shape())
+    workbook_pv = ts["pv_kwh"].to_numpy(dtype=float)
+    ref = _reference_shape()
+    expected_total = (
+        DEFAULT_PV_NAMEPLATE_KWP
+        * DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
+    )
+    ref_total = float(ref.sum())
+    expected_pv = ref * (expected_total / ref_total)
+    diff = np.abs(workbook_pv - expected_pv)
     assert float(diff.max()) < 1.0e-6, (
-        f"max abs difference {float(diff.max())} between workbook and "
-        f"reference exceeds 1e-6"
+        f"max abs diff {float(diff.max())} exceeds 1e-6: workbook PV "
+        "is not the canonical shape scaled to the default target"
     )
 
 
-def test_repo_input_xlsx_pv_sheet_defaults_match_canonical():
+def test_repo_input_xlsx_pv_sheet_defaults_match_documented():
     pv_sheet = pd.read_excel(REPO_INPUT_XLSX, sheet_name="pv")
     pv_dict = dict(zip(pv_sheet["key"].astype(str), pv_sheet["value"]))
     assert float(pv_dict["pv_nameplate_kwp"]) == pytest.approx(
-        CANONICAL_PV_NAMEPLATE_KWP, rel=1e-12,
+        DEFAULT_PV_NAMEPLATE_KWP, rel=1e-12,
     )
     assert float(pv_dict["specific_production_kwh_per_kwp"]) == pytest.approx(
-        CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP, rel=1e-9,
+        DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP, rel=1e-12,
     )
+
+
+def test_canonical_constants_match_reference_dataset():
+    """The canonical 8 MW constants still describe the reference data."""
+    ref_total = float(_reference_shape().sum())
+    expected_canonical = (
+        CANONICAL_PV_NAMEPLATE_KWP
+        * CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
+    )
+    assert ref_total == pytest.approx(expected_canonical, rel=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -136,12 +166,16 @@ def test_generate_pv_timeseries_is_deterministic():
 
 
 def test_default_workbook_loader_passes_pv_through_unchanged():
+    """When the workbook annual total already matches
+    ``pv_nameplate_kwp × specific_production_kwh_per_kwp`` (the
+    case-study default), the loader must NOT modify pv_kwh.  We
+    compare the loader output to the raw xlsx values directly."""
+    raw_ts = pd.read_excel(REPO_INPUT_XLSX, sheet_name="timeseries")
     typed = read_workbook(REPO_INPUT_XLSX)
-    pv = typed["ts"]["pv_kwh"].to_numpy(dtype=float)
-    diff = np.abs(pv - _reference_shape())
-    assert float(diff.max()) < 1.0e-6, (
-        "loader changed the PV column even though defaults match"
-    )
+    raw_pv = raw_ts["pv_kwh"].to_numpy(dtype=float)
+    loaded_pv = typed["ts"]["pv_kwh"].to_numpy(dtype=float)
+    diff = np.abs(loaded_pv - raw_pv)
+    assert float(diff.max()) < 1.0e-9
 
 
 # ---------------------------------------------------------------------------

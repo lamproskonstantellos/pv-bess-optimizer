@@ -3,19 +3,24 @@
 PV column policy
 ----------------
 
-The case-study workbook ships with the **canonical 8 MW reference
-shape verbatim** (real-world site, 35 040 rows @ 15-min cadence,
-12 568 961,75 kWh annual ⇒ 1571,12 kWh/kWp specific production).  The
-``pv_nameplate_kwp`` and ``specific_production_kwh_per_kwp`` defaults
-on the ``pv`` sheet are pinned to ``8000.0`` and ``1571.12021875`` so
-they exactly match the shape that lives next to them in the
+The canonical reference at ``data/pv_shape_15min.csv`` is the
+real-world 8 MW site shape (35 040 rows @ 15-min cadence, 12 568
+961,75 kWh annual ⇒ 1571,12 kWh/kWp specific production).  The
+case-study workbook ships **scaled to 1 MW × 1500 kWh/kWp/year**
+(1 500 000 kWh annual) — a tidy round-number default for new users.
+The shape (every per-step ratio) is identical to the canonical 8 MW
+reference; only the multiplicative scale differs.
+
+The ``pv_nameplate_kwp`` and ``specific_production_kwh_per_kwp``
+defaults on the ``pv`` sheet are pinned to ``1000.0`` and ``1500.0``
+so they exactly match the shape that lives next to them in the
 ``timeseries`` sheet.
 
 When a user later opens the workbook and changes
 ``pv_nameplate_kwp`` and / or ``specific_production_kwh_per_kwp`` to
 their own project numbers, the ``timeseries`` sheet is **NOT** edited
 — the rescaling happens **inside the model loader**
-(:func:`pvbess_opt.io.read_workbook`) at runtime: the canonical shape
+(:func:`pvbess_opt.io.read_workbook`) at runtime: the workbook shape
 is multiplied by ``new_target_total / current_total`` so the
 optimiser sees a series whose annual sum equals the user's
 ``pv_nameplate_kwp * specific_production_kwh_per_kwp`` exactly,
@@ -81,18 +86,25 @@ def generate_pv_timeseries(
     return shape_unit * annual_kwh
 
 
+# The canonical reference (data/pv_shape_15min.csv) is from a real
+# 8 MW site with 1571,12 kWh/kWp specific production.
 CANONICAL_PV_NAMEPLATE_KWP: float = 8000.0
 # Implied by the reference dataset: 12 568 961,75 kWh / 8 000 kWp.
 CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP: float = 1571.12021875
+
+# The case-study default workbook ships with a tidy 1 MW × 1500 kWh/kWp
+# scaling (1 500 000 kWh annual) — same shape, different magnitude.
+DEFAULT_PV_NAMEPLATE_KWP: float = 1000.0
+DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP: float = 1500.0
 
 
 def build_timeseries(
     year: int = 2026,
     target_minutes: int = 15,
     *,
-    pv_nameplate_kwp: float = CANONICAL_PV_NAMEPLATE_KWP,
+    pv_nameplate_kwp: float = DEFAULT_PV_NAMEPLATE_KWP,
     specific_production_kwh_per_kwp: float = (
-        CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
+        DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
     ),
     seed: int = 20260101,
 ) -> pd.DataFrame:
@@ -166,9 +178,9 @@ def build_timeseries(
 
 def build_typed_dict() -> dict:
     """Assemble the typed nested dict for the case-study run (v0.8 schema)."""
-    pv_nameplate_kwp = CANONICAL_PV_NAMEPLATE_KWP
+    pv_nameplate_kwp = DEFAULT_PV_NAMEPLATE_KWP
     specific_production_kwh_per_kwp = (
-        CANONICAL_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
+        DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
     )
     ts = build_timeseries(
         2026,
