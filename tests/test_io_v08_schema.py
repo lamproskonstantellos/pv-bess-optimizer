@@ -28,7 +28,6 @@ from pvbess_opt.io import (
     PROJECT_SHEET_DEFAULTS,
     PV_SHEET_DEFAULTS,
     SIMULATION_SHEET_DEFAULTS,
-    _LEGACY_OPTIMIZATION_KEYS,
     _parse_kv_sheet,
     read_workbook,
     write_workbook,
@@ -204,35 +203,8 @@ def test_misplaced_key_routes_warning_to_correct_sheet(caplog):
 
 
 # ---------------------------------------------------------------------------
-# Legacy paths
+# Removed-in-v0.8 keys still warn
 # ---------------------------------------------------------------------------
-
-
-def test_legacy_v05_optimization_keys_still_warn(caplog):
-    """Phase-1 carries the v0.5 # optimization warning forward unchanged."""
-    flat = {
-        "weight_curtail_tiebreak": 1e-5,
-        "weight_cycles_term": 0.0,
-        "solver_mip_gap": 0.001,
-        "solver_time_limit_seconds": 1800,
-    }
-    with caplog.at_level("WARNING"):
-        _parse_kv_sheet("project", flat)
-    msgs = " ".join(r.getMessage() for r in caplog.records)
-    for key in _LEGACY_OPTIMIZATION_KEYS:
-        assert key in msgs
-    assert "legacy v0.5" in msgs.lower()
-
-
-def test_legacy_plot_daily_year1_still_warns(caplog):
-    flat = {"plot_daily_year1": True}
-    with caplog.at_level("WARNING"):
-        _parse_kv_sheet("simulation", flat)
-    assert any(
-        "plot_daily_year1" in r.getMessage()
-        and "plot_daily_scope" in r.getMessage()
-        for r in caplog.records
-    )
 
 
 @pytest.mark.parametrize("removed_key", [
@@ -248,64 +220,6 @@ def test_v07_removed_keys_warn(removed_key, caplog):
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert removed_key in msgs
     assert "v0.8" in msgs
-
-
-def test_v07_legacy_workbook_logs_warning(tmp_path, caplog):
-    """A v0.7 two-sheet workbook still loads, with a one-line WARNING."""
-    n = 24
-    ts = pd.DataFrame({
-        "timestamp": pd.date_range("2026-01-01", periods=n, freq="h"),
-        "pv_kwh": [100.0] * n,
-        "load_kwh": [50.0] * n,
-        "dam_price_eur_per_mwh": [80.0] * n,
-    })
-    project_rows = [
-        {"key": "# system_sizing", "value": "", "unit": "", "notes": ""},
-        {"key": "pv_nameplate_kwp", "value": 1000.0, "unit": "", "notes": ""},
-        {"key": "bess_power_kw", "value": 500.0, "unit": "", "notes": ""},
-        {"key": "bess_capacity_kwh", "value": 2000.0, "unit": "", "notes": ""},
-        {"key": "p_charge_max_kw", "value": 500.0, "unit": "", "notes": ""},
-        {"key": "p_dis_max_kw", "value": 500.0, "unit": "", "notes": ""},
-        {"key": "battery_hours", "value": 4.0, "unit": "", "notes": ""},
-        {"key": "p_grid_export_max_kw", "value": 500.0, "unit": "", "notes": ""},
-        {"key": "# bess_operation", "value": "", "unit": "", "notes": ""},
-        {"key": "efficiency_charge", "value": 0.95, "unit": "", "notes": ""},
-        {"key": "# regulatory", "value": "", "unit": "", "notes": ""},
-        {"key": "mode", "value": "vnb", "unit": "", "notes": ""},
-        {"key": "curtailment_pct", "value": 27.0, "unit": "", "notes": ""},
-    ]
-    econ_rows = [
-        {"key": "project_lifecycle_years", "value": 5, "unit": "", "notes": ""},
-        {"key": "project_start_year", "value": 2026, "unit": "", "notes": ""},
-        {"key": "discount_rate_pct", "value": 7.0, "unit": "", "notes": ""},
-        {"key": "capex_pv_eur_per_kw", "value": 525.0, "unit": "", "notes": ""},
-        {"key": "capex_bess_eur_per_kw", "value": 200.0, "unit": "", "notes": ""},
-        {"key": "capex_licenses_eur_per_kw", "value": 90.0, "unit": "", "notes": ""},
-        {"key": "opex_pv_eur_per_kwp", "value": 7.0, "unit": "", "notes": ""},
-        {"key": "opex_bess_eur_per_kw", "value": 14.0, "unit": "", "notes": ""},
-    ]
-    dst = tmp_path / "legacy_v07.xlsx"
-    with pd.ExcelWriter(dst, engine="openpyxl") as writer:
-        ts.to_excel(writer, sheet_name="timeseries", index=False)
-        pd.DataFrame(project_rows).to_excel(
-            writer, sheet_name="project", index=False,
-        )
-        pd.DataFrame(econ_rows).to_excel(
-            writer, sheet_name="economic", index=False,
-        )
-    with caplog.at_level("WARNING"):
-        out = read_workbook(dst)
-    assert out["project"]["mode"] == "vnb"
-    assert out["pv"]["pv_nameplate_kwp"] == pytest.approx(1000.0)
-    assert out["bess"]["bess_power_kw"] == pytest.approx(500.0)
-    assert out["bess"]["bess_capacity_kwh"] == pytest.approx(2000.0)
-    msgs = " ".join(r.getMessage() for r in caplog.records)
-    # Migration WARNING references the build-script.
-    assert "build_input_xlsx" in msgs
-    # capex_licenses_eur_per_kw should be flagged as v0.8-removed.
-    assert "capex_licenses_eur_per_kw" in msgs
-    # Curtailment fallback applied.
-    assert np.allclose(np.asarray(out["curtailment_profile"]), 27.0)
 
 
 # ---------------------------------------------------------------------------

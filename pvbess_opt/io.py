@@ -47,30 +47,17 @@ Mode-specific timeseries semantics
 * In ``merchant`` mode ``load_kwh`` is optional — if present, the loader
   logs an INFO message and the optimizer pins all load-coverage flows to 0.
 
-Legacy v0.7 / v0.5 keys
------------------------
+Removed-in-v0.8 keys
+--------------------
 
-A v0.7-style workbook (single ``project`` + ``economic`` sheets with
-the v0.6 ``# system_sizing`` / ``# bess_operation`` group structure)
-still loads — the loader logs a single WARNING listing the affected
-file plus the migration command (``python scripts/build_input_xlsx.py``)
-and reads what it can.  No silent translation.
-
-The v0.5 ``# optimization`` group keys
-(``weight_curtail_tiebreak``, ``weight_cycles_term``,
-``solver_mip_gap``, ``solver_time_limit_seconds``) and the v0.5
-``plot_daily_year1`` flag are still rejected with a WARNING.
-
-Several v0.7 keys were dropped or renamed in v0.8:
+A handful of keys from earlier schemas trigger a friendly WARNING and
+are ignored:
 
 * ``capex_licenses_eur_per_kw`` — replaced by per-asset DEVEX
   (``devex_pv_eur_per_kw`` / ``devex_bess_eur_per_kw``).
 * ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw`` — replaced
   by the symmetric ``bess_power_kw`` and ``bess_capacity_kwh`` pair
-  (industry standard; see Phase 2 of the v0.8 changelog).
-
-Encountering any of these in a workbook triggers a friendly WARNING and
-the value is ignored.
+  (industry standard).
 """
 
 from __future__ import annotations
@@ -178,14 +165,6 @@ for _sheet_name, _sheet_defaults in _SHEET_DEFAULTS.items():
     for _key in _sheet_defaults:
         _KEY_TO_SHEET[_key] = _sheet_name
 
-
-# Legacy v0.5 ``# optimization`` group keys.
-_LEGACY_OPTIMIZATION_KEYS: frozenset[str] = frozenset({
-    "weight_curtail_tiebreak",
-    "weight_cycles_term",
-    "solver_mip_gap",
-    "solver_time_limit_seconds",
-})
 
 # Keys removed in v0.8.  Each maps to a one-line user-facing hint.
 _LEGACY_V08_REMOVED: dict[str, str] = {
@@ -399,10 +378,9 @@ _SHEET_ROW_TEMPLATES: dict[
     "simulation": _SIMULATION_ROWS,
 }
 
-# Default constant 27 % curtailment cap (24 hourly rows) — reproduces
-# v0.7 scalar behaviour exactly.
+# Default constant 27 % curtailment cap (24 hourly rows) applied when the
+# workbook omits the curtailment_profile sheet.
 _DEFAULT_CURTAILMENT_PCT_HOURLY: float = 27.0
-_LEGACY_DEFAULT_CURTAILMENT_PCT: float = 27.0
 
 
 # ---------------------------------------------------------------------------
@@ -668,22 +646,6 @@ def _parse_kv_sheet(
                 sheet_name, key, _LEGACY_V08_REMOVED[key], raw,
             )
             continue
-        if key in _LEGACY_OPTIMIZATION_KEYS:
-            logger.warning(
-                "%s sheet contains legacy v0.5 '# optimization' key %r; "
-                "no longer accepted (solver gap / time limit are CLI-only "
-                "via --mip-gap / --time-limit; tie-breaker weights live as "
-                "private constants in pvbess_opt.optimization). Value %r ignored.",
-                sheet_name, key, raw,
-            )
-            continue
-        if key == "plot_daily_year1":
-            logger.warning(
-                "%s sheet key 'plot_daily_year1' was renamed to "
-                "'plot_daily_scope' in v0.6; use 'none' / 'year1_only' / "
-                "'all' explicitly. Value %r ignored.", sheet_name, raw,
-            )
-            continue
         # Unknown key for this sheet — but maybe it belongs to another v0.8 sheet?
         if key in _KEY_TO_SHEET:
             logger.warning(
@@ -834,9 +796,6 @@ def detect_timestep_minutes(ts: pd.DataFrame) -> int:
 _V08_REQUIRED_SHEETS: frozenset[str] = frozenset({
     "timeseries", "project", "pv", "bess", "economics", "simulation",
 })
-_V07_LEGACY_SHEETS: frozenset[str] = frozenset({
-    "timeseries", "project", "economic",
-})
 
 
 # Tolerance for "the workbook PV total already matches the user's
@@ -891,92 +850,12 @@ def _rescale_pv_to_user_target(
     return out
 
 
-def _read_v07_legacy_workbook(xlsx_path: Path) -> dict[str, Any]:
-    """Best-effort read of a v0.7 workbook (project + economic).
-
-    The loader logs a single WARNING listing the affected file plus the
-    migration command, then translates the v0.7 grouped flat dict into
-    v0.8 typed sections.  No silent translation: keys it cannot place
-    are surfaced via the normal warning channels.
-    """
-    logger.warning(
-        "%s uses the legacy v0.7 two-sheet layout (project + economic). "
-        "v0.8 expects seven sheets — please regenerate via "
-        "`python scripts/build_input_xlsx.py`. Proceeding with best-effort "
-        "translation; values that don't map will be ignored with a per-key "
-        "warning.",
-        xlsx_path,
-    )
-
-    project_flat = _flat_dict_from_sheet(
-        pd.read_excel(xlsx_path, sheet_name="project"),
-    )
-    econ_flat = _flat_dict_from_sheet(
-        pd.read_excel(xlsx_path, sheet_name="economic"),
-    )
-
-    routed: dict[str, dict[str, Any]] = {
-        "project": {}, "pv": {}, "bess": {}, "economics": {}, "simulation": {},
-    }
-    unplaced: list[tuple[str, Any]] = []
-    for src in (project_flat, econ_flat):
-        for key, value in src.items():
-            sheet = _KEY_TO_SHEET.get(key)
-            if sheet is not None:
-                routed[sheet][key] = value
-            else:
-                unplaced.append((key, value))
-
-    typed: dict[str, Any] = {}
-    for sheet_name in ("project", "pv", "bess", "economics", "simulation"):
-        typed[sheet_name] = _parse_kv_sheet(sheet_name, routed[sheet_name])
-
-    # Run unplaced keys through the normal per-sheet path so the
-    # legacy / removed warnings are emitted exactly once.
-    for key, value in unplaced:
-        # Pretend they came from the most likely sheet (project) just
-        # for the warning message.
-        _parse_kv_sheet("project", {key: value})
-
-    profile = np.full(24, _LEGACY_DEFAULT_CURTAILMENT_PCT, dtype=float)
-    legacy_curtailment_pct = econ_flat.get("curtailment_pct")
-    if legacy_curtailment_pct is None:
-        legacy_curtailment_pct = project_flat.get("curtailment_pct")
-    if legacy_curtailment_pct is not None:
-        try:
-            profile = np.full(24, float(legacy_curtailment_pct), dtype=float)
-        except (TypeError, ValueError):
-            pass
-
-    mode = str(typed["project"]["mode"]).lower()
-    ts = _normalise_timeseries(
-        pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
-        mode=mode,
-    )
-    ts = _rescale_pv_to_user_target(
-        ts,
-        pv_nameplate_kwp=float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0),
-        specific_production_kwh_per_kwp=float(
-            typed["pv"].get("specific_production_kwh_per_kwp", 0.0) or 0.0,
-        ),
-    )
-    out: dict[str, Any] = {
-        "ts": ts,
-        "curtailment_profile": profile,
-        "dt_minutes": detect_timestep_minutes(ts),
-    }
-    out.update(typed)
-    return out
-
-
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the input workbook and return the typed nested dict."""
     xlsx_path = Path(xlsx_path)
     sheets = set(pd.ExcelFile(xlsx_path).sheet_names)
 
     missing = _V08_REQUIRED_SHEETS - sheets
-    if missing and _V07_LEGACY_SHEETS.issubset(sheets):
-        return _read_v07_legacy_workbook(xlsx_path)
     if missing:
         raise ValueError(
             f"Workbook {xlsx_path!s} is missing required sheets: "
@@ -1000,10 +879,10 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     else:
         logger.info(
             "curtailment_profile sheet not found in %s; falling back to "
-            "constant %.1f %% for every hour (legacy v0.7 default).",
-            xlsx_path, _LEGACY_DEFAULT_CURTAILMENT_PCT,
+            "constant %.1f %% for every hour.",
+            xlsx_path, _DEFAULT_CURTAILMENT_PCT_HOURLY,
         )
-        profile = np.full(24, _LEGACY_DEFAULT_CURTAILMENT_PCT, dtype=float)
+        profile = np.full(24, _DEFAULT_CURTAILMENT_PCT_HOURLY, dtype=float)
 
     mode = str(typed["project"]["mode"]).lower()
     ts = _normalise_timeseries(
@@ -1043,7 +922,7 @@ def _typed_to_flat(
     if profile is not None:
         curtailment_frac = float(np.mean(np.asarray(profile, dtype=float))) / 100.0
     else:
-        curtailment_frac = _LEGACY_DEFAULT_CURTAILMENT_PCT / 100.0
+        curtailment_frac = _DEFAULT_CURTAILMENT_PCT_HOURLY / 100.0
     curtailment_frac = float(np.clip(curtailment_frac, 0.0, 1.0))
 
     params: dict[str, Any] = {
