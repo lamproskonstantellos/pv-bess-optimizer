@@ -197,9 +197,15 @@ def plot_yearly_cashflow_bars(
            edgecolor="black", linewidth=0.4, label="Revenue")
     ax.bar(years, opex, width=width, color=FINANCIAL_COLORS["opex"],
            edgecolor="black", linewidth=0.4, label="OPEX")
+    # Stack DEVEX at the bottom of the negative Year-0 stack and put CAPEX
+    # on top of it so both segments remain visually identifiable.  Without
+    # the ``bottom=devex`` arg matplotlib overlays the CAPEX bar on the
+    # DEVEX bar at the same x and the smaller DEVEX segment disappears
+    # inside the CAPEX block.
     ax.bar(years, devex, width=width, color=FINANCIAL_COLORS["devex"],
            edgecolor="black", linewidth=0.4, label="DEVEX")
-    ax.bar(years, capex, width=width, color=FINANCIAL_COLORS["capex"],
+    ax.bar(years, capex, width=width, bottom=devex,
+           color=FINANCIAL_COLORS["capex"],
            edgecolor="black", linewidth=0.4, label="CAPEX")
     ax.plot(years, net, color=FINANCIAL_COLORS["net"], linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
