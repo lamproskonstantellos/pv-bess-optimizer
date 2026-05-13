@@ -34,6 +34,7 @@ from .style import save_figure, show_titles
 
 _COLOR_REVENUE = "#2E7D32"        # green
 _COLOR_OPEX = "#EF6C00"           # amber
+_COLOR_DEVEX = "#8E44AD"          # purple
 _COLOR_CAPEX = "#C62828"          # red
 _COLOR_NET = "#1565C0"            # blue
 _COLOR_DISCOUNTED = "#6A1B9A"     # purple
@@ -188,6 +189,10 @@ def plot_yearly_cashflow_bars(
     years = _calendar_axis(yearly_cf)
     revenue = yearly_cf["revenue_eur"].to_numpy(dtype=float)
     opex = yearly_cf["opex_eur"].to_numpy(dtype=float)  # negative
+    if "devex_eur" in yearly_cf.columns:
+        devex = yearly_cf["devex_eur"].to_numpy(dtype=float)  # negative
+    else:
+        devex = np.zeros_like(revenue)
     capex = yearly_cf["capex_eur"].to_numpy(dtype=float)  # negative
     net = yearly_cf["net_cashflow_eur"].to_numpy(dtype=float)
 
@@ -198,6 +203,8 @@ def plot_yearly_cashflow_bars(
            edgecolor="black", linewidth=0.4, label="Revenue")
     ax.bar(years, opex, width=width, color=_COLOR_OPEX,
            edgecolor="black", linewidth=0.4, label="OPEX")
+    ax.bar(years, devex, width=width, color=_COLOR_DEVEX,
+           edgecolor="black", linewidth=0.4, label="DEVEX")
     ax.bar(years, capex, width=width, color=_COLOR_CAPEX,
            edgecolor="black", linewidth=0.4, label="CAPEX")
     ax.plot(years, net, color=_COLOR_NET, linewidth=1.5,
@@ -248,17 +255,25 @@ def plot_npv_waterfall(
     )
     ax.axhline(0.0, color="black", linewidth=0.6)
 
-    # Year-0 step gets a "CAPEX" label, offset off the left edge of the
-    # bar so it can't get clipped or overlap the Year-0 stack.
+    # Year-0 step gets a "CAPEX" (or "CAPEX + DEVEX" when DEVEX is non-zero)
+    # label, offset off the left edge of the bar so it can't get clipped or
+    # overlap the Year-0 stack.
     if "project_year" in yearly_cf.columns and (yearly_cf["project_year"] == 0).any():
         capex_y0 = float(
             yearly_cf.loc[yearly_cf["project_year"] == 0, "discounted_cf_eur"].iloc[0]
         )
+        if "devex_eur" in yearly_cf.columns:
+            devex_y0 = float(
+                yearly_cf.loc[yearly_cf["project_year"] == 0, "devex_eur"].iloc[0]
+            )
+        else:
+            devex_y0 = 0.0
+        capex_label = "CAPEX + DEVEX" if abs(devex_y0) > 1e-9 else "CAPEX"
         trans_left = offset_copy(
             ax.transData, fig=ax.figure, x=-5, y=0, units="points",
         )
         ax.text(
-            float(years[0]), capex_y0, "CAPEX",
+            float(years[0]), capex_y0, capex_label,
             ha="right", va="top" if capex_y0 < 0 else "bottom",
             fontsize=7, color=_COLOR_CAPEX,
             transform=trans_left, clip_on=False,
