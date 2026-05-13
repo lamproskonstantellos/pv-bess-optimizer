@@ -533,7 +533,7 @@ def _dumbbell_plot(
             ax.scatter([right], [i], s=64, color=colour_right,
                        edgecolor="black", linewidth=0.4, zorder=5)
             _annotate_dumbbell_endpoints(
-                ax, left, right, i, low, high, value_formatter,
+                ax, left, right, i, value_formatter,
             )
             continue
         # Same-side branch.
@@ -544,7 +544,7 @@ def _dumbbell_plot(
         ax.scatter([left, right], [i, i], s=64, color=colour_left,
                    edgecolor="black", linewidth=0.4, zorder=5)
         _annotate_dumbbell_endpoints(
-            ax, left, right, i, low, high, value_formatter,
+            ax, left, right, i, value_formatter,
         )
 
     ax.set_yticks(y_pos)
@@ -568,23 +568,29 @@ def _annotate_dumbbell_endpoints(
     left: float,
     right: float,
     row: int,
-    low_value: float,
-    high_value: float,
     value_formatter: Callable[[float], str],
 ) -> None:
-    """Place the low / high labels above each endpoint."""
+    """Print each endpoint label at its actual x-position so the text
+    value always matches the x-axis coordinate.
+
+    ``left`` and ``right`` are the *sorted* endpoint coordinates (left
+    <= right); we label them with their own numeric values rather than
+    re-using ``low`` / ``high`` from the scenario direction, which can
+    swap when a "low" scenario actually produces the larger metric
+    (e.g. low CAPEX → higher IRR).
+    """
     above = offset_copy(ax.transData, fig=ax.figure, x=0, y=10, units="points")
     bbox_kwargs = {
         "facecolor": "white", "edgecolor": "grey", "alpha": 0.8,
         "linewidth": 0.5, "boxstyle": "round,pad=0.15",
     }
     ax.text(
-        left, row, value_formatter(low_value),
+        left, row, value_formatter(left),
         ha="left", va="bottom", fontsize=7, transform=above,
         bbox=bbox_kwargs,
     )
     ax.text(
-        right, row, value_formatter(high_value),
+        right, row, value_formatter(right),
         ha="right", va="bottom", fontsize=7, transform=above,
         bbox=bbox_kwargs,
     )
