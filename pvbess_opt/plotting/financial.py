@@ -236,19 +236,74 @@ def plot_npv_waterfall(
     yearly_cf: pd.DataFrame, out_path: Path,
     *, econ: dict[str, Any] | None = None,
 ) -> Path:
-    """Year-by-year contribution to total NPV (waterfall stacked bar)."""
+    """Year-by-year contribution to total NPV (waterfall stacked bar).
+
+    Year 0 is rendered as two stacked bars at the same x coordinate —
+    DEVEX (purple) at the bottom of the negative stack, CAPEX (red)
+    above it — both labelled in-place.  Years 1..N keep their green /
+    red sign-coded incremental bars unchanged.
+    """
     out_path = Path(out_path)
     years = _calendar_axis(yearly_cf)
     disc = yearly_cf["discounted_cf_eur"].to_numpy(dtype=float)
     cum = np.cumsum(disc)
     fmt_mode = _resolve_currency_format(econ)
 
+    has_pyear = "project_year" in yearly_cf.columns
+    y0_mask = (
+        (yearly_cf["project_year"] == 0).to_numpy()
+        if has_pyear else np.zeros(len(disc), dtype=bool)
+    )
+
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     bottoms = np.concatenate([[0.0], cum[:-1]])
-    colours = [FINANCIAL_COLORS["revenue"] if d >= 0 else FINANCIAL_COLORS["capex"] for d in disc]
-    ax.bar(years, disc, bottom=bottoms, color=colours,
-           edgecolor="black", linewidth=0.4)
+
+    # Operating-year bars (Years 1..N) — sign-coded green / red.
+    op_mask = ~y0_mask
+    op_colours = [
+        FINANCIAL_COLORS["revenue"] if d >= 0 else FINANCIAL_COLORS["capex"]
+        for d in disc[op_mask]
+    ]
+    ax.bar(
+        years[op_mask], disc[op_mask], bottom=bottoms[op_mask],
+        color=op_colours, edgecolor="black", linewidth=0.4,
+    )
+
+    # Year-0: split DEVEX / CAPEX into two stacked bars at the same x.
+    disc_capex_y0 = 0.0
+    disc_devex_y0 = 0.0
+    if y0_mask.any():
+        y0_idx = int(np.argmax(y0_mask))
+        df = yearly_cf
+        disc_factor = (
+            float(df.loc[df["project_year"] == 0, "discount_factor"].iloc[0])
+            if "discount_factor" in df.columns else 1.0
+        )
+        capex_y0_raw = float(
+            df.loc[df["project_year"] == 0, "capex_eur"].iloc[0]
+        )
+        devex_y0_raw = float(
+            df.loc[df["project_year"] == 0, "devex_eur"].iloc[0]
+            if "devex_eur" in df.columns else 0.0
+        )
+        disc_capex_y0 = capex_y0_raw * disc_factor
+        disc_devex_y0 = devex_y0_raw * disc_factor
+        x0 = float(years[y0_idx])
+        bot0 = float(bottoms[y0_idx])
+        if abs(disc_devex_y0) > 1e-9:
+            ax.bar(
+                [x0], [disc_devex_y0], bottom=[bot0],
+                color=FINANCIAL_COLORS["devex"],
+                edgecolor="black", linewidth=0.4, label="DEVEX",
+            )
+        if abs(disc_capex_y0) > 1e-9:
+            ax.bar(
+                [x0], [disc_capex_y0], bottom=[bot0 + disc_devex_y0],
+                color=FINANCIAL_COLORS["capex"],
+                edgecolor="black", linewidth=0.4, label="CAPEX",
+            )
+
     ax.plot(
         years, cum,
         color=FINANCIAL_COLORS["discounted"], linewidth=1.5,
@@ -256,29 +311,31 @@ def plot_npv_waterfall(
     )
     ax.axhline(0.0, color="black", linewidth=0.6)
 
-    # Year-0 step gets a "CAPEX" (or "CAPEX + DEVEX" when DEVEX is non-zero)
-    # label, offset off the left edge of the bar so it can't get clipped or
-    # overlap the Year-0 stack.
-    if "project_year" in yearly_cf.columns and (yearly_cf["project_year"] == 0).any():
-        capex_y0 = float(
-            yearly_cf.loc[yearly_cf["project_year"] == 0, "discounted_cf_eur"].iloc[0]
-        )
-        if "devex_eur" in yearly_cf.columns:
-            devex_y0 = float(
-                yearly_cf.loc[yearly_cf["project_year"] == 0, "devex_eur"].iloc[0]
-            )
-        else:
-            devex_y0 = 0.0
-        capex_label = "CAPEX + DEVEX" if abs(devex_y0) > 1e-9 else "CAPEX"
+    # Two right-aligned text annotations at the midpoints of the Year-0
+    # DEVEX and CAPEX segments — keeps each label glued to its own bar
+    # instead of merging into a single "CAPEX + DEVEX" caption.
+    if y0_mask.any():
+        y0_idx = int(np.argmax(y0_mask))
+        bot0 = float(bottoms[y0_idx])
         trans_left = offset_copy(
             ax.transData, fig=ax.figure, x=-5, y=0, units="points",
         )
-        ax.text(
-            float(years[0]), capex_y0, capex_label,
-            ha="right", va="top" if capex_y0 < 0 else "bottom",
-            fontsize=7, color=FINANCIAL_COLORS["capex"],
-            transform=trans_left, clip_on=False,
-        )
+        if abs(disc_devex_y0) > 1e-9:
+            devex_mid = bot0 + 0.5 * disc_devex_y0
+            ax.text(
+                float(years[y0_idx]), devex_mid, "DEVEX",
+                ha="right", va="center",
+                fontsize=7, color=FINANCIAL_COLORS["devex"],
+                transform=trans_left, clip_on=False,
+            )
+        if abs(disc_capex_y0) > 1e-9:
+            capex_mid = bot0 + disc_devex_y0 + 0.5 * disc_capex_y0
+            ax.text(
+                float(years[y0_idx]), capex_mid, "CAPEX",
+                ha="right", va="center",
+                fontsize=7, color=FINANCIAL_COLORS["capex"],
+                transform=trans_left, clip_on=False,
+            )
 
     final_npv = float(cum[-1]) if len(cum) > 0 else 0.0
     trans_right = offset_copy(
