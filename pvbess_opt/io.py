@@ -245,7 +245,8 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Greek VNB settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
      "Currently informational; the MILP timestep is auto-detected."),
     ("p_grid_export_max_kw", 5000, "kW",
-     "Grid-connection export limit (kW)."),
+     "Grid-connection export limit (kW). Project-wide cap applied to "
+     "the combined PV + BESS export flow."),
     ("retail_tariff_eur_per_mwh", 132, "EUR/MWh",
      "Retail tariff used in vnb mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",

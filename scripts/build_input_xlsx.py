@@ -192,6 +192,7 @@ def build_typed_dict() -> dict:
         "project_start_year": 2026,
         "mode": "vnb",
         "settlement_minutes": 15,
+        # Project-wide cap applied to the combined PV + BESS export flow.
         "p_grid_export_max_kw": 5000.0,
         "retail_tariff_eur_per_mwh": 132.0,
         "allow_bess_grid_charging": False,

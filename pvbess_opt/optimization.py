@@ -538,10 +538,18 @@ def build_model(
             m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * e_cap_param)
 
     # --- Hourly curtailment cap (HARD constraint, BOTH modes) -------------
-    # Section 8 of the VNB spec — regulatory grid-connection limit per
-    # MD YPEN/DAPEEK/53563/1556/2023.  Applies in vnb AND merchant modes.
-    # v0.8: cap may vary by hour-of-day (and optionally by month) via the
-    # ``curtailment_profile`` workbook sheet.
+    # Section 8 of the VNB spec — regulatory grid-connection limit.
+    # Applies in vnb AND merchant modes. v0.8: cap may vary by hour-of-day
+    # (and optionally by month) via the ``curtailment_profile`` sheet.
+    #
+    # Project-wide combined export:
+    #   grid_export_total[t] = pv_to_grid[t] + bess_dis_grid[t]
+    # The per-step cap is
+    #   p_grid_export_max_kw * dt_h * (1 - curtailment_per_step[t])
+    # and applies to that COMBINED flow — not separately to PV exports
+    # or to BESS-discharge exports. ``p_grid_export_max_kw`` is the
+    # nameplate grid-connection limit; ``curtailment_profile`` is the
+    # per-hour regulatory derate that scales it down.
     m.EXPORT_CAP = pyo.Constraint(
         m.T,
         rule=lambda m, t: m.grid_export_total[t] <= export_cap_kwh_per_step[t],
