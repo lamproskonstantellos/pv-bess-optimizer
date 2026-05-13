@@ -593,6 +593,38 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
         )
 
 
+def _emit_bess_utilisation_audit(
+    kpis: dict[str, Any], params: dict[str, Any],
+) -> None:
+    """Log the Year-1 BESS utilisation diagnostics in a single block.
+
+    Warns when actual utilisation falls below 30 % of the theoretical
+    annual cycle budget — the two usual causes (load ≫ PV with
+    grid-charging disabled, or DAM-arbitrage economics marginal) are
+    named so the user knows where to look.
+    """
+    diag = kpis.get("bess_utilization_diagnostics")
+    bess_power_kw = float(params.get("bess_power_kw", 0.0) or 0.0)
+    if not diag or bess_power_kw <= 0.0:
+        return
+    key_width = max(len(k) for k in diag.keys()) + 2
+    lines = ["[BESS utilisation audit]"]
+    for k, v in diag.items():
+        lines.append(f"  {k.ljust(key_width)}{v}")
+    logger.info("\n".join(lines))
+    util = float(diag.get("bess_utilization_pct", 0.0))
+    if util < 30.0:
+        logger.warning(
+            "BESS Year-1 utilisation is %.1f %% of the theoretical annual "
+            "cycle budget (< 30 %%).  Likely causes: (a) load >> PV with "
+            "allow_bess_grid_charging disabled, leaving no surplus to "
+            "charge from; (b) DAM-arbitrage economics marginal versus "
+            "battery degradation.  Consider enabling "
+            "allow_bess_grid_charging or resizing the BESS.",
+            util,
+        )
+
+
 def _project_mode_label(params: dict[str, Any]) -> str:
     """Return ``"PV-only"`` / ``"BESS-only"`` / ``"Hybrid PV+BESS"``."""
     pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
@@ -733,6 +765,7 @@ def _run_one(
         kpis = apply_unavailability_derate(
             kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
         )
+        _emit_bess_utilisation_audit(kpis, params)
         kpis_monthly = compute_monthly_kpis(res)
 
         # Optional rolling-horizon run (writes its KPIs alongside the

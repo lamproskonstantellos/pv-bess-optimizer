@@ -376,6 +376,35 @@ def compute_kpis(
         "profit_total_eur": round(profit_total, 2),
     }
 
+    # ---------------------------------------------------------------------
+    # BESS utilisation diagnostics (Year-1 throughput vs. theoretical max).
+    # Lets the run log explain *why* a project ends up with low lifetime
+    # cycles — typically PV surplus << load with grid charging disabled.
+    # ---------------------------------------------------------------------
+    if e_cap_kwh > 1e-9:
+        max_cycles_per_day = float(params.get("max_cycles_per_day", 0.0) or 0.0)
+        bess_discharge_load_mwh = bess_to_load
+        bess_discharge_grid_mwh = _sum_mwh(res, "bess_dis_grid_kwh")
+        max_cycles_year = max_cycles_per_day * 365.0
+        actual_cycles_year1 = (
+            (bess_discharge_load_mwh + bess_discharge_grid_mwh) * 1000.0
+            / e_cap_kwh
+        )
+        utilisation_pct = (
+            100.0 * actual_cycles_year1 / max_cycles_year
+            if max_cycles_year > 1e-9 else 0.0
+        )
+        kpis["bess_utilization_diagnostics"] = {
+            "bess_charge_pv_surplus_mwh": round(pv_to_bess, 4),
+            "bess_charge_grid_mwh": round(bess_charge_grid, 4),
+            "bess_discharge_load_mwh": round(bess_discharge_load_mwh, 4),
+            "bess_discharge_grid_mwh": round(bess_discharge_grid_mwh, 4),
+            "bess_capacity_mwh": round(e_cap_kwh / 1000.0, 4),
+            "bess_max_cycles_per_year_theoretical": round(max_cycles_year, 2),
+            "bess_actual_cycles_year1": round(actual_cycles_year1, 2),
+            "bess_utilization_pct": round(utilisation_pct, 1),
+        }
+
     return kpis
 
 
