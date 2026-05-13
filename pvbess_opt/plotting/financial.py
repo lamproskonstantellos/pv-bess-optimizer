@@ -25,22 +25,9 @@ import pandas as pd
 from matplotlib.ticker import MaxNLocator
 from matplotlib.transforms import offset_copy
 
+from ..config import FINANCIAL_COLORS
 from ._currency import euro_axis_formatter, format_eur
 from .style import save_figure, show_titles
-
-
-# ---------------------------------------------------------------------------
-# Colour palette
-# ---------------------------------------------------------------------------
-
-_COLOR_REVENUE = "#2E7D32"        # green
-_COLOR_OPEX = "#EF6C00"           # amber
-_COLOR_DEVEX = "#8E44AD"          # purple
-_COLOR_CAPEX = "#C62828"          # red
-_COLOR_NET = "#1565C0"            # blue
-_COLOR_DISCOUNTED = "#6A1B9A"     # purple
-_COLOR_TORNADO_LOW = "#FFB6C6"    # pink (negative impact)
-_COLOR_TORNADO_HIGH = "#90EE90"   # green (positive impact)
 
 
 # ---------------------------------------------------------------------------
@@ -150,18 +137,18 @@ def plot_cumulative_cashflow(
     ax = plt.gca()
     ax.plot(
         years, cum,
-        color=_COLOR_NET, linewidth=1.5, label="Cumulative cash-flow",
+        color=FINANCIAL_COLORS["net"], linewidth=1.5, label="Cumulative cash-flow",
     )
     ax.plot(
         years, cum_disc,
-        color=_COLOR_DISCOUNTED, linewidth=1.5, linestyle="--",
+        color=FINANCIAL_COLORS["discounted"], linewidth=1.5, linestyle="--",
         label="Cumulative discounted cash-flow",
     )
     ax.axhline(0.0, color="grey", linewidth=0.8, alpha=0.6)
 
     for series, colour, label in (
-        (cum, _COLOR_NET, "Simple payback"),
-        (cum_disc, _COLOR_DISCOUNTED, "Discounted payback"),
+        (cum, FINANCIAL_COLORS["net"], "Simple payback"),
+        (cum_disc, FINANCIAL_COLORS["discounted"], "Discounted payback"),
     ):
         crossing = np.where(series >= 0.0)[0]
         if crossing.size > 0 and crossing[0] >= 1:
@@ -206,15 +193,21 @@ def plot_yearly_cashflow_bars(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     width = 0.8
-    ax.bar(years, revenue, width=width, color=_COLOR_REVENUE,
+    ax.bar(years, revenue, width=width, color=FINANCIAL_COLORS["revenue"],
            edgecolor="black", linewidth=0.4, label="Revenue")
-    ax.bar(years, opex, width=width, color=_COLOR_OPEX,
+    ax.bar(years, opex, width=width, color=FINANCIAL_COLORS["opex"],
            edgecolor="black", linewidth=0.4, label="OPEX")
-    ax.bar(years, devex, width=width, color=_COLOR_DEVEX,
+    # Stack DEVEX at the bottom of the negative Year-0 stack and put CAPEX
+    # on top of it so both segments remain visually identifiable.  Without
+    # the ``bottom=devex`` arg matplotlib overlays the CAPEX bar on the
+    # DEVEX bar at the same x and the smaller DEVEX segment disappears
+    # inside the CAPEX block.
+    ax.bar(years, devex, width=width, color=FINANCIAL_COLORS["devex"],
            edgecolor="black", linewidth=0.4, label="DEVEX")
-    ax.bar(years, capex, width=width, color=_COLOR_CAPEX,
+    ax.bar(years, capex, width=width, bottom=devex,
+           color=FINANCIAL_COLORS["capex"],
            edgecolor="black", linewidth=0.4, label="CAPEX")
-    ax.plot(years, net, color=_COLOR_NET, linewidth=1.5,
+    ax.plot(years, net, color=FINANCIAL_COLORS["net"], linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.8)
 
@@ -243,49 +236,106 @@ def plot_npv_waterfall(
     yearly_cf: pd.DataFrame, out_path: Path,
     *, econ: dict[str, Any] | None = None,
 ) -> Path:
-    """Year-by-year contribution to total NPV (waterfall stacked bar)."""
+    """Year-by-year contribution to total NPV (waterfall stacked bar).
+
+    Year 0 is rendered as two stacked bars at the same x coordinate —
+    DEVEX (purple) at the bottom of the negative stack, CAPEX (red)
+    above it — both labelled in-place.  Years 1..N keep their green /
+    red sign-coded incremental bars unchanged.
+    """
     out_path = Path(out_path)
     years = _calendar_axis(yearly_cf)
     disc = yearly_cf["discounted_cf_eur"].to_numpy(dtype=float)
     cum = np.cumsum(disc)
     fmt_mode = _resolve_currency_format(econ)
 
+    has_pyear = "project_year" in yearly_cf.columns
+    y0_mask = (
+        (yearly_cf["project_year"] == 0).to_numpy()
+        if has_pyear else np.zeros(len(disc), dtype=bool)
+    )
+
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     bottoms = np.concatenate([[0.0], cum[:-1]])
-    colours = [_COLOR_REVENUE if d >= 0 else _COLOR_CAPEX for d in disc]
-    ax.bar(years, disc, bottom=bottoms, color=colours,
-           edgecolor="black", linewidth=0.4)
+
+    # Operating-year bars (Years 1..N) — sign-coded green / red.
+    op_mask = ~y0_mask
+    op_colours = [
+        FINANCIAL_COLORS["revenue"] if d >= 0 else FINANCIAL_COLORS["capex"]
+        for d in disc[op_mask]
+    ]
+    ax.bar(
+        years[op_mask], disc[op_mask], bottom=bottoms[op_mask],
+        color=op_colours, edgecolor="black", linewidth=0.4,
+    )
+
+    # Year-0: split DEVEX / CAPEX into two stacked bars at the same x.
+    disc_capex_y0 = 0.0
+    disc_devex_y0 = 0.0
+    if y0_mask.any():
+        y0_idx = int(np.argmax(y0_mask))
+        df = yearly_cf
+        disc_factor = (
+            float(df.loc[df["project_year"] == 0, "discount_factor"].iloc[0])
+            if "discount_factor" in df.columns else 1.0
+        )
+        capex_y0_raw = float(
+            df.loc[df["project_year"] == 0, "capex_eur"].iloc[0]
+        )
+        devex_y0_raw = float(
+            df.loc[df["project_year"] == 0, "devex_eur"].iloc[0]
+            if "devex_eur" in df.columns else 0.0
+        )
+        disc_capex_y0 = capex_y0_raw * disc_factor
+        disc_devex_y0 = devex_y0_raw * disc_factor
+        x0 = float(years[y0_idx])
+        bot0 = float(bottoms[y0_idx])
+        if abs(disc_devex_y0) > 1e-9:
+            ax.bar(
+                [x0], [disc_devex_y0], bottom=[bot0],
+                color=FINANCIAL_COLORS["devex"],
+                edgecolor="black", linewidth=0.4, label="DEVEX",
+            )
+        if abs(disc_capex_y0) > 1e-9:
+            ax.bar(
+                [x0], [disc_capex_y0], bottom=[bot0 + disc_devex_y0],
+                color=FINANCIAL_COLORS["capex"],
+                edgecolor="black", linewidth=0.4, label="CAPEX",
+            )
+
     ax.plot(
         years, cum,
-        color=_COLOR_DISCOUNTED, linewidth=1.5,
+        color=FINANCIAL_COLORS["discounted"], linewidth=1.5,
         marker="o", markersize=3, label="Cumulative NPV",
     )
     ax.axhline(0.0, color="black", linewidth=0.6)
 
-    # Year-0 step gets a "CAPEX" (or "CAPEX + DEVEX" when DEVEX is non-zero)
-    # label, offset off the left edge of the bar so it can't get clipped or
-    # overlap the Year-0 stack.
-    if "project_year" in yearly_cf.columns and (yearly_cf["project_year"] == 0).any():
-        capex_y0 = float(
-            yearly_cf.loc[yearly_cf["project_year"] == 0, "discounted_cf_eur"].iloc[0]
-        )
-        if "devex_eur" in yearly_cf.columns:
-            devex_y0 = float(
-                yearly_cf.loc[yearly_cf["project_year"] == 0, "devex_eur"].iloc[0]
-            )
-        else:
-            devex_y0 = 0.0
-        capex_label = "CAPEX + DEVEX" if abs(devex_y0) > 1e-9 else "CAPEX"
+    # Two right-aligned text annotations at the midpoints of the Year-0
+    # DEVEX and CAPEX segments — keeps each label glued to its own bar
+    # instead of merging into a single "CAPEX + DEVEX" caption.
+    if y0_mask.any():
+        y0_idx = int(np.argmax(y0_mask))
+        bot0 = float(bottoms[y0_idx])
         trans_left = offset_copy(
             ax.transData, fig=ax.figure, x=-5, y=0, units="points",
         )
-        ax.text(
-            float(years[0]), capex_y0, capex_label,
-            ha="right", va="top" if capex_y0 < 0 else "bottom",
-            fontsize=7, color=_COLOR_CAPEX,
-            transform=trans_left, clip_on=False,
-        )
+        if abs(disc_devex_y0) > 1e-9:
+            devex_mid = bot0 + 0.5 * disc_devex_y0
+            ax.text(
+                float(years[y0_idx]), devex_mid, "DEVEX",
+                ha="right", va="center",
+                fontsize=7, color=FINANCIAL_COLORS["devex"],
+                transform=trans_left, clip_on=False,
+            )
+        if abs(disc_capex_y0) > 1e-9:
+            capex_mid = bot0 + disc_devex_y0 + 0.5 * disc_capex_y0
+            ax.text(
+                float(years[y0_idx]), capex_mid, "CAPEX",
+                ha="right", va="center",
+                fontsize=7, color=FINANCIAL_COLORS["capex"],
+                transform=trans_left, clip_on=False,
+            )
 
     final_npv = float(cum[-1]) if len(cum) > 0 else 0.0
     trans_right = offset_copy(
@@ -336,9 +386,9 @@ def plot_payback(
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
-    ax.plot(years, cum, color=_COLOR_NET, linewidth=1.5,
+    ax.plot(years, cum, color=FINANCIAL_COLORS["net"], linewidth=1.5,
             label="Cumulative cash-flow")
-    ax.plot(years, cum_disc, color=_COLOR_DISCOUNTED, linewidth=1.5,
+    ax.plot(years, cum_disc, color=FINANCIAL_COLORS["discounted"], linewidth=1.5,
             linestyle="--", label="Cumulative discounted cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.6)
 
@@ -356,22 +406,22 @@ def plot_payback(
     if simple_payback_years is not None and not np.isnan(simple_payback_years):
         x = _to_axis(float(simple_payback_years))
         ax.axvline(
-            x, color=_COLOR_NET, linewidth=0.8, linestyle=":",
+            x, color=FINANCIAL_COLORS["net"], linewidth=0.8, linestyle=":",
             alpha=0.8,
             label=f"Simple payback: {simple_payback_years:.1f} yr",
         )
-        ax.scatter([x], [0.0], color=_COLOR_NET, s=20, zorder=5)
+        ax.scatter([x], [0.0], color=FINANCIAL_COLORS["net"], s=20, zorder=5)
     if (
         discounted_payback_years is not None
         and not np.isnan(discounted_payback_years)
     ):
         x = _to_axis(float(discounted_payback_years))
         ax.axvline(
-            x, color=_COLOR_DISCOUNTED, linewidth=0.8, linestyle=":",
+            x, color=FINANCIAL_COLORS["discounted"], linewidth=0.8, linestyle=":",
             alpha=0.8,
             label=f"Discounted payback: {discounted_payback_years:.1f} yr",
         )
-        ax.scatter([x], [0.0], color=_COLOR_DISCOUNTED, s=20, zorder=5)
+        ax.scatter([x], [0.0], color=FINANCIAL_COLORS["discounted"], s=20, zorder=5)
 
     ax.set_xlabel("Calendar year" if using_calendar else "Project year")
     _integer_year_axis(ax)
@@ -405,11 +455,11 @@ def plot_monthly_cashflow_year1(
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
-    ax.bar(months, revenue, color=_COLOR_REVENUE,
+    ax.bar(months, revenue, color=FINANCIAL_COLORS["revenue"],
            edgecolor="black", linewidth=0.4, label="Revenue")
-    ax.bar(months, opex, color=_COLOR_OPEX,
+    ax.bar(months, opex, color=FINANCIAL_COLORS["opex"],
            edgecolor="black", linewidth=0.4, label="OPEX")
-    ax.plot(months, net, color=_COLOR_NET, linewidth=1.5,
+    ax.plot(months, net, color=FINANCIAL_COLORS["net"], linewidth=1.5,
             marker="o", markersize=4, label="Net")
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xticks(np.arange(1, 13))
@@ -522,8 +572,8 @@ def _dumbbell_plot(
         alpha=0.6, label=f"Base = {value_formatter(base_value)}",
     )
 
-    red = "#C62828"
-    green = "#2E7D32"
+    red = FINANCIAL_COLORS["tornado_neg"]
+    green = FINANCIAL_COLORS["tornado_pos"]
 
     for i, (low, high) in enumerate(zip(lows, highs)):
         left, right = sorted((low, high))
@@ -546,7 +596,7 @@ def _dumbbell_plot(
             ax.scatter([right], [i], s=64, color=colour_right,
                        edgecolor="black", linewidth=0.4, zorder=5)
             _annotate_dumbbell_endpoints(
-                ax, left, right, i, low, high, value_formatter,
+                ax, left, right, i, value_formatter,
             )
             continue
         # Same-side branch.
@@ -557,7 +607,7 @@ def _dumbbell_plot(
         ax.scatter([left, right], [i, i], s=64, color=colour_left,
                    edgecolor="black", linewidth=0.4, zorder=5)
         _annotate_dumbbell_endpoints(
-            ax, left, right, i, low, high, value_formatter,
+            ax, left, right, i, value_formatter,
         )
 
     ax.set_yticks(y_pos)
@@ -581,23 +631,29 @@ def _annotate_dumbbell_endpoints(
     left: float,
     right: float,
     row: int,
-    low_value: float,
-    high_value: float,
     value_formatter: Callable[[float], str],
 ) -> None:
-    """Place the low / high labels above each endpoint."""
+    """Print each endpoint label at its actual x-position so the text
+    value always matches the x-axis coordinate.
+
+    ``left`` and ``right`` are the *sorted* endpoint coordinates (left
+    <= right); we label them with their own numeric values rather than
+    re-using ``low`` / ``high`` from the scenario direction, which can
+    swap when a "low" scenario actually produces the larger metric
+    (e.g. low CAPEX → higher IRR).
+    """
     above = offset_copy(ax.transData, fig=ax.figure, x=0, y=10, units="points")
     bbox_kwargs = {
         "facecolor": "white", "edgecolor": "grey", "alpha": 0.8,
         "linewidth": 0.5, "boxstyle": "round,pad=0.15",
     }
     ax.text(
-        left, row, value_formatter(low_value),
+        left, row, value_formatter(left),
         ha="left", va="bottom", fontsize=7, transform=above,
         bbox=bbox_kwargs,
     )
     ax.text(
-        right, row, value_formatter(high_value),
+        right, row, value_formatter(right),
         ha="right", va="bottom", fontsize=7, transform=above,
         bbox=bbox_kwargs,
     )

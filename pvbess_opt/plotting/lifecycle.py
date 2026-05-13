@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from ..config import FINANCIAL_COLORS
 from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
 from .style import save_figure, show_titles
@@ -47,17 +48,6 @@ BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH: tuple[float, float] = (30.0, 50.0)
 # Lazard *Levelized Cost of Storage v9 2024*, four-hour
 # lithium-ion utility-scale (EUR/MWh).
 BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH: tuple[float, float] = (100.0, 250.0)
-
-_COLOR_LOAD_PV = "#2E7D32"      # green
-_COLOR_LOAD_BESS = "#388E3C"    # darker green
-_COLOR_EXPORT_PV = "#1565C0"    # blue
-_COLOR_EXPORT_BESS = "#0D47A1"  # darker blue
-_COLOR_GRID_COST = "#C62828"    # red (negative stack)
-_COLOR_NET = "#6A1B9A"          # purple
-_COLOR_LCOE_BAR = "#EF6C00"     # warm orange
-_COLOR_LCOS_BAR = "#1565C0"     # cool blue
-_COLOR_BASE_DIAMOND = "#000000"
-_COLOR_BENCHMARK = "#BDBDBD"    # light grey
 
 
 def _resolve_currency_format(econ: dict[str, Any] | None) -> str:
@@ -118,23 +108,42 @@ def plot_revenue_stack_yearly(
     ax = plt.gca()
     bottoms = np.zeros_like(load_pv)
     for arr, colour, label in [
-        (load_pv, _COLOR_LOAD_PV, "Load from PV"),
-        (load_bess, _COLOR_LOAD_BESS, "Load from BESS"),
-        (exp_pv, _COLOR_EXPORT_PV, "Export from PV"),
-        (exp_bess, _COLOR_EXPORT_BESS, "Export from BESS"),
+        (load_pv, FINANCIAL_COLORS["load_from_pv"], "Load from PV"),
+        (load_bess, FINANCIAL_COLORS["load_from_bess"], "Load from BESS"),
+        (exp_pv, FINANCIAL_COLORS["export_from_pv"], "Export from PV"),
+        (exp_bess, FINANCIAL_COLORS["export_from_bess"], "Export from BESS"),
     ]:
         if np.any(arr > 1e-9):
             ax.bar(years, arr, bottom=bottoms, color=colour,
                    edgecolor="black", linewidth=0.4, label=label)
             bottoms = bottoms + arr
     if np.any(cost < -1e-9):
-        ax.bar(years, cost, color=_COLOR_GRID_COST,
+        ax.bar(years, cost, color=FINANCIAL_COLORS["grid_charge_cost"],
                edgecolor="black", linewidth=0.4,
                label="Grid-charging cost")
     net = (op["revenue_eur"].astype(float)).to_numpy()
-    ax.plot(years, net, color=_COLOR_NET, linewidth=1.5,
+    ax.plot(years, net, color=FINANCIAL_COLORS["discounted"], linewidth=1.5,
             marker="o", markersize=3, label="Net revenue")
     ax.axhline(0.0, color="black", linewidth=0.6)
+
+    # Optional dashed real-EUR (deflated) trajectory — only meaningful
+    # when nominal revenue is being inflated year on year.  Helps the
+    # reader distinguish "stack growing because of inflation" from
+    # "stack growing because of generation".
+    rev_infl_pct = 0.0
+    if econ is not None:
+        rev_infl_pct = float(econ.get("revenue_inflation_pct", 0.0) or 0.0)
+    if rev_infl_pct > 1.0e-9:
+        infl = rev_infl_pct / 100.0
+        project_years = op["project_year"].to_numpy(dtype=int)
+        deflator = 1.0 / np.power(1.0 + infl, project_years - 1)
+        real_net = net * deflator
+        ax.plot(
+            years, real_net,
+            color=FINANCIAL_COLORS["discounted"], linewidth=1.0,
+            linestyle="--", marker="", alpha=0.85,
+            label="Real-EUR net (deflated)",
+        )
 
     ax.set_xlabel(
         "Calendar year" if "calendar_year" in op.columns else "Project year"
@@ -146,6 +155,12 @@ def plot_revenue_stack_yearly(
         ax.set_title(f"Revenue stack — {int(years[0])}-{int(years[-1])}")
     ax.legend(loc="best", framealpha=0.9, fontsize=7, ncol=2)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    ax.annotate(
+        "Stacks scaled by per-year revenue "
+        "(PV degradation × revenue inflation).",
+        xy=(0.5, -0.18), xycoords="axes fraction",
+        ha="center", fontsize=6, fontstyle="italic",
+    )
     return save_figure(out_path)
 
 
@@ -238,27 +253,33 @@ def plot_lcoe_lcos_summary(
     bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
     figsize = (7, 4) if (pv_present and bess_present) else (7, 2.5)
 
-    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+    # Independent x-axes per row.  LCOS values (~1500 EUR/MWh) and LCOE
+    # values (~100 EUR/MWh) span very different ranges; sharing the
+    # x-axis crushed the LCOE row into <5% of the panel.
+    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=False)
     _draw_benchmark_row(
         axes[0],
         base=base_lcoe,
         low=base_lcoe * low_factor if pv_present else float("nan"),
         high=base_lcoe * high_factor if pv_present else float("nan"),
-        bar_colour=_COLOR_LCOE_BAR,
+        bar_colour=FINANCIAL_COLORS["lcoe_bar"],
         benchmark=BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH,
         label="LCOE", asset_present=pv_present,
         absent_message="PV not part of this project — LCOE N/A",
+        gloss="Discounted lifetime cost per discounted MWh of PV generation.",
     )
     _draw_benchmark_row(
         axes[1],
         base=base_lcos,
         low=base_lcos * low_factor if bess_present else float("nan"),
         high=base_lcos * high_factor if bess_present else float("nan"),
-        bar_colour=_COLOR_LCOS_BAR,
+        bar_colour=FINANCIAL_COLORS["lcos_bar"],
         benchmark=BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH,
         label="LCOS", asset_present=bess_present,
         absent_message="BESS not part of this project — LCOS N/A",
+        gloss="Discounted lifetime BESS cost per discounted MWh of BESS discharge.",
     )
+    axes[0].set_xlabel("EUR/MWh")
     axes[1].set_xlabel("EUR/MWh")
 
     if show_titles():
@@ -297,8 +318,17 @@ def _draw_benchmark_row(
     label: str,
     asset_present: bool,
     absent_message: str,
+    gloss: str = "",
 ) -> None:
-    """Single LCOE/LCOS row: benchmark band + project bar + base marker."""
+    """Single LCOE/LCOS row: benchmark band + project bar + base diamond.
+
+    Each row uses its own x-axis (set via ``sharex=False`` at the
+    figure level) scaled to the union of the benchmark band and the
+    project sensitivity range with a 10–15 % margin.
+    """
+    ax.set_ylabel(label, rotation=0, ha="right", va="center",
+                  labelpad=20, fontweight="bold")
+
     if not asset_present or np.isnan(base):
         ax.text(
             0.5, 0.5, absent_message, ha="center", va="center",
@@ -309,38 +339,62 @@ def _draw_benchmark_row(
         ax.set_xlabel("")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-        ax.set_ylabel(label, rotation=0, ha="right", va="center", labelpad=20)
         return
 
     bench_low, bench_high = float(benchmark[0]), float(benchmark[1])
     bar_low = float(min(low, high))
     bar_high = float(max(low, high))
 
-    # Reference benchmark band behind the project bar.
+    # Benchmark band behind the project bar.
     ax.barh(
         [0], [bench_high - bench_low], left=bench_low, height=0.6,
-        color=_COLOR_BENCHMARK, alpha=0.45, edgecolor="grey", linewidth=0.4,
-        label=f"Lazard 2024 {label} band ({bench_low:.0f}–{bench_high:.0f} EUR/MWh)",
+        color=FINANCIAL_COLORS["benchmark_band"], alpha=0.45,
+        edgecolor="grey", linewidth=0.4,
+        label=f"Lazard 2024 {label} band",
         zorder=1,
     )
+    bench_mid = 0.5 * (bench_low + bench_high)
+    ax.text(
+        bench_mid, 0.0,
+        f"Lazard: {bench_low:.0f}–{bench_high:.0f} EUR/MWh",
+        ha="center", va="center", fontsize=6, fontstyle="italic",
+        color="#424242", zorder=2,
+    )
+
     # Project sensitivity range (saturated colour).
     ax.barh(
         [0], [bar_high - bar_low], left=bar_low, height=0.35,
-        color=bar_colour, edgecolor="black", linewidth=0.6,
-        label=f"{label} range",
+        color=bar_colour, alpha=0.85, edgecolor="black", linewidth=0.6,
+        label=f"{label} project range",
         zorder=3,
     )
-    # Base marker.
+
+    # Whisker ticks at the low / high endpoints with numeric labels above.
+    for x in (bar_low, bar_high):
+        ax.plot(
+            [x, x], [-0.20, 0.20],
+            color="black", linewidth=1.0, zorder=4,
+        )
+    ax.text(
+        bar_low, 0.28, f"{bar_low:.0f}",
+        ha="center", va="bottom", fontsize=6, color="black",
+    )
+    ax.text(
+        bar_high, 0.28, f"{bar_high:.0f}",
+        ha="center", va="bottom", fontsize=6, color="black",
+    )
+
+    # Base diamond marker.
     ax.scatter(
-        [base], [0], marker="D", s=64,
-        color=_COLOR_BASE_DIAMOND, edgecolor="white", linewidth=0.5,
+        [base], [0], marker="D", s=80,
+        color=FINANCIAL_COLORS["base_marker"], edgecolor="white", linewidth=0.5,
         label=f"Base {label}",
         zorder=5,
     )
 
-    # Right-aligned annotation past the high end of the project bar.
+    # Right-side annotation summarising the project values.
     label_text = (
-        f"{base:.0f} EUR/MWh "
+        f"{label} base = {base:.0f} EUR/MWh "
         f"(range {bar_low:.0f}–{bar_high:.0f})"
     )
     ax.annotate(
@@ -352,13 +406,22 @@ def _draw_benchmark_row(
     )
 
     ax.set_yticks([])
-    ax.set_ylim(-0.5, 0.5)
-    ax.set_ylabel(label, rotation=0, ha="right", va="center", labelpad=20)
+    ax.set_ylim(-0.6, 0.6)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
     ax.legend(loc="upper right", framealpha=0.9, fontsize=6, ncol=1)
-    # Pad the x-axis so the annotation has room.
-    xmin = min(bench_low, bar_low) * 0.85 if bench_low > 0 else min(bench_low, bar_low) - 5
-    xmax = max(bench_high, bar_high) * 1.35
-    ax.set_xlim(xmin, xmax)
+
+    # Per-row independent x-axis: span the union of (benchmark, project
+    # range) with 12 % padding on each side so labels never get clipped.
+    span_lo = min(bench_low, bar_low)
+    span_hi = max(bench_high, bar_high)
+    pad = 0.12 * max(span_hi - span_lo, 1.0)
+    ax.set_xlim(max(0.0, span_lo - pad), span_hi + pad * 3.0)
+
+    if gloss:
+        ax.annotate(
+            gloss, xy=(0.0, -0.40), xycoords="axes fraction",
+            ha="left", va="top", fontsize=6, fontstyle="italic",
+            color="#424242",
+        )
