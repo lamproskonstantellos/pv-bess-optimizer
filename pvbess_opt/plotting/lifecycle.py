@@ -126,6 +126,25 @@ def plot_revenue_stack_yearly(
             marker="o", markersize=3, label="Net revenue")
     ax.axhline(0.0, color="black", linewidth=0.6)
 
+    # Optional dashed real-EUR (deflated) trajectory — only meaningful
+    # when nominal revenue is being inflated year on year.  Helps the
+    # reader distinguish "stack growing because of inflation" from
+    # "stack growing because of generation".
+    rev_infl_pct = 0.0
+    if econ is not None:
+        rev_infl_pct = float(econ.get("revenue_inflation_pct", 0.0) or 0.0)
+    if rev_infl_pct > 1.0e-9:
+        infl = rev_infl_pct / 100.0
+        project_years = op["project_year"].to_numpy(dtype=int)
+        deflator = 1.0 / np.power(1.0 + infl, project_years - 1)
+        real_net = net * deflator
+        ax.plot(
+            years, real_net,
+            color=FINANCIAL_COLORS["discounted"], linewidth=1.0,
+            linestyle="--", marker="", alpha=0.85,
+            label="Real-EUR net (deflated)",
+        )
+
     ax.set_xlabel(
         "Calendar year" if "calendar_year" in op.columns else "Project year"
     )
@@ -136,6 +155,12 @@ def plot_revenue_stack_yearly(
         ax.set_title(f"Revenue stack — {int(years[0])}-{int(years[-1])}")
     ax.legend(loc="best", framealpha=0.9, fontsize=7, ncol=2)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    ax.annotate(
+        "Stacks scaled by per-year revenue "
+        "(PV degradation × revenue inflation).",
+        xy=(0.5, -0.18), xycoords="axes fraction",
+        ha="center", fontsize=6, fontstyle="italic",
+    )
     return save_figure(out_path)
 
 
