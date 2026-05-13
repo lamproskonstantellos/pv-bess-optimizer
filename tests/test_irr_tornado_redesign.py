@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from pvbess_opt.plotting.financial import _irr_dumbbell_plot, plot_irr_tornado
+from pvbess_opt.plotting.financial import (
+    _build_tornado_pivot,
+    _dumbbell_plot,
+    plot_irr_tornado,
+)
 
 
 def _econ() -> dict:
@@ -61,9 +65,12 @@ def test_dumbbell_drops_discount_rate(tmp_path):
     df = _multi_driver_sens_df()
     out = tmp_path / "irr_dumbbell_drop.pdf"
     # Use the helper directly to inspect drop behaviour.
-    _irr_dumbbell_plot(
-        df, base_irr=36.8, out_path=out,
+    pivot = _build_tornado_pivot(df, "irr_pct", 36.8)
+    _dumbbell_plot(
+        pivot, base_value=36.8, out_path=out,
         title="IRR test",
+        xlabel="IRR (%)",
+        value_formatter=lambda v: f"{v:.1f}%",
         drop_labels=("Discount rate",),
         footer_note="Discount rate omitted — does not affect IRR by definition.",
     )

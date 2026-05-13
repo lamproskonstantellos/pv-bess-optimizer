@@ -444,10 +444,26 @@ def plot_monthly_cashflow_year1(
 # ---------------------------------------------------------------------------
 
 
-def _tornado_plot(
+def _build_tornado_pivot(
     sens_df: pd.DataFrame,
-    base_value: float,
     metric: str,
+    base_value: float,
+) -> pd.DataFrame:
+    """Pivot sens_df on (label, scenario) and add an ``impact`` column."""
+    pivot = sens_df.pivot_table(
+        index="label", columns="scenario", values=metric, aggfunc="first",
+    )
+    if "low" not in pivot.columns:
+        pivot["low"] = base_value
+    if "high" not in pivot.columns:
+        pivot["high"] = base_value
+    pivot["impact"] = (pivot["high"] - pivot["low"]).abs()
+    return pivot
+
+
+def _dumbbell_plot(
+    pivot: pd.DataFrame,
+    base_value: float,
     out_path: Path,
     *,
     title: str,
@@ -458,15 +474,17 @@ def _tornado_plot(
     apply_eur_xaxis: bool = False,
     econ: dict[str, Any] | None = None,
 ) -> Path:
-    """Internal helper shared by NPV and IRR tornado plots.
+    """Shared dumbbell renderer for NPV and IRR sensitivity tornadoes.
 
-    Bars are sorted by absolute total impact (largest at the top).
-    Each row draws a single bar going from ``low`` to ``high``,
-    coloured red on the side below the base and green on the side
-    above — no double-bars in the straddle case.
+    Each driver becomes a horizontal segment running from ``low`` to
+    ``high``, red on the side below ``base_value`` and green above, with
+    filled circle markers at each endpoint and bbox-wrapped numeric
+    labels offset above the line.  Bars are sorted by absolute impact
+    (largest at the top).
     """
     out_path = Path(out_path)
-    if sens_df.empty:
+
+    if pivot.empty:
         plt.figure(figsize=(7, 4))
         ax = plt.gca()
         ax.text(0.5, 0.5, "Sensitivity disabled or empty.",
@@ -476,17 +494,6 @@ def _tornado_plot(
         ax.set_yticks([])
         return save_figure(out_path)
 
-    pivot = sens_df.pivot_table(
-        index="label", columns="scenario", values=metric, aggfunc="first",
-    )
-    if "low" not in pivot.columns:
-        pivot["low"] = base_value
-    if "high" not in pivot.columns:
-        pivot["high"] = base_value
-    pivot["impact"] = (pivot["high"] - pivot["low"]).abs()
-
-    # Drop rows with negligible impact (e.g. discount rate on the IRR
-    # tornado — IRR is by definition independent of the discount rate).
     drop_set = {label.strip().lower() for label in drop_labels}
     if drop_set:
         keep_mask = ~pivot.index.str.strip().str.lower().isin(drop_set)
@@ -494,8 +501,6 @@ def _tornado_plot(
         pivot = pivot.loc[keep_mask]
     else:
         dropped_rows = False
-    # Also drop rows where the spread is essentially zero — they add no
-    # information and clutter the plot.
     pivot = pivot.loc[pivot["impact"] > 1.0e-9]
     pivot = pivot.sort_values("impact", ascending=True)
 
@@ -520,185 +525,33 @@ def _tornado_plot(
         base_value, color="black", linewidth=0.8, linestyle="--",
         alpha=0.6, label=f"Base = {value_formatter(base_value)}",
     )
-    for i, (low, high) in enumerate(zip(lows, highs)):
-        # Draw two half-bars: one for the side below ``base`` (red) and
-        # one for the side above (green).  When both endpoints fall on
-        # the same side of ``base`` only one half-bar is non-zero.
-        below_left = min(low, high, base_value)
-        below_right = base_value
-        above_left = base_value
-        above_right = max(low, high, base_value)
-        if below_right > below_left:
-            ax.barh(
-                i, below_right - below_left, left=below_left, height=0.5,
-                color=_COLOR_TORNADO_LOW, edgecolor="black", linewidth=0.6,
-            )
-        if above_right > above_left:
-            ax.barh(
-                i, above_right - above_left, left=above_left, height=0.5,
-                color=_COLOR_TORNADO_HIGH, edgecolor="black", linewidth=0.6,
-            )
-        # Annotate endpoints with the value formatter.  Use a small
-        # pixel-space offset so labels never overlap the bars or the
-        # central Base line.
-        trans_left = offset_copy(
-            ax.transData, fig=ax.figure, x=-4, y=0, units="points",
-        )
-        trans_right = offset_copy(
-            ax.transData, fig=ax.figure, x=+4, y=0, units="points",
-        )
-        ax.text(low, i, value_formatter(low),
-                ha="right", va="center", fontsize=7, transform=trans_left)
-        ax.text(high, i, value_formatter(high),
-                ha="left", va="center", fontsize=7, transform=trans_right)
-
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(labels)
-    ax.set_xlabel(xlabel)
-    if apply_eur_xaxis:
-        _apply_eur_xaxis(ax, econ)
-    # Pad the x-axis a touch so the offset annotations have headroom.
-    xmin, xmax = ax.get_xlim()
-    pad = 0.05 * (xmax - xmin) if xmax > xmin else 1.0
-    ax.set_xlim(xmin - pad, xmax + pad)
-    _maybe_set_title(ax, title)
-    ax.legend(loc="lower right", framealpha=0.9, fontsize=7)
-    ax.grid(True, axis="x", linestyle="--", alpha=0.5)
-
-    if dropped_rows and footer_note:
-        ax.text(
-            0.5, -0.15, footer_note,
-            ha="center", va="top", fontsize=7, fontstyle="italic",
-            transform=ax.transAxes,
-        )
-
-    return save_figure(out_path)
-
-
-def _econ_title_window(econ: dict[str, Any]) -> str:
-    """Build the ``2026-2045 (CAPEX in 2025)`` fragment from the econ dict."""
-    start = int(econ.get("project_start_year", 0) or 0)
-    n = int(econ.get("project_lifecycle_years", 0) or 0)
-    if not start or not n:
-        return ""
-    end = start + n - 1
-    capex_year = start - 1
-    return f"{start}-{end} (CAPEX in {capex_year})"
-
-
-def plot_npv_tornado(
-    sens_df: pd.DataFrame,
-    base_kpis: dict[str, Any],
-    econ: dict[str, Any],
-    out_path: Path,
-) -> Path:
-    """Sorted NPV tornado.  All annotations use compact EUR format."""
-    base_npv = float(base_kpis.get("npv_eur", 0.0))
-    window = _econ_title_window(econ)
-    title = f"NPV Sensitivity — {window}" if window else "NPV Sensitivity"
-    fmt_mode = _resolve_currency_format(econ)
-    return _tornado_plot(
-        sens_df, base_npv, "npv_eur", out_path,
-        title=title,
-        xlabel="NPV (EUR)",
-        value_formatter=lambda v: format_eur(float(v), fmt_mode),
-        apply_eur_xaxis=True,
-        econ=econ,
-    )
-
-
-def _irr_dumbbell_plot(
-    sens_df: pd.DataFrame,
-    base_irr: float,
-    out_path: Path,
-    *,
-    title: str,
-    drop_labels: tuple[str, ...] = ("Discount rate",),
-    footer_note: str | None = None,
-) -> Path:
-    """Dumbbell-style IRR tornado.
-
-    One horizontal line per driver, end-capped with filled markers and
-    above-line numeric labels — Phase 5 redesign of the v0.7 stacked
-    half-bar IRR tornado.
-    """
-    out_path = Path(out_path)
-
-    if sens_df.empty:
-        plt.figure(figsize=(7, 4))
-        ax = plt.gca()
-        ax.text(0.5, 0.5, "Sensitivity disabled or empty.",
-                ha="center", va="center", fontsize=10,
-                transform=ax.transAxes)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        return save_figure(out_path)
-
-    pivot = sens_df.pivot_table(
-        index="label", columns="scenario", values="irr_pct", aggfunc="first",
-    )
-    if "low" not in pivot.columns:
-        pivot["low"] = base_irr
-    if "high" not in pivot.columns:
-        pivot["high"] = base_irr
-    pivot["impact"] = (pivot["high"] - pivot["low"]).abs()
-
-    drop_set = {label.strip().lower() for label in drop_labels}
-    if drop_set:
-        keep_mask = ~pivot.index.str.strip().str.lower().isin(drop_set)
-        dropped_rows = (~keep_mask).any()
-        pivot = pivot.loc[keep_mask]
-    else:
-        dropped_rows = False
-    pivot = pivot.loc[pivot["impact"] > 1.0e-9]
-    pivot = pivot.sort_values("impact", ascending=True)
-
-    if pivot.empty:
-        plt.figure(figsize=(7, 4))
-        ax = plt.gca()
-        ax.text(0.5, 0.5, "No drivers with non-zero impact.",
-                ha="center", va="center", fontsize=10,
-                transform=ax.transAxes)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        return save_figure(out_path)
-
-    labels = pivot.index.tolist()
-    y_pos = np.arange(len(labels))
-    lows = pivot["low"].astype(float).to_numpy()
-    highs = pivot["high"].astype(float).to_numpy()
-
-    plt.figure(figsize=(7, 4))
-    ax = plt.gca()
-    ax.axvline(
-        base_irr, color="black", linewidth=0.8, linestyle="--",
-        alpha=0.6, label=f"Base = {base_irr:.1f}%",
-    )
 
     red = "#C62828"
     green = "#2E7D32"
 
     for i, (low, high) in enumerate(zip(lows, highs)):
         left, right = sorted((low, high))
-        if right <= base_irr:
+        if right <= base_value:
             colour_left = colour_right = red
-        elif left >= base_irr:
+        elif left >= base_value:
             colour_left = colour_right = green
         else:
             colour_left, colour_right = red, green
             ax.plot(
-                [left, base_irr], [i, i],
+                [left, base_value], [i, i],
                 color=red, linewidth=2.0, solid_capstyle="round",
             )
             ax.plot(
-                [base_irr, right], [i, i],
+                [base_value, right], [i, i],
                 color=green, linewidth=2.0, solid_capstyle="round",
             )
             ax.scatter([left], [i], s=64, color=colour_left,
                        edgecolor="black", linewidth=0.4, zorder=5)
             ax.scatter([right], [i], s=64, color=colour_right,
                        edgecolor="black", linewidth=0.4, zorder=5)
-            _annotate_dumbbell_endpoints(ax, left, right, i, low, high)
+            _annotate_dumbbell_endpoints(
+                ax, left, right, i, low, high, value_formatter,
+            )
             continue
         # Same-side branch.
         ax.plot(
@@ -707,14 +560,17 @@ def _irr_dumbbell_plot(
         )
         ax.scatter([left, right], [i, i], s=64, color=colour_left,
                    edgecolor="black", linewidth=0.4, zorder=5)
-        _annotate_dumbbell_endpoints(ax, left, right, i, low, high)
+        _annotate_dumbbell_endpoints(
+            ax, left, right, i, low, high, value_formatter,
+        )
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(labels)
-    ax.set_xlabel("IRR (%)")
+    ax.set_xlabel(xlabel)
+    if apply_eur_xaxis:
+        _apply_eur_xaxis(ax, econ)
     xmin, xmax = ax.get_xlim()
     pad = 0.08 * (xmax - xmin) if xmax > xmin else 1.0
-    # Add headroom above so above-line labels aren't clipped.
     ax.set_xlim(xmin - pad, xmax + pad)
     ax.set_ylim(-0.6, len(labels) - 0.4)
     _maybe_set_title(ax, title)
@@ -738,22 +594,63 @@ def _annotate_dumbbell_endpoints(
     row: int,
     low_value: float,
     high_value: float,
+    value_formatter: Callable[[float], str],
 ) -> None:
-    """Place the low / high IRR labels above each endpoint."""
+    """Place the low / high labels above each endpoint."""
     above = offset_copy(ax.transData, fig=ax.figure, x=0, y=10, units="points")
     bbox_kwargs = {
         "facecolor": "white", "edgecolor": "grey", "alpha": 0.8,
         "linewidth": 0.5, "boxstyle": "round,pad=0.15",
     }
     ax.text(
-        left, row, f"{low_value:.1f}%",
+        left, row, value_formatter(low_value),
         ha="left", va="bottom", fontsize=7, transform=above,
         bbox=bbox_kwargs,
     )
     ax.text(
-        right, row, f"{high_value:.1f}%",
+        right, row, value_formatter(high_value),
         ha="right", va="bottom", fontsize=7, transform=above,
         bbox=bbox_kwargs,
+    )
+
+
+def _econ_title_window(econ: dict[str, Any]) -> str:
+    """Build the ``2026-2045 (CAPEX in 2025)`` fragment from the econ dict."""
+    start = int(econ.get("project_start_year", 0) or 0)
+    n = int(econ.get("project_lifecycle_years", 0) or 0)
+    if not start or not n:
+        return ""
+    end = start + n - 1
+    capex_year = start - 1
+    return f"{start}-{end} (CAPEX in {capex_year})"
+
+
+def plot_npv_tornado(
+    sens_df: pd.DataFrame,
+    base_kpis: dict[str, Any],
+    econ: dict[str, Any],
+    out_path: Path,
+) -> Path:
+    """Sorted NPV tornado, dumbbell layout matching the IRR plot."""
+    base_npv = float(base_kpis.get("npv_eur", 0.0))
+    window = _econ_title_window(econ)
+    title = f"NPV Sensitivity — {window}" if window else "NPV Sensitivity"
+    fmt_mode = _resolve_currency_format(econ)
+    if sens_df.empty:
+        return _dumbbell_plot(
+            pd.DataFrame(), base_npv, out_path,
+            title=title, xlabel="NPV (EUR)",
+            value_formatter=lambda v: format_eur(float(v), fmt_mode),
+            apply_eur_xaxis=True, econ=econ,
+        )
+    pivot = _build_tornado_pivot(sens_df, "npv_eur", base_npv)
+    return _dumbbell_plot(
+        pivot, base_npv, out_path,
+        title=title,
+        xlabel="NPV (EUR)",
+        value_formatter=lambda v: format_eur(float(v), fmt_mode),
+        apply_eur_xaxis=True,
+        econ=econ,
     )
 
 
@@ -763,7 +660,7 @@ def plot_irr_tornado(
     econ: dict[str, Any],
     out_path: Path,
 ) -> Path:
-    """Sorted IRR tornado, dumbbell layout (v0.8 redesign).
+    """Sorted IRR tornado, dumbbell layout.
 
     The IRR is by definition the discount rate that zeroes the NPV, so
     varying the discount rate does not move the IRR — that row is
@@ -773,9 +670,19 @@ def plot_irr_tornado(
     base_irr = float(base_kpis.get("irr_pct", 0.0) or 0.0)
     window = _econ_title_window(econ)
     title = f"IRR Sensitivity — {window}" if window else "IRR Sensitivity"
-    return _irr_dumbbell_plot(
-        sens_df, base_irr, out_path,
+    if sens_df.empty:
+        return _dumbbell_plot(
+            pd.DataFrame(), base_irr, out_path,
+            title=title, xlabel="IRR (%)",
+            value_formatter=lambda v: f"{v:.1f}%",
+            drop_labels=("Discount rate",),
+        )
+    pivot = _build_tornado_pivot(sens_df, "irr_pct", base_irr)
+    return _dumbbell_plot(
+        pivot, base_irr, out_path,
         title=title,
+        xlabel="IRR (%)",
+        value_formatter=lambda v: f"{v:.1f}%",
         drop_labels=("Discount rate",),
         footer_note=(
             "Discount rate omitted — does not affect IRR by definition."
