@@ -110,3 +110,59 @@ def assert_unique_colors() -> None:
     duplicates = {c: labs for c, labs in inverse.items() if len(labs) > 1}
     if duplicates:
         raise ValueError(f"Duplicate color assignments: {duplicates}")
+
+
+# ---------------------------------------------------------------------------
+# Financial-plot colour palette (v0.8 polish)
+# ---------------------------------------------------------------------------
+
+FINANCIAL_COLORS: dict[str, str] = {
+    # Cashflow / NPV / payback stacks
+    "revenue":        "#2E7D32",  # green
+    "opex":           "#EF6C00",  # amber
+    "capex":          "#C62828",  # red
+    "devex":          "#8E44AD",  # purple
+    "net":            "#1565C0",  # blue
+    "discounted":     "#6A1B9A",  # dark purple
+    # Tornado halves (below / above base)
+    "tornado_neg":    "#B71C1C",  # red
+    "tornado_pos":    "#1B5E20",  # green
+    # LCOE / LCOS summary
+    "benchmark_band": "#BDBDBD",  # light grey
+    "lcoe_bar":       "#F57C00",  # warm orange
+    "lcos_bar":       "#0277BD",  # cool blue
+    "base_marker":    "#000000",  # black
+    # Revenue stack (load_from_pv intentionally same green as revenue)
+    "load_from_pv":   "#2E7D32",
+    "load_from_bess": "#00838F",  # teal — distinct from green/blue
+    "export_from_pv":   "#42A5F5",  # light blue
+    "export_from_bess": "#0D47A1",  # dark blue
+    "grid_charge_cost": "#D32F2F",  # red (negative stack)
+}
+
+
+def assert_unique_financial_colors() -> None:
+    """Sanity check: financial colours must be mutually distinguishable.
+
+    A handful of keys are intentionally aliased (e.g. ``load_from_pv`` reuses
+    the ``revenue`` green) — those colliding pairs are whitelisted.  Any
+    other duplicate hex value is treated as a configuration mistake.
+    """
+    allowed_aliases: set[frozenset[str]] = {
+        frozenset({"revenue", "load_from_pv"}),
+    }
+    inverse: dict[str, list[str]] = {}
+    for key, hex_value in FINANCIAL_COLORS.items():
+        inverse.setdefault(hex_value.lower(), []).append(key)
+    duplicates = {h: keys for h, keys in inverse.items() if len(keys) > 1}
+    real_duplicates = {
+        h: keys for h, keys in duplicates.items()
+        if frozenset(keys) not in allowed_aliases
+    }
+    if real_duplicates:
+        raise ValueError(
+            f"Duplicate FINANCIAL_COLORS hex values: {real_duplicates}"
+        )
+
+
+assert_unique_financial_colors()

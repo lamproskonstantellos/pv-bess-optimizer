@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from ..config import FINANCIAL_COLORS
 from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
 from .style import save_figure, show_titles
@@ -47,17 +48,6 @@ BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH: tuple[float, float] = (30.0, 50.0)
 # Lazard *Levelized Cost of Storage v9 2024*, four-hour
 # lithium-ion utility-scale (EUR/MWh).
 BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH: tuple[float, float] = (100.0, 250.0)
-
-_COLOR_LOAD_PV = "#2E7D32"      # green
-_COLOR_LOAD_BESS = "#388E3C"    # darker green
-_COLOR_EXPORT_PV = "#1565C0"    # blue
-_COLOR_EXPORT_BESS = "#0D47A1"  # darker blue
-_COLOR_GRID_COST = "#C62828"    # red (negative stack)
-_COLOR_NET = "#6A1B9A"          # purple
-_COLOR_LCOE_BAR = "#EF6C00"     # warm orange
-_COLOR_LCOS_BAR = "#1565C0"     # cool blue
-_COLOR_BASE_DIAMOND = "#000000"
-_COLOR_BENCHMARK = "#BDBDBD"    # light grey
 
 
 def _resolve_currency_format(econ: dict[str, Any] | None) -> str:
@@ -118,21 +108,21 @@ def plot_revenue_stack_yearly(
     ax = plt.gca()
     bottoms = np.zeros_like(load_pv)
     for arr, colour, label in [
-        (load_pv, _COLOR_LOAD_PV, "Load from PV"),
-        (load_bess, _COLOR_LOAD_BESS, "Load from BESS"),
-        (exp_pv, _COLOR_EXPORT_PV, "Export from PV"),
-        (exp_bess, _COLOR_EXPORT_BESS, "Export from BESS"),
+        (load_pv, FINANCIAL_COLORS["load_from_pv"], "Load from PV"),
+        (load_bess, FINANCIAL_COLORS["load_from_bess"], "Load from BESS"),
+        (exp_pv, FINANCIAL_COLORS["export_from_pv"], "Export from PV"),
+        (exp_bess, FINANCIAL_COLORS["export_from_bess"], "Export from BESS"),
     ]:
         if np.any(arr > 1e-9):
             ax.bar(years, arr, bottom=bottoms, color=colour,
                    edgecolor="black", linewidth=0.4, label=label)
             bottoms = bottoms + arr
     if np.any(cost < -1e-9):
-        ax.bar(years, cost, color=_COLOR_GRID_COST,
+        ax.bar(years, cost, color=FINANCIAL_COLORS["grid_charge_cost"],
                edgecolor="black", linewidth=0.4,
                label="Grid-charging cost")
     net = (op["revenue_eur"].astype(float)).to_numpy()
-    ax.plot(years, net, color=_COLOR_NET, linewidth=1.5,
+    ax.plot(years, net, color=FINANCIAL_COLORS["discounted"], linewidth=1.5,
             marker="o", markersize=3, label="Net revenue")
     ax.axhline(0.0, color="black", linewidth=0.6)
 
@@ -244,7 +234,7 @@ def plot_lcoe_lcos_summary(
         base=base_lcoe,
         low=base_lcoe * low_factor if pv_present else float("nan"),
         high=base_lcoe * high_factor if pv_present else float("nan"),
-        bar_colour=_COLOR_LCOE_BAR,
+        bar_colour=FINANCIAL_COLORS["lcoe_bar"],
         benchmark=BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH,
         label="LCOE", asset_present=pv_present,
         absent_message="PV not part of this project — LCOE N/A",
@@ -254,7 +244,7 @@ def plot_lcoe_lcos_summary(
         base=base_lcos,
         low=base_lcos * low_factor if bess_present else float("nan"),
         high=base_lcos * high_factor if bess_present else float("nan"),
-        bar_colour=_COLOR_LCOS_BAR,
+        bar_colour=FINANCIAL_COLORS["lcos_bar"],
         benchmark=BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH,
         label="LCOS", asset_present=bess_present,
         absent_message="BESS not part of this project — LCOS N/A",
@@ -319,7 +309,7 @@ def _draw_benchmark_row(
     # Reference benchmark band behind the project bar.
     ax.barh(
         [0], [bench_high - bench_low], left=bench_low, height=0.6,
-        color=_COLOR_BENCHMARK, alpha=0.45, edgecolor="grey", linewidth=0.4,
+        color=FINANCIAL_COLORS["benchmark_band"], alpha=0.45, edgecolor="grey", linewidth=0.4,
         label=f"Lazard 2024 {label} band ({bench_low:.0f}–{bench_high:.0f} EUR/MWh)",
         zorder=1,
     )
@@ -333,7 +323,7 @@ def _draw_benchmark_row(
     # Base marker.
     ax.scatter(
         [base], [0], marker="D", s=64,
-        color=_COLOR_BASE_DIAMOND, edgecolor="white", linewidth=0.5,
+        color=FINANCIAL_COLORS["base_marker"], edgecolor="white", linewidth=0.5,
         label=f"Base {label}",
         zorder=5,
     )
