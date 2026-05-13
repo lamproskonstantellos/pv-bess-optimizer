@@ -228,7 +228,10 @@ def plot_lcoe_lcos_summary(
     bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
     figsize = (7, 4) if (pv_present and bess_present) else (7, 2.5)
 
-    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=True)
+    # Independent x-axes per row.  LCOS values (~1500 EUR/MWh) and LCOE
+    # values (~100 EUR/MWh) span very different ranges; sharing the
+    # x-axis crushed the LCOE row into <5% of the panel.
+    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=False)
     _draw_benchmark_row(
         axes[0],
         base=base_lcoe,
@@ -238,6 +241,7 @@ def plot_lcoe_lcos_summary(
         benchmark=BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH,
         label="LCOE", asset_present=pv_present,
         absent_message="PV not part of this project — LCOE N/A",
+        gloss="Discounted lifetime cost per discounted MWh of PV generation.",
     )
     _draw_benchmark_row(
         axes[1],
@@ -248,7 +252,9 @@ def plot_lcoe_lcos_summary(
         benchmark=BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH,
         label="LCOS", asset_present=bess_present,
         absent_message="BESS not part of this project — LCOS N/A",
+        gloss="Discounted lifetime BESS cost per discounted MWh of BESS discharge.",
     )
+    axes[0].set_xlabel("EUR/MWh")
     axes[1].set_xlabel("EUR/MWh")
 
     if show_titles():
@@ -287,8 +293,17 @@ def _draw_benchmark_row(
     label: str,
     asset_present: bool,
     absent_message: str,
+    gloss: str = "",
 ) -> None:
-    """Single LCOE/LCOS row: benchmark band + project bar + base marker."""
+    """Single LCOE/LCOS row: benchmark band + project bar + base diamond.
+
+    Each row uses its own x-axis (set via ``sharex=False`` at the
+    figure level) scaled to the union of the benchmark band and the
+    project sensitivity range with a 10–15 % margin.
+    """
+    ax.set_ylabel(label, rotation=0, ha="right", va="center",
+                  labelpad=20, fontweight="bold")
+
     if not asset_present or np.isnan(base):
         ax.text(
             0.5, 0.5, absent_message, ha="center", va="center",
@@ -299,38 +314,62 @@ def _draw_benchmark_row(
         ax.set_xlabel("")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-        ax.set_ylabel(label, rotation=0, ha="right", va="center", labelpad=20)
         return
 
     bench_low, bench_high = float(benchmark[0]), float(benchmark[1])
     bar_low = float(min(low, high))
     bar_high = float(max(low, high))
 
-    # Reference benchmark band behind the project bar.
+    # Benchmark band behind the project bar.
     ax.barh(
         [0], [bench_high - bench_low], left=bench_low, height=0.6,
-        color=FINANCIAL_COLORS["benchmark_band"], alpha=0.45, edgecolor="grey", linewidth=0.4,
-        label=f"Lazard 2024 {label} band ({bench_low:.0f}–{bench_high:.0f} EUR/MWh)",
+        color=FINANCIAL_COLORS["benchmark_band"], alpha=0.45,
+        edgecolor="grey", linewidth=0.4,
+        label=f"Lazard 2024 {label} band",
         zorder=1,
     )
+    bench_mid = 0.5 * (bench_low + bench_high)
+    ax.text(
+        bench_mid, 0.0,
+        f"Lazard: {bench_low:.0f}–{bench_high:.0f} EUR/MWh",
+        ha="center", va="center", fontsize=6, fontstyle="italic",
+        color="#424242", zorder=2,
+    )
+
     # Project sensitivity range (saturated colour).
     ax.barh(
         [0], [bar_high - bar_low], left=bar_low, height=0.35,
-        color=bar_colour, edgecolor="black", linewidth=0.6,
-        label=f"{label} range",
+        color=bar_colour, alpha=0.85, edgecolor="black", linewidth=0.6,
+        label=f"{label} project range",
         zorder=3,
     )
-    # Base marker.
+
+    # Whisker ticks at the low / high endpoints with numeric labels above.
+    for x in (bar_low, bar_high):
+        ax.plot(
+            [x, x], [-0.20, 0.20],
+            color="black", linewidth=1.0, zorder=4,
+        )
+    ax.text(
+        bar_low, 0.28, f"{bar_low:.0f}",
+        ha="center", va="bottom", fontsize=6, color="black",
+    )
+    ax.text(
+        bar_high, 0.28, f"{bar_high:.0f}",
+        ha="center", va="bottom", fontsize=6, color="black",
+    )
+
+    # Base diamond marker.
     ax.scatter(
-        [base], [0], marker="D", s=64,
+        [base], [0], marker="D", s=80,
         color=FINANCIAL_COLORS["base_marker"], edgecolor="white", linewidth=0.5,
         label=f"Base {label}",
         zorder=5,
     )
 
-    # Right-aligned annotation past the high end of the project bar.
+    # Right-side annotation summarising the project values.
     label_text = (
-        f"{base:.0f} EUR/MWh "
+        f"{label} base = {base:.0f} EUR/MWh "
         f"(range {bar_low:.0f}–{bar_high:.0f})"
     )
     ax.annotate(
@@ -342,13 +381,22 @@ def _draw_benchmark_row(
     )
 
     ax.set_yticks([])
-    ax.set_ylim(-0.5, 0.5)
-    ax.set_ylabel(label, rotation=0, ha="right", va="center", labelpad=20)
+    ax.set_ylim(-0.6, 0.6)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
     ax.legend(loc="upper right", framealpha=0.9, fontsize=6, ncol=1)
-    # Pad the x-axis so the annotation has room.
-    xmin = min(bench_low, bar_low) * 0.85 if bench_low > 0 else min(bench_low, bar_low) - 5
-    xmax = max(bench_high, bar_high) * 1.35
-    ax.set_xlim(xmin, xmax)
+
+    # Per-row independent x-axis: span the union of (benchmark, project
+    # range) with 12 % padding on each side so labels never get clipped.
+    span_lo = min(bench_low, bar_low)
+    span_hi = max(bench_high, bar_high)
+    pad = 0.12 * max(span_hi - span_lo, 1.0)
+    ax.set_xlim(max(0.0, span_lo - pad), span_hi + pad * 3.0)
+
+    if gloss:
+        ax.annotate(
+            gloss, xy=(0.0, -0.40), xycoords="axes fraction",
+            ha="left", va="top", fontsize=6, fontstyle="italic",
+            color="#424242",
+        )
