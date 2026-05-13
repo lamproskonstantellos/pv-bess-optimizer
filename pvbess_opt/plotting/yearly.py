@@ -237,11 +237,13 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     ax = plt.gca()
     ax.fill_between(
         monthly["month_start"], monthly["min"], monthly["max"],
-        color="#1565C0", alpha=0.25, label="Monthly min-max",
+        color="#1565C0", alpha=0.20, edgecolor="#1565C0",
+        label="Monthly min-max",
     )
     ax.plot(
         monthly["month_start"], monthly["mean"],
-        color="#1565C0", linewidth=1.5, marker="o", markersize=3,
+        color="#1565C0", linewidth=1.5, linestyle="-",
+        marker="o", markersize=3,
         label="Monthly mean",
     )
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))

@@ -265,7 +265,7 @@ def plot_daily_soc(
     t_pad, [soc_pad] = pad_right_to_end(df["timestamp"], [soc_kwh], end)
     ax.plot(
         t_pad, soc_pad, drawstyle="steps-post",
-        color="#1565C0", linewidth=1.5, label="SOC (kWh)",
+        color="#1565C0", linewidth=1.5, label="SOC (kWh / %)",
     )
 
     if "soc_pct" in df.columns:
@@ -274,7 +274,7 @@ def plot_daily_soc(
         ax2 = ax.twinx()
         ax2.plot(
             _t_pct, soc_pct_pad, drawstyle="steps-post",
-            color="#6A1B9A", linewidth=1.0, linestyle="--", label="SOC (%)",
+            color="#1565C0", linewidth=1.5, label="_nolegend_",
         )
         ax2.set_ylabel("SOC (%)")
 
