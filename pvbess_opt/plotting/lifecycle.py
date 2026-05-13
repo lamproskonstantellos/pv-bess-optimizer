@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from ._currency import euro_axis_formatter
+from .financial import _integer_year_axis
 from .style import save_figure, show_titles
 
 # ---------------------------------------------------------------------------
@@ -138,6 +139,7 @@ def plot_revenue_stack_yearly(
     ax.set_xlabel(
         "Calendar year" if "calendar_year" in op.columns else "Project year"
     )
+    _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
     if show_titles():
@@ -180,6 +182,7 @@ def plot_lifetime_cycles(
     ax.set_xlabel(
         "Calendar year" if "calendar_year" in df.columns else "Project year"
     )
+    _integer_year_axis(ax)
     ax.set_ylabel("Equivalent cycles per year")
     if show_titles():
         ax.set_title(

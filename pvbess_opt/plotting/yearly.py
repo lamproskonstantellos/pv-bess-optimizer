@@ -27,6 +27,7 @@ import pandas as pd
 from matplotlib.ticker import ScalarFormatter
 
 from ..config import XTICK_ROT
+from .financial import _integer_year_axis
 from .helpers import (
     bar_stacked_bins,
     edges_and_widths_yearly,
@@ -338,6 +339,7 @@ def plot_lifetime_summary(
                 label=label,
             )
     ax.set_xlabel("Calendar year")
+    _integer_year_axis(ax)
     ax.set_ylabel("Energy (MWh/year)")
     if show_titles():
         ax.set_title(

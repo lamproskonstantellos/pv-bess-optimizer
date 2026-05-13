@@ -22,6 +22,7 @@ from typing import Any, Callable
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import MaxNLocator
 from matplotlib.transforms import offset_copy
 
 from ._currency import euro_axis_formatter, format_eur
@@ -125,6 +126,11 @@ def _apply_eur_xaxis(ax, econ: dict[str, Any] | None) -> None:
     ax.xaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
 
 
+def _integer_year_axis(ax) -> None:
+    """Force integer year ticks; subsample sensibly on long horizons."""
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True, prune=None, nbins=12))
+
+
 # ---------------------------------------------------------------------------
 # Cumulative cashflow
 # ---------------------------------------------------------------------------
@@ -167,6 +173,7 @@ def plot_cumulative_cashflow(
 
     ax.set_xlabel("Calendar year" if "calendar_year" in yearly_cf.columns
                   else "Project year")
+    _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Cumulative Cash-flow — {_title_window(yearly_cf)}")
@@ -215,6 +222,7 @@ def plot_yearly_cashflow_bars(
         "Calendar year" if "calendar_year" in yearly_cf.columns
         else "Project year"
     )
+    _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Yearly Cash-flow Stack — {_title_window(yearly_cf)}")
@@ -298,6 +306,7 @@ def plot_npv_waterfall(
         "Calendar year" if "calendar_year" in yearly_cf.columns
         else "Project year"
     )
+    _integer_year_axis(ax)
     ax.set_ylabel("Discounted EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
@@ -365,6 +374,7 @@ def plot_payback(
         ax.scatter([x], [0.0], color=_COLOR_DISCOUNTED, s=20, zorder=5)
 
     ax.set_xlabel("Calendar year" if using_calendar else "Project year")
+    _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Payback Visualisation — {_title_window(yearly_cf)}")
