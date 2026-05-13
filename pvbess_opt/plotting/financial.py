@@ -470,7 +470,6 @@ def _dumbbell_plot(
     xlabel: str,
     value_formatter: Callable[[float], str],
     drop_labels: tuple[str, ...] = (),
-    footer_note: str | None = None,
     apply_eur_xaxis: bool = False,
     econ: dict[str, Any] | None = None,
 ) -> Path:
@@ -497,10 +496,7 @@ def _dumbbell_plot(
     drop_set = {label.strip().lower() for label in drop_labels}
     if drop_set:
         keep_mask = ~pivot.index.str.strip().str.lower().isin(drop_set)
-        dropped_rows = (~keep_mask).any()
         pivot = pivot.loc[keep_mask]
-    else:
-        dropped_rows = False
     pivot = pivot.loc[pivot["impact"] > 1.0e-9]
     pivot = pivot.sort_values("impact", ascending=True)
 
@@ -576,13 +572,6 @@ def _dumbbell_plot(
     _maybe_set_title(ax, title)
     ax.legend(loc="lower right", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
-
-    if dropped_rows and footer_note:
-        ax.text(
-            0.5, -0.22, footer_note,
-            ha="center", va="top", fontsize=7, fontstyle="italic",
-            transform=ax.transAxes,
-        )
 
     return save_figure(out_path)
 
@@ -664,8 +653,7 @@ def plot_irr_tornado(
 
     The IRR is by definition the discount rate that zeroes the NPV, so
     varying the discount rate does not move the IRR — that row is
-    filtered out and an italic footer note is added when the filter
-    actually fired.
+    filtered out silently before the plot is drawn.
     """
     base_irr = float(base_kpis.get("irr_pct", 0.0) or 0.0)
     window = _econ_title_window(econ)
@@ -684,7 +672,4 @@ def plot_irr_tornado(
         xlabel="IRR (%)",
         value_formatter=lambda v: f"{v:.1f}%",
         drop_labels=("Discount rate",),
-        footer_note=(
-            "Discount rate omitted — does not affect IRR by definition."
-        ),
     )

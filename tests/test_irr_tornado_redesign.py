@@ -72,7 +72,6 @@ def test_dumbbell_drops_discount_rate(tmp_path):
         xlabel="IRR (%)",
         value_formatter=lambda v: f"{v:.1f}%",
         drop_labels=("Discount rate",),
-        footer_note="Discount rate omitted — does not affect IRR by definition.",
     )
     assert out.exists()
     # The pivot constructed inside the helper is private, but we can
