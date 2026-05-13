@@ -11,16 +11,17 @@ Monte Carlo for uncertainty analysis.
 
 Two regulatory regimes and three asset modes are supported:
 
-* `vnb` — Greek Virtual Net Billing with co-located load.  Load
-  balance, hard PV→load priority (Section 2 of the spec), surplus-only
-  export (Section 5, binary-free slack), no simultaneous grid I/O
-  (tight big-M), retail tariff for self-consumption, DAM for export.
+* `vnb` — co-located load with self-consumption priority.  Load
+  balance enforces a hard PV→load priority, surplus-only export
+  through a binary-free slack, and no simultaneous grid I/O via a
+  tight big-M.  Self-consumption is settled at the retail tariff;
+  surplus is settled per applicable settlement rules at the
+  day-ahead market price.
 * `merchant` — pure utility-scale dispatch with **no co-located load**.
-  PV and BESS dispatch entirely to the day-ahead market.  The hard
-  static curtailment cap on grid-bound flows still applies (regulatory
-  grid-connection limit per
-  [MD YPEN/DAPEEK/53563/1556/2023](https://www.et.gr/), 27 % distribution-
-  connected, 28 % transmission-connected).
+  PV and BESS dispatch entirely to the day-ahead market.  The hourly
+  static curtailment cap on grid-bound flows still applies and is
+  supplied by the user through the `curtailment_profile` sheet, in
+  line with the applicable grid-connection regulations.
 
 The asset mode is read literally from the workbook in v0.6 — set
 `pv_nameplate_kwp = 0` for a BESS-only project, `bess_power_kw = 0`
@@ -95,13 +96,15 @@ Seven themed sheets:
 * **`timeseries`** — per-step data: `timestamp`, `load_kwh` (required
   for `vnb`, optional for `merchant`), `pv_kwh`,
   `dam_price_eur_per_mwh`, optional `retail_price_eur_per_mwh`.
-  Case-study fixture is 35 040 rows at 15-minute cadence per
-  MD YPEN/DAPEEK/93976/2772/2024; the MILP timestep is auto-detected.
+  Case-study fixture is 35 040 rows at 15-minute cadence (one full
+  year); the MILP timestep is auto-detected.
 * **`project`** — high-level run config:
   `project_lifecycle_years`, `project_start_year`, `mode`,
-  `settlement_minutes`, `p_grid_export_max_kw`,
+  `settlement_minutes`, `p_grid_export_max_kw` (project-wide grid
+  export limit applied to the combined PV + BESS flow),
   `retail_tariff_eur_per_mwh`, `allow_bess_grid_charging`,
-  `unavailability_pct`, `currency_format`, `show_titles`.
+  `unavailability_pct` (user-configurable post-solve derate),
+  `currency_format`, `show_titles`.
 * **`pv`** — `pv_nameplate_kwp`, `specific_production_kwh_per_kwp`,
   `pv_degradation_year1_pct`, `pv_degradation_annual_pct`,
   `capex_pv_eur_per_kw`, `devex_pv_eur_per_kw`, `opex_pv_eur_per_kwp`.
@@ -111,15 +114,29 @@ Seven themed sheets:
   `opex_bess_eur_per_kw`, `bess_replacement_year`,
   `bess_replacement_cost_pct`, `bess_degradation_annual_pct`.
 * **`economics`** — `discount_rate_pct`, `opex_inflation_pct`,
-  `revenue_inflation_pct`, `aggregator_fee_pct_revenue`,
-  `sensitivity_*` (5 keys).
+  `revenue_inflation_pct`, `aggregator_fee_pct_revenue`
+  (user-configurable fraction of gross revenue retained by the
+  aggregator), `sensitivity_*` (5 keys).
 * **`simulation`** — `uncertainty_*` (11 keys), `plot_daily_scope` /
   `plot_monthly_scope` / `plot_yearly_scope` ∈
   `none | year1_only | all`.
-* **`curtailment_profile`** — 24 hourly rows × 1 col
-  (`curtailment_pct`) for a constant-by-month cap, or 24 rows × 12
-  cols (`curtailment_pct_jan` … `curtailment_pct_dec`) for a per-month
-  hour-of-day cap.
+* **`curtailment_profile`** — user-configurable hourly cap profile.
+  24 hourly rows × 1 col (`curtailment_pct`) for a constant-by-month
+  cap, or 24 rows × 12 cols (`curtailment_pct_jan` …
+  `curtailment_pct_dec`) for a per-month hour-of-day cap.  Missing
+  sheet ⇒ the loader falls back to a flat default.
+
+### How the export cap is enforced
+
+The per-step grid-export cap is computed as
+`p_grid_export_max_kw × dt_h × (1 − curtailment_fraction)` and
+applied to the **combined** PV + BESS export flow
+(`grid_export_total[t] = pv_to_grid[t] + bess_dis_grid[t]`), not
+separately to PV exports or BESS-discharge exports.
+`p_grid_export_max_kw` is the nameplate grid-connection limit;
+`curtailment_profile` is the per-hour regulatory derate that scales
+the nameplate down for that step.  The same cap applies in both
+`vnb` and `merchant` modes.
 
 Setting `pv_nameplate_kwp = 0` makes the project BESS-only;
 `bess_power_kw = 0` makes it PV-only; both > 0 ⇒ hybrid.  Setting both
@@ -206,18 +223,19 @@ See `docs/source/users.guide/rolling_horizon.rst` for the full guide.
   `(res, resolved_solver_name)`.
 * **Hourly curtailment cap profile** — the old scalar
   `curtailment_pct` becomes a 24-row hour-of-day profile, optionally
-  with one column per calendar month.  Missing sheet ⇒ flat 27 %.
+  with one column per calendar month.  Missing sheet ⇒ the loader
+  falls back to a flat default.
 * **DEVEX (NEW)** — per-asset `devex_pv_eur_per_kw` and
   `devex_bess_eur_per_kw` replace the v0.7 `capex_licenses_eur_per_kw`.
   Paid in Year 0 alongside CAPEX, surfaces as a `devex_eur` column on
   `cashflow_yearly` and as `total_devex_eur` /
   `total_capex_devex_eur` financial KPIs.
-* **Unavailability (NEW)** — `unavailability_pct` (default 1 %)
-  applies a post-solve derate to PV generation, BESS discharge, and
-  revenue.  Implemented in `pvbess_opt.availability`.
-* **Aggregator fee (NEW)** — `aggregator_fee_pct_revenue` (default
-  10 %, Gridcog convention) reduces gross revenue and shows up as a
-  signed `aggregator_fee_eur` column on `cashflow_yearly`.
+* **Unavailability (NEW)** — `unavailability_pct` is a
+  user-configurable post-solve derate applied to PV generation, BESS
+  discharge, and revenue.  Implemented in `pvbess_opt.availability`.
+* **Aggregator fee (NEW)** — `aggregator_fee_pct_revenue` is a
+  user-configurable fraction that reduces gross revenue and shows up
+  as a signed `aggregator_fee_eur` column on `cashflow_yearly`.
 * **Plot redesigns** — IRR tornado switches to a dumbbell layout for
   unambiguous endpoint labels; LCOE/LCOS summary becomes a single
   panel with the project sensitivity range overlaid on the Lazard
@@ -234,8 +252,8 @@ The Sphinx site under `docs/` covers:
 * `users.guide/` — install, inputs, running, economics, financial plots,
   sensitivity, rolling horizon
 * `technical.documentation/` — MILP formulation, regulatory framework
-  (MD YPEN/DAPEEK/53563/1556/2023), KPIs, energy balance, lifetime
-  scaling
+  (per applicable grid-connection regulations), KPIs, energy balance,
+  lifetime scaling
 * `api/` — full API reference (autodoc)
 
 Build locally:
