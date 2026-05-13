@@ -266,6 +266,7 @@ def _generate_energy_plots_for_year(
                     plot_daily_supply(res_for_year, date_str, daily_root)
                     plot_daily_surplus(res_for_year, date_str, daily_root)
                     plot_daily_combined(res_for_year, date_str, daily_root)
+                    plot_daily_soc(res_for_year, date_str, daily_root)
             except Exception:
                 logger.exception("Daily plot failed for %s", date_str)
 
@@ -283,6 +284,7 @@ def _generate_energy_plots_for_year(
                     plot_monthly_supply(res_for_year, month, monthly_root)
                     plot_monthly_surplus(res_for_year, month, monthly_root)
                     plot_monthly_combined(res_for_year, month, monthly_root)
+                    plot_monthly_soc(res_for_year, month, monthly_root)
             except Exception:
                 logger.exception("Monthly plot failed for month %s", month)
 
@@ -298,6 +300,7 @@ def _generate_energy_plots_for_year(
                 plot_yearly_supply(res_for_year, int(calendar_year), yearly_root)
                 plot_yearly_surplus(res_for_year, int(calendar_year), yearly_root)
                 plot_yearly_combined(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_soc(res_for_year, int(calendar_year), yearly_root)
         except Exception:
             logger.exception(
                 "Yearly plot failed for year %s", calendar_year,

@@ -247,11 +247,13 @@ def plot_monthly_soc(
     ax = plt.gca()
     ax.fill_between(
         daily["date"], daily["min"], daily["max"],
-        color="#1565C0", alpha=0.25, label="Daily min-max",
+        color="#1565C0", alpha=0.20, edgecolor="#1565C0",
+        label="Daily min-max",
     )
     ax.plot(
         daily["date"], daily["mean"],
-        color="#1565C0", linewidth=1.5, marker="o", markersize=3,
+        color="#1565C0", linewidth=1.5, linestyle="-",
+        marker="o", markersize=3,
         label="Daily mean",
     )
     if show_titles():
