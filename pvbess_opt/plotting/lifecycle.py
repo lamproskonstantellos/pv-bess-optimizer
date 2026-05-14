@@ -37,6 +37,7 @@ from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
 from .style import (
+    HEADROOM_Y_FRAC,
     annotate_value_safe,
     apply_universal_margins,
     save_figure,
@@ -235,7 +236,7 @@ def plot_lifetime_cycles(
         ha="right", va="top", fontsize=7,
         bbox_alpha=0.8,
     )
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, y_frac=HEADROOM_Y_FRAC)
     return save_figure(out_path)
 
 

@@ -196,3 +196,107 @@ def test_npv_total_annotation_has_breathing_room(tmp_path, monkeypatch):
         "from the top of the frame; expected y0 > 0.85."
     )
     plt.close("all")
+
+
+def test_npv_total_annotation_has_full_breathing_room(tmp_path, monkeypatch):
+    """Round-5: with HEADROOM_Y_FRAC padding the NPV bbox must sit at
+    least 5 % of axes height above the topmost data point."""
+    captured: dict[str, plt.Figure] = {}
+
+    def _save_no_close(path):
+        path = path.with_suffix(".pdf") if hasattr(path, "with_suffix") else path
+        captured["fig"] = plt.gcf()
+        return path
+
+    monkeypatch.setattr(fin_mod, "save_figure", _save_no_close)
+    plt.close("all")
+
+    plot_npv_waterfall(_yearly_cf_fixture(), tmp_path / "npv.pdf",
+                       econ={"currency_format": "millions"})
+
+    fig = captured["fig"]
+    ax = fig.axes[0]
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    npv_text = None
+    for txt in ax.texts:
+        if txt.get_bbox_patch() and "NPV" in txt.get_text():
+            npv_text = txt
+            break
+    assert npv_text is not None
+
+    bbox_disp = npv_text.get_window_extent(renderer)
+    inv = ax.transAxes.inverted()
+    bbox_y0_frac = inv.transform((0.0, bbox_disp.y0))[1]
+    line_max = -np.inf
+    for line in ax.lines:
+        ys = np.asarray(line.get_ydata(), dtype=float)
+        if ys.size > 0:
+            line_max = max(line_max, float(np.nanmax(ys)))
+    bar_max = -np.inf
+    for patch in ax.patches:
+        try:
+            bar_max = max(bar_max, float(patch.get_y()) + float(patch.get_height()))
+        except AttributeError:
+            continue
+    top_data_y = max(line_max, bar_max)
+    ymin, ymax = ax.get_ylim()
+    top_data_frac = (top_data_y - ymin) / (ymax - ymin)
+
+    assert bbox_y0_frac - top_data_frac >= 0.05, (
+        f"NPV annotation needs >=5 % breathing room above topmost data; "
+        f"bbox y0_frac={bbox_y0_frac:.3f}, data top frac={top_data_frac:.3f}"
+    )
+    plt.close("all")
+
+
+def test_lifetime_cycles_total_has_breathing_room(tmp_path, monkeypatch):
+    """Round-5: the 'Total: N cycles' annotation has the same headroom
+    treatment as the NPV bbox."""
+    captured: dict[str, plt.Figure] = {}
+
+    def _save_no_close(path):
+        path = path.with_suffix(".pdf") if hasattr(path, "with_suffix") else path
+        captured["fig"] = plt.gcf()
+        return path
+
+    monkeypatch.setattr(life_mod, "save_figure", _save_no_close)
+    plt.close("all")
+
+    years = np.arange(0, 11)
+    lifetime_yearly = pd.DataFrame({
+        "project_year": years,
+        "calendar_year": 2025 + years,
+        "bess_discharge_mwh": np.concatenate([[0.0], np.full(10, 5000.0)]),
+    })
+    plot_lifetime_cycles(lifetime_yearly, bess_kwh=20_000.0,
+                        out_path=tmp_path / "cyc.pdf")
+    fig = captured["fig"]
+    ax = fig.axes[0]
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+
+    total_text = None
+    for txt in ax.texts:
+        if txt.get_bbox_patch() and "Total" in txt.get_text():
+            total_text = txt
+            break
+    assert total_text is not None, "Total cycles annotation not found"
+
+    bbox_disp = total_text.get_window_extent(renderer)
+    inv = ax.transAxes.inverted()
+    bbox_y0_frac = inv.transform((0.0, bbox_disp.y0))[1]
+    bar_max = -np.inf
+    for patch in ax.patches:
+        try:
+            bar_max = max(bar_max, float(patch.get_y()) + float(patch.get_height()))
+        except AttributeError:
+            continue
+    ymin, ymax = ax.get_ylim()
+    top_data_frac = (bar_max - ymin) / (ymax - ymin)
+    assert bbox_y0_frac - top_data_frac >= 0.05, (
+        f"Lifetime-cycles annotation needs >=5 % headroom; "
+        f"bbox y0_frac={bbox_y0_frac:.3f}, data top frac={top_data_frac:.3f}"
+    )
+    plt.close("all")

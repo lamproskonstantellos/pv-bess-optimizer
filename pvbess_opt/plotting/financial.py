@@ -28,6 +28,7 @@ from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter, format_eur
 from .style import (
     annotate_value_safe,
+    HEADROOM_Y_FRAC,
     apply_universal_margins,
     save_figure,
     show_titles,
@@ -318,7 +319,7 @@ def plot_npv_waterfall(
     _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, y_frac=HEADROOM_Y_FRAC)
     return save_figure(out_path)
 
 
