@@ -75,8 +75,13 @@ def test_bess_sheet_keys():
 
 def test_economics_sheet_keys():
     expected = {
-        "discount_rate_pct", "opex_inflation_pct", "revenue_inflation_pct",
+        "discount_rate_pct", "opex_inflation_pct",
+        "retail_inflation_pct", "dam_inflation_pct",
         "aggregator_fee_pct_revenue",
+        "benchmark_lcoe_low_eur_per_mwh",
+        "benchmark_lcoe_high_eur_per_mwh",
+        "benchmark_lcos_low_eur_per_mwh",
+        "benchmark_lcos_high_eur_per_mwh",
         "sensitivity_enabled", "sensitivity_capex_delta_pct",
         "sensitivity_opex_delta_pct", "sensitivity_revenue_delta_pct",
         "sensitivity_discount_rate_delta_pp",

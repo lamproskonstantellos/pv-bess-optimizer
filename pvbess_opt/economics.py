@@ -216,7 +216,51 @@ def build_yearly_cashflow(
     aggregator_fee_pct = float(econ.get("aggregator_fee_pct_revenue", 0.0) or 0.0)
     aggregator_fee_frac = max(0.0, min(1.0, aggregator_fee_pct / 100.0))
 
-    revenue_1_gross = float(year1_kpis.get("profit_total_eur", 0.0))
+    # v0.8.1: split the Year-1 revenue base into retail (load-coverage)
+    # and DAM (wholesale export) streams.  Retail revenue is indexed by
+    # retail_inflation_pct (CPI-linked PPAs / VNB tariffs).  DAM revenue
+    # is indexed by dam_inflation_pct (default 0 — Lazard / Aurora /
+    # Gridcog use exogenous price curves, not CPI).  Grid-charging cost
+    # (a negative on the revenue side) tracks the DAM index.
+    _has_breakdown = any(
+        k in year1_kpis for k in (
+            "profit_load_from_pv_eur", "profit_load_from_bess_eur",
+            "profit_export_from_pv_eur", "profit_export_from_bess_eur",
+            "expense_charge_bess_grid_eur",
+        )
+    )
+    if _has_breakdown:
+        revenue_1_retail = float(
+            (year1_kpis.get("profit_load_from_pv_eur", 0.0) or 0.0)
+            + (year1_kpis.get("profit_load_from_bess_eur", 0.0) or 0.0)
+        )
+        revenue_1_dam = float(
+            (year1_kpis.get("profit_export_from_pv_eur", 0.0) or 0.0)
+            + (year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0)
+            - (year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
+        )
+        revenue_1_gross = revenue_1_retail + revenue_1_dam
+        # Reconciliation guard — when the KPI dict carries
+        # profit_total_eur it should equal retail + DAM within rounding.
+        if "profit_total_eur" in year1_kpis:
+            profit_total = float(year1_kpis["profit_total_eur"] or 0.0)
+            if abs(profit_total - revenue_1_gross) > max(
+                1.0, abs(profit_total) * 1e-6,
+            ):
+                logger.warning(
+                    "Year-1 revenue split drift: profit_total_eur=%.2f vs "
+                    "retail+dam=%.2f. Using component sum.",
+                    profit_total, revenue_1_gross,
+                )
+    else:
+        # Fallback for fixtures / unit tests that supply only
+        # profit_total_eur with no breakdown — index the whole revenue
+        # as retail (CPI-linked) so legacy single-rate behaviour is
+        # preserved when retail_inflation_pct = dam_inflation_pct.
+        revenue_1_gross = float(year1_kpis.get("profit_total_eur", 0.0) or 0.0)
+        revenue_1_retail = revenue_1_gross
+        revenue_1_dam = 0.0
+
     opex_pv_1 = float(econ["opex_pv_eur_per_kwp"]) * pv_kwp
     opex_bess_1 = float(econ["opex_bess_eur_per_kw"]) * bess_kw
     opex_1 = -(opex_pv_1 + opex_bess_1)
@@ -224,7 +268,8 @@ def build_yearly_cashflow(
     pv_deg_y1 = float(econ["pv_degradation_year1_pct"]) / 100.0
     pv_deg_annual = float(econ["pv_degradation_annual_pct"]) / 100.0
     bess_deg_annual = float(econ["bess_degradation_annual_pct"]) / 100.0
-    rev_infl = float(econ["revenue_inflation_pct"]) / 100.0
+    retail_infl = float(econ.get("retail_inflation_pct", 2.0) or 0.0) / 100.0
+    dam_infl = float(econ.get("dam_inflation_pct", 0.0) or 0.0) / 100.0
     opex_infl = float(econ["opex_inflation_pct"]) / 100.0
     discount_rate = float(econ["discount_rate_pct"]) / 100.0
 
@@ -236,6 +281,8 @@ def build_yearly_cashflow(
         if y == 0:
             pv_factor = 1.0
             bess_factor = 1.0
+            revenue_retail_y = 0.0
+            revenue_dam_y = 0.0
             revenue_gross_y = 0.0
             opex_y = 0.0
             capex_y = capex_total_y0
@@ -247,11 +294,21 @@ def build_yearly_cashflow(
             else:
                 pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
             bess_factor = (1.0 - bess_deg_annual) ** (y - 1)
-            revenue_gross_y = (
-                revenue_1_gross
+            # v0.8.1: per-stream inflation.  pv_factor is used for both
+            # streams as the existing v0.8 convention (downstream scopes
+            # like revenue_stack_yearly scale by revenue_eur ratios);
+            # per-stream BESS degradation is a future enhancement.
+            revenue_retail_y = (
+                revenue_1_retail
                 * pv_factor
-                * (1.0 + rev_infl) ** (y - 1)
+                * (1.0 + retail_infl) ** (y - 1)
             )
+            revenue_dam_y = (
+                revenue_1_dam
+                * pv_factor
+                * (1.0 + dam_infl) ** (y - 1)
+            )
+            revenue_gross_y = revenue_retail_y + revenue_dam_y
             aggregator_fee_y = -revenue_gross_y * aggregator_fee_frac
             opex_y = opex_1 * (1.0 + opex_infl) ** (y - 1)
             if bess_repl_year > 0 and y == bess_repl_year:
@@ -261,6 +318,17 @@ def build_yearly_cashflow(
             devex_y = 0.0
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
+        # Split the aggregator fee across the two streams in proportion
+        # to their gross contribution so the per-stream net columns add
+        # up exactly to revenue_eur.
+        if abs(revenue_gross_y) > 1e-12:
+            retail_share = revenue_retail_y / revenue_gross_y
+        else:
+            retail_share = 0.0
+        retail_fee_y = aggregator_fee_y * retail_share
+        dam_fee_y = aggregator_fee_y - retail_fee_y
+        revenue_retail_net_y = revenue_retail_y + retail_fee_y
+        revenue_dam_net_y = revenue_dam_y + dam_fee_y
         net_cf = revenue_net_y + opex_y + capex_y + devex_y
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
         rows.append(
@@ -270,6 +338,8 @@ def build_yearly_cashflow(
                 "pv_production_factor": float(pv_factor),
                 "bess_capacity_factor": float(bess_factor),
                 "revenue_eur": float(revenue_net_y),
+                "revenue_retail_eur": float(revenue_retail_net_y),
+                "revenue_dam_eur": float(revenue_dam_net_y),
                 "aggregator_fee_eur": float(aggregator_fee_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),

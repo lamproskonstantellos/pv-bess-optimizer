@@ -129,10 +129,12 @@ def plot_revenue_stack_yearly(
     # Optional dashed real-EUR (deflated) trajectory — only meaningful
     # when nominal revenue is being inflated year on year.  Helps the
     # reader distinguish "stack growing because of inflation" from
-    # "stack growing because of generation".
+    # "stack growing because of generation".  The deflator follows the
+    # retail inflation index (CPI proxy) since the DAM index is
+    # typically 0; the plot is a CPI-purchasing-power view.
     rev_infl_pct = 0.0
     if econ is not None:
-        rev_infl_pct = float(econ.get("revenue_inflation_pct", 0.0) or 0.0)
+        rev_infl_pct = float(econ.get("retail_inflation_pct", 0.0) or 0.0)
     if rev_infl_pct > 1.0e-9:
         infl = rev_infl_pct / 100.0
         project_years = op["project_year"].to_numpy(dtype=int)
