@@ -32,8 +32,8 @@ Highlights:
     * DEVEX (per-asset development CAPEX), unavailability_pct,
       aggregator_fee_pct_revenue.
     * IRR tornado dumbbell with endpoint labels outside the dots
-      and an LCOE/LCOS single-panel summary against Lazard 2024
+      and separate LCOE / LCOS summary PDFs against Lazard 2024
       benchmark bands.
 """
 
-__version__ = "0.8.4"
+__version__ = "0.8.5"
