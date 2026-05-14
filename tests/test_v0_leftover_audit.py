@@ -72,6 +72,7 @@ FORBIDDEN_TOKENS: tuple[str, ...] = (
     '"0.6.0"',
     '"0.7.0"',
     '"0.8.0"',
+    '"0.8.1"',
     "capex_licenses_eur_per_kw",
     "battery_hours",
     "p_charge_max_kw",
@@ -96,7 +97,11 @@ REQUIRED_TOKENS: tuple[str, ...] = (
     "retail_inflation_pct",
     "dam_inflation_pct",
     "net_revenue_line",
-    '"0.8.1"',
+    "FINANCIAL_LABELS",
+    "FINANCIAL_LEGEND_ORDER",
+    "financial_color",
+    "apply_financial_legend",
+    '"0.8.2"',
 )
 
 REQUIRED_FILES: tuple[str, ...] = (
@@ -251,6 +256,6 @@ def test_inputs_xlsx_uses_v08_schema():
 # ---------------------------------------------------------------------------
 
 
-def test_pvbess_version_string_is_exactly_0_8_1():
+def test_pvbess_version_string_is_exactly_0_8_2():
     import pvbess_opt
-    assert pvbess_opt.__version__ == "0.8.1"
+    assert pvbess_opt.__version__ == "0.8.2"
