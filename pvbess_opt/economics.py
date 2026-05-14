@@ -623,34 +623,46 @@ def compute_financial_kpis(
         op_mask = df[project_year_col] >= 1
 
         if pv_kwp > 0.0 and "pv_generation_mwh" in lifetime_yearly.columns:
+            # LCOE per IEA / IRENA / NREL ATB: isolate PV-only economics.
+            # Numerator must NOT include BESS CAPEX, BESS DEVEX, BESS OPEX
+            # or BESS replacement.  Denominator uses derated PV generation
+            # (the lifetime_yearly column is already unavailability-derated
+            # upstream in main._build_financials).
             ly = lifetime_yearly.set_index("project_year") \
                 if "project_year" in lifetime_yearly.columns else None
-            disc = df.set_index(project_year_col)["discount_factor"]
-            disc_costs = float(
-                (disc.loc[op_mask.values] * (
-                    -df.loc[op_mask, "opex_eur"].astype(float).values
-                )).sum()
+            disc_series = df.set_index(project_year_col)["discount_factor"]
+
+            disc_y0 = float(
+                df.loc[df[project_year_col] == 0, "discount_factor"].iloc[0]
+            ) if (df[project_year_col] == 0).any() else 1.0
+            capex_pv_y0 = float(econ.get("capex_pv_eur_per_kw", 0.0)) * pv_kwp
+            devex_pv_y0 = (
+                float(econ.get("devex_pv_eur_per_kw", 0.0) or 0.0) * pv_kwp
             )
-            disc_capex = float((-df["capex_eur"].astype(float)
-                                * df["discount_factor"].astype(float)).sum())
-            # v0.8: DEVEX is part of the Year-0 outlay too.
-            if "devex_eur" in df.columns:
-                disc_capex += float(
-                    (-df["devex_eur"].astype(float)
-                     * df["discount_factor"].astype(float)).sum()
-                )
-            disc_total = disc_capex + disc_costs
+            disc_pv_capex = (capex_pv_y0 + devex_pv_y0) * disc_y0
+
+            opex_pv_per_kwp = float(econ.get("opex_pv_eur_per_kwp", 0.0))
+            opex_infl_lcoe = float(econ.get("opex_inflation_pct", 0.0) or 0.0) / 100.0
+            disc_pv_opex = 0.0
             disc_pv_mwh = 0.0
-            if ly is not None:
-                for y in df.loc[op_mask, project_year_col]:
-                    yi = int(y)
-                    if yi in ly.index:
-                        disc_pv_mwh += float(disc.loc[yi]) * float(
-                            ly.loc[yi, "pv_generation_mwh"],
-                        )
+            for y in df.loc[op_mask, project_year_col]:
+                yi = int(y)
+                if yi == 0:
+                    continue
+                disc_y = float(disc_series.loc[yi])
+                opex_pv_y = (
+                    opex_pv_per_kwp * pv_kwp * (1.0 + opex_infl_lcoe) ** (yi - 1)
+                )
+                disc_pv_opex += disc_y * opex_pv_y
+                if ly is not None and yi in ly.index:
+                    disc_pv_mwh += disc_y * float(
+                        ly.loc[yi, "pv_generation_mwh"],
+                    )
+
+            disc_pv_total = disc_pv_capex + disc_pv_opex
             if disc_pv_mwh > 1e-9:
                 extras["lcoe_eur_per_mwh"] = float(
-                    round(disc_total / disc_pv_mwh, 4),
+                    round(disc_pv_total / disc_pv_mwh, 4),
                 )
 
         if (
@@ -771,6 +783,28 @@ def compute_financial_kpis(
     }
     out.update(extras)
     out.update(breakdown)
+
+    # ---- v0.8.1 LCOE / LCOS audit log -----------------------------------
+    # Single INFO line so the run_log.txt records the headline cost
+    # numbers next to the Lazard 2024 reference bands.
+    lcoe_bench_low = float(econ.get("benchmark_lcoe_low_eur_per_mwh", 30.0))
+    lcoe_bench_high = float(econ.get("benchmark_lcoe_high_eur_per_mwh", 85.0))
+    lcos_bench_low = float(econ.get("benchmark_lcos_low_eur_per_mwh", 157.0))
+    lcos_bench_high = float(econ.get("benchmark_lcos_high_eur_per_mwh", 274.0))
+    lcoe_val = extras.get("lcoe_eur_per_mwh", float("nan"))
+    lcos_val = extras.get("lcos_eur_per_mwh", float("nan"))
+    cycles_val = extras.get("bess_lifetime_cycles", float("nan"))
+
+    def _fmt(v: float) -> str:
+        return "n/a" if np.isnan(v) else f"{v:.1f}"
+
+    logger.info(
+        "[LCOE/LCOS audit] LCOE = %s EUR/MWh (Lazard: %.0f-%.0f) | "
+        "LCOS = %s EUR/MWh (Lazard: %.0f-%.0f) | bess_lifetime_cycles = %s",
+        _fmt(lcoe_val), lcoe_bench_low, lcoe_bench_high,
+        _fmt(lcos_val), lcos_bench_low, lcos_bench_high,
+        "n/a" if np.isnan(cycles_val) else f"{cycles_val:.0f}",
+    )
     return out
 
 

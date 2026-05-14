@@ -41,13 +41,25 @@ from .style import save_figure, show_titles
 # ---------------------------------------------------------------------------
 # Industry benchmark bands (Lazard 2024 — update annually)
 # ---------------------------------------------------------------------------
+#
+# Source: Lazard *Levelized Cost of Energy+ v17* (LCOE) and *Levelized
+# Cost of Storage v9* (LCOS), both 2024 edition.  Lazard publishes in
+# USD; bands below are EUR-equivalent at ~1.08 EUR/USD (mid-2024).
+#
+# * LCOE: utility-scale PV, unsubsidised band USD 29-92/MWh.  Rounded
+#   to EUR 30-85/MWh.  v0.8.0 used (30, 50) which excluded the upper
+#   half of the band; v0.8.1 widens to align with the published range.
+# * LCOS: 100 MW / 4-hour utility-scale Li-ion BESS, unsubsidised band
+#   USD 170-296/MWh.  Rounded to EUR 157-274/MWh.  v0.8.0 used (100,
+#   250) which under-shot the lower edge; v0.8.1 tightens to the
+#   published range.
+#
+# Workbook overrides: the four benchmark_lcoe_* / benchmark_lcos_* keys
+# in the economics sheet override these per-project.
 
-# Lazard *Levelized Cost of Energy+ 2024*, utility-scale PV (EUR/MWh).
-BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH: tuple[float, float] = (30.0, 50.0)
+BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH: tuple[float, float] = (30.0, 85.0)
 
-# Lazard *Levelized Cost of Storage v9 2024*, four-hour
-# lithium-ion utility-scale (EUR/MWh).
-BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH: tuple[float, float] = (100.0, 250.0)
+BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH: tuple[float, float] = (157.0, 274.0)
 
 
 def _resolve_currency_format(econ: dict[str, Any] | None) -> str:
@@ -255,6 +267,22 @@ def plot_lcoe_lcos_summary(
     bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
     figsize = (7, 4) if (pv_present and bess_present) else (7, 2.5)
 
+    # Workbook overrides (v0.8.1).  When the economics sheet carries
+    # benchmark_* keys, use them; otherwise fall back to the module
+    # constants (Lazard 2024 EUR-equivalent).
+    lcoe_band = (
+        float(econ.get("benchmark_lcoe_low_eur_per_mwh",
+                       BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH[0])),
+        float(econ.get("benchmark_lcoe_high_eur_per_mwh",
+                       BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH[1])),
+    )
+    lcos_band = (
+        float(econ.get("benchmark_lcos_low_eur_per_mwh",
+                       BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH[0])),
+        float(econ.get("benchmark_lcos_high_eur_per_mwh",
+                       BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH[1])),
+    )
+
     # Independent x-axes per row.  LCOS values (~1500 EUR/MWh) and LCOE
     # values (~100 EUR/MWh) span very different ranges; sharing the
     # x-axis crushed the LCOE row into <5% of the panel.
@@ -265,7 +293,7 @@ def plot_lcoe_lcos_summary(
         low=base_lcoe * low_factor if pv_present else float("nan"),
         high=base_lcoe * high_factor if pv_present else float("nan"),
         bar_colour=FINANCIAL_COLORS["lcoe_bar"],
-        benchmark=BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH,
+        benchmark=lcoe_band,
         label="LCOE", asset_present=pv_present,
         absent_message="PV not part of this project — LCOE N/A",
         gloss="Discounted lifetime cost per discounted MWh of PV generation.",
@@ -276,7 +304,7 @@ def plot_lcoe_lcos_summary(
         low=base_lcos * low_factor if bess_present else float("nan"),
         high=base_lcos * high_factor if bess_present else float("nan"),
         bar_colour=FINANCIAL_COLORS["lcos_bar"],
-        benchmark=BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH,
+        benchmark=lcos_band,
         label="LCOS", asset_present=bess_present,
         absent_message="BESS not part of this project — LCOS N/A",
         gloss="Discounted lifetime BESS cost per discounted MWh of BESS discharge.",
