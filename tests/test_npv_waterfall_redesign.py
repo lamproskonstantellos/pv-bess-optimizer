@@ -62,49 +62,81 @@ def test_npv_waterfall_renders_with_five_legend_entries(tmp_path: Path):
     # function and pulling from plt.get_fignums()).
 
 
-def test_npv_waterfall_legend_has_all_components(tmp_path: Path):
+def _render_npv_waterfall(tmp_path: Path):
+    """Render plot_npv_waterfall and return the live figure object.
+
+    Bypasses the close-on-save in :func:`save_figure` so the test can
+    introspect axes / legend / text artists.
+    """
     plt.close("all")
-    df = _yearly_cf()
-    # Call the function but intercept before close by using the public
-    # entry point; matplotlib leaves the saved figure closed.  Rebuild
-    # the chart manually with the same data through a fresh invocation
-    # that returns the legend labels via a controlled path.
-    out = plot_npv_waterfall(df, tmp_path / "waterfall.pdf")
-    assert out.exists()
-    # The morphology contract: open the PDF as a binary blob, read
-    # nothing — instead verify the implementation directly by
-    # instrumenting matplotlib via a probe.
-    fig, ax = plt.subplots()
-    # Replicate the labels added inside plot_npv_waterfall.  The
-    # contract: these exact six entries must be present.
+    import pvbess_opt.plotting.financial as fin_mod
+    captured: dict = {}
+    original_save = fin_mod.save_figure
+
+    def keep_open(out):
+        captured["fig"] = plt.gcf()
+        return Path(out)
+
+    fin_mod.save_figure = keep_open
+    try:
+        plot_npv_waterfall(_yearly_cf(), tmp_path / "waterfall.pdf")
+    finally:
+        fin_mod.save_figure = original_save
+    return captured["fig"]
+
+
+def test_npv_waterfall_legend_has_all_components(tmp_path: Path):
+    """The six canonical legend entries must all render on the axes."""
+    fig = _render_npv_waterfall(tmp_path)
+    ax = fig.axes[0]
+    _, labels = ax.get_legend_handles_labels()
     expected = {"Revenue", "OPEX", "DEVEX", "CAPEX",
                 "Net cash-flow", "Cumulative NPV"}
-    # Cross-check by re-running the plot into a new figure via direct
-    # rebuild using the same call path: re-invoke and probe the most
-    # recent Figure object.
-    plt.close(fig)
-    # The most reliable check is to grep the source for the labels.
-    src = Path("pvbess_opt/plotting/financial.py").read_text()
-    for label in expected:
-        assert f'label="{label}"' in src, (
-            f'plot_npv_waterfall is missing label="{label}"'
-        )
+    assert expected.issubset(set(labels)), (
+        f"plot_npv_waterfall missing legend entries: "
+        f"{expected - set(labels)}"
+    )
+
+
+def test_npv_total_annotation_inside_frame(tmp_path: Path):
+    """v0.8.2: the "NPV = €X.XM" total annotation lives in axes
+    coordinates inside the frame, not overflowing past the right
+    spine."""
+    fig = _render_npv_waterfall(tmp_path)
+    ax = fig.axes[0]
+    matches = [t for t in ax.texts if "NPV =" in t.get_text()]
+    assert matches, "NPV total annotation missing"
+    summary = matches[0]
+    # The annotation must be anchored in axes-coordinates (transform
+    # == ax.transAxes) so it never escapes the frame even on long
+    # horizons.
+    assert summary.get_transform() == ax.transAxes, (
+        "NPV total annotation must use axes coordinates (top-right "
+        "of the frame); got data-coordinate transform instead."
+    )
+    x, y = summary.get_position()
+    assert 0.0 <= float(x) <= 1.0, f"NPV total x out of frame: {x}"
+    assert 0.0 <= float(y) <= 1.0, f"NPV total y out of frame: {y}"
 
 
 def test_npv_waterfall_has_no_inaxis_capex_devex_text(tmp_path: Path):
     """The redesigned waterfall no longer adds in-axis DEVEX / CAPEX
     text annotations next to the Year-0 bar — those are conveyed
-    through the 5-entry legend instead."""
-    src = Path("pvbess_opt/plotting/financial.py").read_text()
-    # The string 'ha="right", va="center"' inside a text() with
-    # 'DEVEX' / 'CAPEX' captions is the smoking-gun pattern from the
-    # old implementation.  Confirm it's been removed.
-    plot_block_start = src.index("def plot_npv_waterfall")
-    next_def = src.index("\ndef ", plot_block_start + 1)
-    block = src[plot_block_start:next_def]
-    assert '"DEVEX"' not in block.replace('label="DEVEX"', ""), (
-        "in-axis DEVEX text annotation should be removed"
-    )
-    assert '"CAPEX"' not in block.replace('label="CAPEX"', ""), (
-        "in-axis CAPEX text annotation should be removed"
+    through the 5-entry legend instead.
+
+    Detection contract (v0.8.2): inspect rendered text artists on the
+    axes rather than grepping source.  Source-level lookups are
+    brittle because the canonical labels now appear inside
+    ``financial_color("DEVEX")`` / ``label="DEVEX"`` calls.
+    """
+    fig = _render_npv_waterfall(tmp_path)
+    ax = fig.axes[0]
+    bad_texts: list[str] = []
+    for t in ax.texts:
+        text = t.get_text()
+        if text in ("DEVEX", "CAPEX"):
+            bad_texts.append(text)
+    assert not bad_texts, (
+        f"plot_npv_waterfall still draws in-axis DEVEX/CAPEX text: "
+        f"{bad_texts}"
     )
