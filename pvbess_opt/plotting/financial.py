@@ -564,7 +564,7 @@ def _dumbbell_plot(
     if apply_eur_xaxis:
         _apply_eur_xaxis(ax, econ)
     xmin, xmax = ax.get_xlim()
-    pad = 0.08 * (xmax - xmin) if xmax > xmin else 1.0
+    pad = 0.18 * (xmax - xmin) if xmax > xmin else 1.0
     ax.set_xlim(xmin - pad, xmax + pad)
     ax.set_ylim(-0.6, len(labels) - 0.4)
     _maybe_set_title(ax, title)
@@ -581,26 +581,27 @@ def _annotate_dumbbell_endpoints(
     row: int,
     value_formatter: Callable[[float], str],
 ) -> None:
-    """Print each endpoint label at its actual x-position so the text
-    value always matches the x-axis coordinate.
+    """Place each endpoint label OUTSIDE the corresponding dot.
 
-    ``left`` and ``right`` are the *sorted* endpoint coordinates (left
-    <= right); we label them with their own numeric values rather than
-    re-using ``low`` / ``high`` from the scenario direction, which can
-    swap when a "low" scenario actually produces the larger metric
+    The left label is right-aligned and offset 8 points to the LEFT of
+    the leftmost dot; the right label is left-aligned and offset 8
+    points to the RIGHT of the rightmost dot.  Both are vertically
+    centred on the row.  Labels carry their own numeric value (sorted
+    ``left`` / ``right``) so the printed text always matches its
+    x-axis position even when a "low" scenario yields a higher metric
     (e.g. low CAPEX → higher IRR).
     """
     annotate_value_safe(
         ax, left, row, value_formatter(left),
-        ha="left", va="bottom", fontsize=7,
-        offset_points=(0.0, 10.0),
-        bbox_alpha=0.8, bbox_pad=0.15,
+        ha="right", va="center", fontsize=7,
+        offset_points=(-8.0, 0.0),
+        bbox_alpha=0.85, bbox_pad=0.18,
     )
     annotate_value_safe(
         ax, right, row, value_formatter(right),
-        ha="right", va="bottom", fontsize=7,
-        offset_points=(0.0, 10.0),
-        bbox_alpha=0.8, bbox_pad=0.15,
+        ha="left", va="center", fontsize=7,
+        offset_points=(8.0, 0.0),
+        bbox_alpha=0.85, bbox_pad=0.18,
     )
 
 
