@@ -28,7 +28,8 @@ def _hand_econ() -> dict:
         "project_start_year": 2026,
         "discount_rate_pct": 7.0,
         "opex_inflation_pct": 0.0,
-        "revenue_inflation_pct": 0.0,
+        "retail_inflation_pct": 0.0,
+        "dam_inflation_pct": 0.0,
         "capex_pv_eur_per_kw": 500.0,
         "capex_bess_eur_per_kw": 200.0,
         "devex_pv_eur_per_kw": 60.0,
@@ -79,7 +80,11 @@ def _hand_lifetime_yearly() -> pd.DataFrame:
 
 
 def test_lcoe_formula_hand_checked():
-    """LCOE = (Disc CAPEX + Disc OPEX) / Disc PV gen."""
+    """LCOE per Lazard / IRENA / NREL ATB — PV-only economics.
+
+    Numerator = discounted (PV CAPEX + PV DEVEX + PV OPEX).  BESS CAPEX,
+    BESS DEVEX and BESS OPEX are NOT in LCOE.
+    """
     yearly = build_yearly_cashflow(_hand_year1_kpis(), _hand_econ(), _hand_caps())
     fin = compute_financial_kpis(
         yearly, _hand_econ(),
@@ -87,17 +92,64 @@ def test_lcoe_formula_hand_checked():
         lifetime_yearly=_hand_lifetime_yearly(),
         year1_kpis=_hand_year1_kpis(),
     )
-    # Disc factors
     r = 0.07
     disc = [(1 / (1 + r) ** y) for y in range(0, 6)]
-    # CAPEX (incl. DEVEX): PV 500*1000 + BESS 200*500 + DEVEX-PV 60*1000 + DEVEX-BESS 30*500
-    capex_y0 = 500_000 + 100_000 + 60_000 + 15_000
-    opex_per_year = 7_000 + 7_000  # 14 000
-    disc_capex = capex_y0 * disc[0]
-    disc_opex = sum(opex_per_year * disc[y] for y in range(1, 6))
+    # PV-only Year-0 outlay: 500*1000 CAPEX + 60*1000 DEVEX
+    capex_pv_y0 = 500_000 + 60_000
+    opex_pv_per_year = 7_000  # PV-only O&M; BESS OPEX excluded
+    disc_capex = capex_pv_y0 * disc[0]
+    disc_opex = sum(opex_pv_per_year * disc[y] for y in range(1, 6))
     disc_pv = sum(1800.0 * disc[y] for y in range(1, 6))
     expected_lcoe = (disc_capex + disc_opex) / disc_pv
     assert fin["lcoe_eur_per_mwh"] == pytest.approx(expected_lcoe, rel=1e-3)
+
+
+def test_lcoe_independent_of_bess_opex():
+    """LCOE is PV-only: doubling BESS OPEX must NOT move LCOE.
+
+    Lazard / IRENA convention: BESS costs are excluded from LCOE.
+    """
+    econ_a = _hand_econ()
+    econ_b = dict(econ_a, opex_bess_eur_per_kw=econ_a["opex_bess_eur_per_kw"] * 2.0)
+    fin_a = compute_financial_kpis(
+        build_yearly_cashflow(_hand_year1_kpis(), econ_a, _hand_caps()),
+        econ_a, capacities=_hand_caps(),
+        lifetime_yearly=_hand_lifetime_yearly(),
+        year1_kpis=_hand_year1_kpis(),
+    )
+    fin_b = compute_financial_kpis(
+        build_yearly_cashflow(_hand_year1_kpis(), econ_b, _hand_caps()),
+        econ_b, capacities=_hand_caps(),
+        lifetime_yearly=_hand_lifetime_yearly(),
+        year1_kpis=_hand_year1_kpis(),
+    )
+    assert fin_a["lcoe_eur_per_mwh"] == pytest.approx(
+        fin_b["lcoe_eur_per_mwh"], rel=1e-9,
+    )
+
+
+def test_lcos_independent_of_pv_opex():
+    """LCOS is BESS-only: doubling PV OPEX must NOT move LCOS.
+
+    Lazard LCOS v9 convention: PV costs are excluded from LCOS.
+    """
+    econ_a = _hand_econ()
+    econ_b = dict(econ_a, opex_pv_eur_per_kwp=econ_a["opex_pv_eur_per_kwp"] * 2.0)
+    fin_a = compute_financial_kpis(
+        build_yearly_cashflow(_hand_year1_kpis(), econ_a, _hand_caps()),
+        econ_a, capacities=_hand_caps(),
+        lifetime_yearly=_hand_lifetime_yearly(),
+        year1_kpis=_hand_year1_kpis(),
+    )
+    fin_b = compute_financial_kpis(
+        build_yearly_cashflow(_hand_year1_kpis(), econ_b, _hand_caps()),
+        econ_b, capacities=_hand_caps(),
+        lifetime_yearly=_hand_lifetime_yearly(),
+        year1_kpis=_hand_year1_kpis(),
+    )
+    assert fin_a["lcos_eur_per_mwh"] == pytest.approx(
+        fin_b["lcos_eur_per_mwh"], rel=1e-9,
+    )
 
 
 def test_lcos_formula_hand_checked():

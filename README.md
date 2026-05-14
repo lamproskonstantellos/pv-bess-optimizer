@@ -1,7 +1,7 @@
 # PV & BESS Optimizer
 
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.8.0-blue)](pvbess_opt/__init__.py)
+[![version](https://img.shields.io/badge/version-0.8.1-blue)](pvbess_opt/__init__.py)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
@@ -239,8 +239,37 @@ See `docs/source/users.guide/rolling_horizon.rst` for the full guide.
 * **Plot redesigns** — IRR tornado switches to a dumbbell layout for
   unambiguous endpoint labels; LCOE/LCOS summary becomes a single
   panel with the project sensitivity range overlaid on the Lazard
-  2024 industry benchmark band (LCOE 30–50 EUR/MWh; LCOS
-  100–250 EUR/MWh).
+  2024 industry benchmark band.
+
+## What's new in v0.8.1 (patch round)
+
+* **Retail / DAM inflation split** — `revenue_inflation_pct` is
+  replaced by `retail_inflation_pct` (default 2 %, PPA / VNB load
+  coverage) and `dam_inflation_pct` (default 0 %, wholesale exports).
+  Industry tools (Lazard / Aurora / Gridcog) do not apply CPI to
+  wholesale prices.  Legacy workbooks still load with a WARNING and
+  the value mapped to `retail_inflation_pct`.
+* **LCOE audit fix** — LCOE numerator no longer includes BESS CAPEX /
+  DEVEX / OPEX.  Per IEA / IRENA / NREL ATB convention LCOE is
+  PV-only; LCOS is BESS-only.  Benchmark bands updated to Lazard 2024
+  EUR-equivalents (LCOE 30–85 EUR/MWh; LCOS 157–274 EUR/MWh) and
+  overridable per project via four `benchmark_*` workbook keys.
+* **`run_log.txt` LCOE/LCOS audit** — single INFO line records the
+  computed LCOE / LCOS next to the benchmark bands.
+* **NPV waterfall** matches `yearly_cashflow_bars` morphology
+  (five-entry legend, no in-axis CAPEX/DEVEX captions, padded
+  y-axis).
+* **Cumulative / payback dedup** —
+  `cumulative_cashflow_<start>-<end>.pdf` is now pure cumulative
+  trajectory; payback markers live in
+  `cumulative_cashflow_with_payback_<start>-<end>.pdf`.
+* **LCOS annotation placement** — when the project bar undershoots
+  the Lazard band the summary annotation now lifts above the bar
+  rather than landing inside the grey benchmark band.
+* **Net-revenue line contrast** — Net revenue / Real-EUR net lines
+  in `revenue_stack_yearly` switch from dark purple to magenta
+  (`FINANCIAL_COLORS["net_revenue_line"]`) so they stay visible
+  over the dark blue BESS-export stack.
 
 See `docs/v0.8_changelog.md` for the full breaking-changes contract
 and the five-line v0.7 → v0.8 migration summary.

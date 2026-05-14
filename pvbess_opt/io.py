@@ -125,8 +125,13 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
 ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "discount_rate_pct": 7.0,
     "opex_inflation_pct": 1.0,
-    "revenue_inflation_pct": 2.0,
+    "retail_inflation_pct": 2.0,
+    "dam_inflation_pct": 0.0,
     "aggregator_fee_pct_revenue": 10.0,
+    "benchmark_lcoe_low_eur_per_mwh": 30.0,
+    "benchmark_lcoe_high_eur_per_mwh": 85.0,
+    "benchmark_lcos_low_eur_per_mwh": 157.0,
+    "benchmark_lcos_high_eur_per_mwh": 274.0,
     "sensitivity_enabled": True,
     "sensitivity_capex_delta_pct": 10.0,
     "sensitivity_opex_delta_pct": 10.0,
@@ -164,6 +169,19 @@ _KEY_TO_SHEET: dict[str, str] = {}
 for _sheet_name, _sheet_defaults in _SHEET_DEFAULTS.items():
     for _key in _sheet_defaults:
         _KEY_TO_SHEET[_key] = _sheet_name
+
+
+# Keys renamed in v0.8.1.  Legacy → (new_key, user-facing hint).  A
+# workbook that still carries the legacy key gets a WARNING and the
+# value is mapped to ``new_key`` so existing projects keep working.
+_LEGACY_V081_RENAMED: dict[str, tuple[str, str]] = {
+    "revenue_inflation_pct": (
+        "retail_inflation_pct",
+        "v0.8.1 split revenue inflation into retail_inflation_pct "
+        "(load / PPA) and dam_inflation_pct (wholesale exports). "
+        "Value mapped to retail_inflation_pct.",
+    ),
+}
 
 
 # Keys removed in v0.8.  Each maps to a one-line user-facing hint.
@@ -319,11 +337,29 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "WACC. Typical EU RES band 6-8 %."),
     ("opex_inflation_pct", 1.0, "%",
      "Annual OPEX escalation rate."),
-    ("revenue_inflation_pct", 2.0, "%",
-     "Annual revenue escalation rate (ECB target). Set 0 to disable."),
+    ("retail_inflation_pct", 2.0, "%",
+     "Annual indexation of retail tariff / PPA revenue (load-coverage). "
+     "ECB target ~2%. Set to 0 to disable."),
+    ("dam_inflation_pct", 0.0, "%",
+     "Annual indexation of wholesale DAM revenue (exports). Default 0 "
+     "since DAM prices are driven by gas/CO2/RES penetration, not CPI. "
+     "Industry tools (Lazard, Aurora, Gridcog) use exogenous price "
+     "curves, not flat inflation."),
     ("aggregator_fee_pct_revenue", 10.0, "%",
      "Aggregator fee on gross revenue (Gridcog convention; see public "
      "Gridcog cost / pricing docs)."),
+    ("benchmark_lcoe_low_eur_per_mwh", 30.0, "EUR/MWh",
+     "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
+     "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
+    ("benchmark_lcoe_high_eur_per_mwh", 85.0, "EUR/MWh",
+     "Upper edge of the Lazard 2024 utility-scale PV LCOE band "
+     "(EUR-equivalent at ~1.08 EUR/USD)."),
+    ("benchmark_lcos_low_eur_per_mwh", 157.0, "EUR/MWh",
+     "Lower edge of the Lazard 2024 utility-scale 4-hour Li-ion LCOS "
+     "band (EUR-equivalent at ~1.08 EUR/USD)."),
+    ("benchmark_lcos_high_eur_per_mwh", 274.0, "EUR/MWh",
+     "Upper edge of the Lazard 2024 utility-scale 4-hour Li-ion LCOS "
+     "band (EUR-equivalent at ~1.08 EUR/USD)."),
     ("sensitivity_enabled", True, "bool",
      "Run a one-at-a-time tornado sensitivity after the base run."),
     ("sensitivity_capex_delta_pct", 10, "%",
@@ -641,6 +677,22 @@ def _parse_kv_sheet(
         if key in defaults:
             out[key] = _parse_value(key, raw, defaults[key])
             continue
+        if key in _LEGACY_V081_RENAMED:
+            new_key, hint = _LEGACY_V081_RENAMED[key]
+            if new_key in flat:
+                logger.warning(
+                    "%s sheet key %r is the legacy name of %r; both keys "
+                    "are present so the legacy value %r is ignored. %s",
+                    sheet_name, key, new_key, raw, hint,
+                )
+                continue
+            if new_key in defaults:
+                logger.warning(
+                    "%s sheet key %r renamed to %r in v0.8.1. %s",
+                    sheet_name, key, new_key, hint,
+                )
+                out[new_key] = _parse_value(new_key, raw, defaults[new_key])
+                continue
         if key in _LEGACY_V08_REMOVED:
             logger.warning(
                 "%s sheet key %r was dropped in v0.8: %s. Value %r ignored.",

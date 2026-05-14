@@ -446,7 +446,8 @@ def _generate_financial_plots(
             if fin_kpis else float("nan")
         )
         plot_payback(
-            yearly_cf, plots_dir / "payback_visualization.pdf",
+            yearly_cf,
+            plots_dir / f"cumulative_cashflow_with_payback_{start}-{end}.pdf",
             simple_payback_years=simple_pb,
             discounted_payback_years=disc_pb,
         )

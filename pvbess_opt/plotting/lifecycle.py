@@ -41,13 +41,25 @@ from .style import save_figure, show_titles
 # ---------------------------------------------------------------------------
 # Industry benchmark bands (Lazard 2024 — update annually)
 # ---------------------------------------------------------------------------
+#
+# Source: Lazard *Levelized Cost of Energy+ v17* (LCOE) and *Levelized
+# Cost of Storage v9* (LCOS), both 2024 edition.  Lazard publishes in
+# USD; bands below are EUR-equivalent at ~1.08 EUR/USD (mid-2024).
+#
+# * LCOE: utility-scale PV, unsubsidised band USD 29-92/MWh.  Rounded
+#   to EUR 30-85/MWh.  v0.8.0 used (30, 50) which excluded the upper
+#   half of the band; v0.8.1 widens to align with the published range.
+# * LCOS: 100 MW / 4-hour utility-scale Li-ion BESS, unsubsidised band
+#   USD 170-296/MWh.  Rounded to EUR 157-274/MWh.  v0.8.0 used (100,
+#   250) which under-shot the lower edge; v0.8.1 tightens to the
+#   published range.
+#
+# Workbook overrides: the four benchmark_lcoe_* / benchmark_lcos_* keys
+# in the economics sheet override these per-project.
 
-# Lazard *Levelized Cost of Energy+ 2024*, utility-scale PV (EUR/MWh).
-BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH: tuple[float, float] = (30.0, 50.0)
+BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH: tuple[float, float] = (30.0, 85.0)
 
-# Lazard *Levelized Cost of Storage v9 2024*, four-hour
-# lithium-ion utility-scale (EUR/MWh).
-BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH: tuple[float, float] = (100.0, 250.0)
+BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH: tuple[float, float] = (157.0, 274.0)
 
 
 def _resolve_currency_format(econ: dict[str, Any] | None) -> str:
@@ -122,17 +134,19 @@ def plot_revenue_stack_yearly(
                edgecolor="black", linewidth=0.4,
                label="Grid-charging cost")
     net = (op["revenue_eur"].astype(float)).to_numpy()
-    ax.plot(years, net, color=FINANCIAL_COLORS["discounted"], linewidth=1.5,
-            marker="o", markersize=3, label="Net revenue")
+    ax.plot(years, net, color=FINANCIAL_COLORS["net_revenue_line"],
+            linewidth=1.5, marker="o", markersize=3, label="Net revenue")
     ax.axhline(0.0, color="black", linewidth=0.6)
 
     # Optional dashed real-EUR (deflated) trajectory — only meaningful
     # when nominal revenue is being inflated year on year.  Helps the
     # reader distinguish "stack growing because of inflation" from
-    # "stack growing because of generation".
+    # "stack growing because of generation".  The deflator follows the
+    # retail inflation index (CPI proxy) since the DAM index is
+    # typically 0; the plot is a CPI-purchasing-power view.
     rev_infl_pct = 0.0
     if econ is not None:
-        rev_infl_pct = float(econ.get("revenue_inflation_pct", 0.0) or 0.0)
+        rev_infl_pct = float(econ.get("retail_inflation_pct", 0.0) or 0.0)
     if rev_infl_pct > 1.0e-9:
         infl = rev_infl_pct / 100.0
         project_years = op["project_year"].to_numpy(dtype=int)
@@ -140,7 +154,7 @@ def plot_revenue_stack_yearly(
         real_net = net * deflator
         ax.plot(
             years, real_net,
-            color=FINANCIAL_COLORS["discounted"], linewidth=1.0,
+            color=FINANCIAL_COLORS["net_revenue_line"], linewidth=1.0,
             linestyle="--", marker="", alpha=0.85,
             label="Real-EUR net (deflated)",
         )
@@ -253,6 +267,22 @@ def plot_lcoe_lcos_summary(
     bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
     figsize = (7, 4) if (pv_present and bess_present) else (7, 2.5)
 
+    # Workbook overrides (v0.8.1).  When the economics sheet carries
+    # benchmark_* keys, use them; otherwise fall back to the module
+    # constants (Lazard 2024 EUR-equivalent).
+    lcoe_band = (
+        float(econ.get("benchmark_lcoe_low_eur_per_mwh",
+                       BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH[0])),
+        float(econ.get("benchmark_lcoe_high_eur_per_mwh",
+                       BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH[1])),
+    )
+    lcos_band = (
+        float(econ.get("benchmark_lcos_low_eur_per_mwh",
+                       BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH[0])),
+        float(econ.get("benchmark_lcos_high_eur_per_mwh",
+                       BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH[1])),
+    )
+
     # Independent x-axes per row.  LCOS values (~1500 EUR/MWh) and LCOE
     # values (~100 EUR/MWh) span very different ranges; sharing the
     # x-axis crushed the LCOE row into <5% of the panel.
@@ -263,7 +293,7 @@ def plot_lcoe_lcos_summary(
         low=base_lcoe * low_factor if pv_present else float("nan"),
         high=base_lcoe * high_factor if pv_present else float("nan"),
         bar_colour=FINANCIAL_COLORS["lcoe_bar"],
-        benchmark=BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH,
+        benchmark=lcoe_band,
         label="LCOE", asset_present=pv_present,
         absent_message="PV not part of this project — LCOE N/A",
         gloss="Discounted lifetime cost per discounted MWh of PV generation.",
@@ -274,7 +304,7 @@ def plot_lcoe_lcos_summary(
         low=base_lcos * low_factor if bess_present else float("nan"),
         high=base_lcos * high_factor if bess_present else float("nan"),
         bar_colour=FINANCIAL_COLORS["lcos_bar"],
-        benchmark=BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH,
+        benchmark=lcos_band,
         label="LCOS", asset_present=bess_present,
         absent_message="BESS not part of this project — LCOS N/A",
         gloss="Discounted lifetime BESS cost per discounted MWh of BESS discharge.",
@@ -392,21 +422,41 @@ def _draw_benchmark_row(
         zorder=5,
     )
 
-    # Right-side annotation summarising the project values.
+    # Annotation placement v0.8.1: when the project bar lies entirely
+    # to the LEFT of the benchmark band (typical undershoot scenario,
+    # e.g. LCOS 37-56 vs Lazard 157-274), put the summary above the
+    # bar so it does not get rendered over the grey band.  Otherwise
+    # the historical right-of-bar placement still works.
     label_text = (
         f"{label} base = {base:.0f} EUR/MWh "
         f"(range {bar_low:.0f}–{bar_high:.0f})"
     )
-    ax.annotate(
-        label_text, xy=(bar_high, 0), xytext=(8, 0),
-        textcoords="offset points",
-        ha="left", va="center", fontsize=7,
-        bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "grey",
-              "linewidth": 0.5, "boxstyle": "round,pad=0.2"},
-    )
+    bbox_kwargs = {
+        "facecolor": "white", "alpha": 0.85, "edgecolor": "grey",
+        "linewidth": 0.5, "boxstyle": "round,pad=0.2",
+    }
+    project_left_of_band = bar_high < bench_low
+    if project_left_of_band:
+        bar_mid_x = 0.5 * (bar_low + bar_high)
+        ax.annotate(
+            label_text, xy=(bar_mid_x, 0.20), xytext=(0, 6),
+            textcoords="offset points",
+            ha="center", va="bottom", fontsize=7, bbox=bbox_kwargs,
+        )
+    else:
+        ax.annotate(
+            label_text, xy=(bar_high, 0), xytext=(8, 0),
+            textcoords="offset points",
+            ha="left", va="center", fontsize=7, bbox=bbox_kwargs,
+        )
 
     ax.set_yticks([])
-    ax.set_ylim(-0.6, 0.6)
+    # Slightly larger y-span when the annotation lives above the bar
+    # so the bbox does not get clipped by the row's own axes.
+    if project_left_of_band:
+        ax.set_ylim(-0.6, 0.85)
+    else:
+        ax.set_ylim(-0.6, 0.6)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
@@ -417,7 +467,10 @@ def _draw_benchmark_row(
     span_lo = min(bench_low, bar_low)
     span_hi = max(bench_high, bar_high)
     pad = 0.12 * max(span_hi - span_lo, 1.0)
-    ax.set_xlim(max(0.0, span_lo - pad), span_hi + pad * 3.0)
+    # When the annotation lives above the bar the historical right-side
+    # padding is no longer required.
+    right_pad_mult = 1.0 if project_left_of_band else 3.0
+    ax.set_xlim(max(0.0, span_lo - pad), span_hi + pad * right_pad_mult)
 
     if gloss:
         ax.annotate(
