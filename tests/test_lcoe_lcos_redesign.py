@@ -93,7 +93,7 @@ def test_benchmark_constants_are_tuples_of_two_floats():
 
 
 # ---------------------------------------------------------------------------
-# v0.8.2: Lazard caption placement
+# Round 3: every numeric value is reported in the legend
 # ---------------------------------------------------------------------------
 
 
@@ -118,32 +118,42 @@ def _render_lcoe_lcos(tmp_path: Path, fin: dict, caps: dict):
     return captured["fig"]
 
 
-def test_lazard_caption_below_bar(tmp_path: Path):
-    """v0.8.2: the "Lazard: X–Y EUR/MWh" caption must sit below the
-    grey band on BOTH rows so it never collides with the project
-    bar or the project summary annotation."""
-    fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 1151.0}
-    caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
-    fig = _render_lcoe_lcos(tmp_path, fin, caps)
-    for row_idx, ax in enumerate(fig.axes):
-        captions = [t for t in ax.texts if "Lazard:" in t.get_text()]
-        assert captions, f"row {row_idx}: Lazard caption missing"
-        for caption in captions:
-            xy_y = float(caption.get_position()[1])
-            assert xy_y < 0.0, (
-                f"row {row_idx}: Lazard caption must be BELOW the grey "
-                f"band (y < 0); got y={xy_y} for text "
-                f"{caption.get_text()!r}"
-            )
-
-
-def test_lcoe_row_caption_below_even_when_bar_overlaps(tmp_path: Path):
-    """The LCOE bar overlaps the Lazard band (project range 36–54
-    falls inside 30–85).  Caption must still drop below the band."""
+def test_legend_carries_lazard_band_with_numeric_range(tmp_path: Path):
+    """Round 3: the Lazard band's numeric range lives in the legend,
+    not in a free-floating italic caption beneath the bar."""
     fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
     caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
     fig = _render_lcoe_lcos(tmp_path, fin, caps)
-    lcoe_ax = fig.axes[0]
-    captions = [t for t in lcoe_ax.texts if "Lazard:" in t.get_text()]
-    assert captions, "LCOE Lazard caption missing"
-    assert float(captions[0].get_position()[1]) < 0.0
+    for row_idx, ax in enumerate(fig.axes):
+        legend = ax.get_legend()
+        assert legend is not None, f"row {row_idx}: missing legend"
+        labels = [t.get_text() for t in legend.get_texts()]
+        assert any("Lazard" in lab and "EUR/MWh" in lab for lab in labels), (
+            f"row {row_idx}: legend missing Lazard band entry; got {labels}"
+        )
+
+
+def test_legend_carries_base_value(tmp_path: Path):
+    """Round 3: the base LCOE / LCOS value is reported in the legend."""
+    fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
+    caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    fig = _render_lcoe_lcos(tmp_path, fin, caps)
+    for row_idx, (ax, want) in enumerate(zip(fig.axes, ("LCOE", "LCOS"))):
+        legend = ax.get_legend()
+        labels = [t.get_text() for t in legend.get_texts()]
+        assert any(
+            f"Base {want}" in lab and "EUR/MWh" in lab for lab in labels
+        ), f"row {row_idx}: legend missing 'Base {want}' entry; got {labels}"
+
+
+def test_no_diamond_marker_drawn(tmp_path: Path):
+    """Round 3: the base value is drawn as a vertical line, not a
+    diamond marker — no scatter artist sits on the row centreline."""
+    fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
+    caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    fig = _render_lcoe_lcos(tmp_path, fin, caps)
+    for ax in fig.axes:
+        for coll in ax.collections:
+            assert coll.__class__.__name__ != "PathCollection" or (
+                len(coll.get_offsets()) == 0
+            ), "Round-3 redesign forbids scatter / diamond markers"
