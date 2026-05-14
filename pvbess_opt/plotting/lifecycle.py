@@ -1,4 +1,4 @@
-"""Lifecycle plots — added in v0.6, redesigned in v0.8.
+"""Lifecycle plots.
 
 * :func:`plot_revenue_stack_yearly` — stacked yearly revenue source
   decomposition with the net line overlaid.
@@ -36,7 +36,12 @@ import pandas as pd
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
-from .style import annotate_value_safe, save_figure, show_titles
+from .style import (
+    annotate_value_safe,
+    apply_universal_margins,
+    save_figure,
+    show_titles,
+)
 
 # ---------------------------------------------------------------------------
 # Industry benchmark bands (Lazard 2024 — update annually)
@@ -47,12 +52,9 @@ from .style import annotate_value_safe, save_figure, show_titles
 # USD; bands below are EUR-equivalent at ~1.08 EUR/USD (mid-2024).
 #
 # * LCOE: utility-scale PV, unsubsidised band USD 29-92/MWh.  Rounded
-#   to EUR 30-85/MWh.  v0.8.0 used (30, 50) which excluded the upper
-#   half of the band; v0.8.1 widens to align with the published range.
+#   to EUR 30-85/MWh.
 # * LCOS: 100 MW / 4-hour utility-scale Li-ion BESS, unsubsidised band
-#   USD 170-296/MWh.  Rounded to EUR 157-274/MWh.  v0.8.0 used (100,
-#   250) which under-shot the lower edge; v0.8.1 tightens to the
-#   published range.
+#   USD 170-296/MWh.  Rounded to EUR 157-274/MWh.
 #
 # Workbook overrides: the four benchmark_lcoe_* / benchmark_lcos_* keys
 # in the economics sheet override these per-project.
@@ -181,6 +183,7 @@ def plot_revenue_stack_yearly(
         ax.set_title(f"Revenue stack — {int(years[0])}-{int(years[-1])}")
     apply_financial_legend(ax)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
     return save_figure(out_path)
 
 
@@ -232,6 +235,7 @@ def plot_lifetime_cycles(
         ha="right", va="top", fontsize=7,
         bbox_alpha=0.8,
     )
+    apply_universal_margins(ax)
     return save_figure(out_path)
 
 
@@ -263,6 +267,10 @@ def plot_lcoe_lcos_summary(
     LCOS N/A" line in place of the LCOS row; BESS-only swaps the
     other way.  Hybrid projects render both rows at figsize=(7, 4);
     single-row projects render at (7, 2.5).
+
+    margins: delegated.  Each row sets its own 12% x-padding inside
+    ``_draw_benchmark_row`` and a fixed y-range of (-0.6, 0.6) wider
+    than the bar height — the universal helper would over-pad.
     """
     out_path = Path(out_path)
     pv_kwp = float(capacities.get("pv_kwp", 0.0) or 0.0)
@@ -279,7 +287,7 @@ def plot_lcoe_lcos_summary(
     bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
     figsize = (7, 4) if (pv_present and bess_present) else (7, 2.5)
 
-    # Workbook overrides (v0.8.1).  When the economics sheet carries
+    # Workbook overrides.  When the economics sheet carries
     # benchmark_* keys, use them; otherwise fall back to the module
     # constants (Lazard 2024 EUR-equivalent).
     lcoe_band = (

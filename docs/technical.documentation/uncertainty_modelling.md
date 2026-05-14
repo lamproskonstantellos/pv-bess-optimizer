@@ -3,8 +3,8 @@
 The annual MILP solved by `pvbess_opt.optimization.run_scenario` is a
 **perfect-foresight** model: it sees every hour's DAM price, PV
 output, and load and produces an upper bound on achievable profit.
-Real operators never have that visibility.  v0.6 adds a workbook-
-driven rolling-horizon Monte Carlo so the foresight gap is
+Real operators never have that visibility.  The package supplies a
+workbook-driven rolling-horizon Monte Carlo so the foresight gap is
 quantifiable.
 
 ## Sources of uncertainty

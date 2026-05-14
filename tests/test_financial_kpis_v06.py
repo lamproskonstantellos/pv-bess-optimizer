@@ -1,4 +1,4 @@
-"""v0.6/v0.8 financial KPIs (LCOE / LCOS / capacity factor / lifetime cycles).
+"""Financial KPIs (LCOE / LCOS / capacity factor / lifetime cycles).
 
 Hand-checked tiny scenario:
 

@@ -1,4 +1,4 @@
-"""v0.8 workbook-schema tests.
+"""Workbook-schema tests.
 
 Covers:
 
@@ -7,10 +7,10 @@ Covers:
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
-* Legacy v0.7 two-sheet (project + economic) workbooks load with a
+* Legacy two-sheet (project + economic) workbooks load with a
   single migration WARNING.
-* The four legacy v0.5 ``# optimization`` keys still warn.
-* The new "removed in v0.8" warnings for ``capex_licenses_eur_per_kw``,
+* The four legacy ``# optimization`` keys still warn.
+* The "removed legacy key" warnings for ``capex_licenses_eur_per_kw``,
   ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw``.
 """
 
@@ -208,7 +208,7 @@ def test_misplaced_key_routes_warning_to_correct_sheet(caplog):
 
 
 # ---------------------------------------------------------------------------
-# Removed-in-v0.8 keys still warn
+# Removed legacy keys still warn
 # ---------------------------------------------------------------------------
 
 
@@ -218,13 +218,13 @@ def test_misplaced_key_routes_warning_to_correct_sheet(caplog):
     "p_charge_max_kw",
     "p_dis_max_kw",
 ])
-def test_v07_removed_keys_warn(removed_key, caplog):
+def test_legacy_removed_keys_warn(removed_key, caplog):
     flat = {removed_key: 42.0}
     with caplog.at_level("WARNING"):
         _parse_kv_sheet("bess", flat)
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert removed_key in msgs
-    assert "v0.8" in msgs
+    assert "no longer supported" in msgs
 
 
 # ---------------------------------------------------------------------------

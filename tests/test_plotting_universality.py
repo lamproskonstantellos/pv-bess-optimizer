@@ -166,3 +166,21 @@ def test_soc_plots_have_right_axis(fn_name):
     assert '"SOC (%)"' in src or "'SOC (%)'" in src, (
         f"{fn_name}: must label right axis 'SOC (%)'"
     )
+
+
+@pytest.mark.parametrize("fn_name", PLOTTING_FUNCTIONS)
+def test_apply_universal_margins_called(fn_name):
+    """Every plotting function must call ``apply_universal_margins``
+    on its axes, unless its docstring carries the explicit marker
+    ``margins: delegated`` (used when padding is set inside a shared
+    helper).
+    """
+    fn = getattr(_plotting, fn_name)
+    src = inspect.getsource(fn)
+    doc = (fn.__doc__ or "").lower()
+    if "margins: delegated" in doc:
+        return
+    assert "apply_universal_margins" in src, (
+        f"{fn_name}: must call apply_universal_margins(ax) before "
+        "save_figure, or carry 'margins: delegated' in its docstring."
+    )

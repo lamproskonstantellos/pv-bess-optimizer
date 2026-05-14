@@ -1,4 +1,4 @@
-"""v0.8.2: financial-plot label / colour / legend-order consistency.
+"""Financial-plot label / colour / legend-order consistency.
 
 Centralization contract: every label drawn on a financial /
 lifecycle / uncertainty plot must come from
@@ -151,7 +151,7 @@ def _render_with_open_figure(plot_fn, *args, **kwargs):
 
 
 def test_monthly_cashflow_legend_uses_net_cash_flow(tmp_path):
-    """v0.8.2: the line label is "Net cash-flow", not "Net"."""
+    """The line label is "Net cash-flow", not "Net"."""
     fig = _render_with_open_figure(
         plot_monthly_cashflow_year1,
         _monthly_cf(), tmp_path / "monthly.pdf",
@@ -206,7 +206,7 @@ def test_all_financial_plots_emit_only_canonical_labels(tmp_path, caplog):
 
 
 def test_net_revenue_line_uses_iee_charcoal():
-    """v0.8.2: IEEE emphasis colour swap (magenta -> charcoal)."""
+    """IEEE emphasis colour swap (magenta -> charcoal)."""
     assert FINANCIAL_COLORS["net_revenue_line"] == "#212121"
 
 

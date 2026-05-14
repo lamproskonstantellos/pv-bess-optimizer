@@ -32,11 +32,10 @@ sensitivity, availability), `uncertainty/` (rolling_horizon),
 
 ## Workbook schema
 
-The v0.8 input workbook is split across **seven themed sheets**:
+The input workbook is split across **seven themed sheets**:
 `timeseries`, `project`, `pv`, `bess`, `economics`, `simulation`,
 `curtailment_profile`.  See `docs/source/users.guide/inputs.rst` for
-the full reference and `docs/v0.8_changelog.md` for the v0.7 → v0.8
-migration notes.
+the full reference.
 
 ## Style
 

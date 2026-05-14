@@ -22,18 +22,18 @@ Three asset modes are first-class:
     * BESS-only      — pv_nameplate_kwp = 0 (most useful with
                        allow_bess_grid_charging = TRUE).
 
-v0.8 highlights:
+Highlights:
     * Seven-sheet input workbook (project / pv / bess / economics /
       simulation / curtailment_profile / timeseries) — one theme per
       sheet for human readability.
     * Symmetric BESS power limit (bess_power_kw) and pinned energy
-      capacity (bess_capacity_kwh).  e_cap is no longer a decision
-      variable.
+      capacity (bess_capacity_kwh).  e_cap is not a decision variable.
     * Hour-of-day curtailment cap profile (optional monthly axis).
     * DEVEX (per-asset development CAPEX), unavailability_pct,
       aggregator_fee_pct_revenue.
-    * Redesigned IRR tornado (dumbbell) and LCOE/LCOS summary
-      (single panel against Lazard 2024 benchmark bands).
+    * IRR tornado dumbbell with endpoint labels outside the dots
+      and an LCOE/LCOS single-panel summary against Lazard 2024
+      benchmark bands.
 """
 
-__version__ = "0.8.2"
+__version__ = "0.8.4"

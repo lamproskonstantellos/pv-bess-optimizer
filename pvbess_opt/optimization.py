@@ -25,7 +25,7 @@ Tight big-M values
 ------------------
 
 Big-Ms are derived per-instance using the symmetric ``bess_power_kw``
-limit (v0.8 dropped the asymmetric p_charge_max / p_dis_max pair):
+limit (the asymmetric p_charge_max / p_dis_max pair is not supported):
 
 * ``M_imp = (load_max + bess_power_kw × dt_h) × 1.001``
 * ``M_exp = p_grid_export_max × dt_h × (1 − curtailment_frac) × 1.001``
@@ -44,7 +44,7 @@ Module-level tuning constants
 
 The two weight terms below are tie-breakers / debug levers, not
 project knobs.  They are intentionally NOT exposed in the workbook —
-the v0.5 ``# optimization`` group has been removed in v0.6.  Solver
+There is no ``# optimization`` group.  Solver
 ``mip_gap`` and ``time_limit`` are exposed via the CLI flags
 ``--mip-gap`` / ``--time-limit``; these two weights stay private to
 keep the user-facing surface small.
@@ -203,7 +203,7 @@ def derive_tight_big_m(
 ) -> dict[str, float]:
     """Compute the tight big-M values.
 
-    Charge / discharge limits are symmetric in v0.8 — both come from
+    Charge / discharge limits are symmetric — both come from
     ``bess_power_kw``.  The export big-M uses the worst-case (smallest)
     curtailment cap across the timeseries — a single global cap that
     over-bounds the per-step constraint.
@@ -327,7 +327,7 @@ def build_model(
 
     curtail_per_step = _resolve_curtailment_per_step(params, ts)
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
-    # v0.8: symmetric charge / discharge limit from bess_power_kw.
+    # Symmetric charge / discharge limit from bess_power_kw.
     p_bess = float(params.get("bess_power_kw", 0.0) or 0.0)
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
@@ -345,7 +345,7 @@ def build_model(
     m.mode = pyo.Param(initialize=mode, within=pyo.Any, mutable=False)
 
     # --- BESS energy capacity is a parameter, not a decision variable.
-    # v0.8 pins e_cap to bess_capacity_kwh (industry standard for
+    # e_cap is pinned to bess_capacity_kwh (industry standard for
     # sizing-as-input projects; matches Gridcog / Aurora Chronos /
     # HOMER).  When BESS is absent the value is 0 and the SOC pins
     # below take effect.
@@ -375,7 +375,7 @@ def build_model(
         )
 
     # PV-only / BESS-only / hybrid asset support — see Phase 3 of the
-    # v0.6 changelog.  Pin all flows for an absent asset to zero.
+    # Pin all flows for an absent asset to zero.
     if not pv_present:
         m.NOPV_TO_LOAD = pyo.Constraint(
             m.T, rule=lambda m, t: m.pv_to_load[t] == 0,
@@ -514,7 +514,7 @@ def build_model(
                 expr=final_soc_expr <= params["soc_max_frac"] * e_cap_param,
             )
 
-        # --- Charge / discharge power limits (symmetric in v0.8) -----------
+        # --- Charge / discharge power limits (symmetric) -------------------
         bess_step_lim = p_bess * dt_h
         m.CH_LIM = pyo.Constraint(
             m.T,
@@ -539,7 +539,7 @@ def build_model(
 
     # --- Hourly curtailment cap (HARD constraint, BOTH modes) -------------
     # Section 8 of the VNB spec — regulatory grid-connection limit.
-    # Applies in vnb AND merchant modes. v0.8: cap may vary by hour-of-day
+    # Applies in vnb AND merchant modes. Cap may vary by hour-of-day
     # (and optionally by month) via the ``curtailment_profile`` sheet.
     #
     # Project-wide combined export:
@@ -736,7 +736,7 @@ def run_scenario(
 ) -> tuple[pd.DataFrame, str]:
     """Build, solve and extract dispatch for a single scenario.
 
-    Returns ``(res, resolved_solver_name)``.  In v0.8 ``e_cap`` is a
+    Returns ``(res, resolved_solver_name)``.  ``e_cap`` is a
     parameter pinned to ``params['bess_capacity_kwh']`` (industry
     standard for sizing-as-input projects), so it is no longer a
     decision variable and no longer returned.
@@ -850,7 +850,7 @@ def verify_dispatch_invariants(
         inv_6 = 0.0
 
     # Invariant 7 — curtail behavior, checked in BOTH modes per spec:
-    # cap not binding ⇒ curtail = 0.  v0.8: cap is per-step.
+    # cap not binding ⇒ curtail = 0.  Cap is per-step.
     if "grid_export_cap_kwh" in res.columns:
         cap = res["grid_export_cap_kwh"].to_numpy(dtype=float)
     else:

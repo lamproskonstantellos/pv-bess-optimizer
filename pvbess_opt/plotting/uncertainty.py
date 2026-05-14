@@ -10,7 +10,7 @@ import pandas as pd
 
 from ..config import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
 from ._currency import euro_axis_formatter
-from .style import save_figure, show_titles
+from .style import apply_universal_margins, save_figure, show_titles
 
 
 # Backwards-compatibility alias; the canonical palette is
@@ -76,6 +76,7 @@ def plot_rolling_horizon_distribution(
             ax.set_title("Rolling-horizon MC profit distribution by source set")
         ax.legend(loc="best", framealpha=0.9, fontsize=7)
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+        apply_universal_margins(ax)
         return save_figure(out_path)
 
     profits = mc_df["profit_total_eur"].astype(float).to_numpy()
@@ -110,6 +111,7 @@ def plot_rolling_horizon_distribution(
         ax.set_title("Rolling-horizon Monte Carlo profit distribution")
     ax.legend(loc="best", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
     return save_figure(out_path)
 
 
@@ -165,4 +167,5 @@ def plot_foresight_gap_comparison(
     if show_titles():
         ax.set_title("Foresight-gap comparison by uncertainty source")
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
     return save_figure(out_path)

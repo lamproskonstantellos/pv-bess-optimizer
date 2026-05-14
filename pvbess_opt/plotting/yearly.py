@@ -7,7 +7,7 @@ Three vnb-mode figures per calendar year, written directly into
 * ``yearly_surplus.pdf``
 * ``yearly_combined.pdf``
 
-Three merchant-mode figures per calendar year (added in v0.6):
+Three merchant-mode figures per calendar year:
 
 * ``yearly_dispatch.pdf`` — monthly exports + curtailment vs charging.
 * ``yearly_soc.pdf`` — monthly min/mean/max SOC envelope.
@@ -36,7 +36,13 @@ from .helpers import (
     title_prefix,
     year_aggregate,
 )
-from .style import apply_legend, get_scenario_label, save_figure, show_titles
+from .style import (
+    apply_legend,
+    apply_universal_margins,
+    get_scenario_label,
+    save_figure,
+    show_titles,
+)
 
 
 def _setup_month_axis(ax, left: pd.Series, width_days) -> None:
@@ -86,6 +92,7 @@ def plot_yearly_supply(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     ax.set_xlabel("Month")
     _setup_month_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="yearly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / "yearly_supply.pdf")
 
 
@@ -120,6 +127,7 @@ def plot_yearly_surplus(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     ax.set_xlabel("Month")
     _setup_month_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="yearly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / "yearly_surplus.pdf")
 
 
@@ -170,11 +178,12 @@ def plot_yearly_combined(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     ax.set_xlabel("Month")
     _setup_month_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="yearly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / "yearly_combined.pdf")
 
 
 # ---------------------------------------------------------------------------
-# Merchant-mode plots (no load) — added in v0.6
+# Merchant-mode plots (no load)
 # ---------------------------------------------------------------------------
 
 
@@ -214,6 +223,7 @@ def plot_yearly_dispatch(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     ax.set_xlabel("Month")
     _setup_month_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="yearly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / "yearly_dispatch.pdf")
 
 
@@ -262,9 +272,13 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
         )
     ax.set_xlabel("Month")
     ax.set_ylabel("SOC (kWh)")
-    # Round-3 universality: every SOC plot also exposes a right-side
-    # SOC (%) axis.  Scale derived from the soc_pct ↔ soc_kwh ratio
-    # in the frame when available, else fall back to a 0–100 % range.
+    # Apply universal padding to the primary y-axis BEFORE deriving the
+    # right-side SOC (%) scale so the two axes share identical bounds
+    # after padding.
+    apply_universal_margins(ax, skip_x=True)
+    # Every SOC plot also exposes a right-side SOC (%) axis.  Scale
+    # derived from the soc_pct ↔ soc_kwh ratio in the frame when
+    # available, else fall back to a 0–100 % range.
     ax2 = ax.twinx()
     max_kwh = float(df["soc_kwh"].max())
     if "soc_pct" in df.columns and max_kwh > 0.0:
@@ -327,6 +341,7 @@ def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     ax.set_ylabel("EUR/month")
     _setup_month_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="yearly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / "yearly_revenue.pdf")
 
 
@@ -367,4 +382,5 @@ def plot_lifetime_summary(
         )
     ax.legend(loc="best", framealpha=0.9, fontsize=7)
     ax.grid(True, linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
     save_figure(out_path)

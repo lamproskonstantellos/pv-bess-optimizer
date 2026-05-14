@@ -74,7 +74,7 @@ def test_bess_only_shows_na_for_lcoe(tmp_path: Path):
 
 
 def test_benchmark_constants_exposed():
-    # v0.8.1: bands tightened to the Lazard 2024 EUR-equivalent range
+    # Bands set to the Lazard 2024 EUR-equivalent range
     # (LCOE+ v17 utility-scale PV; LCOS v9 4-hour Li-ion utility-scale).
     assert BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH == (30.0, 85.0)
     assert BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH == (157.0, 274.0)

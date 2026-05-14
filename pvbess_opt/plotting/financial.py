@@ -26,7 +26,12 @@ from matplotlib.ticker import MaxNLocator
 
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter, format_eur
-from .style import annotate_value_safe, save_figure, show_titles
+from .style import (
+    annotate_value_safe,
+    apply_universal_margins,
+    save_figure,
+    show_titles,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +60,7 @@ def _start_end_years(yearly_cf: pd.DataFrame) -> tuple[int, int]:
 def _operating_window_with_capex(
     yearly_cf: pd.DataFrame,
 ) -> tuple[int, int, int | None]:
-    """Return ``(op_start, op_end, capex_year)`` for v0.6 title strings.
+    """Return ``(op_start, op_end, capex_year)`` for title strings.
 
     ``op_start`` is the calendar year of Year 1 (first operating year).
     ``op_end`` is the calendar year of the last row.  ``capex_year`` is
@@ -155,6 +160,7 @@ def plot_cumulative_cashflow(
     _maybe_set_title(ax, f"Cumulative Cash-flow — {_title_window(yearly_cf)}")
     apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
     return save_figure(out_path)
 
 
@@ -213,6 +219,7 @@ def plot_yearly_cashflow_bars(
     # Year-0 CAPEX stack on the left.
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
     return save_figure(out_path)
 
 
@@ -294,7 +301,7 @@ def plot_npv_waterfall(
     # plot_lifetime_cycles.  Robust across project horizons (20 / 25 /
     # 30 y) since it never expands the data-axis range.
     annotate_value_safe(
-        ax, 0.98, 0.96,
+        ax, 0.98, 0.98,
         f"NPV = {format_eur(final_npv, fmt_mode)}",
         transform=ax.transAxes,
         ha="right", va="top", fontsize=8,
@@ -309,9 +316,9 @@ def plot_npv_waterfall(
     ax.set_ylabel("Discounted EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
-    ax.margins(y=0.05)
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
     return save_figure(out_path)
 
 
@@ -346,7 +353,7 @@ def plot_payback(
     using_calendar = "calendar_year" in yearly_cf.columns
     # Year-0 row's calendar value is the new "base year" anchor: a payback
     # of N years lands at calendar (capex_year + N) = (project_start_year - 1
-    # + N), one step earlier than the v0.5 mapping.
+    # + N).
     base_year = float(years[0]) if using_calendar else 0.0
 
     def _to_axis(payback: float) -> float:
@@ -389,6 +396,7 @@ def plot_payback(
     _maybe_set_title(ax, f"Payback Visualisation — {_title_window(yearly_cf)}")
     apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
     return save_figure(out_path)
 
 
@@ -434,6 +442,7 @@ def plot_monthly_cashflow_year1(
 
     apply_financial_legend(ax, max_rows=2)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
     return save_figure(out_path)
 
 
@@ -564,12 +573,16 @@ def _dumbbell_plot(
     if apply_eur_xaxis:
         _apply_eur_xaxis(ax, econ)
     xmin, xmax = ax.get_xlim()
-    pad = 0.08 * (xmax - xmin) if xmax > xmin else 1.0
+    pad = 0.18 * (xmax - xmin) if xmax > xmin else 1.0
     ax.set_xlim(xmin - pad, xmax + pad)
     ax.set_ylim(-0.6, len(labels) - 0.4)
     _maybe_set_title(ax, title)
     ax.legend(loc="lower right", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
+    # Tornado owns its 18% x-padding (above) and its fixed y-row
+    # extent; the universal helper only adds defensive padding to
+    # neither axis.
+    apply_universal_margins(ax, skip_x=True, skip_y=True)
 
     return save_figure(out_path)
 
@@ -581,26 +594,27 @@ def _annotate_dumbbell_endpoints(
     row: int,
     value_formatter: Callable[[float], str],
 ) -> None:
-    """Print each endpoint label at its actual x-position so the text
-    value always matches the x-axis coordinate.
+    """Place each endpoint label OUTSIDE the corresponding dot.
 
-    ``left`` and ``right`` are the *sorted* endpoint coordinates (left
-    <= right); we label them with their own numeric values rather than
-    re-using ``low`` / ``high`` from the scenario direction, which can
-    swap when a "low" scenario actually produces the larger metric
+    The left label is right-aligned and offset 8 points to the LEFT of
+    the leftmost dot; the right label is left-aligned and offset 8
+    points to the RIGHT of the rightmost dot.  Both are vertically
+    centred on the row.  Labels carry their own numeric value (sorted
+    ``left`` / ``right``) so the printed text always matches its
+    x-axis position even when a "low" scenario yields a higher metric
     (e.g. low CAPEX → higher IRR).
     """
     annotate_value_safe(
         ax, left, row, value_formatter(left),
-        ha="left", va="bottom", fontsize=7,
-        offset_points=(0.0, 10.0),
-        bbox_alpha=0.8, bbox_pad=0.15,
+        ha="right", va="center", fontsize=7,
+        offset_points=(-8.0, 0.0),
+        bbox_alpha=0.85, bbox_pad=0.18,
     )
     annotate_value_safe(
         ax, right, row, value_formatter(right),
-        ha="right", va="bottom", fontsize=7,
-        offset_points=(0.0, 10.0),
-        bbox_alpha=0.8, bbox_pad=0.15,
+        ha="left", va="center", fontsize=7,
+        offset_points=(8.0, 0.0),
+        bbox_alpha=0.85, bbox_pad=0.18,
     )
 
 
@@ -621,7 +635,10 @@ def plot_npv_tornado(
     econ: dict[str, Any],
     out_path: Path,
 ) -> Path:
-    """Sorted NPV tornado, dumbbell layout matching the IRR plot."""
+    """Sorted NPV tornado, dumbbell layout matching the IRR plot.
+
+    margins: delegated to ``_dumbbell_plot``.
+    """
     base_npv = float(base_kpis.get("npv_eur", 0.0))
     window = _econ_title_window(econ)
     title = f"NPV Sensitivity — {window}" if window else "NPV Sensitivity"
@@ -655,6 +672,8 @@ def plot_irr_tornado(
     The IRR is by definition the discount rate that zeroes the NPV, so
     varying the discount rate does not move the IRR — that row is
     filtered out silently before the plot is drawn.
+
+    margins: delegated to ``_dumbbell_plot``.
     """
     base_irr = float(base_kpis.get("irr_pct", 0.0) or 0.0)
     window = _econ_title_window(econ)

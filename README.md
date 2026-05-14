@@ -1,7 +1,7 @@
 # PV & BESS Optimizer
 
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.8.2-blue)](pvbess_opt/__init__.py)
+[![version](https://img.shields.io/badge/version-0.8.4-blue)](pvbess_opt/__init__.py)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
@@ -23,7 +23,7 @@ Two regulatory regimes and three asset modes are supported:
   supplied by the user through the `curtailment_profile` sheet, in
   line with the applicable grid-connection regulations.
 
-The asset mode is read literally from the workbook in v0.6 — set
+The asset mode is read literally from the workbook — set
 `pv_nameplate_kwp = 0` for a BESS-only project, `bess_power_kw = 0`
 for a PV-only project, both > 0 for a hybrid PV+BESS project.
 
@@ -43,7 +43,7 @@ pv-bess-optimizer/
 │   ├── dev.txt                   # Linters + pytest + base + solvers
 │   └── docs.txt                  # Sphinx + RTD theme
 ├── inputs/
-│   └── input.xlsx                # Seven-sheet workbook (v0.8 schema)
+│   └── input.xlsx                # Seven-sheet workbook
 ├── scripts/
 │   ├── build_input_xlsx.py       # Regenerate inputs/input.xlsx
 │   └── resample_timeseries.py    # Mixed-resolution timeseries harmoniser
@@ -56,8 +56,8 @@ pv-bess-optimizer/
     ├── optimization.py           # Pyomo MILP, solver dispatch, 9 audit invariants
     ├── kpis.py                   # KPIs, green attribution, energy verification
     ├── economics.py              # Cashflow + NPV/IRR/ROI/BCR + DEVEX + fee
-    ├── availability.py           # Post-solve unavailability derate (v0.8)
-    ├── curtailment.py            # Hour-of-day cap profile expander (v0.8)
+    ├── availability.py           # Post-solve unavailability derate
+    ├── curtailment.py            # Hour-of-day cap profile expander
     ├── lifetime.py               # Multi-year analytical hourly dispatch projection
     ├── sensitivity.py            # One-at-a-time tornado sensitivity
     ├── rolling_horizon.py        # Rolling-horizon dispatch + Monte Carlo
@@ -89,7 +89,7 @@ A run produces, under `results/<input>_<scenario>_<timestamp>/`:
 06_uncertainty_plots/ inputs_forecast_band, inputs_seasonal_boxplot, dam_intraday_heatmap
 ```
 
-## Workbook schema (v0.8)
+## Workbook schema
 
 Seven themed sheets:
 
@@ -114,9 +114,11 @@ Seven themed sheets:
   `opex_bess_eur_per_kw`, `bess_replacement_year`,
   `bess_replacement_cost_pct`, `bess_degradation_annual_pct`.
 * **`economics`** — `discount_rate_pct`, `opex_inflation_pct`,
-  `revenue_inflation_pct`, `aggregator_fee_pct_revenue`
-  (user-configurable fraction of gross revenue retained by the
-  aggregator), `sensitivity_*` (5 keys).
+  `retail_inflation_pct` (default 2 %, PPA / VNB load coverage),
+  `dam_inflation_pct` (default 0 %, wholesale exports),
+  `aggregator_fee_pct_revenue` (user-configurable fraction of gross
+  revenue retained by the aggregator), `sensitivity_*` (5 keys),
+  four `benchmark_*` keys for the Lazard LCOE / LCOS bands.
 * **`simulation`** — `uncertainty_*` (11 keys), `plot_daily_scope` /
   `plot_monthly_scope` / `plot_yearly_scope` ∈
   `none | year1_only | all`.
@@ -142,10 +144,10 @@ Setting `pv_nameplate_kwp = 0` makes the project BESS-only;
 `bess_power_kw = 0` makes it PV-only; both > 0 ⇒ hybrid.  Setting both
 to zero raises `ValueError` from `read_inputs`.
 
-See `docs/source/users.guide/inputs.rst` for the full reference,
-`docs/v0.8_changelog.md` for the v0.7 → v0.8 migration notes, and
+See `docs/source/users.guide/inputs.rst` for the full reference and
 `docs/technical.documentation/uncertainty_modelling.md` plus
-`docs/technical.documentation/asset_modes.md`.
+`docs/technical.documentation/asset_modes.md` for the technical
+notes.
 
 ## CLI
 
@@ -209,96 +211,6 @@ Forecast-noise sigmas (defensible from literature):
 
 See `docs/source/users.guide/rolling_horizon.rst` for the full guide.
 
-## What's new in v0.8
-
-* **Seven-sheet workbook schema (breaking)** — `project` and
-  `economic` split into seven themed sheets: `project`, `pv`, `bess`,
-  `economics`, `simulation`, `curtailment_profile`, plus the existing
-  `timeseries` sheet.
-* **BESS spec rationalisation** — `battery_hours`, `p_charge_max_kw`
-  and `p_dis_max_kw` are dropped.  `bess_power_kw` is the symmetric
-  charge / discharge limit and `bess_capacity_kwh` pins the energy
-  capacity (industry standard for sizing-as-input projects).  `e_cap`
-  is no longer a decision variable; `run_scenario` returns
-  `(res, resolved_solver_name)`.
-* **Hourly curtailment cap profile** — the old scalar
-  `curtailment_pct` becomes a 24-row hour-of-day profile, optionally
-  with one column per calendar month.  Missing sheet ⇒ the loader
-  falls back to a flat default.
-* **DEVEX (NEW)** — per-asset `devex_pv_eur_per_kw` and
-  `devex_bess_eur_per_kw` replace the v0.7 `capex_licenses_eur_per_kw`.
-  Paid in Year 0 alongside CAPEX, surfaces as a `devex_eur` column on
-  `cashflow_yearly` and as `total_devex_eur` /
-  `total_capex_devex_eur` financial KPIs.
-* **Unavailability (NEW)** — `unavailability_pct` is a
-  user-configurable post-solve derate applied to PV generation, BESS
-  discharge, and revenue.  Implemented in `pvbess_opt.availability`.
-* **Aggregator fee (NEW)** — `aggregator_fee_pct_revenue` is a
-  user-configurable fraction that reduces gross revenue and shows up
-  as a signed `aggregator_fee_eur` column on `cashflow_yearly`.
-* **Plot redesigns** — IRR tornado switches to a dumbbell layout for
-  unambiguous endpoint labels; LCOE/LCOS summary becomes a single
-  panel with the project sensitivity range overlaid on the Lazard
-  2024 industry benchmark band.
-
-## What's new in v0.8.2 (plot-styling round)
-
-* **Centralized financial labels and colours** — `config.py` now
-  carries `FINANCIAL_LABELS`, `FINANCIAL_LABEL_TO_COLOR_KEY`,
-  `FINANCIAL_LEGEND_ORDER`, plus the helpers `financial_color(label)`
-  and `apply_financial_legend(ax)`.  All financial / lifecycle plots
-  resolve colours via the helper and order legends via the canonical
-  list, mirroring the energy plots' `ALL_LABELS` / `COLORS` /
-  `LEGEND_ORDER` pattern.  Uncertainty plots reuse the same palette
-  via `UNCERTAINTY_SOURCE_COLORS` and dedicated percentile colour
-  keys (`percentile_p10/p50/p90`, `perfect_foresight`).
-* **Lazard caption placement** — on both LCOE and LCOS rows the
-  "Lazard: X–Y EUR/MWh" caption drops below the grey benchmark band
-  so it never collides with the project bar or summary annotation.
-* **NPV total annotation** — anchored in axes coordinates at the
-  top-right corner so it always stays inside the frame, regardless
-  of horizon (20 / 25 / 30 y).
-* **IEEE-friendly emphasis colour** — `net_revenue_line` swaps from
-  magenta `#E91E63` to near-black `#212121` (Material grey 900).
-  Net revenue markers gain white edges for clean reading over
-  saturated stack colours; the Real-EUR companion line distinguishes
-  itself by dashed linestyle only.
-* **Monthly cashflow label** — the line label is now the canonical
-  `"Net cash-flow"` everywhere (was `"Net"` in the monthly plot).
-
-## What's new in v0.8.1 (patch round)
-
-* **Retail / DAM inflation split** — `revenue_inflation_pct` is
-  replaced by `retail_inflation_pct` (default 2 %, PPA / VNB load
-  coverage) and `dam_inflation_pct` (default 0 %, wholesale exports).
-  Industry tools (Lazard / Aurora / Gridcog) do not apply CPI to
-  wholesale prices.  Legacy workbooks still load with a WARNING and
-  the value mapped to `retail_inflation_pct`.
-* **LCOE audit fix** — LCOE numerator no longer includes BESS CAPEX /
-  DEVEX / OPEX.  Per IEA / IRENA / NREL ATB convention LCOE is
-  PV-only; LCOS is BESS-only.  Benchmark bands updated to Lazard 2024
-  EUR-equivalents (LCOE 30–85 EUR/MWh; LCOS 157–274 EUR/MWh) and
-  overridable per project via four `benchmark_*` workbook keys.
-* **`run_log.txt` LCOE/LCOS audit** — single INFO line records the
-  computed LCOE / LCOS next to the benchmark bands.
-* **NPV waterfall** matches `yearly_cashflow_bars` morphology
-  (five-entry legend, no in-axis CAPEX/DEVEX captions, padded
-  y-axis).
-* **Cumulative / payback dedup** —
-  `cumulative_cashflow_<start>-<end>.pdf` is now pure cumulative
-  trajectory; payback markers live in
-  `cumulative_cashflow_with_payback_<start>-<end>.pdf`.
-* **LCOS annotation placement** — when the project bar undershoots
-  the Lazard band the summary annotation now lifts above the bar
-  rather than landing inside the grey benchmark band.
-* **Net-revenue line contrast** — Net revenue / Real-EUR net lines
-  in `revenue_stack_yearly` switch from dark purple to magenta
-  (`FINANCIAL_COLORS["net_revenue_line"]`) so they stay visible
-  over the dark blue BESS-export stack.
-
-See `docs/v0.8_changelog.md` for the full breaking-changes contract
-and the five-line v0.7 → v0.8 migration summary.
-
 ## Documentation
 
 The Sphinx site under `docs/` covers:
@@ -316,6 +228,9 @@ Build locally:
 pip install -r requirements/docs.txt
 make -C docs html         # output: docs/build/html/index.html
 ```
+
+A short release log is maintained in `docs/CHANGELOG.md` covering the
+most recent release only.
 
 ## License
 

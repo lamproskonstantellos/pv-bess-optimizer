@@ -196,7 +196,7 @@ def year_aggregate(res: pd.DataFrame, year: int) -> pd.DataFrame:
 def title_prefix(scenario_label: str) -> str:
     """Return ``' (<scenario>; <project mode>)'`` or ``''`` for plot titles.
 
-    The project-mode segment is read from the v0.6
+    The project-mode segment is read from the
     :func:`pvbess_opt.plotting.style.get_project_mode_label`.  An empty
     value drops it from the prefix; the scenario label is shown alone
     in that case.

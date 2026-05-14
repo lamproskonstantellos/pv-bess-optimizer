@@ -1,4 +1,4 @@
-"""v0.8.1 retail / DAM revenue-inflation split.
+"""Retail / DAM revenue-inflation split.
 
 Lazard / Aurora / Gridcog do NOT apply CPI to wholesale exports.
 retail_inflation_pct now indexes only load-coverage (PPA / VNB)

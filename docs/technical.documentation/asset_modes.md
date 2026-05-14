@@ -1,21 +1,18 @@
 # Asset modes — PV-only / BESS-only / hybrid
 
-In v0.5 a zero `pv_nameplate_kwp` triggered inference from the
-timeseries (`max(pv_kwh) / dt_h`), and a zero `bess_power_kw` fell
-back to `p_dis_max_kw`.  That conflated "unspecified" with "absent"
-and made it impossible to model an actually PV-only or actually
-BESS-only project.  v0.6 reads zero literally:
+The loader reads zero literally — there is no inference from the
+timeseries or from legacy power keys.  The four cases are:
 
 | `pv_nameplate_kwp` | `bess_power_kw` | Configuration |
 | ------------------ | --------------- | ------------- |
-| > 0                | > 0             | Hybrid PV+BESS (the v0.5 case). |
+| > 0                | > 0             | Hybrid PV+BESS. |
 | > 0                | = 0             | PV-only (no battery). |
 | = 0                | > 0             | BESS-only (only meaningful with `allow_bess_grid_charging = TRUE`). |
 | = 0                | = 0             | Invalid — `read_inputs` raises `ValueError`. |
 
 The chosen mode is reflected as a subtitle on every energy-plot title
 ("PV-only project" / "BESS-only project" / "Hybrid PV+BESS project")
-through the new `set_project_mode_label` helper in
+through the `set_project_mode_label` helper in
 `pvbess_opt.plotting.style`.
 
 ## Optimizer behaviour
@@ -44,9 +41,9 @@ when the BESS is absent.
 
 ## Capacity helper
 
-`pvbess_opt.economics.derive_asset_capacities` no longer infers from
-the timeseries or from `p_dis_max_kw`.  Declared values pass through
-exactly:
+`pvbess_opt.economics.derive_asset_capacities` does not infer
+capacities from the timeseries or from any legacy power key.
+Declared values pass through exactly:
 
 ```python
 caps = {
@@ -65,9 +62,9 @@ clean cashflow with no phantom BESS line items, and vice versa.
 * The existing `plot_stack_filtered` helper drops zero series, so the
   vnb-mode supply / surplus / combined plots naturally hide the
   missing asset's stacks.
-* Every energy-plot title now carries a project-mode suffix —
+* Every energy-plot title carries a project-mode suffix —
   `(vnb; PV-only)`, `(merchant; BESS-only)`, etc — driven by the
-  new `set_project_mode_label` setter that `main.py` calls before
+  `set_project_mode_label` setter that `main.py` calls before
   the plot fan-out.
 * The merchant-mode `plot_*_soc` helpers skip rendering when the BESS
   is absent (no SOC trajectory worth plotting).

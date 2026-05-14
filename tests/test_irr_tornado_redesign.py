@@ -61,7 +61,7 @@ def test_dumbbell_handles_single_driver(tmp_path):
 
 def test_dumbbell_drops_discount_rate(tmp_path):
     """The Discount rate row drops out (its impact is 0 anyway, but the
-    explicit filter is part of the v0.7 contract preserved into v0.8)."""
+    explicit filter is part of the IRR contract)."""
     df = _multi_driver_sens_df()
     out = tmp_path / "irr_dumbbell_drop.pdf"
     # Use the helper directly to inspect drop behaviour.

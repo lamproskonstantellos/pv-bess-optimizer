@@ -15,7 +15,7 @@ Plot titles default to off; toggle with ``show_titles`` in the
 ``economic`` sheet.
 
 Plot-scope flags in ``economic`` control how many energy PDFs are
-produced.  All three share the same vocabulary in v0.6:
+produced.  All three share the same vocabulary:
 
 * ``plot_daily_scope``   — none / year1_only / all   (default ``year1_only``)
 * ``plot_monthly_scope`` — none / year1_only / all   (default ``all``)
@@ -136,7 +136,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tee", action="store_true",
                         help="Print solver output.")
 
-    # Rolling-horizon flags.  In v0.6 these become CLI overrides of
+    # Rolling-horizon flags.  These act as CLI overrides of
     # the workbook ``# uncertainty`` group; when omitted, the workbook
     # value applies (None sentinel signals "not provided").
     parser.add_argument(
@@ -244,7 +244,7 @@ def _generate_energy_plots_for_year(
 
     In ``vnb`` mode this drives the supply / surplus / combined views.
     In ``merchant`` mode the load is pinned to zero so those plots
-    collapse — render the v0.6 dispatch / SOC / revenue trio instead.
+    collapse — render the dispatch / SOC / revenue trio instead.
     """
     if not pd.api.types.is_datetime64_any_dtype(res_for_year["timestamp"]):
         return
@@ -482,7 +482,7 @@ def _generate_financial_plots(
                 rolling_compare_mc,
                 target_dir / "rolling_horizon_foresight_gap_comparison.pdf",
             )
-        # v0.6 lifecycle plots
+        # Lifecycle plots
         if year1_kpis is not None:
             plot_revenue_stack_yearly(
                 yearly_cf, year1_kpis,
@@ -525,7 +525,7 @@ def _build_financials(
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
     lifetime_df = build_lifetime_dispatch(res, econ, capacities)
     lifetime_yearly = aggregate_lifetime_to_yearly(lifetime_df)
-    # v0.8 Phase 4: post-solve unavailability derate on the lifetime
+    # Post-solve unavailability derate on the lifetime
     # totals (PV generation and BESS discharge) so LCOE / LCOS
     # denominators reflect the realistic operating envelope.
     avail_factor = max(
@@ -761,7 +761,7 @@ def _run_one(
             _check_strict_invariants(invariants)
 
         kpis = compute_kpis(res, params, verify_balance=False)
-        # v0.8 Phase 4: post-solve unavailability derate.  Multiplies a
+        # Post-solve unavailability derate.  Multiplies a
         # curated set of MWh / EUR keys by (1 - unavailability_pct/100).
         kpis = apply_unavailability_derate(
             kpis, float(params.get("unavailability_pct", 0.0) or 0.0),

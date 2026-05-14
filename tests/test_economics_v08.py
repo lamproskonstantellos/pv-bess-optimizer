@@ -1,4 +1,4 @@
-"""v0.8 economics tests (Phase 4).
+"""Post-DEVEX economics tests.
 
 Covers DEVEX, unavailability_pct, aggregator_fee_pct_revenue, plus the
 year-on-year revenue monotonicity invariant under the default
@@ -156,16 +156,16 @@ def test_legacy_capex_licenses_warns(caplog):
         _parse_kv_sheet("economics", flat)
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert "capex_licenses_eur_per_kw" in msgs
-    assert "v0.8" in msgs
+    assert "no longer supported" in msgs
 
 
 # ---------------------------------------------------------------------------
 # Strict regression guard: with DEVEX = 0, unavail = 0, fee = 0,
-# the v0.7 baseline numbers reappear.
+# the pre-DEVEX baseline numbers reappear.
 # ---------------------------------------------------------------------------
 
 
-def test_v07_baseline_reproducible_when_v08_extras_off():
+def test_baseline_reproducible_when_extras_off():
     econ = _econ()
     econ["devex_pv_eur_per_kw"] = 0.0
     econ["devex_bess_eur_per_kw"] = 0.0

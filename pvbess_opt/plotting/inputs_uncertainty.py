@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import COLORS, FINANCIAL_COLORS
-from .style import save_figure, show_titles
+from .style import apply_universal_margins, save_figure, show_titles
 
 _Z90 = 1.2816  # Phi^{-1}(0.90)
 
@@ -100,6 +100,8 @@ def plot_input_forecast_band(
         axes[0].set_title(
             f"Forecast envelope, week starting DOY {week_start_doy}"
         )
+    for ax in axes:
+        apply_universal_margins(ax)
     return save_figure(out_path)
 
 
@@ -138,6 +140,8 @@ def plot_input_seasonal_boxplot(
     axes[-1].set_xlabel("Month")
     if show_titles():
         axes[0].set_title("Monthly distribution of inputs (Year 1)")
+    for ax in axes:
+        apply_universal_margins(ax, skip_x=True)
     return save_figure(out_path)
 
 
@@ -180,4 +184,5 @@ def plot_dam_intraday_heatmap(
     cbar.set_label("DAM (EUR/MWh)")
     if show_titles():
         ax.set_title("DAM intraday × seasonal heatmap (Year 1)")
+    apply_universal_margins(ax, skip_x=True, skip_y=True)
     return save_figure(out_path)

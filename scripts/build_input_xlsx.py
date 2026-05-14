@@ -1,4 +1,4 @@
-"""Build the case-study ``inputs/input.xlsx`` workbook (v0.8 schema).
+"""Build the case-study ``inputs/input.xlsx`` workbook (seven-sheet schema).
 
 PV column policy
 ----------------
@@ -177,7 +177,7 @@ def build_timeseries(
 
 
 def build_typed_dict() -> dict:
-    """Assemble the typed nested dict for the case-study run (v0.8 schema)."""
+    """Assemble the typed nested dict for the case-study run (seven-sheet schema)."""
     pv_nameplate_kwp = DEFAULT_PV_NAMEPLATE_KWP
     specific_production_kwh_per_kwp = (
         DEFAULT_PV_SPECIFIC_PRODUCTION_KWH_PER_KWP
@@ -258,7 +258,7 @@ def build_typed_dict() -> dict:
         "plot_monthly_scope": "all",
         "plot_yearly_scope": "all",
     }
-    # 24 hourly rows at constant 27 % — reproduces the v0.7 scalar baseline.
+    # 24 hourly rows at constant 27 % — the scalar-equivalent baseline.
     curtailment_profile = np.full(24, 27.0, dtype=float)
     return {
         "ts": ts,
