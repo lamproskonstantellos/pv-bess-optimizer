@@ -35,9 +35,25 @@ Plot-polish release covering three areas:
   `tests/test_no_historical_version_strings.py` scans the
   repository for any reintroduction.
 
-Verification: the full test suite (including the new
-`test_endpoint_labels_outside_dots`,
-`test_universal_margin_applied_to_all_plots`,
-`test_no_historical_version_strings`) passes, and a `main.py
-inputs/input.xlsx --solver highs` end-to-end render produces no
-collisions on the tornado, waterfall, SOC, or LCOE/LCOS panels.
+Verification log:
+
+* 525 tests pass under `pytest tests/` (including the three new
+  parametrized suites: `test_tornado_labels`'s
+  `endpoint_labels_outside_dots` /
+  `do_not_overlap_y_axis_spine` /
+  `short_range_row_labels_dont_collide`,
+  `test_annotation_safety`'s
+  `test_apply_universal_margins_pads_both_axes` /
+  `skip_x_leaves_x_alone` /
+  `npv_total_annotation_has_breathing_room`,
+  `test_plotting_universality`'s
+  `test_apply_universal_margins_called[...]` over every public plot
+  function, plus `test_no_historical_version_strings` over the seven
+  pre-release-version regex patterns).
+* Audits 1–7 grep clean across the plotting package.
+* `python main.py inputs/input.xlsx --solver highs` renders the
+  full financial-plot set under
+  `results/<run>/04_financial_plots/` (cumulative, waterfall,
+  payback, tornados, monthly cashflow, lifecycle cycles, revenue
+  stack, LCOE/LCOS summary) plus the daily / monthly / yearly
+  energy plots without error.
