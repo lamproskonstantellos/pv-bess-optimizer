@@ -226,3 +226,46 @@ def expand_axes_for_annotations(ax, *, pad: float = 0.05) -> None:
     dy = pad * (ymax - ymin) if ymax > ymin else pad
     ax.set_xlim(xmin - dx, xmax + dx)
     ax.set_ylim(ymin - dy, ymax + dy)
+
+
+# ---------------------------------------------------------------------------
+# Universal axes-margin helper
+# ---------------------------------------------------------------------------
+
+# Universal margin fractions — small enough to feel tight, large
+# enough that no annotation, legend, or data point touches the
+# axes frame.
+UNIVERSAL_MARGIN_X_FRAC: float = 0.02
+UNIVERSAL_MARGIN_Y_FRAC: float = 0.05
+
+
+def apply_universal_margins(
+    ax,
+    *,
+    x_frac: float = UNIVERSAL_MARGIN_X_FRAC,
+    y_frac: float = UNIVERSAL_MARGIN_Y_FRAC,
+    skip_x: bool = False,
+    skip_y: bool = False,
+) -> None:
+    """Pad axes limits so data and annotations never touch the frame.
+
+    Called as the last step in every plotting function before
+    :func:`save_figure`.  Adds a small symmetric padding (2% in x,
+    5% in y by default) to the current axes limits.
+
+    skip_x: pass True for plots with a fixed x-domain that must not
+        extend (e.g. monthly plots whose x-axis spans exactly
+        Jan 1 → Feb 1, or tornado plots that already apply their own
+        outward padding).
+    skip_y: same for fixed y-domains.
+    """
+    if not skip_x:
+        xmin, xmax = ax.get_xlim()
+        span = xmax - xmin
+        if span > 0:
+            ax.set_xlim(xmin - x_frac * span, xmax + x_frac * span)
+    if not skip_y:
+        ymin, ymax = ax.get_ylim()
+        span = ymax - ymin
+        if span > 0:
+            ax.set_ylim(ymin - y_frac * span, ymax + y_frac * span)

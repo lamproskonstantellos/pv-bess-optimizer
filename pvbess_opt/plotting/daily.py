@@ -39,7 +39,13 @@ from .helpers import (
     pretty_date,
     title_prefix,
 )
-from .style import apply_legend, get_scenario_label, save_figure_daily, show_titles
+from .style import (
+    apply_legend,
+    apply_universal_margins,
+    get_scenario_label,
+    save_figure_daily,
+    show_titles,
+)
 
 
 def _setup_day_axes(ax, start: pd.Timestamp, end: pd.Timestamp) -> None:
@@ -84,6 +90,7 @@ def plot_daily_supply(res: pd.DataFrame, date_str: str, out_dir: Path) -> None:
     plt.ylabel("Energy (kWh)")
     _setup_day_axes(ax, start, end)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="daily")
+    apply_universal_margins(ax, skip_x=True)
     save_figure_daily(out_dir / f"daily_supply_{date_str}.pdf", date_str)
 
 
@@ -126,6 +133,7 @@ def plot_daily_surplus(res: pd.DataFrame, date_str: str, out_dir: Path) -> None:
     plt.ylabel("Energy (kWh)")
     _setup_day_axes(ax, start, end)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="daily")
+    apply_universal_margins(ax, skip_x=True)
     save_figure_daily(out_dir / f"daily_surplus_{date_str}.pdf", date_str)
 
 
@@ -184,6 +192,7 @@ def plot_daily_combined(
     plt.ylabel("Energy (kWh)")
     _setup_day_axes(ax, start, end)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="daily")
+    apply_universal_margins(ax, skip_x=True)
     save_figure_daily(out_dir / f"daily_combined_{date_str}.pdf", date_str)
 
 
@@ -241,6 +250,7 @@ def plot_daily_dispatch(
     plt.ylabel("Energy (kWh)")
     _setup_day_axes(ax, start, end)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="daily")
+    apply_universal_margins(ax, skip_x=True)
     save_figure_daily(out_dir / f"daily_dispatch_{date_str}.pdf", date_str)
 
 
@@ -288,6 +298,7 @@ def plot_daily_soc(
     ax.set_ylabel("SOC (kWh)")
     _setup_day_axes(ax, start, end)
     ax.legend(loc="best", framealpha=0.9, fontsize=7)
+    apply_universal_margins(ax, skip_x=True)
     save_figure_daily(out_dir / f"daily_soc_{date_str}.pdf", date_str)
 
 
@@ -331,4 +342,5 @@ def plot_daily_revenue(
     ax.set_ylabel("EUR")
     _setup_day_axes(ax, start, end)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="daily")
+    apply_universal_margins(ax, skip_x=True)
     save_figure_daily(out_dir / f"daily_revenue_{date_str}.pdf", date_str)

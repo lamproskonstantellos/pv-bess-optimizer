@@ -35,7 +35,13 @@ from .helpers import (
     pad_line_to_bins_end,
     title_prefix,
 )
-from .style import apply_legend, get_scenario_label, save_figure, show_titles
+from .style import (
+    apply_legend,
+    apply_universal_margins,
+    get_scenario_label,
+    save_figure,
+    show_titles,
+)
 
 
 def _setup_day_axis(ax, left: pd.Series, width_days) -> None:
@@ -88,6 +94,7 @@ def plot_monthly_supply(
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="monthly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / f"monthly_supply_{month:02d}.pdf")
 
 
@@ -124,6 +131,7 @@ def plot_monthly_surplus(
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="monthly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / f"monthly_surplus_{month:02d}.pdf")
 
 
@@ -178,6 +186,7 @@ def plot_monthly_combined(
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=True, plot_type="monthly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / f"monthly_combined_{month:02d}.pdf")
 
 
@@ -224,6 +233,7 @@ def plot_monthly_dispatch(
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="monthly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / f"monthly_dispatch_{month:02d}.pdf")
 
 
@@ -271,9 +281,13 @@ def plot_monthly_soc(
     ax.set_xlabel("Day")
     ax.set_ylabel("SOC (kWh)")
     _setup_day_axis(ax, left, width_days)
-    # Round-3 universality: every SOC plot also exposes a right-side
-    # SOC (%) axis.  Scale derived from the soc_pct ↔ soc_kwh ratio
-    # in the frame when available, else fall back to a 0–100 % range.
+    # Apply universal padding to the primary y-axis BEFORE deriving the
+    # right-side SOC (%) scale so the two axes share identical bounds
+    # after padding.
+    apply_universal_margins(ax, skip_x=True)
+    # Every SOC plot also exposes a right-side SOC (%) axis.  Scale
+    # derived from the soc_pct ↔ soc_kwh ratio in the frame when
+    # available, else fall back to a 0–100 % range.
     ax2 = ax.twinx()
     max_kwh = float(df["soc_kwh"].max())
     if "soc_pct" in df.columns and max_kwh > 0.0:
@@ -336,4 +350,5 @@ def plot_monthly_revenue(
     ax.set_ylabel("EUR/day")
     _setup_day_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="monthly")
+    apply_universal_margins(ax, skip_x=True)
     save_figure(out_dir / f"monthly_revenue_{month:02d}.pdf")
