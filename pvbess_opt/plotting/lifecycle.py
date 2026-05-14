@@ -4,10 +4,11 @@
   decomposition with the net line overlaid.
 * :func:`plot_lifetime_cycles` — equivalent BESS cycles per operating
   year (post-degradation).  Skipped when no BESS is in the project.
-* :func:`plot_lcoe_lcos_summary` — single horizontal-bar comparison
-  panel (LCOE top, LCOS bottom) with the project sensitivity range
-  overlaid on Lazard 2024 industry benchmark bands.  PV-only / BESS-
-  only projects show an italic "N/A" line for the missing row.
+* :func:`plot_lcoe_summary` / :func:`plot_lcos_summary` — single-row
+  horizontal-bar comparison panels written to separate PDFs, each
+  showing the project sensitivity range over the Lazard 2024 industry
+  benchmark band for the corresponding asset.  When the project does
+  not include the asset the row collapses to an italic "N/A" message.
 
 Industry benchmark constants (update annually):
 
@@ -240,101 +241,111 @@ def plot_lifetime_cycles(
     return save_figure(out_path)
 
 
-def plot_lcoe_lcos_summary(
+def _sensitivity_factors(econ: dict[str, Any]) -> tuple[float, float]:
+    capex_d = float(econ.get("sensitivity_capex_delta_pct", 10.0)) / 100.0
+    opex_d = float(econ.get("sensitivity_opex_delta_pct", 10.0)) / 100.0
+    return (1.0 - capex_d) * (1.0 - opex_d), (1.0 + capex_d) * (1.0 + opex_d)
+
+
+def plot_lcoe_summary(
     fin_kpis: dict[str, Any],
     sensitivity_df: pd.DataFrame | None,
     capacities: dict[str, float],
     econ: dict[str, Any],
     out_path: Path,
 ) -> Path:
-    """Single horizontal-bar comparison panel with industry benchmark bands.
+    """LCOE comparison panel vs Lazard 2024 utility-scale PV band.
 
-    LCOE on the top row, LCOS on the bottom row.  Round-3 redesign:
-    every numeric value (base, sensitivity range, benchmark range) is
-    reported in the row legend so the plot face stays free of bbox
-    annotations, italic prose captions, and diamond markers.
+    Single-row horizontal bar with the project sensitivity range, a
+    centred base tick, and the Lazard band shaded behind.  Every
+    numeric value (base, sensitivity span, benchmark span) is reported
+    in the legend; the plot face holds no bbox annotations, italic
+    captions, or diamond markers, and the row carries no rotated
+    y-axis label — the panel context is implicit from the filename
+    and legend entries.
 
-    Each row shows:
-
-    * a light-grey shaded benchmark band (Lazard 2024 EUR-equivalent
-      range, labelled in the legend);
-    * a saturated bar over the project's sensitivity range
-      ``[base × low_factor, base × high_factor]``, labelled in the
-      legend with its numeric span;
-    * a black vertical line at the base value, labelled in the legend
-      with its numeric value (no diamond, no white marker edge ring).
-
-    PV-only projects show a plain "BESS not part of this project —
-    LCOS N/A" line in place of the LCOS row; BESS-only swaps the
-    other way.  Hybrid projects render both rows at figsize=(7, 4);
-    single-row projects render at (7, 2.5).
-
-    margins: delegated.  Each row sets its own 12% x-padding inside
-    ``_draw_benchmark_row`` and a fixed y-range of (-0.6, 0.6) wider
-    than the bar height — the universal helper would over-pad.
+    margins: delegated.  ``_draw_benchmark_row`` applies its own 12 %
+    x-padding and fixes y-range to ``(-0.6, 0.6)`` so the universal
+    helper would over-pad.
     """
     out_path = Path(out_path)
     pv_kwp = float(capacities.get("pv_kwp", 0.0) or 0.0)
-    bess_kw = float(capacities.get("bess_kw", 0.0) or 0.0)
     base_lcoe = float(fin_kpis.get("lcoe_eur_per_mwh", float("nan")))
-    base_lcos = float(fin_kpis.get("lcos_eur_per_mwh", float("nan")))
-    capex_d = float(econ.get("sensitivity_capex_delta_pct", 10.0)) / 100.0
-    opex_d = float(econ.get("sensitivity_opex_delta_pct", 10.0)) / 100.0
-    high_factor = (1.0 + capex_d) * (1.0 + opex_d)
-    low_factor = (1.0 - capex_d) * (1.0 - opex_d)
-    _ = sensitivity_df  # kept for API symmetry; range derived directly above
-
+    low_factor, high_factor = _sensitivity_factors(econ)
+    _ = sensitivity_df  # kept for API symmetry; range derived above
     pv_present = pv_kwp > 0.0 and not np.isnan(base_lcoe)
-    bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
-    figsize = (7, 4) if (pv_present and bess_present) else (7, 2.5)
-
-    # Workbook overrides.  When the economics sheet carries
-    # benchmark_* keys, use them; otherwise fall back to the module
-    # constants (Lazard 2024 EUR-equivalent).
-    lcoe_band = (
+    benchmark = (
         float(econ.get("benchmark_lcoe_low_eur_per_mwh",
                        BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH[0])),
         float(econ.get("benchmark_lcoe_high_eur_per_mwh",
                        BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH[1])),
     )
-    lcos_band = (
+
+    fig, ax = plt.subplots(figsize=(7, 2.5))
+    _draw_benchmark_row(
+        ax,
+        base=base_lcoe,
+        low=base_lcoe * low_factor if pv_present else float("nan"),
+        high=base_lcoe * high_factor if pv_present else float("nan"),
+        bar_colour=FINANCIAL_COLORS["lcoe_bar"],
+        benchmark=benchmark,
+        label="LCOE", asset_present=pv_present,
+        absent_message="PV not part of this project — LCOE N/A",
+    )
+    ax.set_xlabel("EUR/MWh")
+    if show_titles():
+        fig.suptitle("Levelized Cost of Energy — Lazard 2024 benchmark")
+    fig.tight_layout()
+    out = out_path.with_suffix(".pdf")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, format="pdf", bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
+def plot_lcos_summary(
+    fin_kpis: dict[str, Any],
+    sensitivity_df: pd.DataFrame | None,
+    capacities: dict[str, float],
+    econ: dict[str, Any],
+    out_path: Path,
+) -> Path:
+    """LCOS comparison panel vs Lazard 2024 utility-scale BESS band.
+
+    Single-row horizontal bar; layout and conventions mirror
+    :func:`plot_lcoe_summary`.
+
+    margins: delegated.
+    """
+    out_path = Path(out_path)
+    bess_kw = float(capacities.get("bess_kw", 0.0) or 0.0)
+    base_lcos = float(fin_kpis.get("lcos_eur_per_mwh", float("nan")))
+    low_factor, high_factor = _sensitivity_factors(econ)
+    _ = sensitivity_df
+    bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
+    benchmark = (
         float(econ.get("benchmark_lcos_low_eur_per_mwh",
                        BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH[0])),
         float(econ.get("benchmark_lcos_high_eur_per_mwh",
                        BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH[1])),
     )
 
-    # Independent x-axes per row.  LCOS values (~1500 EUR/MWh) and LCOE
-    # values (~100 EUR/MWh) span very different ranges; sharing the
-    # x-axis crushed the LCOE row into <5% of the panel.
-    fig, axes = plt.subplots(2, 1, figsize=figsize, sharex=False)
+    fig, ax = plt.subplots(figsize=(7, 2.5))
     _draw_benchmark_row(
-        axes[0],
-        base=base_lcoe,
-        low=base_lcoe * low_factor if pv_present else float("nan"),
-        high=base_lcoe * high_factor if pv_present else float("nan"),
-        bar_colour=FINANCIAL_COLORS["lcoe_bar"],
-        benchmark=lcoe_band,
-        label="LCOE", asset_present=pv_present,
-        absent_message="PV not part of this project — LCOE N/A",
-    )
-    _draw_benchmark_row(
-        axes[1],
+        ax,
         base=base_lcos,
         low=base_lcos * low_factor if bess_present else float("nan"),
         high=base_lcos * high_factor if bess_present else float("nan"),
         bar_colour=FINANCIAL_COLORS["lcos_bar"],
-        benchmark=lcos_band,
+        benchmark=benchmark,
         label="LCOS", asset_present=bess_present,
         absent_message="BESS not part of this project — LCOS N/A",
     )
-    axes[0].set_xlabel("EUR/MWh")
-    axes[1].set_xlabel("EUR/MWh")
-
+    ax.set_xlabel("EUR/MWh")
     if show_titles():
-        fig.suptitle("Levelized Cost Summary — Lazard 2024 benchmark")
+        fig.suptitle("Levelized Cost of Storage — Lazard 2024 benchmark")
     fig.tight_layout()
-    out = Path(out_path).with_suffix(".pdf")
+    out = out_path.with_suffix(".pdf")
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, format="pdf", bbox_inches="tight")
     plt.close(fig)
@@ -374,11 +385,11 @@ def _draw_benchmark_row(
     range, base) is reported in the legend; the plot face holds no
     bbox annotations, no italic captions, and no diamond markers.
     Each row uses its own x-axis scaled to the union of the benchmark
-    band and the project sensitivity range with a 12 % margin.
+    band and the project sensitivity range with a 12 % margin.  No
+    rotated y-axis label is drawn — Round-5 splits LCOE and LCOS into
+    separate PDFs so the panel context is implicit from the filename
+    and legend entries.
     """
-    ax.set_ylabel(label, rotation=0, ha="right", va="center",
-                  labelpad=20, fontweight="bold")
-
     if not asset_present or np.isnan(base):
         ax.text(
             0.5, 0.5, absent_message, ha="center", va="center",

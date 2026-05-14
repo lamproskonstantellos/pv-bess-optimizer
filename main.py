@@ -70,7 +70,8 @@ from pvbess_opt.plotting import (
     plot_daily_supply,
     plot_daily_surplus,
     plot_irr_tornado,
-    plot_lcoe_lcos_summary,
+    plot_lcoe_summary,
+    plot_lcos_summary,
     plot_lifetime_cycles,
     plot_lifetime_summary,
     plot_monthly_cashflow_year1,
@@ -509,9 +510,13 @@ def _generate_financial_plots(
                 bess_present=float(capacities.get("bess_kw", 0.0) or 0.0) > 0.0,
             )
         if fin_kpis is not None and capacities is not None:
-            plot_lcoe_lcos_summary(
+            plot_lcoe_summary(
                 fin_kpis, sensitivity_df, capacities, econ,
-                plots_dir / "lcoe_lcos_summary.pdf",
+                plots_dir / "lcoe_summary.pdf",
+            )
+            plot_lcos_summary(
+                fin_kpis, sensitivity_df, capacities, econ,
+                plots_dir / "lcos_summary.pdf",
             )
     except Exception:
         logger.exception("Financial plot generation failed")

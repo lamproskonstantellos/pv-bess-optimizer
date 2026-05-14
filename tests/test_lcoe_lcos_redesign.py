@@ -1,4 +1,10 @@
-"""LCOE / LCOS benchmark-comparison redesign tests (Phase 6)."""
+"""LCOE / LCOS benchmark-comparison redesign tests.
+
+Round-5 split: ``plot_lcoe_lcos_summary`` is gone; the two summaries
+now render as separate PDFs via ``plot_lcoe_summary`` and
+``plot_lcos_summary``.  The rotated y-axis label is dropped — the
+panel context is implicit from the filename and legend entries.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +19,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 from pvbess_opt.plotting.lifecycle import (  # noqa: E402
     BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH,
     BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH,
-    plot_lcoe_lcos_summary,
+    plot_lcoe_summary,
+    plot_lcos_summary,
 )
 
 
@@ -25,47 +32,91 @@ def _econ() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Hybrid: both rows render
+# Each summary renders its own PDF
 # ---------------------------------------------------------------------------
 
 
-def test_hybrid_renders_two_rows(tmp_path: Path):
-    fin = {
-        "lcoe_eur_per_mwh": 45.0,
-        "lcos_eur_per_mwh": 180.0,
-    }
-    caps = {"pv_kwp": 1000.0, "bess_kw": 500.0, "bess_kwh": 2000.0}
-    out = tmp_path / "summary_hybrid.pdf"
-    plot_lcoe_lcos_summary(fin, None, caps, _econ(), out)
-    assert out.exists()
-    assert out.stat().st_size > 0
+def test_plot_lcoe_summary_renders(tmp_path: Path):
+    fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
+    caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    out = plot_lcoe_summary(fin, None, caps, _econ(), tmp_path / "lcoe.pdf")
+    assert out.exists() and out.stat().st_size > 0
 
 
-# ---------------------------------------------------------------------------
-# PV-only / BESS-only — italic N/A line for the missing row
-# ---------------------------------------------------------------------------
+def test_plot_lcos_summary_renders(tmp_path: Path):
+    fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
+    caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    out = plot_lcos_summary(fin, None, caps, _econ(), tmp_path / "lcos.pdf")
+    assert out.exists() and out.stat().st_size > 0
 
 
-def test_pv_only_shows_na_for_lcos(tmp_path: Path):
-    fin = {
-        "lcoe_eur_per_mwh": 60.0,
-        "lcos_eur_per_mwh": float("nan"),
-    }
+def test_pv_only_lcos_renders_na_line(tmp_path: Path):
+    """BESS-absent project — LCOS panel renders an N/A line, not a bar."""
+    fin = {"lcoe_eur_per_mwh": 60.0, "lcos_eur_per_mwh": float("nan")}
     caps = {"pv_kwp": 1000.0, "bess_kw": 0.0, "bess_kwh": 0.0}
-    out = tmp_path / "summary_pv_only.pdf"
-    plot_lcoe_lcos_summary(fin, None, caps, _econ(), out)
+    out = plot_lcos_summary(fin, None, caps, _econ(), tmp_path / "lcos.pdf")
     assert out.exists()
 
 
-def test_bess_only_shows_na_for_lcoe(tmp_path: Path):
-    fin = {
-        "lcoe_eur_per_mwh": float("nan"),
-        "lcos_eur_per_mwh": 200.0,
-    }
+def test_bess_only_lcoe_renders_na_line(tmp_path: Path):
+    """PV-absent project — LCOE panel renders an N/A line, not a bar."""
+    fin = {"lcoe_eur_per_mwh": float("nan"), "lcos_eur_per_mwh": 200.0}
     caps = {"pv_kwp": 0.0, "bess_kw": 500.0, "bess_kwh": 2000.0}
-    out = tmp_path / "summary_bess_only.pdf"
-    plot_lcoe_lcos_summary(fin, None, caps, _econ(), out)
+    out = plot_lcoe_summary(fin, None, caps, _econ(), tmp_path / "lcoe.pdf")
     assert out.exists()
+
+
+# ---------------------------------------------------------------------------
+# The combined function must not come back
+# ---------------------------------------------------------------------------
+
+
+def test_lcoe_lcos_summary_function_is_gone():
+    from pvbess_opt.plotting import lifecycle
+    assert not hasattr(lifecycle, "plot_lcoe_lcos_summary")
+
+
+# ---------------------------------------------------------------------------
+# No rotated y-axis label — Round-5 strips it
+# ---------------------------------------------------------------------------
+
+
+def _render(plot_fn, tmp_path: Path, fin: dict, caps: dict):
+    plt.close("all")
+    import pvbess_opt.plotting.lifecycle as life_mod
+    captured: dict = {}
+    original_close = life_mod.plt.close
+
+    def keep_open(fig=None):
+        if fig is not None and hasattr(fig, "axes"):
+            captured["fig"] = fig
+
+    life_mod.plt.close = keep_open
+    try:
+        plot_fn(fin, None, caps, _econ(), tmp_path / "out.pdf")
+    finally:
+        life_mod.plt.close = original_close
+    return captured["fig"]
+
+
+def test_lcoe_summary_has_no_left_y_axis_label(tmp_path: Path):
+    fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
+    caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    fig = _render(plot_lcoe_summary, tmp_path, fin, caps)
+    for ax in fig.axes:
+        assert ax.get_ylabel() == "", (
+            f"plot_lcoe_summary must not draw a y-axis label, got {ax.get_ylabel()!r}"
+        )
+
+
+def test_lcos_summary_has_no_left_y_axis_label(tmp_path: Path):
+    fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
+    caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    fig = _render(plot_lcos_summary, tmp_path, fin, caps)
+    for ax in fig.axes:
+        assert ax.get_ylabel() == "", (
+            f"plot_lcos_summary must not draw a y-axis label, got {ax.get_ylabel()!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -74,8 +125,6 @@ def test_bess_only_shows_na_for_lcoe(tmp_path: Path):
 
 
 def test_benchmark_constants_exposed():
-    # Bands set to the Lazard 2024 EUR-equivalent range
-    # (LCOE+ v17 utility-scale PV; LCOS v9 4-hour Li-ion utility-scale).
     assert BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH == (30.0, 85.0)
     assert BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH == (157.0, 274.0)
 
@@ -93,67 +142,42 @@ def test_benchmark_constants_are_tuples_of_two_floats():
 
 
 # ---------------------------------------------------------------------------
-# Round 3: every numeric value is reported in the legend
+# Legend still carries the numeric values
 # ---------------------------------------------------------------------------
 
 
-def _render_lcoe_lcos(tmp_path: Path, fin: dict, caps: dict):
-    """Render plot_lcoe_lcos_summary and return the live figure."""
-    plt.close("all")
-    import pvbess_opt.plotting.lifecycle as life_mod
-    captured: dict = {}
-    original_close = life_mod.plt.close
-
-    def keep_open(fig=None):
-        if fig is not None and hasattr(fig, "axes"):
-            captured["fig"] = fig
-
-    life_mod.plt.close = keep_open
-    try:
-        plot_lcoe_lcos_summary(
-            fin, None, caps, _econ(), tmp_path / "summary.pdf",
-        )
-    finally:
-        life_mod.plt.close = original_close
-    return captured["fig"]
-
-
-def test_legend_carries_lazard_band_with_numeric_range(tmp_path: Path):
-    """Round 3: the Lazard band's numeric range lives in the legend,
-    not in a free-floating italic caption beneath the bar."""
+def test_lcoe_legend_carries_lazard_band_and_base(tmp_path: Path):
     fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
     caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
-    fig = _render_lcoe_lcos(tmp_path, fin, caps)
-    for row_idx, ax in enumerate(fig.axes):
-        legend = ax.get_legend()
-        assert legend is not None, f"row {row_idx}: missing legend"
-        labels = [t.get_text() for t in legend.get_texts()]
-        assert any("Lazard" in lab and "EUR/MWh" in lab for lab in labels), (
-            f"row {row_idx}: legend missing Lazard band entry; got {labels}"
-        )
+    fig = _render(plot_lcoe_summary, tmp_path, fin, caps)
+    ax = fig.axes[0]
+    legend = ax.get_legend()
+    assert legend is not None
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert any("Lazard" in lab and "EUR/MWh" in lab for lab in labels)
+    assert any("Base LCOE" in lab and "EUR/MWh" in lab for lab in labels)
 
 
-def test_legend_carries_base_value(tmp_path: Path):
-    """Round 3: the base LCOE / LCOS value is reported in the legend."""
+def test_lcos_legend_carries_lazard_band_and_base(tmp_path: Path):
     fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
     caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
-    fig = _render_lcoe_lcos(tmp_path, fin, caps)
-    for row_idx, (ax, want) in enumerate(zip(fig.axes, ("LCOE", "LCOS"))):
-        legend = ax.get_legend()
-        labels = [t.get_text() for t in legend.get_texts()]
-        assert any(
-            f"Base {want}" in lab and "EUR/MWh" in lab for lab in labels
-        ), f"row {row_idx}: legend missing 'Base {want}' entry; got {labels}"
+    fig = _render(plot_lcos_summary, tmp_path, fin, caps)
+    ax = fig.axes[0]
+    legend = ax.get_legend()
+    assert legend is not None
+    labels = [t.get_text() for t in legend.get_texts()]
+    assert any("Lazard" in lab and "EUR/MWh" in lab for lab in labels)
+    assert any("Base LCOS" in lab and "EUR/MWh" in lab for lab in labels)
 
 
 def test_no_diamond_marker_drawn(tmp_path: Path):
-    """Round 3: the base value is drawn as a vertical line, not a
-    diamond marker — no scatter artist sits on the row centreline."""
+    """The base value is drawn as a vertical line — no scatter artist."""
     fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
     caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
-    fig = _render_lcoe_lcos(tmp_path, fin, caps)
-    for ax in fig.axes:
-        for coll in ax.collections:
-            assert coll.__class__.__name__ != "PathCollection" or (
-                len(coll.get_offsets()) == 0
-            ), "Round-3 redesign forbids scatter / diamond markers"
+    for plot_fn in (plot_lcoe_summary, plot_lcos_summary):
+        fig = _render(plot_fn, tmp_path, fin, caps)
+        for ax in fig.axes:
+            for coll in ax.collections:
+                assert coll.__class__.__name__ != "PathCollection" or (
+                    len(coll.get_offsets()) == 0
+                ), "Redesign forbids scatter / diamond markers"

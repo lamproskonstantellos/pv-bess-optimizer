@@ -284,8 +284,11 @@ def test_plot_lifetime_cycles_no_bess_returns_placeholder(tmp_path):
     assert out.exists()
 
 
-def test_plot_lcoe_lcos_summary_hybrid(tmp_path):
-    from pvbess_opt.plotting.lifecycle import plot_lcoe_lcos_summary
+def test_plot_lcoe_and_lcos_summary_hybrid(tmp_path):
+    from pvbess_opt.plotting.lifecycle import (
+        plot_lcoe_summary,
+        plot_lcos_summary,
+    )
     yearly = build_yearly_cashflow(_hand_year1_kpis(), _hand_econ(), _hand_caps())
     fin = compute_financial_kpis(
         yearly, _hand_econ(),
@@ -293,20 +296,31 @@ def test_plot_lcoe_lcos_summary_hybrid(tmp_path):
         lifetime_yearly=_hand_lifetime_yearly(),
         year1_kpis=_hand_year1_kpis(),
     )
-    out = plot_lcoe_lcos_summary(
-        fin, None, _hand_caps(), _hand_econ(), tmp_path / "summary.pdf",
+    out_lcoe = plot_lcoe_summary(
+        fin, None, _hand_caps(), _hand_econ(), tmp_path / "lcoe.pdf",
     )
-    assert out.exists()
+    out_lcos = plot_lcos_summary(
+        fin, None, _hand_caps(), _hand_econ(), tmp_path / "lcos.pdf",
+    )
+    assert out_lcoe.exists()
+    assert out_lcos.exists()
 
 
-def test_plot_lcoe_lcos_summary_pv_only(tmp_path):
-    from pvbess_opt.plotting.lifecycle import plot_lcoe_lcos_summary
+def test_plot_lcoe_summary_pv_only(tmp_path):
+    from pvbess_opt.plotting.lifecycle import (
+        plot_lcoe_summary,
+        plot_lcos_summary,
+    )
     caps = {"pv_kwp": 1000.0, "bess_kw": 0.0, "bess_kwh": 0.0}
     fin = {
         "lcoe_eur_per_mwh": 60.0,
         "lcos_eur_per_mwh": float("nan"),
     }
-    out = plot_lcoe_lcos_summary(
-        fin, None, caps, _hand_econ(), tmp_path / "summary_pv.pdf",
+    out_lcoe = plot_lcoe_summary(
+        fin, None, caps, _hand_econ(), tmp_path / "lcoe.pdf",
     )
-    assert out.exists()
+    out_lcos = plot_lcos_summary(
+        fin, None, caps, _hand_econ(), tmp_path / "lcos.pdf",
+    )
+    assert out_lcoe.exists()
+    assert out_lcos.exists()

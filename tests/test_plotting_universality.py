@@ -35,7 +35,7 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     "plot_npv_tornado", "plot_irr_tornado",
     # Lifecycle
     "plot_revenue_stack_yearly", "plot_lifetime_cycles",
-    "plot_lcoe_lcos_summary",
+    "plot_lcoe_summary", "plot_lcos_summary",
     # Uncertainty
     "plot_rolling_horizon_distribution", "plot_foresight_gap_comparison",
     # Inputs

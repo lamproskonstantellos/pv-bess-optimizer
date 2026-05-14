@@ -54,7 +54,8 @@ from .style import (
     set_show_titles,
 )
 from .lifecycle import (
-    plot_lcoe_lcos_summary,
+    plot_lcoe_summary,
+    plot_lcos_summary,
     plot_lifetime_cycles,
     plot_revenue_stack_yearly,
 )
@@ -111,7 +112,8 @@ __all__ = [
     "plot_foresight_gap_comparison",
     "plot_revenue_stack_yearly",
     "plot_lifetime_cycles",
-    "plot_lcoe_lcos_summary",
+    "plot_lcoe_summary",
+    "plot_lcos_summary",
     "plot_input_forecast_band",
     "plot_input_seasonal_boxplot",
     "plot_dam_intraday_heatmap",
