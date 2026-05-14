@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..config import FINANCIAL_COLORS
+from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
 from .style import save_figure, show_titles
@@ -119,23 +119,33 @@ def plot_revenue_stack_yearly(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     bottoms = np.zeros_like(load_pv)
-    for arr, colour, label in [
-        (load_pv, FINANCIAL_COLORS["load_from_pv"], "Load from PV"),
-        (load_bess, FINANCIAL_COLORS["load_from_bess"], "Load from BESS"),
-        (exp_pv, FINANCIAL_COLORS["export_from_pv"], "Export from PV"),
-        (exp_bess, FINANCIAL_COLORS["export_from_bess"], "Export from BESS"),
+    for arr, label in [
+        (load_pv, "Load from PV"),
+        (load_bess, "Load from BESS"),
+        (exp_pv, "Export from PV"),
+        (exp_bess, "Export from BESS"),
     ]:
         if np.any(arr > 1e-9):
-            ax.bar(years, arr, bottom=bottoms, color=colour,
+            ax.bar(years, arr, bottom=bottoms, color=financial_color(label),
                    edgecolor="black", linewidth=0.4, label=label)
             bottoms = bottoms + arr
     if np.any(cost < -1e-9):
-        ax.bar(years, cost, color=FINANCIAL_COLORS["grid_charge_cost"],
+        ax.bar(years, cost, color=financial_color("Grid-charging cost"),
                edgecolor="black", linewidth=0.4,
                label="Grid-charging cost")
     net = (op["revenue_eur"].astype(float)).to_numpy()
-    ax.plot(years, net, color=FINANCIAL_COLORS["net_revenue_line"],
-            linewidth=1.5, marker="o", markersize=3, label="Net revenue")
+    # IEEE-friendly emphasis line: near-black with white-edged markers
+    # so the line reads cleanly against every stack colour.
+    ax.plot(
+        years, net,
+        color=financial_color("Net revenue"),
+        linewidth=1.5,
+        marker="o", markersize=4,
+        markerfacecolor=financial_color("Net revenue"),
+        markeredgecolor="white",
+        markeredgewidth=0.6,
+        label="Net revenue",
+    )
     ax.axhline(0.0, color="black", linewidth=0.6)
 
     # Optional dashed real-EUR (deflated) trajectory — only meaningful
@@ -152,9 +162,12 @@ def plot_revenue_stack_yearly(
         project_years = op["project_year"].to_numpy(dtype=int)
         deflator = 1.0 / np.power(1.0 + infl, project_years - 1)
         real_net = net * deflator
+        # Dashed companion line distinguishes itself by linestyle; no
+        # markers — standard IEEE convention for "derived" series.
         ax.plot(
             years, real_net,
-            color=FINANCIAL_COLORS["net_revenue_line"], linewidth=1.0,
+            color=financial_color("Real-EUR net (deflated)"),
+            linewidth=1.2,
             linestyle="--", marker="", alpha=0.85,
             label="Real-EUR net (deflated)",
         )
@@ -167,7 +180,7 @@ def plot_revenue_stack_yearly(
     ax.yaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
     if show_titles():
         ax.set_title(f"Revenue stack — {int(years[0])}-{int(years[-1])}")
-    ax.legend(loc="best", framealpha=0.9, fontsize=7, ncol=2)
+    apply_financial_legend(ax)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     ax.annotate(
         "Stacks scaled by per-year revenue "
@@ -384,10 +397,14 @@ def _draw_benchmark_row(
         zorder=1,
     )
     bench_mid = 0.5 * (bench_low + bench_high)
+    # v0.8.2: Lazard caption is anchored BELOW the grey band so it
+    # never collides with the project bar — particularly relevant on
+    # the LCOE row, where the project range overlaps the benchmark
+    # band.  Both rows place the caption identically for symmetry.
     ax.text(
-        bench_mid, 0.0,
+        bench_mid, -0.50,
         f"Lazard: {bench_low:.0f}–{bench_high:.0f} EUR/MWh",
-        ha="center", va="center", fontsize=6, fontstyle="italic",
+        ha="center", va="top", fontsize=6, fontstyle="italic",
         color="#424242", zorder=2,
     )
 
@@ -451,12 +468,14 @@ def _draw_benchmark_row(
         )
 
     ax.set_yticks([])
-    # Slightly larger y-span when the annotation lives above the bar
-    # so the bbox does not get clipped by the row's own axes.
+    # v0.8.2: bottom of the axis is widened to -0.9 so the Lazard
+    # caption (placed below the grey band at y=-0.50) has room.
+    # Top half is taller (0.85) only when the project summary lives
+    # above the bar.
     if project_left_of_band:
-        ax.set_ylim(-0.6, 0.85)
+        ax.set_ylim(-0.9, 0.85)
     else:
-        ax.set_ylim(-0.6, 0.6)
+        ax.set_ylim(-0.9, 0.6)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)

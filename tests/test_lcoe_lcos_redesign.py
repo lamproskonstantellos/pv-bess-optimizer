@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pvbess_opt.plotting.lifecycle import (
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt  # noqa: E402
+
+from pvbess_opt.plotting.lifecycle import (  # noqa: E402
     BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH,
     BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH,
     plot_lcoe_lcos_summary,
@@ -84,3 +90,60 @@ def test_benchmark_constants_are_tuples_of_two_floats():
         low, high = band
         assert isinstance(low, float) and isinstance(high, float)
         assert low < high
+
+
+# ---------------------------------------------------------------------------
+# v0.8.2: Lazard caption placement
+# ---------------------------------------------------------------------------
+
+
+def _render_lcoe_lcos(tmp_path: Path, fin: dict, caps: dict):
+    """Render plot_lcoe_lcos_summary and return the live figure."""
+    plt.close("all")
+    import pvbess_opt.plotting.lifecycle as life_mod
+    captured: dict = {}
+    original_close = life_mod.plt.close
+
+    def keep_open(fig=None):
+        if fig is not None and hasattr(fig, "axes"):
+            captured["fig"] = fig
+
+    life_mod.plt.close = keep_open
+    try:
+        plot_lcoe_lcos_summary(
+            fin, None, caps, _econ(), tmp_path / "summary.pdf",
+        )
+    finally:
+        life_mod.plt.close = original_close
+    return captured["fig"]
+
+
+def test_lazard_caption_below_bar(tmp_path: Path):
+    """v0.8.2: the "Lazard: X–Y EUR/MWh" caption must sit below the
+    grey band on BOTH rows so it never collides with the project
+    bar or the project summary annotation."""
+    fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 1151.0}
+    caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    fig = _render_lcoe_lcos(tmp_path, fin, caps)
+    for row_idx, ax in enumerate(fig.axes):
+        captions = [t for t in ax.texts if "Lazard:" in t.get_text()]
+        assert captions, f"row {row_idx}: Lazard caption missing"
+        for caption in captions:
+            xy_y = float(caption.get_position()[1])
+            assert xy_y < 0.0, (
+                f"row {row_idx}: Lazard caption must be BELOW the grey "
+                f"band (y < 0); got y={xy_y} for text "
+                f"{caption.get_text()!r}"
+            )
+
+
+def test_lcoe_row_caption_below_even_when_bar_overlaps(tmp_path: Path):
+    """The LCOE bar overlaps the Lazard band (project range 36–54
+    falls inside 30–85).  Caption must still drop below the band."""
+    fin = {"lcoe_eur_per_mwh": 45.0, "lcos_eur_per_mwh": 200.0}
+    caps = {"pv_kwp": 1000.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    fig = _render_lcoe_lcos(tmp_path, fin, caps)
+    lcoe_ax = fig.axes[0]
+    captions = [t for t in lcoe_ax.texts if "Lazard:" in t.get_text()]
+    assert captions, "LCOE Lazard caption missing"
+    assert float(captions[0].get_position()[1]) < 0.0

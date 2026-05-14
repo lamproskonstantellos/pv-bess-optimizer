@@ -25,7 +25,7 @@ import pandas as pd
 from matplotlib.ticker import MaxNLocator
 from matplotlib.transforms import offset_copy
 
-from ..config import FINANCIAL_COLORS
+from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter, format_eur
 from .style import save_figure, show_titles
 
@@ -137,11 +137,13 @@ def plot_cumulative_cashflow(
     ax = plt.gca()
     ax.plot(
         years, cum,
-        color=FINANCIAL_COLORS["net"], linewidth=1.5, label="Cumulative cash-flow",
+        color=financial_color("Cumulative cash-flow"),
+        linewidth=1.5, label="Cumulative cash-flow",
     )
     ax.plot(
         years, cum_disc,
-        color=FINANCIAL_COLORS["discounted"], linewidth=1.5, linestyle="--",
+        color=financial_color("Cumulative discounted cash-flow"),
+        linewidth=1.5, linestyle="--",
         label="Cumulative discounted cash-flow",
     )
     ax.axhline(0.0, color="grey", linewidth=0.8, alpha=0.6)
@@ -152,7 +154,7 @@ def plot_cumulative_cashflow(
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Cumulative Cash-flow — {_title_window(yearly_cf)}")
-    ax.legend(loc="best", framealpha=0.9)
+    apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
     return save_figure(out_path)
 
@@ -181,21 +183,21 @@ def plot_yearly_cashflow_bars(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     width = 0.8
-    ax.bar(years, revenue, width=width, color=FINANCIAL_COLORS["revenue"],
+    ax.bar(years, revenue, width=width, color=financial_color("Revenue"),
            edgecolor="black", linewidth=0.4, label="Revenue")
-    ax.bar(years, opex, width=width, color=FINANCIAL_COLORS["opex"],
+    ax.bar(years, opex, width=width, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
     # Stack DEVEX at the bottom of the negative Year-0 stack and put CAPEX
     # on top of it so both segments remain visually identifiable.  Without
     # the ``bottom=devex`` arg matplotlib overlays the CAPEX bar on the
     # DEVEX bar at the same x and the smaller DEVEX segment disappears
     # inside the CAPEX block.
-    ax.bar(years, devex, width=width, color=FINANCIAL_COLORS["devex"],
+    ax.bar(years, devex, width=width, color=financial_color("DEVEX"),
            edgecolor="black", linewidth=0.4, label="DEVEX")
     ax.bar(years, capex, width=width, bottom=devex,
-           color=FINANCIAL_COLORS["capex"],
+           color=financial_color("CAPEX"),
            edgecolor="black", linewidth=0.4, label="CAPEX")
-    ax.plot(years, net, color=FINANCIAL_COLORS["net"], linewidth=1.5,
+    ax.plot(years, net, color=financial_color("Net cash-flow"), linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.8)
 
@@ -210,7 +212,7 @@ def plot_yearly_cashflow_bars(
     # Pin to the lower right — the post-payback region is roughly
     # horizontal there, so the legend stays clear of the bars and the
     # Year-0 CAPEX stack on the left.
-    ax.legend(loc="lower right", framealpha=0.9, ncol=2, fontsize=7)
+    apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     return save_figure(out_path)
 
@@ -254,12 +256,12 @@ def plot_npv_waterfall(
     width = 0.8
     ax.bar(
         years, revenue_disc, width=width,
-        color=FINANCIAL_COLORS["revenue"], edgecolor="black",
+        color=financial_color("Revenue"), edgecolor="black",
         linewidth=0.4, label="Revenue",
     )
     ax.bar(
         years, opex_disc, width=width,
-        color=FINANCIAL_COLORS["opex"], edgecolor="black",
+        color=financial_color("OPEX"), edgecolor="black",
         linewidth=0.4, label="OPEX",
     )
     # DEVEX at the bottom of the Year-0 negative stack, CAPEX on top of
@@ -267,36 +269,37 @@ def plot_npv_waterfall(
     # smaller DEVEX segment stays visible.
     ax.bar(
         years, devex_disc, width=width,
-        color=FINANCIAL_COLORS["devex"], edgecolor="black",
+        color=financial_color("DEVEX"), edgecolor="black",
         linewidth=0.4, label="DEVEX",
     )
     ax.bar(
         years, capex_disc, width=width, bottom=devex_disc,
-        color=FINANCIAL_COLORS["capex"], edgecolor="black",
+        color=financial_color("CAPEX"), edgecolor="black",
         linewidth=0.4, label="CAPEX",
     )
 
     ax.plot(
-        years, net_disc, color=FINANCIAL_COLORS["net"], linewidth=1.5,
+        years, net_disc, color=financial_color("Net cash-flow"), linewidth=1.5,
         marker="o", markersize=3, label="Net cash-flow",
     )
     ax.plot(
         years, cum_disc,
-        color=FINANCIAL_COLORS["discounted"], linewidth=1.5,
+        color=financial_color("Cumulative NPV"), linewidth=1.5,
         marker="o", markersize=3, label="Cumulative NPV",
     )
     ax.axhline(0.0, color="black", linewidth=0.8)
 
     final_npv = float(cum_disc[-1]) if len(cum_disc) > 0 else 0.0
-    # Plain in-axis annotation for the final NPV — no offset transforms
-    # so it always lives inside the axes margin.
-    ax.annotate(
-        f"NPV = {format_eur(final_npv, fmt_mode)}",
-        xy=(float(years[-1]), final_npv),
-        xytext=(6, 0), textcoords="offset points",
-        ha="left", va="center", fontsize=7,
-        bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "grey",
-              "linewidth": 0.5, "boxstyle": "round,pad=0.2"},
+    # v0.8.2: NPV total annotation lives in axes coordinates at the
+    # top-right of the frame, mirroring the total-cycles annotation
+    # in plot_lifetime_cycles.  This is robust across project
+    # horizons (20 / 25 / 30 y) since it never expands the data-axis
+    # range.
+    ax.text(
+        0.98, 0.96, f"NPV = {format_eur(final_npv, fmt_mode)}",
+        ha="right", va="top", fontsize=8, transform=ax.transAxes,
+        bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "grey",
+              "linewidth": 0.5, "boxstyle": "round,pad=0.4"},
     )
 
     ax.set_xlabel(
@@ -308,7 +311,7 @@ def plot_npv_waterfall(
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
     ax.margins(y=0.05)
-    ax.legend(loc="lower right", framealpha=0.9, ncol=2, fontsize=7)
+    apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     return save_figure(out_path)
 
@@ -334,10 +337,11 @@ def plot_payback(
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
-    ax.plot(years, cum, color=FINANCIAL_COLORS["net"], linewidth=1.5,
-            label="Cumulative cash-flow")
-    ax.plot(years, cum_disc, color=FINANCIAL_COLORS["discounted"], linewidth=1.5,
-            linestyle="--", label="Cumulative discounted cash-flow")
+    ax.plot(years, cum, color=financial_color("Cumulative cash-flow"),
+            linewidth=1.5, label="Cumulative cash-flow")
+    ax.plot(years, cum_disc, color=financial_color("Cumulative discounted cash-flow"),
+            linewidth=1.5, linestyle="--",
+            label="Cumulative discounted cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.6)
 
     using_calendar = "calendar_year" in yearly_cf.columns
@@ -353,30 +357,38 @@ def plot_payback(
 
     if simple_payback_years is not None and not np.isnan(simple_payback_years):
         x = _to_axis(float(simple_payback_years))
+        # Label is year-annotated for legend readability; canonical
+        # ordering is recovered by apply_financial_legend's prefix match.
         ax.axvline(
-            x, color=FINANCIAL_COLORS["net"], linewidth=0.8, linestyle=":",
-            alpha=0.8,
+            x, color=financial_color("Simple payback"),
+            linewidth=0.8, linestyle=":", alpha=0.8,
             label=f"Simple payback: {simple_payback_years:.1f} yr",
         )
-        ax.scatter([x], [0.0], color=FINANCIAL_COLORS["net"], s=20, zorder=5)
+        ax.scatter(
+            [x], [0.0], color=financial_color("Simple payback"),
+            s=20, zorder=5,
+        )
     if (
         discounted_payback_years is not None
         and not np.isnan(discounted_payback_years)
     ):
         x = _to_axis(float(discounted_payback_years))
         ax.axvline(
-            x, color=FINANCIAL_COLORS["discounted"], linewidth=0.8, linestyle=":",
-            alpha=0.8,
+            x, color=financial_color("Discounted payback"),
+            linewidth=0.8, linestyle=":", alpha=0.8,
             label=f"Discounted payback: {discounted_payback_years:.1f} yr",
         )
-        ax.scatter([x], [0.0], color=FINANCIAL_COLORS["discounted"], s=20, zorder=5)
+        ax.scatter(
+            [x], [0.0], color=financial_color("Discounted payback"),
+            s=20, zorder=5,
+        )
 
     ax.set_xlabel("Calendar year" if using_calendar else "Project year")
     _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Payback Visualisation — {_title_window(yearly_cf)}")
-    ax.legend(loc="best", framealpha=0.9)
+    apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
     return save_figure(out_path)
 
@@ -403,12 +415,12 @@ def plot_monthly_cashflow_year1(
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
-    ax.bar(months, revenue, color=FINANCIAL_COLORS["revenue"],
+    ax.bar(months, revenue, color=financial_color("Revenue"),
            edgecolor="black", linewidth=0.4, label="Revenue")
-    ax.bar(months, opex, color=FINANCIAL_COLORS["opex"],
+    ax.bar(months, opex, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
-    ax.plot(months, net, color=FINANCIAL_COLORS["net"], linewidth=1.5,
-            marker="o", markersize=4, label="Net")
+    ax.plot(months, net, color=financial_color("Net cash-flow"),
+            linewidth=1.5, marker="o", markersize=4, label="Net cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xticks(np.arange(1, 13))
     ax.set_xlabel("Month")
@@ -421,18 +433,7 @@ def plot_monthly_cashflow_year1(
     else:
         _maybe_set_title(ax, "Year-1 Monthly Cash-flow")
 
-    # Reorder the legend so Net comes last (Revenue / OPEX / Net) and
-    # drop to two columns to avoid the cramped three-column layout.
-    handles, labels = ax.get_legend_handles_labels()
-    ordered = [(h, lbl)
-               for target in ("Revenue", "OPEX", "Net")
-               for h, lbl in zip(handles, labels) if lbl == target]
-    if ordered:
-        h_ord, l_ord = zip(*ordered)
-        ax.legend(h_ord, l_ord, loc="best",
-                  framealpha=0.9, ncol=2, fontsize=7)
-    else:
-        ax.legend(loc="best", framealpha=0.9, ncol=2, fontsize=7)
+    apply_financial_legend(ax, max_rows=2)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     return save_figure(out_path)
 

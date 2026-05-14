@@ -51,15 +51,20 @@ def _y1_kpis() -> dict:
 
 def test_financial_colors_contains_net_revenue_line():
     assert "net_revenue_line" in FINANCIAL_COLORS
-    # The new colour must not collide with any other key.
+    # v0.8.2: net_revenue_line is deliberately aliased to
+    # perfect_foresight (both use Material grey 900, near-black) so
+    # the "anchor / benchmark" series read identically across plots.
+    # Any OTHER collision is still a configuration mistake.
     inverse: dict[str, list[str]] = {}
     for key, hex_value in FINANCIAL_COLORS.items():
         inverse.setdefault(hex_value.lower(), []).append(key)
-    for hex_value, keys in inverse.items():
-        if hex_value == FINANCIAL_COLORS["net_revenue_line"].lower():
-            assert keys == ["net_revenue_line"], (
-                f"net_revenue_line colour collides with: {keys}"
-            )
+    target_hex = FINANCIAL_COLORS["net_revenue_line"].lower()
+    allowed_aliases = {"net_revenue_line", "perfect_foresight"}
+    keys_at_target = set(inverse.get(target_hex, []))
+    extra = keys_at_target - allowed_aliases
+    assert not extra, (
+        f"net_revenue_line colour collides with unexpected keys: {extra}"
+    )
 
 
 def test_net_revenue_line_uses_high_contrast_colour(tmp_path: Path):

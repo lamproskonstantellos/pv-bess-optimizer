@@ -1,7 +1,7 @@
 # PV & BESS Optimizer
 
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.8.1-blue)](pvbess_opt/__init__.py)
+[![version](https://img.shields.io/badge/version-0.8.2-blue)](pvbess_opt/__init__.py)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
@@ -240,6 +240,31 @@ See `docs/source/users.guide/rolling_horizon.rst` for the full guide.
   unambiguous endpoint labels; LCOE/LCOS summary becomes a single
   panel with the project sensitivity range overlaid on the Lazard
   2024 industry benchmark band.
+
+## What's new in v0.8.2 (plot-styling round)
+
+* **Centralized financial labels and colours** — `config.py` now
+  carries `FINANCIAL_LABELS`, `FINANCIAL_LABEL_TO_COLOR_KEY`,
+  `FINANCIAL_LEGEND_ORDER`, plus the helpers `financial_color(label)`
+  and `apply_financial_legend(ax)`.  All financial / lifecycle plots
+  resolve colours via the helper and order legends via the canonical
+  list, mirroring the energy plots' `ALL_LABELS` / `COLORS` /
+  `LEGEND_ORDER` pattern.  Uncertainty plots reuse the same palette
+  via `UNCERTAINTY_SOURCE_COLORS` and dedicated percentile colour
+  keys (`percentile_p10/p50/p90`, `perfect_foresight`).
+* **Lazard caption placement** — on both LCOE and LCOS rows the
+  "Lazard: X–Y EUR/MWh" caption drops below the grey benchmark band
+  so it never collides with the project bar or summary annotation.
+* **NPV total annotation** — anchored in axes coordinates at the
+  top-right corner so it always stays inside the frame, regardless
+  of horizon (20 / 25 / 30 y).
+* **IEEE-friendly emphasis colour** — `net_revenue_line` swaps from
+  magenta `#E91E63` to near-black `#212121` (Material grey 900).
+  Net revenue markers gain white edges for clean reading over
+  saturated stack colours; the Real-EUR companion line distinguishes
+  itself by dashed linestyle only.
+* **Monthly cashflow label** — the line label is now the canonical
+  `"Net cash-flow"` everywhere (was `"Net"` in the monthly plot).
 
 ## What's new in v0.8.1 (patch round)
 
