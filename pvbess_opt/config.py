@@ -138,6 +138,9 @@ FINANCIAL_COLORS: dict[str, str] = {
     "export_from_pv":   "#42A5F5",  # light blue
     "export_from_bess": "#0D47A1",  # dark blue
     "grid_charge_cost": "#D32F2F",  # red (negative stack)
+    # Foreground net-revenue line over the dark BESS stack — magenta is
+    # high-contrast over both PV light blue and BESS dark blue.
+    "net_revenue_line": "#E91E63",
 }
 
 

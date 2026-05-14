@@ -134,8 +134,8 @@ def plot_revenue_stack_yearly(
                edgecolor="black", linewidth=0.4,
                label="Grid-charging cost")
     net = (op["revenue_eur"].astype(float)).to_numpy()
-    ax.plot(years, net, color=FINANCIAL_COLORS["discounted"], linewidth=1.5,
-            marker="o", markersize=3, label="Net revenue")
+    ax.plot(years, net, color=FINANCIAL_COLORS["net_revenue_line"],
+            linewidth=1.5, marker="o", markersize=3, label="Net revenue")
     ax.axhline(0.0, color="black", linewidth=0.6)
 
     # Optional dashed real-EUR (deflated) trajectory — only meaningful
@@ -154,7 +154,7 @@ def plot_revenue_stack_yearly(
         real_net = net * deflator
         ax.plot(
             years, real_net,
-            color=FINANCIAL_COLORS["discounted"], linewidth=1.0,
+            color=FINANCIAL_COLORS["net_revenue_line"], linewidth=1.0,
             linestyle="--", marker="", alpha=0.85,
             label="Real-EUR net (deflated)",
         )
@@ -422,21 +422,41 @@ def _draw_benchmark_row(
         zorder=5,
     )
 
-    # Right-side annotation summarising the project values.
+    # Annotation placement v0.8.1: when the project bar lies entirely
+    # to the LEFT of the benchmark band (typical undershoot scenario,
+    # e.g. LCOS 37-56 vs Lazard 157-274), put the summary above the
+    # bar so it does not get rendered over the grey band.  Otherwise
+    # the historical right-of-bar placement still works.
     label_text = (
         f"{label} base = {base:.0f} EUR/MWh "
         f"(range {bar_low:.0f}–{bar_high:.0f})"
     )
-    ax.annotate(
-        label_text, xy=(bar_high, 0), xytext=(8, 0),
-        textcoords="offset points",
-        ha="left", va="center", fontsize=7,
-        bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "grey",
-              "linewidth": 0.5, "boxstyle": "round,pad=0.2"},
-    )
+    bbox_kwargs = {
+        "facecolor": "white", "alpha": 0.85, "edgecolor": "grey",
+        "linewidth": 0.5, "boxstyle": "round,pad=0.2",
+    }
+    project_left_of_band = bar_high < bench_low
+    if project_left_of_band:
+        bar_mid_x = 0.5 * (bar_low + bar_high)
+        ax.annotate(
+            label_text, xy=(bar_mid_x, 0.20), xytext=(0, 6),
+            textcoords="offset points",
+            ha="center", va="bottom", fontsize=7, bbox=bbox_kwargs,
+        )
+    else:
+        ax.annotate(
+            label_text, xy=(bar_high, 0), xytext=(8, 0),
+            textcoords="offset points",
+            ha="left", va="center", fontsize=7, bbox=bbox_kwargs,
+        )
 
     ax.set_yticks([])
-    ax.set_ylim(-0.6, 0.6)
+    # Slightly larger y-span when the annotation lives above the bar
+    # so the bbox does not get clipped by the row's own axes.
+    if project_left_of_band:
+        ax.set_ylim(-0.6, 0.85)
+    else:
+        ax.set_ylim(-0.6, 0.6)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
@@ -447,7 +467,10 @@ def _draw_benchmark_row(
     span_lo = min(bench_low, bar_low)
     span_hi = max(bench_high, bar_high)
     pad = 0.12 * max(span_hi - span_lo, 1.0)
-    ax.set_xlim(max(0.0, span_lo - pad), span_hi + pad * 3.0)
+    # When the annotation lives above the bar the historical right-side
+    # padding is no longer required.
+    right_pad_mult = 1.0 if project_left_of_band else 3.0
+    ax.set_xlim(max(0.0, span_lo - pad), span_hi + pad * right_pad_mult)
 
     if gloss:
         ax.annotate(
