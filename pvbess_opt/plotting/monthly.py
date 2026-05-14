@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.ticker import ScalarFormatter
 
-from ..config import XTICK_ROT
+from ..config import FINANCIAL_COLORS, XTICK_ROT
 from .helpers import (
     bar_stacked_bins,
     edges_and_widths_monthly,
@@ -230,7 +230,12 @@ def plot_monthly_dispatch(
 def plot_monthly_soc(
     res: pd.DataFrame, month: int, out_dir: Path,
 ) -> None:
-    """Daily min / mean / max SOC envelope across the calendar month."""
+    """Daily min / mean / max SOC envelope across the calendar month.
+
+    The right-hand axis mirrors the SOC % range (when the result frame
+    carries a ``soc_pct`` column) so a reader can read both kWh and %
+    off the same envelope without a separate panel.
+    """
     df = res[res["timestamp"].dt.month == month]
     if df.empty or "soc_kwh" not in df.columns:
         return
@@ -242,17 +247,19 @@ def plot_monthly_soc(
     daily["date"] = pd.to_datetime(daily["date"])
     if daily.empty:
         return
+    left, width_days = edges_and_widths_monthly(daily["date"])
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
+    soc_colour = FINANCIAL_COLORS["net"]
     ax.fill_between(
         daily["date"], daily["min"], daily["max"],
-        color="#1565C0", alpha=0.20, edgecolor="#1565C0",
+        color=soc_colour, alpha=0.20, edgecolor=soc_colour,
         label="Daily min-max",
     )
     ax.plot(
         daily["date"], daily["mean"],
-        color="#1565C0", linewidth=1.5, linestyle="-",
+        color=soc_colour, linewidth=1.5, linestyle="-",
         marker="o", markersize=3,
         label="Daily mean",
     )
@@ -263,6 +270,19 @@ def plot_monthly_soc(
         )
     ax.set_xlabel("Day")
     ax.set_ylabel("SOC (kWh)")
+    _setup_day_axis(ax, left, width_days)
+    # Round-3 universality: every SOC plot also exposes a right-side
+    # SOC (%) axis.  Scale derived from the soc_pct ↔ soc_kwh ratio
+    # in the frame when available, else fall back to a 0–100 % range.
+    ax2 = ax.twinx()
+    max_kwh = float(df["soc_kwh"].max())
+    if "soc_pct" in df.columns and max_kwh > 0.0:
+        ratio = float(df["soc_pct"].max()) / max_kwh
+    else:
+        ratio = 100.0 / max_kwh if max_kwh > 0.0 else 1.0
+    ymin, ymax = ax.get_ylim()
+    ax2.set_ylim(ymin * ratio, ymax * ratio)
+    ax2.set_ylabel("SOC (%)")
     ax.legend(loc="best", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     save_figure(out_dir / f"monthly_soc_{month:02d}.pdf")

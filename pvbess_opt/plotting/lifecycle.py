@@ -36,7 +36,7 @@ import pandas as pd
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
-from .style import save_figure, show_titles
+from .style import annotate_value_safe, save_figure, show_titles
 
 # ---------------------------------------------------------------------------
 # Industry benchmark bands (Lazard 2024 — update annually)
@@ -134,16 +134,15 @@ def plot_revenue_stack_yearly(
                edgecolor="black", linewidth=0.4,
                label="Grid-charging cost")
     net = (op["revenue_eur"].astype(float)).to_numpy()
-    # IEEE-friendly emphasis line: near-black with white-edged markers
-    # so the line reads cleanly against every stack colour.
+    # IEEE-friendly emphasis line: near-black solid markers.  Round-3
+    # universality rule forbids markeredgecolor="white" rings; line
+    # contrast comes from the charcoal colour itself.
     ax.plot(
         years, net,
         color=financial_color("Net revenue"),
         linewidth=1.5,
         marker="o", markersize=4,
         markerfacecolor=financial_color("Net revenue"),
-        markeredgecolor="white",
-        markeredgewidth=0.6,
         label="Net revenue",
     )
     ax.axhline(0.0, color="black", linewidth=0.6)
@@ -182,12 +181,6 @@ def plot_revenue_stack_yearly(
         ax.set_title(f"Revenue stack — {int(years[0])}-{int(years[-1])}")
     apply_financial_legend(ax)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    ax.annotate(
-        "Stacks scaled by per-year revenue "
-        "(PV degradation × revenue inflation).",
-        xy=(0.5, -0.18), xycoords="axes fraction",
-        ha="center", fontsize=6, fontstyle="italic",
-    )
     return save_figure(out_path)
 
 
@@ -218,7 +211,8 @@ def plot_lifetime_cycles(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     ax.bar(years, df["cycles"].to_numpy(dtype=float),
-           color="#1565C0", edgecolor="black", linewidth=0.4)
+           color=FINANCIAL_COLORS["net"],
+           edgecolor="black", linewidth=0.4)
     total = float(df["cycles"].sum())
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xlabel(
@@ -232,12 +226,11 @@ def plot_lifetime_cycles(
             f"{int(years[0])}-{int(years[-1])}"
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    # Footer total annotation.
-    ax.text(
-        0.99, 0.95, f"Total: {total:.0f} cycles",
-        ha="right", va="top", fontsize=7, transform=ax.transAxes,
-        bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "grey",
-              "linewidth": 0.5},
+    annotate_value_safe(
+        ax, 0.99, 0.95, f"Total: {total:.0f} cycles",
+        transform=ax.transAxes,
+        ha="right", va="top", fontsize=7,
+        bbox_alpha=0.8,
     )
     return save_figure(out_path)
 
@@ -251,16 +244,22 @@ def plot_lcoe_lcos_summary(
 ) -> Path:
     """Single horizontal-bar comparison panel with industry benchmark bands.
 
-    LCOE on the top row, LCOS on the bottom row, both rendered against
-    the same EUR/MWh axis.  Each row shows:
+    LCOE on the top row, LCOS on the bottom row.  Round-3 redesign:
+    every numeric value (base, sensitivity range, benchmark range) is
+    reported in the row legend so the plot face stays free of bbox
+    annotations, italic prose captions, and diamond markers.
 
+    Each row shows:
+
+    * a light-grey shaded benchmark band (Lazard 2024 EUR-equivalent
+      range, labelled in the legend);
     * a saturated bar over the project's sensitivity range
-      ``[base × low_factor, base × high_factor]``;
-    * a black diamond marker at the base value;
-    * a light-grey shaded band behind the bar showing the Lazard 2024
-      industry benchmark range (LCOE: 30–50, LCOS: 100–250 EUR/MWh).
+      ``[base × low_factor, base × high_factor]``, labelled in the
+      legend with its numeric span;
+    * a black vertical line at the base value, labelled in the legend
+      with its numeric value (no diamond, no white marker edge ring).
 
-    PV-only projects show an italic "BESS not part of this project —
+    PV-only projects show a plain "BESS not part of this project —
     LCOS N/A" line in place of the LCOS row; BESS-only swaps the
     other way.  Hybrid projects render both rows at figsize=(7, 4);
     single-row projects render at (7, 2.5).
@@ -309,7 +308,6 @@ def plot_lcoe_lcos_summary(
         benchmark=lcoe_band,
         label="LCOE", asset_present=pv_present,
         absent_message="PV not part of this project — LCOE N/A",
-        gloss="Discounted lifetime cost per discounted MWh of PV generation.",
     )
     _draw_benchmark_row(
         axes[1],
@@ -320,7 +318,6 @@ def plot_lcoe_lcos_summary(
         benchmark=lcos_band,
         label="LCOS", asset_present=bess_present,
         absent_message="BESS not part of this project — LCOS N/A",
-        gloss="Discounted lifetime BESS cost per discounted MWh of BESS discharge.",
     )
     axes[0].set_xlabel("EUR/MWh")
     axes[1].set_xlabel("EUR/MWh")
@@ -361,13 +358,14 @@ def _draw_benchmark_row(
     label: str,
     asset_present: bool,
     absent_message: str,
-    gloss: str = "",
 ) -> None:
-    """Single LCOE/LCOS row: benchmark band + project bar + base diamond.
+    """Single LCOE/LCOS row: benchmark band + project bar + base line.
 
-    Each row uses its own x-axis (set via ``sharex=False`` at the
-    figure level) scaled to the union of the benchmark band and the
-    project sensitivity range with a 10–15 % margin.
+    Round-3 redesign: every numeric value (benchmark band, project
+    range, base) is reported in the legend; the plot face holds no
+    bbox annotations, no italic captions, and no diamond markers.
+    Each row uses its own x-axis scaled to the union of the benchmark
+    band and the project sensitivity range with a 12 % margin.
     """
     ax.set_ylabel(label, rotation=0, ha="right", va="center",
                   labelpad=20, fontweight="bold")
@@ -375,7 +373,7 @@ def _draw_benchmark_row(
     if not asset_present or np.isnan(base):
         ax.text(
             0.5, 0.5, absent_message, ha="center", va="center",
-            fontsize=9, fontstyle="italic", transform=ax.transAxes,
+            fontsize=9, transform=ax.transAxes,
         )
         ax.set_yticks([])
         ax.set_ylim(-0.5, 0.5)
@@ -388,112 +386,51 @@ def _draw_benchmark_row(
     bar_low = float(min(low, high))
     bar_high = float(max(low, high))
 
-    # Benchmark band behind the project bar.
+    # Benchmark band behind the project bar.  Numeric range carried
+    # in the legend label.
     ax.barh(
         [0], [bench_high - bench_low], left=bench_low, height=0.6,
         color=FINANCIAL_COLORS["benchmark_band"], alpha=0.45,
         edgecolor="grey", linewidth=0.4,
-        label=f"Lazard 2024 {label} band",
+        label=(
+            f"Lazard 2024 {label} band: "
+            f"{bench_low:.0f}–{bench_high:.0f} EUR/MWh"
+        ),
         zorder=1,
     )
-    bench_mid = 0.5 * (bench_low + bench_high)
-    # v0.8.2: Lazard caption is anchored BELOW the grey band so it
-    # never collides with the project bar — particularly relevant on
-    # the LCOE row, where the project range overlaps the benchmark
-    # band.  Both rows place the caption identically for symmetry.
-    ax.text(
-        bench_mid, -0.50,
-        f"Lazard: {bench_low:.0f}–{bench_high:.0f} EUR/MWh",
-        ha="center", va="top", fontsize=6, fontstyle="italic",
-        color="#424242", zorder=2,
-    )
 
-    # Project sensitivity range (saturated colour).
+    # Project sensitivity range (saturated colour).  Numeric range
+    # carried in the legend label.
     ax.barh(
         [0], [bar_high - bar_low], left=bar_low, height=0.35,
         color=bar_colour, alpha=0.85, edgecolor="black", linewidth=0.6,
-        label=f"{label} project range",
+        label=(
+            f"{label} project range: "
+            f"{bar_low:.0f}–{bar_high:.0f} EUR/MWh"
+        ),
         zorder=3,
     )
 
-    # Whisker ticks at the low / high endpoints with numeric labels above.
-    for x in (bar_low, bar_high):
-        ax.plot(
-            [x, x], [-0.20, 0.20],
-            color="black", linewidth=1.0, zorder=4,
-        )
-    ax.text(
-        bar_low, 0.28, f"{bar_low:.0f}",
-        ha="center", va="bottom", fontsize=6, color="black",
+    # Base value drawn as a vertical line (no diamond, no marker-edge
+    # ring).  Numeric value carried in the legend label.
+    ax.plot(
+        [base, base], [-0.25, 0.25],
+        color=FINANCIAL_COLORS["base_marker"], linewidth=1.4,
+        solid_capstyle="butt", zorder=5,
+        label=f"Base {label}: {base:.0f} EUR/MWh",
     )
-    ax.text(
-        bar_high, 0.28, f"{bar_high:.0f}",
-        ha="center", va="bottom", fontsize=6, color="black",
-    )
-
-    # Base diamond marker.
-    ax.scatter(
-        [base], [0], marker="D", s=80,
-        color=FINANCIAL_COLORS["base_marker"], edgecolor="white", linewidth=0.5,
-        label=f"Base {label}",
-        zorder=5,
-    )
-
-    # Annotation placement v0.8.1: when the project bar lies entirely
-    # to the LEFT of the benchmark band (typical undershoot scenario,
-    # e.g. LCOS 37-56 vs Lazard 157-274), put the summary above the
-    # bar so it does not get rendered over the grey band.  Otherwise
-    # the historical right-of-bar placement still works.
-    label_text = (
-        f"{label} base = {base:.0f} EUR/MWh "
-        f"(range {bar_low:.0f}–{bar_high:.0f})"
-    )
-    bbox_kwargs = {
-        "facecolor": "white", "alpha": 0.85, "edgecolor": "grey",
-        "linewidth": 0.5, "boxstyle": "round,pad=0.2",
-    }
-    project_left_of_band = bar_high < bench_low
-    if project_left_of_band:
-        bar_mid_x = 0.5 * (bar_low + bar_high)
-        ax.annotate(
-            label_text, xy=(bar_mid_x, 0.20), xytext=(0, 6),
-            textcoords="offset points",
-            ha="center", va="bottom", fontsize=7, bbox=bbox_kwargs,
-        )
-    else:
-        ax.annotate(
-            label_text, xy=(bar_high, 0), xytext=(8, 0),
-            textcoords="offset points",
-            ha="left", va="center", fontsize=7, bbox=bbox_kwargs,
-        )
 
     ax.set_yticks([])
-    # v0.8.2: bottom of the axis is widened to -0.9 so the Lazard
-    # caption (placed below the grey band at y=-0.50) has room.
-    # Top half is taller (0.85) only when the project summary lives
-    # above the bar.
-    if project_left_of_band:
-        ax.set_ylim(-0.9, 0.85)
-    else:
-        ax.set_ylim(-0.9, 0.6)
+    ax.set_ylim(-0.6, 0.6)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
     ax.legend(loc="upper right", framealpha=0.9, fontsize=6, ncol=1)
 
     # Per-row independent x-axis: span the union of (benchmark, project
-    # range) with 12 % padding on each side so labels never get clipped.
+    # range) with 12 % padding on each side so legend / labels never
+    # get clipped.
     span_lo = min(bench_low, bar_low)
     span_hi = max(bench_high, bar_high)
     pad = 0.12 * max(span_hi - span_lo, 1.0)
-    # When the annotation lives above the bar the historical right-side
-    # padding is no longer required.
-    right_pad_mult = 1.0 if project_left_of_band else 3.0
-    ax.set_xlim(max(0.0, span_lo - pad), span_hi + pad * right_pad_mult)
-
-    if gloss:
-        ax.annotate(
-            gloss, xy=(0.0, -0.40), xycoords="axes fraction",
-            ha="left", va="top", fontsize=6, fontstyle="italic",
-            color="#424242",
-        )
+    ax.set_xlim(max(0.0, span_lo - pad), span_hi + pad)

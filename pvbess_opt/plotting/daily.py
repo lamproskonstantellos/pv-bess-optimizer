@@ -30,7 +30,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from ..config import XTICK_ROT
+from ..config import FINANCIAL_COLORS, XTICK_ROT
 from .helpers import (
     fill_stacked_above,
     line_if_nonzero,
@@ -262,10 +262,11 @@ def plot_daily_soc(
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
+    soc_colour = FINANCIAL_COLORS["net"]
     t_pad, [soc_pad] = pad_right_to_end(df["timestamp"], [soc_kwh], end)
     ax.plot(
         t_pad, soc_pad, drawstyle="steps-post",
-        color="#1565C0", linewidth=1.5, label="SOC (kWh / %)",
+        color=soc_colour, linewidth=1.5, label="SOC (kWh / %)",
     )
 
     if "soc_pct" in df.columns:
@@ -274,7 +275,7 @@ def plot_daily_soc(
         ax2 = ax.twinx()
         ax2.plot(
             _t_pct, soc_pct_pad, drawstyle="steps-post",
-            color="#1565C0", linewidth=1.5, label="_nolegend_",
+            color=soc_colour, linewidth=1.5, label="_nolegend_",
         )
         ax2.set_ylabel("SOC (%)")
 

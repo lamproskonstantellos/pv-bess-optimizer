@@ -23,11 +23,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.ticker import MaxNLocator
-from matplotlib.transforms import offset_copy
 
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter, format_eur
-from .style import save_figure, show_titles
+from .style import annotate_value_safe, save_figure, show_titles
 
 
 # ---------------------------------------------------------------------------
@@ -290,16 +289,16 @@ def plot_npv_waterfall(
     ax.axhline(0.0, color="black", linewidth=0.8)
 
     final_npv = float(cum_disc[-1]) if len(cum_disc) > 0 else 0.0
-    # v0.8.2: NPV total annotation lives in axes coordinates at the
-    # top-right of the frame, mirroring the total-cycles annotation
-    # in plot_lifetime_cycles.  This is robust across project
-    # horizons (20 / 25 / 30 y) since it never expands the data-axis
-    # range.
-    ax.text(
-        0.98, 0.96, f"NPV = {format_eur(final_npv, fmt_mode)}",
-        ha="right", va="top", fontsize=8, transform=ax.transAxes,
-        bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "grey",
-              "linewidth": 0.5, "boxstyle": "round,pad=0.4"},
+    # NPV total annotation lives in axes coordinates at the top-right
+    # of the frame, mirroring the total-cycles annotation in
+    # plot_lifetime_cycles.  Robust across project horizons (20 / 25 /
+    # 30 y) since it never expands the data-axis range.
+    annotate_value_safe(
+        ax, 0.98, 0.96,
+        f"NPV = {format_eur(final_npv, fmt_mode)}",
+        transform=ax.transAxes,
+        ha="right", va="top", fontsize=8,
+        bbox_alpha=0.9, bbox_pad=0.4,
     )
 
     ax.set_xlabel(
@@ -591,20 +590,17 @@ def _annotate_dumbbell_endpoints(
     swap when a "low" scenario actually produces the larger metric
     (e.g. low CAPEX → higher IRR).
     """
-    above = offset_copy(ax.transData, fig=ax.figure, x=0, y=10, units="points")
-    bbox_kwargs = {
-        "facecolor": "white", "edgecolor": "grey", "alpha": 0.8,
-        "linewidth": 0.5, "boxstyle": "round,pad=0.15",
-    }
-    ax.text(
-        left, row, value_formatter(left),
-        ha="left", va="bottom", fontsize=7, transform=above,
-        bbox=bbox_kwargs,
+    annotate_value_safe(
+        ax, left, row, value_formatter(left),
+        ha="left", va="bottom", fontsize=7,
+        offset_points=(0.0, 10.0),
+        bbox_alpha=0.8, bbox_pad=0.15,
     )
-    ax.text(
-        right, row, value_formatter(right),
-        ha="right", va="bottom", fontsize=7, transform=above,
-        bbox=bbox_kwargs,
+    annotate_value_safe(
+        ax, right, row, value_formatter(right),
+        ha="right", va="bottom", fontsize=7,
+        offset_points=(0.0, 10.0),
+        bbox_alpha=0.8, bbox_pad=0.15,
     )
 
 
