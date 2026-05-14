@@ -1,6 +1,39 @@
 Changelog
 =========
 
+0.8.1 (2026-05-14)
+------------------
+
+Patch round — see ``docs/v0.8_changelog.md`` for the per-task
+breakdown.
+
+* **Revenue inflation split** — ``revenue_inflation_pct`` is replaced
+  by ``retail_inflation_pct`` (load coverage / PPA, default 2 %) and
+  ``dam_inflation_pct`` (wholesale exports, default 0 %).  Legacy
+  workbooks load with a WARNING and the value is mapped to
+  ``retail_inflation_pct``.
+* **LCOE / LCOS audit** — LCOE numerator now isolates PV CAPEX,
+  PV DEVEX and PV OPEX (Lazard / IRENA / NREL ATB convention).
+  Benchmark bands updated to the Lazard 2024 EUR-equivalent: LCOE
+  30–85 EUR/MWh, LCOS 157–274 EUR/MWh, both overridable via
+  ``benchmark_lcoe_*`` / ``benchmark_lcos_*`` workbook keys.  A
+  single INFO log line in ``run_log.txt`` records the computed
+  LCOE / LCOS next to the bands.
+* **NPV waterfall redesign** — morphology matches
+  ``yearly_cashflow_bars`` (five-entry legend, no in-axis CAPEX /
+  DEVEX captions, padded y-axis).
+* **cumulative_cashflow / payback dedup** —
+  ``plot_cumulative_cashflow`` no longer draws payback verticals;
+  ``plot_payback`` is renamed to
+  ``cumulative_cashflow_with_payback_<start>-<end>.pdf`` for
+  naming parity.
+* **LCOS annotation placement** — when the project bar undershoots
+  the Lazard band the summary annotation lifts above the bar.
+* **Net-revenue line contrast** — Net revenue / Real-EUR net lines
+  in ``revenue_stack_yearly`` switch to magenta
+  (``FINANCIAL_COLORS["net_revenue_line"]``) so they stay visible
+  over the dark blue BESS-export stack.
+
 0.8.0 (2026-05-08)
 ------------------
 

@@ -36,4 +36,4 @@ v0.8 highlights:
       (single panel against Lazard 2024 benchmark bands).
 """
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
