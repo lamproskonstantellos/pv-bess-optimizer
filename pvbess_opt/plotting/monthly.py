@@ -237,6 +237,58 @@ def plot_monthly_dispatch(
     save_figure(out_dir / f"monthly_dispatch_{month:02d}.pdf")
 
 
+def plot_monthly_combined_merchant(
+    res: pd.DataFrame, month: int, out_dir: Path,
+) -> None:
+    """Monthly merchant-mode combined view.
+
+    Daily-aggregated bars stacked as in :func:`plot_daily_combined_merchant`
+    (PV→BESS, PV→Grid, PV→Curtailment, BESS→Grid, Import→BESS), with the
+    PV generation line overlaid as the ceiling.
+
+    Filename: ``monthly_combined_<MM>.pdf``.
+    """
+    g = month_aggregate(res, month)
+    if g.empty:
+        return
+    left, width_days = edges_and_widths_monthly(g["date"])
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    bar_stacked_bins(
+        ax, left, width_days,
+        [
+            g["pv_to_bess_kwh"] / 1000.0,
+            g["pv_to_grid_kwh"] / 1000.0,
+            g["pv_curtail_kwh"] / 1000.0,
+            g["bess_dis_grid_kwh"] / 1000.0,
+            g["bess_charge_grid_kwh"] / 1000.0,
+        ],
+        [
+            "PV→BESS (charge)", "PV→Grid (export)", "PV→Curtailment",
+            "BESS→Grid (export)", "Import→BESS (charge)",
+        ],
+    )
+    t_pad, y_pad = pad_line_to_bins_end(
+        left, width_days, (g["pv_kwh"] / 1000.0).to_numpy(),
+    )
+    line_if_nonzero(ax, t_pad, y_pad, "PV generation",
+                    linewidth=1.8, step_post=True)
+
+    _set_mwh_yaxis(ax, "Energy (MWh/day)")
+    if show_titles():
+        ax.set_title(
+            f"Merchant — Monthly Combined Flows"
+            f"{title_prefix(get_scenario_label())} "
+            f"— {month_name[month]}"
+        )
+    ax.set_xlabel("Day")
+    _setup_day_axis(ax, left, width_days)
+    apply_legend(ax, max_rows=2, custom_order=True, plot_type="monthly")
+    apply_universal_margins(ax, skip_x=True)
+    save_figure(out_dir / f"monthly_combined_{month:02d}.pdf")
+
+
 def plot_monthly_soc(
     res: pd.DataFrame, month: int, out_dir: Path,
 ) -> None:

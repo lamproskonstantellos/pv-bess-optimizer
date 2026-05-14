@@ -11,6 +11,7 @@ import math
 
 ALL_LABELS: list[str] = [
     "Load (demand)",
+    "PV generation",
     "PV→Load",
     "BESS→Load",
     "Import→Load",
@@ -25,6 +26,8 @@ ALL_LABELS: list[str] = [
 COLORS: dict[str, str] = {
     # Load (priority indicator)
     "Load (demand)": "#d62728",
+    # PV reference line (merchant combined view)
+    "PV generation": "#FFB300",
     # PV-origin flows (warm gradient)
     "PV→Load": "#D2691E",
     "PV→BESS (charge)": "#DAA520",
@@ -42,6 +45,7 @@ COLORS: dict[str, str] = {
 
 LEGEND_ORDER: list[str] = [
     "Load (demand)",
+    "PV generation",
     "PV→Load",
     "BESS→Load",
     "PV→BESS (charge)",

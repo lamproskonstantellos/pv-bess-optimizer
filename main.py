@@ -63,6 +63,7 @@ from pvbess_opt.plotting import (
     apply_ieee_style,
     plot_cumulative_cashflow,
     plot_daily_combined,
+    plot_daily_combined_merchant,
     plot_daily_dispatch,
     plot_daily_revenue,
     plot_daily_soc,
@@ -74,6 +75,7 @@ from pvbess_opt.plotting import (
     plot_lifetime_summary,
     plot_monthly_cashflow_year1,
     plot_monthly_combined,
+    plot_monthly_combined_merchant,
     plot_monthly_dispatch,
     plot_monthly_revenue,
     plot_monthly_soc,
@@ -86,6 +88,7 @@ from pvbess_opt.plotting import (
     plot_rolling_horizon_distribution,
     plot_yearly_cashflow_bars,
     plot_yearly_combined,
+    plot_yearly_combined_merchant,
     plot_yearly_dispatch,
     plot_yearly_revenue,
     plot_yearly_soc,
@@ -262,6 +265,9 @@ def _generate_energy_plots_for_year(
                     plot_daily_dispatch(res_for_year, date_str, daily_root)
                     plot_daily_soc(res_for_year, date_str, daily_root)
                     plot_daily_revenue(res_for_year, date_str, daily_root)
+                    plot_daily_combined_merchant(
+                        res_for_year, date_str, daily_root,
+                    )
                 else:
                     plot_daily_supply(res_for_year, date_str, daily_root)
                     plot_daily_surplus(res_for_year, date_str, daily_root)
@@ -280,6 +286,9 @@ def _generate_energy_plots_for_year(
                     plot_monthly_dispatch(res_for_year, month, monthly_root)
                     plot_monthly_soc(res_for_year, month, monthly_root)
                     plot_monthly_revenue(res_for_year, month, monthly_root)
+                    plot_monthly_combined_merchant(
+                        res_for_year, month, monthly_root,
+                    )
                 else:
                     plot_monthly_supply(res_for_year, month, monthly_root)
                     plot_monthly_surplus(res_for_year, month, monthly_root)
@@ -296,6 +305,9 @@ def _generate_energy_plots_for_year(
                 plot_yearly_dispatch(res_for_year, int(calendar_year), yearly_root)
                 plot_yearly_soc(res_for_year, int(calendar_year), yearly_root)
                 plot_yearly_revenue(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_combined_merchant(
+                    res_for_year, int(calendar_year), yearly_root,
+                )
             else:
                 plot_yearly_supply(res_for_year, int(calendar_year), yearly_root)
                 plot_yearly_surplus(res_for_year, int(calendar_year), yearly_root)

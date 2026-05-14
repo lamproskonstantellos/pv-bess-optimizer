@@ -254,6 +254,66 @@ def plot_daily_dispatch(
     save_figure_daily(out_dir / f"daily_dispatch_{date_str}.pdf", date_str)
 
 
+def plot_daily_combined_merchant(
+    res: pd.DataFrame, date_str: str, out_dir: Path,
+) -> None:
+    """Combined merchant-mode dispatch view for one calendar day.
+
+    Stacks every PV-origin flow (charge / export / curtail) plus the
+    BESS-discharged export and any grid-charging draw.  The PV
+    generation line is overlaid as the natural ceiling of the
+    PV-origin stacks.
+
+    Filename: ``daily_combined_<YYYY-MM-DD>.pdf``.
+    """
+    day = pd.to_datetime(date_str).date()
+    df = res[res["timestamp"].dt.date == day]
+    if df.empty:
+        return
+    start = pd.Timestamp(day)
+    end = start + pd.Timedelta(days=1)
+    t = df["timestamp"]
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+
+    series = [
+        df["pv_to_bess_kwh"].to_numpy(),
+        df["pv_to_grid_kwh"].to_numpy(),
+        df["pv_curtail_kwh"].to_numpy(),
+        df["bess_dis_grid_kwh"].to_numpy(),
+        df["bess_charge_grid_kwh"].to_numpy(),
+    ]
+    labels = [
+        "PV→BESS (charge)",
+        "PV→Grid (export)",
+        "PV→Curtailment",
+        "BESS→Grid (export)",
+        "Import→BESS (charge)",
+    ]
+    t_pad, ypads = pad_right_to_end(t, series, end)
+    plot_stack_filtered(ax, t_pad, ypads, labels, step_post=True)
+
+    t_pad, [pv_pad] = pad_right_to_end(t, [df["pv_kwh"].to_numpy()], end)
+    line_if_nonzero(
+        ax, t_pad, pv_pad, "PV generation",
+        linewidth=1.8, step_post=True,
+    )
+
+    if show_titles():
+        plt.title(
+            f"Merchant — Daily Combined Flows"
+            f"{title_prefix(get_scenario_label())} "
+            f"— {pretty_date(date_str)}"
+        )
+    plt.xlabel("Time (HH:mm)")
+    plt.ylabel("Energy (kWh)")
+    _setup_day_axes(ax, start, end)
+    apply_legend(ax, max_rows=2, custom_order=True, plot_type="daily")
+    apply_universal_margins(ax, skip_x=True)
+    save_figure_daily(out_dir / f"daily_combined_{date_str}.pdf", date_str)
+
+
 def plot_daily_soc(
     res: pd.DataFrame, date_str: str, out_dir: Path, *,
     e_cap_kwh: float | None = None,
