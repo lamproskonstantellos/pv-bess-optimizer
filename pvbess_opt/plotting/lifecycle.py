@@ -36,7 +36,7 @@ import pandas as pd
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
-from .style import save_figure, show_titles
+from .style import annotate_value_safe, save_figure, show_titles
 
 # ---------------------------------------------------------------------------
 # Industry benchmark bands (Lazard 2024 — update annually)
@@ -134,16 +134,15 @@ def plot_revenue_stack_yearly(
                edgecolor="black", linewidth=0.4,
                label="Grid-charging cost")
     net = (op["revenue_eur"].astype(float)).to_numpy()
-    # IEEE-friendly emphasis line: near-black with white-edged markers
-    # so the line reads cleanly against every stack colour.
+    # IEEE-friendly emphasis line: near-black solid markers.  Round-3
+    # universality rule forbids markeredgecolor="white" rings; line
+    # contrast comes from the charcoal colour itself.
     ax.plot(
         years, net,
         color=financial_color("Net revenue"),
         linewidth=1.5,
         marker="o", markersize=4,
         markerfacecolor=financial_color("Net revenue"),
-        markeredgecolor="white",
-        markeredgewidth=0.6,
         label="Net revenue",
     )
     ax.axhline(0.0, color="black", linewidth=0.6)
@@ -182,12 +181,6 @@ def plot_revenue_stack_yearly(
         ax.set_title(f"Revenue stack — {int(years[0])}-{int(years[-1])}")
     apply_financial_legend(ax)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    ax.annotate(
-        "Stacks scaled by per-year revenue "
-        "(PV degradation × revenue inflation).",
-        xy=(0.5, -0.18), xycoords="axes fraction",
-        ha="center", fontsize=6, fontstyle="italic",
-    )
     return save_figure(out_path)
 
 
@@ -218,7 +211,8 @@ def plot_lifetime_cycles(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     ax.bar(years, df["cycles"].to_numpy(dtype=float),
-           color="#1565C0", edgecolor="black", linewidth=0.4)
+           color=FINANCIAL_COLORS["net"],
+           edgecolor="black", linewidth=0.4)
     total = float(df["cycles"].sum())
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xlabel(
@@ -232,12 +226,11 @@ def plot_lifetime_cycles(
             f"{int(years[0])}-{int(years[-1])}"
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    # Footer total annotation.
-    ax.text(
-        0.99, 0.95, f"Total: {total:.0f} cycles",
-        ha="right", va="top", fontsize=7, transform=ax.transAxes,
-        bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "grey",
-              "linewidth": 0.5},
+    annotate_value_safe(
+        ax, 0.99, 0.95, f"Total: {total:.0f} cycles",
+        transform=ax.transAxes,
+        ha="right", va="top", fontsize=7,
+        bbox_alpha=0.8,
     )
     return save_figure(out_path)
 
