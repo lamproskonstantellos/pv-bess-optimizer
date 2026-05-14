@@ -1,6 +1,6 @@
 """Excel input parsing and output writing for the PV+BESS optimizer.
 
-The v0.8 schema is **seven sheets**, one logical theme per sheet:
+The schema is **seven sheets**, one logical theme per sheet:
 
 * ``timeseries`` — per-step data with lowercase snake_case column names:
   ``timestamp``, ``load_kwh``, ``pv_kwh``, ``dam_price_eur_per_mwh``,
@@ -17,7 +17,7 @@ The v0.8 schema is **seven sheets**, one logical theme per sheet:
   scope flags.
 * ``curtailment_profile`` — hour-of-day curtailment cap profile (24
   rows), optionally with one column per calendar month.  Missing →
-  fall back to a constant 27 % (legacy v0.7 behaviour) and log INFO.
+  fall back to a constant 27 % and log INFO.
 
 Public loader API
 -----------------
@@ -47,7 +47,7 @@ Mode-specific timeseries semantics
 * In ``merchant`` mode ``load_kwh`` is optional — if present, the loader
   logs an INFO message and the optimizer pins all load-coverage flows to 0.
 
-Removed-in-v0.8 keys
+Removed keys
 --------------------
 
 A handful of keys from earlier schemas trigger a friendly WARNING and
@@ -171,35 +171,36 @@ for _sheet_name, _sheet_defaults in _SHEET_DEFAULTS.items():
         _KEY_TO_SHEET[_key] = _sheet_name
 
 
-# Keys renamed in v0.8.1.  Legacy → (new_key, user-facing hint).  A
-# workbook that still carries the legacy key gets a WARNING and the
-# value is mapped to ``new_key`` so existing projects keep working.
-_LEGACY_V081_RENAMED: dict[str, tuple[str, str]] = {
+# Legacy keys remapped to current keys.  A workbook that still carries
+# a legacy key gets a WARNING and the value is mapped to ``new_key`` so
+# existing projects keep working.
+_LEGACY_RENAMED: dict[str, tuple[str, str]] = {
     "revenue_inflation_pct": (
         "retail_inflation_pct",
-        "v0.8.1 split revenue inflation into retail_inflation_pct "
+        "Revenue inflation is split into retail_inflation_pct "
         "(load / PPA) and dam_inflation_pct (wholesale exports). "
         "Value mapped to retail_inflation_pct.",
     ),
 }
 
 
-# Keys removed in v0.8.  Each maps to a one-line user-facing hint.
-_LEGACY_V08_REMOVED: dict[str, str] = {
+# Keys no longer supported.  Each maps to a one-line user-facing hint.
+_LEGACY_REMOVED: dict[str, str] = {
     "capex_licenses_eur_per_kw": (
-        "v0.8 dropped this — use devex_pv_eur_per_kw / "
+        "This key is no longer supported — use devex_pv_eur_per_kw / "
         "devex_bess_eur_per_kw instead"
     ),
     "battery_hours": (
-        "v0.8 dropped this — set bess_power_kw / bess_capacity_kwh "
-        "instead (capacity is pinned to the workbook value)"
+        "This key is no longer supported — set bess_power_kw / "
+        "bess_capacity_kwh instead (capacity is pinned to the "
+        "workbook value)"
     ),
     "p_charge_max_kw": (
-        "v0.8 dropped this — set bess_power_kw instead "
+        "This key is no longer supported — set bess_power_kw instead "
         "(symmetric charge / discharge limit)"
     ),
     "p_dis_max_kw": (
-        "v0.8 dropped this — set bess_power_kw instead "
+        "This key is no longer supported — set bess_power_kw instead "
         "(symmetric charge / discharge limit)"
     ),
 }
@@ -491,7 +492,7 @@ _MONTH_TOKENS: tuple[str, ...] = (
 
 
 def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
-    """Write a workbook from a typed nested dict (v0.8 seven-sheet schema)."""
+    """Write a workbook from a typed nested dict (seven-sheet schema)."""
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -677,8 +678,8 @@ def _parse_kv_sheet(
         if key in defaults:
             out[key] = _parse_value(key, raw, defaults[key])
             continue
-        if key in _LEGACY_V081_RENAMED:
-            new_key, hint = _LEGACY_V081_RENAMED[key]
+        if key in _LEGACY_RENAMED:
+            new_key, hint = _LEGACY_RENAMED[key]
             if new_key in flat:
                 logger.warning(
                     "%s sheet key %r is the legacy name of %r; both keys "
@@ -688,18 +689,18 @@ def _parse_kv_sheet(
                 continue
             if new_key in defaults:
                 logger.warning(
-                    "%s sheet key %r renamed to %r in v0.8.1. %s",
+                    "%s sheet key %r is the legacy name of %r. %s",
                     sheet_name, key, new_key, hint,
                 )
                 out[new_key] = _parse_value(new_key, raw, defaults[new_key])
                 continue
-        if key in _LEGACY_V08_REMOVED:
+        if key in _LEGACY_REMOVED:
             logger.warning(
-                "%s sheet key %r was dropped in v0.8: %s. Value %r ignored.",
-                sheet_name, key, _LEGACY_V08_REMOVED[key], raw,
+                "%s sheet key %r is no longer supported: %s. Value %r ignored.",
+                sheet_name, key, _LEGACY_REMOVED[key], raw,
             )
             continue
-        # Unknown key for this sheet — but maybe it belongs to another v0.8 sheet?
+        # Unknown key for this sheet — but maybe it belongs to another sheet?
         if key in _KEY_TO_SHEET:
             logger.warning(
                 "Key %r found on %r sheet but belongs to %r sheet; ignored.",
@@ -725,7 +726,7 @@ _HOUR_PARSE_RE = _re.compile(r"^\s*(\d{1,2})")
 def _parse_hour_of_day(value: Any) -> int:
     """Coerce an ``hour_of_day`` cell into an integer 0..23.
 
-    Accepts the legacy integer format and the v0.8 24-hour interval
+    Accepts the legacy integer format and the 24-hour interval
     string format (``"00:00-01:00"`` … ``"23:00-24:00"``).  The
     parser is forgiving: any leading 1-2 digit run is taken as the
     start hour.  Out-of-range values raise ``ValueError``.

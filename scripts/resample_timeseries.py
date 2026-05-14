@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             "energy" if col in _ENERGY_COLS else "passthrough"
         )
         if kind == "passthrough":
-            # Drop unrecognised numeric columns (the v0.5 schema only
+            # Drop unrecognised numeric columns (the schema only
             # tolerates the four data columns).
             continue
         col_series = ts.set_index("timestamp")[col]

@@ -1,4 +1,4 @@
-"""Lifecycle plots — added in v0.6, redesigned in v0.8.
+"""Lifecycle plots.
 
 * :func:`plot_revenue_stack_yearly` — stacked yearly revenue source
   decomposition with the net line overlaid.
@@ -52,12 +52,9 @@ from .style import (
 # USD; bands below are EUR-equivalent at ~1.08 EUR/USD (mid-2024).
 #
 # * LCOE: utility-scale PV, unsubsidised band USD 29-92/MWh.  Rounded
-#   to EUR 30-85/MWh.  v0.8.0 used (30, 50) which excluded the upper
-#   half of the band; v0.8.1 widens to align with the published range.
+#   to EUR 30-85/MWh.
 # * LCOS: 100 MW / 4-hour utility-scale Li-ion BESS, unsubsidised band
-#   USD 170-296/MWh.  Rounded to EUR 157-274/MWh.  v0.8.0 used (100,
-#   250) which under-shot the lower edge; v0.8.1 tightens to the
-#   published range.
+#   USD 170-296/MWh.  Rounded to EUR 157-274/MWh.
 #
 # Workbook overrides: the four benchmark_lcoe_* / benchmark_lcos_* keys
 # in the economics sheet override these per-project.
@@ -290,7 +287,7 @@ def plot_lcoe_lcos_summary(
     bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
     figsize = (7, 4) if (pv_present and bess_present) else (7, 2.5)
 
-    # Workbook overrides (v0.8.1).  When the economics sheet carries
+    # Workbook overrides.  When the economics sheet carries
     # benchmark_* keys, use them; otherwise fall back to the module
     # constants (Lazard 2024 EUR-equivalent).
     lcoe_band = (

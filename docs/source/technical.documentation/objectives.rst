@@ -43,6 +43,6 @@ pinned to zero):
             - \epsilon \cdot \sum_{t} p^{\text{curtail}}_t
 
 The curtailment tiebreaker is a *tiny* term that adds determinism
-under degeneracy (multiple optima).  In v0.6 the weight is a private
+under degeneracy (multiple optima).  The weight is a private
 module-level constant in :mod:`pvbess_opt.optimization` (set to 0 to
-disable); it is no longer exposed in the workbook.
+disable); it is not exposed in the workbook.

@@ -6,7 +6,7 @@ Three vnb-mode figures per month, written directly into ``out_dir``:
 * ``monthly_surplus_<MM>.pdf``
 * ``monthly_combined_<MM>.pdf``
 
-Three merchant-mode figures per month (added in v0.6):
+Three merchant-mode figures per month:
 
 * ``monthly_dispatch_<MM>.pdf`` — exports + curtailment vs charging.
 * ``monthly_soc_<MM>.pdf`` — daily min/mean/max SOC envelope.
@@ -191,7 +191,7 @@ def plot_monthly_combined(
 
 
 # ---------------------------------------------------------------------------
-# Merchant-mode plots (no load) — added in v0.6
+# Merchant-mode plots (no load)
 # ---------------------------------------------------------------------------
 
 

@@ -125,7 +125,7 @@ detected by the loader from the column names):
   that calendar month.
 
 If the sheet is missing the loader logs an INFO message and falls
-back to a flat 27 % cap (legacy v0.7 default).
+back to a flat 27 % cap.
 
 The canonical defaults live in
 :data:`pvbess_opt.io.PROJECT_SHEET_DEFAULTS`,

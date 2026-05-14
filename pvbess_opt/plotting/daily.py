@@ -8,7 +8,7 @@ Three vnb-mode figures per calendar day, all written into the
 * ``daily_combined_<YYYY-MM-DD>.pdf`` — supply + surplus on top of the
   load line
 
-Three merchant-mode figures per calendar day (added in v0.6 — no
+Three merchant-mode figures per calendar day (no
 load, so the supply / combined views collapse to a single stack):
 
 * ``daily_dispatch_<YYYY-MM-DD>.pdf`` — stacked PV/BESS exports +
@@ -197,7 +197,7 @@ def plot_daily_combined(
 
 
 # ---------------------------------------------------------------------------
-# Merchant-mode plots (no load) — added in v0.6
+# Merchant-mode plots (no load)
 # ---------------------------------------------------------------------------
 
 

@@ -1,4 +1,4 @@
-"""I/O loader, schema validation, and output workbook tests (v0.8 schema)."""
+"""I/O loader, schema validation, and output workbook tests."""
 
 from __future__ import annotations
 

@@ -7,7 +7,7 @@ Three vnb-mode figures per calendar year, written directly into
 * ``yearly_surplus.pdf``
 * ``yearly_combined.pdf``
 
-Three merchant-mode figures per calendar year (added in v0.6):
+Three merchant-mode figures per calendar year:
 
 * ``yearly_dispatch.pdf`` — monthly exports + curtailment vs charging.
 * ``yearly_soc.pdf`` — monthly min/mean/max SOC envelope.
@@ -183,7 +183,7 @@ def plot_yearly_combined(res: pd.DataFrame, year: int, out_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Merchant-mode plots (no load) — added in v0.6
+# Merchant-mode plots (no load)
 # ---------------------------------------------------------------------------
 
 

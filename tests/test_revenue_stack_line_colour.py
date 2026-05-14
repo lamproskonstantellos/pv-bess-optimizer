@@ -1,7 +1,7 @@
-"""v0.8.1: Net revenue / Real-EUR net lines use a high-contrast colour.
+"""Net revenue / Real-EUR net lines use a high-contrast colour.
 
 The dark BESS-export stack (#0D47A1) used to swallow the dark purple
-(#6A1B9A) lines.  v0.8.1 introduces a dedicated FINANCIAL_COLORS entry
+(#6A1B9A) lines.  A dedicated FINANCIAL_COLORS entry
 "net_revenue_line" (magenta) which is high-contrast over both the
 light blue PV stack and the dark blue BESS stack.
 """
@@ -51,7 +51,7 @@ def _y1_kpis() -> dict:
 
 def test_financial_colors_contains_net_revenue_line():
     assert "net_revenue_line" in FINANCIAL_COLORS
-    # v0.8.2: net_revenue_line is deliberately aliased to
+    # net_revenue_line is deliberately aliased to
     # perfect_foresight (both use Material grey 900, near-black) so
     # the "anchor / benchmark" series read identically across plots.
     # Any OTHER collision is still a configuration mistake.

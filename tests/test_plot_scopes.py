@@ -1,8 +1,8 @@
 """Plot-scope unification tests (Phase 5).
 
-v0.6 unifies the daily / monthly / yearly scope vocabulary to
+The daily / monthly / yearly scope vocabulary is unified to
 ``none`` | ``year1_only`` | ``all``.  The Year-1-only daily branch
-that v0.5 hardcoded as a bool ``plot_daily_year1`` is now an enum
+(the historical bool ``plot_daily_year1`` is replaced by an enum
 identical to monthly / yearly.
 
 This module probes the dispatcher logic in ``main`` rather than

@@ -1,4 +1,4 @@
-"""v0.8.1: dedup plot_cumulative_cashflow vs plot_payback.
+"""Dedup plot_cumulative_cashflow vs plot_payback.
 
 plot_cumulative_cashflow now draws ONLY the cumulative + discounted
 lines.  Payback markers belong to plot_payback alone, which renders

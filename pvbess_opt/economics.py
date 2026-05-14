@@ -15,7 +15,7 @@ a representative "Year 1" then derive Years 2..N analytically by
 applying a PV degradation curve, a BESS capacity-fade curve, and
 inflation indices for revenue and OPEX.
 
-Calendar-year convention (v0.6)
+Calendar-year convention
 -------------------------------
 
 * **Year 0** carries the upfront CAPEX only.  Its calendar year is
@@ -28,7 +28,7 @@ Calendar-year convention (v0.6)
 
 A 20-year run with ``project_start_year = 2026`` therefore produces
 21 yearly rows: Year 0 = 2025 (CAPEX only), Years 1..20 = 2026..2045.
-This replaces the v0.5 convention in which Year 0 and Year 1 shared
+Year 0 and Year 1 carry distinct calendar values rather than sharing
 the same calendar year.
 
 Sign convention
@@ -148,7 +148,7 @@ def derive_asset_capacities(
 ) -> dict[str, float]:
     """Resolve the PV nameplate and BESS sizing that drive EUR/kW math.
 
-    v0.8: ``pv_nameplate_kwp``, ``bess_power_kw`` and
+    ``pv_nameplate_kwp``, ``bess_power_kw`` and
     ``bess_capacity_kwh`` are workbook inputs (no inference, no
     decision-variable read-back).  ``bess_kwh`` follows ``bess_kw``:
     zero when the BESS is absent, otherwise the workbook value.
@@ -182,7 +182,7 @@ def build_yearly_cashflow(
     derived analytically from the PV degradation curve, BESS capacity
     fade, and inflation indices.
 
-    Calendar-year mapping (v0.6 convention):
+    Calendar-year mapping:
     Year 0 (CAPEX paid the year before COD) lands at calendar
     ``project_start_year - 1``; Years 1..N at
     ``project_start_year .. project_start_year + N - 1``.
@@ -209,14 +209,14 @@ def build_yearly_cashflow(
     devex_bess_y0 = -float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
     devex_total_y0 = devex_pv_y0 + devex_bess_y0
 
-    # v0.8: revenue is derated by the aggregator fee (Gridcog /
+    # Revenue is derated by the aggregator fee (Gridcog /
     # merchant-aggregator convention).  The unavailability factor is
     # already baked into ``year1_kpis['profit_total_eur']`` upstream
     # (see :mod:`pvbess_opt.availability`), so it is NOT re-applied here.
     aggregator_fee_pct = float(econ.get("aggregator_fee_pct_revenue", 0.0) or 0.0)
     aggregator_fee_frac = max(0.0, min(1.0, aggregator_fee_pct / 100.0))
 
-    # v0.8.1: split the Year-1 revenue base into retail (load-coverage)
+    # Split the Year-1 revenue base into retail (load-coverage)
     # and DAM (wholesale export) streams.  Retail revenue is indexed by
     # retail_inflation_pct (CPI-linked PPAs / VNB tariffs).  DAM revenue
     # is indexed by dam_inflation_pct (default 0 — Lazard / Aurora /
@@ -294,8 +294,8 @@ def build_yearly_cashflow(
             else:
                 pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
             bess_factor = (1.0 - bess_deg_annual) ** (y - 1)
-            # v0.8.1: per-stream inflation.  pv_factor is used for both
-            # streams as the existing v0.8 convention (downstream scopes
+            # Per-stream inflation.  pv_factor is used for both
+            # streams as the convention (downstream scopes
             # like revenue_stack_yearly scale by revenue_eur ratios);
             # per-stream BESS degradation is a future enhancement.
             revenue_retail_y = (
@@ -519,7 +519,7 @@ def compute_financial_kpis(
     year1_kpis: dict[str, Any] | None = None,
 ) -> dict[str, float]:
     """Compute the headline NPV / IRR / ROI / BCR / payback metrics
-    plus the v0.6 LCOE / LCOS / capacity-factor / cycles metrics when
+    plus the LCOE / LCOS / capacity-factor / cycles metrics when
     ``capacities``, ``lifetime_yearly``, and ``year1_kpis`` are provided.
 
     KPI keys are lowercase snake_case.
@@ -609,7 +609,7 @@ def compute_financial_kpis(
         float("nan") if np.isnan(payback) else float(round(payback, 4))
     )
 
-    # ---- v0.6 LCOE / LCOS / capacity-factor / cycles ----------------------
+    # ---- LCOE / LCOS / capacity-factor / cycles --------------------------
     extras: dict[str, float] = {
         "lcoe_eur_per_mwh": float("nan"),
         "lcos_eur_per_mwh": float("nan"),
@@ -738,7 +738,7 @@ def compute_financial_kpis(
         if max_y1 > 1e-9:
             extras["pv_capacity_factor"] = float(round(pv_gen_y1 / max_y1, 4))
 
-    # ---- v0.6 Year-1 revenue breakdown ------------------------------------
+    # ---- Year-1 revenue breakdown -----------------------------------------
     breakdown: dict[str, float] = {}
     if year1_kpis is not None:
         breakdown = {
@@ -784,7 +784,7 @@ def compute_financial_kpis(
     out.update(extras)
     out.update(breakdown)
 
-    # ---- v0.8.1 LCOE / LCOS audit log -----------------------------------
+    # ---- LCOE / LCOS audit log --------------------------------------------
     # Single INFO line so the run_log.txt records the headline cost
     # numbers next to the Lazard 2024 reference bands.
     lcoe_bench_low = float(econ.get("benchmark_lcoe_low_eur_per_mwh", 30.0))

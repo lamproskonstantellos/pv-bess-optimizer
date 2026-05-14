@@ -1,25 +1,20 @@
-"""v0 leftover audit (consolidated v0.5 / v0.6 / v0.7 / v0.8 contract).
+"""Leftover-token audit.
 
 Codifies the forbidden-tokens / required-tokens / files-must-exist
-contract.  The grep is implemented in pure Python so it works offline
-and on Windows without external tools.
+contract for the current release.  The grep is implemented in pure
+Python so it works offline and on Windows without external tools.
 
 Allowed locations for forbidden tokens:
 
 * The legacy-warning paths inside :func:`pvbess_opt.io._parse_kv_sheet`
-  (and the module-level ``_LEGACY_OPTIMIZATION_KEYS`` /
-  ``_LEGACY_V08_REMOVED`` constants + their docstrings).
-* The historical ``docs/v0.6_changelog.md`` and the new
-  ``docs/v0.8_changelog.md`` migration files.
-* The README's "What's new" diff and the Sphinx changelog entry.
-* Migration / asset-mode docs that retain a side-by-side diff.
-* Test files that exercise the legacy paths and this audit file
-  itself.
+  (and the module-level ``_LEGACY_RENAMED`` / ``_LEGACY_REMOVED``
+  constants + their docstrings).
+* Tests that exercise the legacy-warning paths.
+* This audit file itself.
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -38,17 +33,12 @@ SCAN_FILES: tuple[Path, ...] = (
     ROOT / "main.py",
 )
 
-# Files whose v0.5-token mentions are intentional (warning path /
-# legacy-test machinery / v0.6 migration changelog / this audit
-# file).  Paths are stored relative to ROOT for portability.
+# Files whose legacy-key mentions are intentional (warning path /
+# legacy-test machinery / this audit file).  Paths are stored
+# relative to ROOT for portability.
 FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
     Path(p) for p in (
         "pvbess_opt/io.py",
-        "docs/v0.6_changelog.md",
-        "docs/v0.8_changelog.md",
-        "docs/source/changelog.rst",
-        "docs/technical.documentation/asset_modes.md",
-        "README.md",
         "tests/test_io.py",
         "tests/test_io_v08_schema.py",
         "tests/test_plot_scopes.py",
@@ -73,6 +63,8 @@ FORBIDDEN_TOKENS: tuple[str, ...] = (
     '"0.7.0"',
     '"0.8.0"',
     '"0.8.1"',
+    '"0.8.2"',
+    '"0.8.3"',
     "capex_licenses_eur_per_kw",
     "battery_hours",
     "p_charge_max_kw",
@@ -101,13 +93,13 @@ REQUIRED_TOKENS: tuple[str, ...] = (
     "FINANCIAL_LEGEND_ORDER",
     "financial_color",
     "apply_financial_legend",
-    '"0.8.2"',
+    "apply_universal_margins",
 )
 
 REQUIRED_FILES: tuple[str, ...] = (
-    "docs/v0.6_changelog.md",
     "docs/technical.documentation/uncertainty_modelling.md",
     "docs/technical.documentation/asset_modes.md",
+    "docs/CHANGELOG.md",
     "pvbess_opt/plotting/lifecycle.py",
     "tests/test_io_v08_schema.py",
     "tests/test_year0_convention.py",
@@ -207,9 +199,9 @@ def test_required_file_exists(relpath: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_repo_input_xlsx_round_trips_through_v08_loader_cleanly(caplog):
-    """Inputs/input.xlsx must load through read_workbook with no
-    legacy-key warnings — i.e. it carries the v0.8 schema."""
+def test_repo_input_xlsx_loads_through_loader_cleanly(caplog):
+    """inputs/input.xlsx must load through read_workbook with no
+    legacy-key warnings."""
     import logging
     from pvbess_opt.io import read_workbook
 
@@ -219,11 +211,10 @@ def test_repo_input_xlsx_round_trips_through_v08_loader_cleanly(caplog):
         rec for rec in caplog.records
         if rec.levelno >= logging.WARNING
         and rec.name.startswith("pvbess_opt.io")
-        and any(re.search(t, rec.getMessage())
-                for t in (
-                    "legacy v0.5", "plot_daily_year1",
-                    "v0.7 two-sheet layout", "v0.8 dropped this",
-                ))
+        and (
+            "no longer supported" in rec.getMessage()
+            or "legacy name of" in rec.getMessage()
+        )
     ]
     assert not legacy_warnings, (
         "inputs/input.xlsx still emits legacy-schema warnings: "
@@ -231,8 +222,8 @@ def test_repo_input_xlsx_round_trips_through_v08_loader_cleanly(caplog):
     )
 
 
-def test_inputs_xlsx_uses_v08_schema():
-    """inputs/input.xlsx must expose the v0.8 seven-sheet typed dict."""
+def test_inputs_xlsx_uses_seven_sheet_schema():
+    """inputs/input.xlsx must expose the seven-sheet typed dict."""
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     for section in ("project", "pv", "bess", "economics", "simulation"):
@@ -252,10 +243,21 @@ def test_inputs_xlsx_uses_v08_schema():
 
 
 # ---------------------------------------------------------------------------
-# Sanity: pvbess_opt.__version__ matches the badge token
+# Sanity: pvbess_opt.__version__ matches the README badge
 # ---------------------------------------------------------------------------
 
 
-def test_pvbess_version_string_is_exactly_0_8_2():
+def test_pvbess_version_string_matches_init_version():
+    """The version exposed by the package equals the README badge."""
+    import re
     import pvbess_opt
-    assert pvbess_opt.__version__ == "0.8.2"
+
+    version = pvbess_opt.__version__
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    match = re.search(
+        r"img\.shields\.io/badge/version-([^-\s]+)-blue", readme,
+    )
+    assert match, "version badge not found in README.md"
+    assert match.group(1) == version, (
+        f"README badge {match.group(1)!r} != __version__ {version!r}"
+    )

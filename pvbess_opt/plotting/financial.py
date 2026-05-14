@@ -60,7 +60,7 @@ def _start_end_years(yearly_cf: pd.DataFrame) -> tuple[int, int]:
 def _operating_window_with_capex(
     yearly_cf: pd.DataFrame,
 ) -> tuple[int, int, int | None]:
-    """Return ``(op_start, op_end, capex_year)`` for v0.6 title strings.
+    """Return ``(op_start, op_end, capex_year)`` for title strings.
 
     ``op_start`` is the calendar year of Year 1 (first operating year).
     ``op_end`` is the calendar year of the last row.  ``capex_year`` is
@@ -353,7 +353,7 @@ def plot_payback(
     using_calendar = "calendar_year" in yearly_cf.columns
     # Year-0 row's calendar value is the new "base year" anchor: a payback
     # of N years lands at calendar (capex_year + N) = (project_start_year - 1
-    # + N), one step earlier than the v0.5 mapping.
+    # + N).
     base_year = float(years[0]) if using_calendar else 0.0
 
     def _to_axis(payback: float) -> float:

@@ -357,7 +357,7 @@ def test_rescale_tolerance_constant_is_tight():
 
 
 # ---------------------------------------------------------------------------
-# Leftover-artifact audit — no v0.7 noise-bleed pattern in the tree
+# Leftover-artifact audit — no noise-bleed pattern in the tree
 # ---------------------------------------------------------------------------
 
 
@@ -387,5 +387,5 @@ def test_no_v07_noise_bleed_pattern_remains():
                 if _BAD_PATTERN.search(line):
                     hits.append(f"{path.relative_to(ROOT)}:{i}: {line.rstrip()}")
     assert not hits, (
-        "v0.7 noise-bleed pattern found:\n" + "\n".join(hits)
+        "noise-bleed pattern found:\n" + "\n".join(hits)
     )

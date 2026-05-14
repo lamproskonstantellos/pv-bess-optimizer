@@ -1,6 +1,6 @@
 """Year-0 CAPEX / Year-1 operations calendar convention (Phase 2).
 
-v0.6 mapping:
+Year-0 / Year-1 mapping:
 
     Year 0    calendar = project_start_year - 1   CAPEX paid here, no operations
     Year 1    calendar = project_start_year       First operating year
@@ -184,7 +184,7 @@ def test_plot_payback_marker_axis_v06():
     """A simple payback of 5.0 yr with start=2026 must land at calendar 2031."""
     base_year = 2025.0  # Year 0 calendar
     payback = 5.0
-    # v0.6 mapping: base_year + payback
+    # Year-0 / Year-1 mapping: base_year + payback
     assert base_year + payback == 2030.0
     # Alternatively, project_start_year + (payback - 1) = 2026 + 4 = 2030 also.
     assert int(_econ(start=2026, n_years=20)["project_start_year"]) + (payback - 1) == 2030.0

@@ -1,6 +1,6 @@
-"""v0.8 BESS spec rationalisation tests (Phase 2).
+"""BESS spec rationalisation tests.
 
-The optimizer's surface dropped three v0.7 keys:
+The optimizer's surface drops three legacy keys:
 ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw``.  ``bess_power_kw``
 is now the symmetric charge / discharge limit, and ``bess_capacity_kwh``
 pins the BESS energy capacity.  ``e_cap`` is no longer a decision
@@ -75,14 +75,14 @@ def _params(*, pv_kwp: float, bess_kw: float, bess_kwh: float, mode: str) -> dic
 @pytest.mark.parametrize("dropped", [
     "battery_hours", "p_charge_max_kw", "p_dis_max_kw",
 ])
-def test_loader_warns_on_v07_bess_keys(dropped, caplog):
+def test_loader_warns_on_legacy_bess_keys(dropped, caplog):
     flat = {dropped: 5000.0}
     with caplog.at_level("WARNING"):
         _parse_kv_sheet("bess", flat)
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert dropped in msgs
     assert "bess_power_kw" in msgs or "bess_capacity_kwh" in msgs
-    assert "v0.8" in msgs
+    assert "no longer supported" in msgs
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ def test_kpi_e_cap_mwh_matches_workbook_capacity():
     kpis = compute_kpis(res, params, verify_balance=False)
     assert "e_cap_mwh" in kpis
     assert "e_cap_opt_mwh" not in kpis
-    # In v0.8 the value comes straight from bess_capacity_kwh / 1000.
+    # The value comes straight from bess_capacity_kwh / 1000.
     assert kpis["e_cap_mwh"] == pytest.approx(20.0, rel=1e-6)
 
 

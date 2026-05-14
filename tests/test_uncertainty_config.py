@@ -1,7 +1,7 @@
 """Configurable rolling-horizon uncertainty tests (Phase 4).
 
 Covers:
-* The 11 uncertainty keys default to the v0.5 behaviour
+* The 11 uncertainty keys default to a baseline behaviour
   (enabled=False).
 * ``add_forecast_noise`` honours the per-source enable flags.
 * ``rolling_horizon_dispatch`` plumbs the flags through.

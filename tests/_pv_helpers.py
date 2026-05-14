@@ -4,7 +4,7 @@ The canonical 15-min reference shape lives at
 ``data/pv_shape_15min.csv`` (real-world 8 MW site, 35 040 rows, sums
 to 12 568 961.7517 kWh).  This module exposes a tiny helper that
 loads, downsamples and slices that shape without any randomness — used
-by every short-fixture timeseries in the test suite so the v0.7
+by every short-fixture timeseries in the test suite so the
 noise-bleed-at-night bug cannot creep back into a unit test.
 """
 

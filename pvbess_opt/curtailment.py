@@ -1,6 +1,6 @@
 """Hour-of-day curtailment-cap profile helpers.
 
-The v0.8 workbook ships with a ``curtailment_profile`` sheet that
+The workbook ships with a ``curtailment_profile`` sheet that
 specifies the regulatory grid-export curtailment cap as a percentage
 per hour-of-day, optionally per calendar month.
 
@@ -14,8 +14,8 @@ Two supported shapes (auto-detected by the loader in
 
 The :func:`build_per_step_curtailment_frac` helper expands the profile
 to a per-timestep fraction array aligned with the timeseries.  When the
-profile is constant 27 % at every hour (the default v0.8 fixture)
-the resulting per-step series is a flat 0.27, reproducing the v0.7
+profile is constant 27 % at every hour (the default fixture)
+the resulting per-step series is a flat 0.27, reproducing the scalar
 scalar baseline exactly.
 """
 
@@ -68,7 +68,7 @@ def build_per_step_curtailment_frac(
         Either a (24,) hourly cap profile applied to every day, or a
         (24, 12) cap profile indexed by ``(hour_of_day, month - 1)``.
         Values are interpreted as percentages (e.g. 27 ⇒ 0.27).
-        ``None`` falls back to a flat 27 % (legacy v0.7 default).
+        ``None`` falls back to a flat 27 % default.
     """
     arr = _normalise_profile(profile)
     ts = pd.to_datetime(pd.Index(timestamps))

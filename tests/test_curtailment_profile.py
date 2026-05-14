@@ -140,14 +140,14 @@ def test_missing_sheet_falls_back_to_scalar(tmp_path, caplog):
 
 
 # ---------------------------------------------------------------------------
-# Optimizer regression: constant 27% reproduces v0.7 export caps
+# Optimizer regression: constant 27% reproduces the scalar export caps
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_constant_27_matches_v07_export_caps(short_params, short_ts):
     """A constant 27 % profile must produce a flat 0.27 per-step cap
-    identical to the v0.7 scalar path."""
+    identical to the scalar path."""
     profile = np.full(24, 27.0, dtype=float)
     params = dict(short_params)
     params["curtailment_profile"] = profile

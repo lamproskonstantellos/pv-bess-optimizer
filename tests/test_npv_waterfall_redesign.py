@@ -1,4 +1,4 @@
-"""v0.8.1: plot_npv_waterfall morphology must match yearly_cashflow_bars.
+"""plot_npv_waterfall morphology must match yearly_cashflow_bars.
 
 Legend entries: Revenue, OPEX, DEVEX, CAPEX, Net cash-flow, Cumulative
 NPV.  No in-axis DEVEX / CAPEX text annotations.  y-axis padded so the
@@ -99,7 +99,7 @@ def test_npv_waterfall_legend_has_all_components(tmp_path: Path):
 
 
 def test_npv_total_annotation_inside_frame(tmp_path: Path):
-    """v0.8.2: the "NPV = €X.XM" total annotation lives in axes
+    """The "NPV = €X.XM" total annotation lives in axes
     coordinates inside the frame, not overflowing past the right
     spine."""
     fig = _render_npv_waterfall(tmp_path)
@@ -124,7 +124,7 @@ def test_npv_waterfall_has_no_inaxis_capex_devex_text(tmp_path: Path):
     text annotations next to the Year-0 bar — those are conveyed
     through the 5-entry legend instead.
 
-    Detection contract (v0.8.2): inspect rendered text artists on the
+    Detection contract: inspect rendered text artists on the
     axes rather than grepping source.  Source-level lookups are
     brittle because the canonical labels now appear inside
     ``financial_color("DEVEX")`` / ``label="DEVEX"`` calls.

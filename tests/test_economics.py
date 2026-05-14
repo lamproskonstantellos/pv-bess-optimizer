@@ -91,7 +91,7 @@ def test_build_yearly_cashflow_lowercase_keys():
 
 
 def test_calendar_year_v06_convention():
-    """v0.6: Year 0 (CAPEX) is project_start_year - 1; Year 1 is project_start_year."""
+    """Year 0 (CAPEX) is project_start_year - 1; Year 1 is project_start_year."""
     kpis = {"profit_total_eur": 200_000.0}
     caps = {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
     df = build_yearly_cashflow(kpis, _econ(), caps)

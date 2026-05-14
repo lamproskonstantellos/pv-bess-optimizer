@@ -1,6 +1,6 @@
 """PV-only / BESS-only / hybrid asset-mode tests (Phase 3).
 
-v0.6 semantics:
+Asset-mode semantics:
 
 * ``pv_nameplate_kwp = 0``  → PV is not part of the project.
 * ``bess_power_kw = 0``     → BESS is not part of the project.
@@ -180,7 +180,7 @@ def test_bess_only_run_pins_pv_to_zero():
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_hybrid_run_unaffected():
-    """Hybrid: both > 0 → behaves identically to v0.7 base case."""
+    """Hybrid: both > 0 → behaves identically to the baseline case."""
     params = _params(pv_kwp=4500.0, bess_kw=5000.0, mode="vnb")
     ts = _make_ts()
     res, _ = run_scenario(
