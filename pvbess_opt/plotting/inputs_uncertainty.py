@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from ..config import COLORS, FINANCIAL_COLORS
 from .style import save_figure, show_titles
 
 _Z90 = 1.2816  # Phi^{-1}(0.90)
@@ -61,11 +62,15 @@ def plot_input_forecast_band(
         return save_figure(out_path)
 
     panels = [
-        ("dam_price_eur_per_mwh", "DAM (EUR/MWh)", sigma_dam, "#1565C0"),
-        ("pv_kwh", "PV (kWh / step)", sigma_pv, "#D2691E"),
+        ("dam_price_eur_per_mwh", "DAM (EUR/MWh)", sigma_dam,
+         FINANCIAL_COLORS["net"]),
+        ("pv_kwh", "PV (kWh / step)", sigma_pv, COLORS["PV→Load"]),
     ]
     if "load_kwh" in sub.columns:
-        panels.append(("load_kwh", "Load (kWh / step)", sigma_load, "#2E7D32"))
+        panels.append((
+            "load_kwh", "Load (kWh / step)", sigma_load,
+            FINANCIAL_COLORS["revenue"],
+        ))
 
     fig, axes = plt.subplots(len(panels), 1, figsize=(7, 6.5), sharex=True)
     if len(panels) == 1:
@@ -113,11 +118,13 @@ def plot_input_seasonal_boxplot(
         axes = [axes]
 
     panels = [
-        ("dam_price_eur_per_mwh", "DAM (EUR/MWh)", "#1565C0"),
-        ("pv_kwh",                "PV (kWh / step)", "#D2691E"),
+        ("dam_price_eur_per_mwh", "DAM (EUR/MWh)", FINANCIAL_COLORS["net"]),
+        ("pv_kwh",                "PV (kWh / step)", COLORS["PV→Load"]),
     ]
     if has_load:
-        panels.append(("load_kwh", "Load (kWh / step)", "#2E7D32"))
+        panels.append((
+            "load_kwh", "Load (kWh / step)", FINANCIAL_COLORS["revenue"],
+        ))
 
     for ax, (col, ylabel, color) in zip(axes, panels):
         data = [ts.loc[months == m, col].to_numpy(dtype=float)
