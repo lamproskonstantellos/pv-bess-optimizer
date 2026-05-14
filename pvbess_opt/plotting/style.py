@@ -13,6 +13,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.transforms import offset_copy
 
 from ..config import IEEE_RCPARAMS, LEGEND_ORDER, assert_unique_colors
 
@@ -149,3 +150,79 @@ def apply_legend(
         frameon=True,
         framealpha=0.9,
     )
+
+
+# ---------------------------------------------------------------------------
+# Universal value-annotation helper (round-3)
+# ---------------------------------------------------------------------------
+
+
+def annotate_value_safe(
+    ax,
+    x: float,
+    y: float,
+    text: str,
+    *,
+    transform=None,
+    ha: str = "center",
+    va: str = "center",
+    fontsize: int = 7,
+    color: str = "black",
+    offset_points: tuple[float, float] = (0.0, 0.0),
+    bbox_facecolor: str = "white",
+    bbox_edgecolor: str = "grey",
+    bbox_alpha: float = 0.85,
+    bbox_pad: float = 0.2,
+):
+    """Place a bbox-wrapped value annotation at ``(x, y)``.
+
+    The single entry point for every numeric annotation on a plot.
+    Plotting modules MUST call this instead of ``ax.text(...)`` /
+    ``ax.annotate(...)`` with an inline ``bbox=`` kwarg — universality
+    tests enforce this.
+
+    With ``transform=None`` (the default), ``(x, y)`` are data
+    coordinates and ``offset_points`` may apply a Δ in points so the
+    bbox sits cleanly above / beside the underlying mark.  Pass
+    ``transform=ax.transAxes`` to anchor the bbox in axes-fraction
+    coordinates (e.g. top-right summary boxes).
+    """
+    bbox_kwargs = {
+        "facecolor": bbox_facecolor,
+        "edgecolor": bbox_edgecolor,
+        "alpha": bbox_alpha,
+        "linewidth": 0.5,
+        "boxstyle": f"round,pad={bbox_pad}",
+    }
+    if transform is None:
+        if offset_points != (0.0, 0.0):
+            tr = offset_copy(
+                ax.transData, fig=ax.figure,
+                x=offset_points[0], y=offset_points[1], units="points",
+            )
+        else:
+            tr = ax.transData
+    else:
+        tr = transform
+    return ax.text(
+        x, y, text,
+        transform=tr,
+        ha=ha, va=va, fontsize=fontsize, color=color,
+        bbox=bbox_kwargs,
+    )
+
+
+def expand_axes_for_annotations(ax, *, pad: float = 0.05) -> None:
+    """Enlarge the current xlim / ylim by ``pad`` so bbox annotations
+    placed near the data edges do not clip outside the frame.
+
+    Idempotent enough for normal use: re-running with a small pad
+    won't drift the axes.  Call at the END of a plotting function,
+    after every annotation has been placed.
+    """
+    xmin, xmax = ax.get_xlim()
+    ymin, ymax = ax.get_ylim()
+    dx = pad * (xmax - xmin) if xmax > xmin else pad
+    dy = pad * (ymax - ymin) if ymax > ymin else pad
+    ax.set_xlim(xmin - dx, xmax + dx)
+    ax.set_ylim(ymin - dy, ymax + dy)
