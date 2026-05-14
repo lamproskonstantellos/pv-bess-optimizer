@@ -13,12 +13,15 @@ import numpy as np
 import pandas as pd
 
 from pvbess_opt.plotting import (
+    plot_daily_combined_merchant,
     plot_daily_dispatch,
     plot_daily_revenue,
     plot_daily_soc,
+    plot_monthly_combined_merchant,
     plot_monthly_dispatch,
     plot_monthly_revenue,
     plot_monthly_soc,
+    plot_yearly_combined_merchant,
     plot_yearly_dispatch,
     plot_yearly_revenue,
     plot_yearly_soc,
@@ -90,6 +93,13 @@ def test_plot_daily_revenue(tmp_path):
     assert files
 
 
+def test_plot_daily_combined_merchant_renders(tmp_path):
+    df = _make_dispatch()
+    plot_daily_combined_merchant(df, "2026-06-01", tmp_path)
+    files = list(tmp_path.rglob("daily_combined_2026-06-01.pdf"))
+    assert files
+
+
 # ---------------------------------------------------------------------------
 # Monthly merchant trio
 # ---------------------------------------------------------------------------
@@ -111,6 +121,12 @@ def test_plot_monthly_revenue(tmp_path):
     df = _make_dispatch(n_days=14)
     plot_monthly_revenue(df, 6, tmp_path)
     assert (tmp_path / "monthly_revenue_06.pdf").exists()
+
+
+def test_plot_monthly_combined_merchant_renders(tmp_path):
+    df = _make_dispatch(n_days=14)
+    plot_monthly_combined_merchant(df, 6, tmp_path)
+    assert (tmp_path / "monthly_combined_06.pdf").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +160,12 @@ def test_plot_yearly_revenue(tmp_path):
     assert (tmp_path / "yearly_revenue.pdf").exists()
 
 
+def test_plot_yearly_combined_merchant_renders(tmp_path):
+    df = _make_year()
+    plot_yearly_combined_merchant(df, 2026, tmp_path)
+    assert (tmp_path / "yearly_combined.pdf").exists()
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher branches on params['mode']
 # ---------------------------------------------------------------------------
@@ -163,6 +185,20 @@ def test_dispatcher_renders_merchant_trio(tmp_path):
     assert list(tmp_path.rglob("daily_dispatch_*.pdf"))
     assert list(tmp_path.rglob("daily_soc_*.pdf"))
     assert list(tmp_path.rglob("daily_revenue_*.pdf"))
+
+
+def test_dispatcher_renders_merchant_combined(tmp_path):
+    """Round-5: the merchant branch also produces the combined trio."""
+    from main import _generate_energy_plots_for_year
+    df = _make_dispatch()
+    _generate_energy_plots_for_year(
+        df, 2026, tmp_path,
+        daily=True, monthly=True, yearly=True,
+        mode="merchant",
+    )
+    assert list(tmp_path.rglob("daily_combined_*.pdf"))
+    assert list(tmp_path.rglob("monthly_combined_*.pdf"))
+    assert list(tmp_path.rglob("yearly_combined.pdf"))
 
 
 def test_dispatcher_renders_vnb_trio(tmp_path):

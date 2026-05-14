@@ -17,6 +17,7 @@ Three families of plots:
 
 from .daily import (
     plot_daily_combined,
+    plot_daily_combined_merchant,
     plot_daily_dispatch,
     plot_daily_revenue,
     plot_daily_soc,
@@ -39,6 +40,7 @@ from .inputs_uncertainty import (
 )
 from .monthly import (
     plot_monthly_combined,
+    plot_monthly_combined_merchant,
     plot_monthly_dispatch,
     plot_monthly_revenue,
     plot_monthly_soc,
@@ -52,7 +54,8 @@ from .style import (
     set_show_titles,
 )
 from .lifecycle import (
-    plot_lcoe_lcos_summary,
+    plot_lcoe_summary,
+    plot_lcos_summary,
     plot_lifetime_cycles,
     plot_revenue_stack_yearly,
 )
@@ -63,6 +66,7 @@ from .uncertainty import (
 from .yearly import (
     plot_lifetime_summary,
     plot_yearly_combined,
+    plot_yearly_combined_merchant,
     plot_yearly_dispatch,
     plot_yearly_revenue,
     plot_yearly_soc,
@@ -78,18 +82,21 @@ __all__ = [
     "plot_daily_supply",
     "plot_daily_surplus",
     "plot_daily_combined",
+    "plot_daily_combined_merchant",
     "plot_daily_dispatch",
     "plot_daily_soc",
     "plot_daily_revenue",
     "plot_monthly_supply",
     "plot_monthly_surplus",
     "plot_monthly_combined",
+    "plot_monthly_combined_merchant",
     "plot_monthly_dispatch",
     "plot_monthly_soc",
     "plot_monthly_revenue",
     "plot_yearly_supply",
     "plot_yearly_surplus",
     "plot_yearly_combined",
+    "plot_yearly_combined_merchant",
     "plot_yearly_dispatch",
     "plot_yearly_soc",
     "plot_yearly_revenue",
@@ -105,7 +112,8 @@ __all__ = [
     "plot_foresight_gap_comparison",
     "plot_revenue_stack_yearly",
     "plot_lifetime_cycles",
-    "plot_lcoe_lcos_summary",
+    "plot_lcoe_summary",
+    "plot_lcos_summary",
     "plot_input_forecast_band",
     "plot_input_seasonal_boxplot",
     "plot_dam_intraday_heatmap",

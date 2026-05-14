@@ -20,10 +20,13 @@ from pvbess_opt import plotting as _plotting
 PLOTTING_FUNCTIONS: tuple[str, ...] = (
     # Energy
     "plot_daily_supply", "plot_daily_surplus", "plot_daily_combined",
+    "plot_daily_combined_merchant",
     "plot_daily_dispatch", "plot_daily_soc", "plot_daily_revenue",
     "plot_monthly_supply", "plot_monthly_surplus", "plot_monthly_combined",
+    "plot_monthly_combined_merchant",
     "plot_monthly_dispatch", "plot_monthly_soc", "plot_monthly_revenue",
     "plot_yearly_supply", "plot_yearly_surplus", "plot_yearly_combined",
+    "plot_yearly_combined_merchant",
     "plot_yearly_dispatch", "plot_yearly_soc", "plot_yearly_revenue",
     "plot_lifetime_summary",
     # Financial
@@ -32,7 +35,7 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     "plot_npv_tornado", "plot_irr_tornado",
     # Lifecycle
     "plot_revenue_stack_yearly", "plot_lifetime_cycles",
-    "plot_lcoe_lcos_summary",
+    "plot_lcoe_summary", "plot_lcos_summary",
     # Uncertainty
     "plot_rolling_horizon_distribution", "plot_foresight_gap_comparison",
     # Inputs
@@ -124,6 +127,7 @@ def test_no_italic_prose_captions(fn_name):
 
 @pytest.mark.parametrize("fn_name", [
     "plot_monthly_supply", "plot_monthly_surplus", "plot_monthly_combined",
+    "plot_monthly_combined_merchant",
     "plot_monthly_dispatch", "plot_monthly_soc", "plot_monthly_revenue",
 ])
 def test_monthly_uses_dd_mm_yyyy_format(fn_name):
@@ -139,6 +143,7 @@ def test_monthly_uses_dd_mm_yyyy_format(fn_name):
 
 @pytest.mark.parametrize("fn_name", [
     "plot_yearly_supply", "plot_yearly_surplus", "plot_yearly_combined",
+    "plot_yearly_combined_merchant",
     "plot_yearly_dispatch", "plot_yearly_soc", "plot_yearly_revenue",
 ])
 def test_yearly_uses_mm_yyyy_format(fn_name):

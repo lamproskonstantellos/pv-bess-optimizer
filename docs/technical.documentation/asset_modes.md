@@ -68,9 +68,9 @@ clean cashflow with no phantom BESS line items, and vice versa.
   the plot fan-out.
 * The merchant-mode `plot_*_soc` helpers skip rendering when the BESS
   is absent (no SOC trajectory worth plotting).
-* The lifecycle `plot_lifetime_cycles` and `plot_lcoe_lcos_summary`
-  show explicit "N/A" placeholders for the asset that is not part of
-  the project.
+* The lifecycle `plot_lifetime_cycles`, `plot_lcoe_summary`, and
+  `plot_lcos_summary` show explicit "N/A" placeholders for the asset
+  that is not part of the project.
 
 ## Lifetime dispatch
 

@@ -13,6 +13,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.patches import Rectangle
 from matplotlib.transforms import offset_copy
 
 from ..config import IEEE_RCPARAMS, LEGEND_ORDER, assert_unique_colors
@@ -237,6 +238,9 @@ def expand_axes_for_annotations(ax, *, pad: float = 0.05) -> None:
 # axes frame.
 UNIVERSAL_MARGIN_X_FRAC: float = 0.02
 UNIVERSAL_MARGIN_Y_FRAC: float = 0.05
+# Larger headroom for plots that anchor an annotation in the top
+# corner (NPV waterfall total box, lifetime-cycles total box).
+HEADROOM_Y_FRAC: float = 0.12
 
 
 def apply_universal_margins(
@@ -247,25 +251,46 @@ def apply_universal_margins(
     skip_x: bool = False,
     skip_y: bool = False,
 ) -> None:
-    """Pad axes limits so data and annotations never touch the frame.
+    """Pad axes so data and annotations never touch the frame.
 
-    Called as the last step in every plotting function before
-    :func:`save_figure`.  Adds a small symmetric padding (2% in x,
-    5% in y by default) to the current axes limits.
+    Called as the LAST step in every plotting function before
+    :func:`save_figure`.  Idempotent.
 
-    skip_x: pass True for plots with a fixed x-domain that must not
-        extend (e.g. monthly plots whose x-axis spans exactly
-        Jan 1 → Feb 1, or tornado plots that already apply their own
-        outward padding).
-    skip_y: same for fixed y-domains.
+    Baseline-aware behaviour:
+
+    * Y-axis — if the current y-min is at or above 0 (typical bar
+      / stacked-bar plot with non-negative data), the floor is
+      preserved at the data minimum. Only the top gets padded.
+      Otherwise (line plot crossing zero, waterfall, NPV curve)
+      both top and bottom are padded.
+    * X-axis — if the plot contains bar artists, only the right
+      side is padded (the leftmost bar sits at the left frame
+      edge). Otherwise both sides padded symmetrically.
+
+    Plots that put an annotation in the top-right corner (e.g.
+    NPV waterfall, lifetime cycles total) should pass a larger
+    ``y_frac`` (use :data:`HEADROOM_Y_FRAC` ≈ 0.12) so the
+    annotation has its own breathing row above the data.
     """
-    if not skip_x:
-        xmin, xmax = ax.get_xlim()
-        span = xmax - xmin
-        if span > 0:
-            ax.set_xlim(xmin - x_frac * span, xmax + x_frac * span)
     if not skip_y:
         ymin, ymax = ax.get_ylim()
-        span = ymax - ymin
-        if span > 0:
-            ax.set_ylim(ymin - y_frac * span, ymax + y_frac * span)
+        span_y = ymax - ymin
+        if span_y > 0:
+            new_ymin = ymin if ymin >= 0 else ymin - y_frac * span_y
+            new_ymax = ymax + y_frac * span_y
+            ax.set_ylim(new_ymin, new_ymax)
+    if not skip_x:
+        xmin, xmax = ax.get_xlim()
+        span_x = xmax - xmin
+        if span_x > 0:
+            has_bars = any(
+                hasattr(c, "patches") and len(c.patches) > 0
+                for c in ax.containers
+            ) or any(
+                isinstance(p, Rectangle) and p.get_width() > 0
+                for p in ax.patches
+            )
+            if has_bars:
+                ax.set_xlim(xmin, xmax + x_frac * span_x)
+            else:
+                ax.set_xlim(xmin - x_frac * span_x, xmax + x_frac * span_x)
