@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.ticker import ScalarFormatter
 
-from ..config import XTICK_ROT
+from ..config import COLORS, FINANCIAL_COLORS, XTICK_ROT
 from .financial import _integer_year_axis
 from .helpers import (
     bar_stacked_bins,
@@ -218,7 +218,12 @@ def plot_yearly_dispatch(res: pd.DataFrame, year: int, out_dir: Path) -> None:
 
 
 def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
-    """Monthly min / mean / max SOC envelope for the calendar year."""
+    """Monthly min / mean / max SOC envelope for the calendar year.
+
+    The right-hand axis mirrors the SOC % range (when the result frame
+    carries a ``soc_pct`` column) so a reader can read both kWh and %
+    off the same envelope without a separate panel.
+    """
     df = res[pd.to_datetime(res["timestamp"]).dt.year == year]
     if df.empty or "soc_kwh" not in df.columns:
         return
@@ -235,14 +240,15 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
+    soc_colour = FINANCIAL_COLORS["net"]
     ax.fill_between(
         monthly["month_start"], monthly["min"], monthly["max"],
-        color="#1565C0", alpha=0.20, edgecolor="#1565C0",
+        color=soc_colour, alpha=0.20, edgecolor=soc_colour,
         label="Monthly min-max",
     )
     ax.plot(
         monthly["month_start"], monthly["mean"],
-        color="#1565C0", linewidth=1.5, linestyle="-",
+        color=soc_colour, linewidth=1.5, linestyle="-",
         marker="o", markersize=3,
         label="Monthly mean",
     )
@@ -256,6 +262,18 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
         )
     ax.set_xlabel("Month")
     ax.set_ylabel("SOC (kWh)")
+    # Round-3 universality: every SOC plot also exposes a right-side
+    # SOC (%) axis.  Scale derived from the soc_pct ↔ soc_kwh ratio
+    # in the frame when available, else fall back to a 0–100 % range.
+    ax2 = ax.twinx()
+    max_kwh = float(df["soc_kwh"].max())
+    if "soc_pct" in df.columns and max_kwh > 0.0:
+        ratio = float(df["soc_pct"].max()) / max_kwh
+    else:
+        ratio = 100.0 / max_kwh if max_kwh > 0.0 else 1.0
+    ymin, ymax = ax.get_ylim()
+    ax2.set_ylim(ymin * ratio, ymax * ratio)
+    ax2.set_ylabel("SOC (%)")
     ax.legend(loc="best", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     save_figure(out_dir / "yearly_soc.pdf")
@@ -328,10 +346,10 @@ def plot_lifetime_summary(
     ax = plt.gca()
     x = yearly_aggregate["calendar_year"].to_numpy(dtype=int)
     for column, color, label in [
-        ("pv_generation_mwh", "#D2691E", "PV generation"),
-        ("export_total_mwh", "#5B9BD5", "Grid exports"),
-        ("import_to_load_mwh", "#607D8B", "Grid imports → load"),
-        ("bess_discharge_mwh", "#1C5A8E", "BESS discharge"),
+        ("pv_generation_mwh", COLORS["PV→Load"], "PV generation"),
+        ("export_total_mwh", COLORS["BESS→Grid (export)"], "Grid exports"),
+        ("import_to_load_mwh", COLORS["Import→Load"], "Grid imports → load"),
+        ("bess_discharge_mwh", COLORS["BESS→Load"], "BESS discharge"),
     ]:
         if column in yearly_aggregate.columns:
             ax.plot(
