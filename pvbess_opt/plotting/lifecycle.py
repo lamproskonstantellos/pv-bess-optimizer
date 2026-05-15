@@ -39,6 +39,7 @@ from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
 from .style import (
     annotate_value_safe,
+    apply_fine_ticks,
     apply_universal_margins,
     save_figure,
     show_titles,
@@ -185,6 +186,7 @@ def plot_revenue_stack_yearly(
     apply_financial_legend(ax)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -231,6 +233,7 @@ def plot_lifetime_cycles(
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -286,6 +289,7 @@ def plot_lcoe_summary(
         absent_message="PV not part of this project — LCOE N/A",
     )
     ax.set_xlabel("EUR/MWh")
+    apply_fine_ticks(ax, axis="x")
     if show_titles():
         fig.suptitle("Levelized Cost of Energy — Lazard 2024 benchmark")
     fig.tight_layout()
@@ -335,6 +339,7 @@ def plot_lcos_summary(
         absent_message="BESS not part of this project — LCOS N/A",
     )
     ax.set_xlabel("EUR/MWh")
+    apply_fine_ticks(ax, axis="x")
     if show_titles():
         fig.suptitle("Levelized Cost of Storage — Lazard 2024 benchmark")
     fig.tight_layout()

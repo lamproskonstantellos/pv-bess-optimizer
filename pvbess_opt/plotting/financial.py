@@ -28,6 +28,7 @@ from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter, format_eur
 from .style import (
     annotate_value_safe,
+    apply_fine_ticks,
     apply_universal_margins,
     save_figure,
     show_titles,
@@ -161,6 +162,7 @@ def plot_cumulative_cashflow(
     apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -220,6 +222,7 @@ def plot_yearly_cashflow_bars(
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -305,6 +308,7 @@ def plot_npv_waterfall(
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -569,6 +573,7 @@ def _dumbbell_plot(
     # extent; the universal helper only adds defensive padding to
     # neither axis.
     apply_universal_margins(ax, skip_x=True, skip_y=True)
+    apply_fine_ticks(ax, axis="x")
 
     return save_figure(out_path)
 

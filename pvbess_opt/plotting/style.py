@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.patches import Rectangle
+from matplotlib.ticker import MaxNLocator
 from matplotlib.transforms import offset_copy
 
 from ..config import IEEE_RCPARAMS, LEGEND_ORDER, assert_unique_colors
@@ -288,3 +289,38 @@ def apply_universal_margins(
                 ax.set_xlim(xmin - x_frac * span_x, xmax + x_frac * span_x)
 
 
+# ---------------------------------------------------------------------------
+# Fine tick density helper
+# ---------------------------------------------------------------------------
+
+
+def apply_fine_ticks(
+    ax,
+    *,
+    nbins: int = 10,
+    axis: str = "y",
+) -> None:
+    """Use a denser tick locator for plots that benefit from finer
+    granularity (currency, energy).
+
+    Picks steps from the standard ``[1, 2, 5, 10]`` family — the
+    same family matplotlib uses for default ticks, just at a higher
+    bin count.  For a y-range of 20M, ~10 bins yields a 2M step.
+    For 10M, a 1M step.  For 5M, a 0.5M step.
+
+    Call as the **last** axis-mutating step in a plotting function,
+    after data is drawn and :func:`apply_universal_margins` has set
+    the final limits.
+
+    Parameters
+    ----------
+    axis : ``"y"`` (default) or ``"x"``.  Tornado plots whose value
+        axis is horizontal pass ``axis="x"``.
+    """
+    locator = MaxNLocator(nbins=nbins, steps=[1, 2, 5, 10])
+    if axis == "y":
+        ax.yaxis.set_major_locator(locator)
+    elif axis == "x":
+        ax.xaxis.set_major_locator(locator)
+    else:
+        raise ValueError(f"axis must be 'x' or 'y', got {axis!r}")
