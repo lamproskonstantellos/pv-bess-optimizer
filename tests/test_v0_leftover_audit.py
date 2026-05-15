@@ -74,6 +74,7 @@ FORBIDDEN_TOKENS: tuple[str, ...] = (
 REQUIRED_TOKENS: tuple[str, ...] = (
     "pv_present",
     "bess_present",
+    "pv_kwh_override",
     "capex_year",
     "plot_daily_scope",
     "uncertainty_compare_sources",

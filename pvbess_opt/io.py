@@ -4,7 +4,12 @@ The schema is **seven sheets**, one logical theme per sheet:
 
 * ``timeseries`` — per-step data with lowercase snake_case column names:
   ``timestamp``, ``load_kwh``, ``pv_kwh``, ``dam_price_eur_per_mwh``,
-  optional ``retail_price_eur_per_mwh``.
+  optional ``retail_price_eur_per_mwh``, optional ``pv_kwh_override``.
+  ``pv_kwh_override`` — when populated for every row, the loader uses
+  the column verbatim and bypasses the
+  ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` rescaling.
+  Use this when you have your own 15-min PV timeseries from another
+  model or measurements.
 * ``project`` — high-level run config (lifecycle horizon, mode,
   settlement, retail tariff, grid export limit, currency / title flags).
 * ``pv`` — PV nameplate, specific production, degradation, CAPEX /
@@ -819,6 +824,8 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
     for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh", "retail_price_eur_per_mwh"):
         if col in ts.columns:
             ts[col] = ts[col].astype(float).ffill().bfill()
+    # pv_kwh_override deliberately stays out of the ffill/bfill loop so
+    # partial NaN survives long enough for _resolve_pv_column to raise.
     return ts
 
 
@@ -904,6 +911,77 @@ def _rescale_pv_to_user_target(
     return out
 
 
+def _resolve_pv_column(
+    ts: pd.DataFrame,
+    *,
+    pv_nameplate_kwp: float,
+    specific_production_kwh_per_kwp: float,
+) -> pd.DataFrame:
+    """Resolve ``pv_kwh`` from either the override column or rescaling.
+
+    Four cases handled in order:
+
+    1. ``pv_kwh_override`` column absent — fall through to the
+       ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` rescale.
+    2. Column present, all-null — treat as absent and rescale.
+    3. Column present, all non-null — overwrite ``pv_kwh`` with the
+       override values verbatim, drop the override column from the
+       returned frame, log INFO with the annual sum + implied SP.
+    4. Column present, partial NaN — raise ``ValueError`` with a hint.
+    """
+    if "pv_kwh_override" not in ts.columns:
+        return _rescale_pv_to_user_target(
+            ts,
+            pv_nameplate_kwp=pv_nameplate_kwp,
+            specific_production_kwh_per_kwp=specific_production_kwh_per_kwp,
+        )
+    override = ts["pv_kwh_override"]
+    n_total = len(override)
+    n_null = int(override.isna().sum())
+    if n_null == n_total:
+        out = ts.drop(columns=["pv_kwh_override"])
+        return _rescale_pv_to_user_target(
+            out,
+            pv_nameplate_kwp=pv_nameplate_kwp,
+            specific_production_kwh_per_kwp=specific_production_kwh_per_kwp,
+        )
+    if n_null > 0:
+        raise ValueError(
+            f"pv_kwh_override has {n_null} NaN values out of {n_total}. "
+            "Either fill every row (15-min cadence, all 35040 values) "
+            "or leave the column entirely empty — the loader will then "
+            "fall back to pv_kwh × pv_nameplate_kwp × "
+            "specific_production_kwh_per_kwp rescaling."
+        )
+    out = ts.copy()
+    out["pv_kwh"] = override.astype(float)
+    out = out.drop(columns=["pv_kwh_override"])
+    annual_sum = float(override.sum())
+    if pv_nameplate_kwp > 0:
+        implied_sp = annual_sum / pv_nameplate_kwp
+        logger.info(
+            "PV column: using pv_kwh_override verbatim (annual sum "
+            "%.1f kWh, implied specific production %.1f kWh/kWp at "
+            "pv_nameplate_kwp=%.1f). Confirm pv_nameplate_kwp matches "
+            "the asset that produced this series.",
+            annual_sum, implied_sp, pv_nameplate_kwp,
+        )
+        if implied_sp < 500.0 or implied_sp > 2500.0:
+            logger.warning(
+                "PV column: implied specific production %.1f kWh/kWp "
+                "at pv_nameplate_kwp=%.1f falls outside the plausible "
+                "500-2500 kWh/kWp band. Check pv_nameplate_kwp.",
+                implied_sp, pv_nameplate_kwp,
+            )
+    else:
+        logger.info(
+            "PV column: using pv_kwh_override verbatim (annual sum "
+            "%.1f kWh). pv_nameplate_kwp = 0 — no implied SP check.",
+            annual_sum,
+        )
+    return out
+
+
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the input workbook and return the typed nested dict."""
     xlsx_path = Path(xlsx_path)
@@ -943,7 +1021,7 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
     )
-    ts = _rescale_pv_to_user_target(
+    ts = _resolve_pv_column(
         ts,
         pv_nameplate_kwp=float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0),
         specific_production_kwh_per_kwp=float(
