@@ -241,9 +241,6 @@ def expand_axes_for_annotations(ax, *, pad: float = 0.05) -> None:
 # axes frame.
 UNIVERSAL_MARGIN_X_FRAC: float = 0.02
 UNIVERSAL_MARGIN_Y_FRAC: float = 0.05
-# Larger headroom for plots that anchor an annotation in the top
-# corner (NPV waterfall total box, lifetime-cycles total box).
-HEADROOM_Y_FRAC: float = 0.12
 
 
 def apply_universal_margins(
@@ -256,8 +253,8 @@ def apply_universal_margins(
 ) -> None:
     """Pad axes so data and annotations never touch the frame.
 
-    Called as the LAST step in every plotting function before
-    :func:`save_figure`.  Idempotent.
+    Called before :func:`anchor_corner_value` (when used) and as
+    the last step before :func:`save_figure` otherwise.  Idempotent.
 
     Baseline-aware behaviour:
 
@@ -270,10 +267,11 @@ def apply_universal_margins(
       side is padded (the leftmost bar sits at the left frame
       edge). Otherwise both sides padded symmetrically.
 
-    Plots that put an annotation in the top-right corner (e.g.
-    NPV waterfall, lifetime cycles total) should pass a larger
-    ``y_frac`` (use :data:`HEADROOM_Y_FRAC` ≈ 0.12) so the
-    annotation has its own breathing row above the data.
+    Plots that put a value annotation in the top-right corner
+    (NPV waterfall, lifetime cycles) should call
+    :func:`anchor_corner_value` AFTER this helper.  That helper
+    expands the y-axis upper limit to a clean tick boundary if —
+    and only if — the annotation would overlap data.
     """
     if not skip_y:
         ymin, ymax = ax.get_ylim()

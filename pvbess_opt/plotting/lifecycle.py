@@ -38,7 +38,7 @@ from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
 from .style import (
-    HEADROOM_Y_FRAC,
+    anchor_corner_value,
     annotate_value_safe,
     apply_universal_margins,
     save_figure,
@@ -231,13 +231,8 @@ def plot_lifetime_cycles(
             f"{int(years[0])}-{int(years[-1])}"
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    annotate_value_safe(
-        ax, 0.99, 0.95, f"Total: {total:.0f} cycles",
-        transform=ax.transAxes,
-        ha="right", va="top", fontsize=7,
-        bbox_alpha=0.8,
-    )
-    apply_universal_margins(ax, y_frac=HEADROOM_Y_FRAC)
+    apply_universal_margins(ax)
+    anchor_corner_value(ax, text=f"Total: {total:.0f} cycles")
     return save_figure(out_path)
 
 
