@@ -32,6 +32,7 @@ from .helpers import (
     bar_stacked_bins,
     edges_and_widths_monthly,
     line_if_nonzero,
+    line_masked_zeros,
     month_aggregate,
     pad_line_to_bins_end,
     title_prefix,
@@ -273,8 +274,8 @@ def plot_monthly_combined_merchant(
     t_pad, y_pad = pad_line_to_bins_end(
         left, width_days, (g["pv_kwh"] / 1000.0).to_numpy(),
     )
-    line_if_nonzero(ax, t_pad, y_pad, "PV generation",
-                    linewidth=1.8, step_post=True)
+    line_masked_zeros(ax, t_pad, y_pad, "PV generation",
+                      linewidth=1.8, step_post=True)
 
     _set_mwh_yaxis(ax, "Energy (MWh/day)")
     if show_titles():
@@ -314,29 +315,60 @@ def plot_monthly_soc(
     else:
         capacity_kwh = max_kwh
 
-    daily = df.groupby(df["timestamp"].dt.date)["soc_kwh"].agg(
-        ["min", "mean", "max"],
-    ).reset_index().rename(columns={"timestamp": "date"})
-    daily["date"] = pd.to_datetime(daily["date"])
-    if daily.empty:
-        return
-    left, width_days = edges_and_widths_monthly(daily["date"])
+    # Aggregate soc_pct directly — single source of truth for the %.
+    # Tests / fixtures that omit soc_pct fall back to the derivation
+    # below so legacy callers keep working.
+    if "soc_pct" in df.columns and float(df["soc_pct"].max()) > 1e-9:
+        soc_pct_series = df["soc_pct"].astype(float)
+    else:
+        soc_pct_series = (df["soc_kwh"].astype(float) / capacity_kwh) * 100.0
 
-    daily_min_pct = daily["min"] / capacity_kwh * 100.0
-    daily_mean_pct = daily["mean"] / capacity_kwh * 100.0
-    daily_max_pct = daily["max"] / capacity_kwh * 100.0
+    daily_agg = (
+        soc_pct_series
+        .groupby(df["timestamp"].dt.date)
+        .agg(["min", "mean", "max"])
+        .reset_index()
+        .rename(columns={"timestamp": "date"})
+    )
+    daily_agg["date"] = pd.to_datetime(daily_agg["date"])
+    if daily_agg.empty:
+        return
+    left, width_days = edges_and_widths_monthly(daily_agg["date"])
+
+    daily_min_pct = daily_agg["min"]
+    daily_mean_pct = daily_agg["mean"]
+    daily_max_pct = daily_agg["max"]
+
+    # Pad to the next day after the last data point so fill + line reach
+    # the right edge of the x-axis (matches plot_monthly_combined).
+    last_date = daily_agg["date"].iloc[-1]
+    end_date = last_date + pd.Timedelta(days=1)
+    dates_pad = pd.concat(
+        [daily_agg["date"], pd.Series([end_date])], ignore_index=True,
+    )
+    min_pct_pad = np.append(
+        daily_min_pct.to_numpy(), float(daily_min_pct.iloc[-1]),
+    )
+    mean_pct_pad = np.append(
+        daily_mean_pct.to_numpy(), float(daily_mean_pct.iloc[-1]),
+    )
+    max_pct_pad = np.append(
+        daily_max_pct.to_numpy(), float(daily_max_pct.iloc[-1]),
+    )
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     soc_colour = FINANCIAL_COLORS["net"]
     ax.fill_between(
-        daily["date"], daily_min_pct, daily_max_pct,
+        dates_pad, min_pct_pad, max_pct_pad,
+        step="post",
         color=soc_colour, alpha=0.20, edgecolor=soc_colour,
         label="Daily min-max",
     )
     ax.plot(
-        daily["date"], daily_mean_pct,
-        color=soc_colour, linewidth=1.5, linestyle="-",
+        dates_pad, mean_pct_pad,
+        drawstyle="steps-post",
+        color=soc_colour, linewidth=1.5,
         marker="o", markersize=3,
         label="Daily mean",
     )

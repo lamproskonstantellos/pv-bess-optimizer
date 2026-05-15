@@ -85,6 +85,24 @@ def line_if_nonzero(ax, x, y, label, *, step_post: bool = False, **kwargs):
     ax.plot(x, y, label=label, color=label_color(label), **kwargs)
 
 
+def line_masked_zeros(ax, x, y, label, *, step_post: bool = False, **kwargs):
+    """Plot `y` masking zero entries so the line breaks at zeros.
+
+    Useful for series that are exactly zero outside their active window
+    (e.g. PV generation at night). Skips the whole call if every value
+    is zero — same all-zero behaviour as `line_if_nonzero` — but breaks
+    the line at any individual zero so the flat-zero segments do not
+    draw.
+    """
+    arr = np.asarray(y, dtype=float)
+    if np.nansum(arr) <= ZERO_THRESHOLD:
+        return
+    masked = np.where(arr > ZERO_THRESHOLD, arr, np.nan)
+    if step_post:
+        kwargs.setdefault("drawstyle", "steps-post")
+    ax.plot(x, masked, label=label, color=label_color(label), **kwargs)
+
+
 def fill_stacked_above(ax, x, base, series, labels, *, step_post: bool = False):
     """Stacked filled areas drawn above a base curve."""
     cum = np.nan_to_num(np.asarray(base, dtype=float), nan=0.0)
