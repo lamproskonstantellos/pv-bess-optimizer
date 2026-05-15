@@ -43,6 +43,54 @@ COLORS: dict[str, str] = {
     "Export cap": "#7f7f7f",
 }
 
+# ---------------------------------------------------------------------------
+# Merchant revenue-plot label colours
+# ---------------------------------------------------------------------------
+#
+# The daily / monthly / yearly merchant revenue plots draw labels of the
+# form "PV→Grid (revenue)" / "BESS→Grid (revenue)" / "Import→BESS (cost)".
+# These are a financial view of physical flows already present in the
+# energy stack, so each revenue label shares the hex value of its energy
+# counterpart — a reader who memorised "yellow = PV→Grid in the energy
+# plot" reads "yellow = PV→Grid in the revenue plot" without a second
+# look.
+#
+# Kept in a separate registry so ``COLORS`` itself stays free of
+# duplicate hex values; ``label_color`` resolves through both
+# registries.
+
+MERCHANT_COLORS: dict[str, str] = {
+    "PV→Grid (revenue)":   COLORS["PV→Grid (export)"],
+    "BESS→Grid (revenue)": COLORS["BESS→Grid (export)"],
+    "Import→BESS (cost)":  COLORS["Import→BESS (charge)"],
+}
+
+
+def merchant_color(label: str) -> str:
+    """Return the hex colour for a merchant revenue-plot label.
+
+    Raises ``KeyError`` for unknown labels so typos surface at plot
+    time rather than silently producing an off-palette colour.
+    """
+    return MERCHANT_COLORS[label]
+
+
+def label_color(label: str) -> str | None:
+    """Return the canonical hex colour for any plot label.
+
+    Looks up :data:`COLORS` (energy plots) first, then
+    :data:`MERCHANT_COLORS` (financial-view variants of the same
+    physical flow).  Returns ``None`` when neither registry knows
+    the label, so call sites can fall back to matplotlib defaults
+    where appropriate.
+    """
+    if label in COLORS:
+        return COLORS[label]
+    if label in MERCHANT_COLORS:
+        return MERCHANT_COLORS[label]
+    return None
+
+
 LEGEND_ORDER: list[str] = [
     "Load (demand)",
     "PV generation",
