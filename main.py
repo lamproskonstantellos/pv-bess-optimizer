@@ -64,6 +64,8 @@ from pvbess_opt.plotting import (
     plot_cumulative_cashflow,
     plot_daily_combined,
     plot_daily_combined_merchant,
+    plot_daily_combined_merchant_with_soc,
+    plot_daily_combined_with_soc,
     plot_daily_dispatch,
     plot_daily_revenue,
     plot_daily_soc,
@@ -269,11 +271,17 @@ def _generate_energy_plots_for_year(
                     plot_daily_combined_merchant(
                         res_for_year, date_str, daily_root,
                     )
+                    plot_daily_combined_merchant_with_soc(
+                        res_for_year, date_str, daily_root,
+                    )
                 else:
                     plot_daily_supply(res_for_year, date_str, daily_root)
                     plot_daily_surplus(res_for_year, date_str, daily_root)
                     plot_daily_combined(res_for_year, date_str, daily_root)
                     plot_daily_soc(res_for_year, date_str, daily_root)
+                    plot_daily_combined_with_soc(
+                        res_for_year, date_str, daily_root,
+                    )
             except Exception:
                 logger.exception("Daily plot failed for %s", date_str)
 

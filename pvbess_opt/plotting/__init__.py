@@ -18,6 +18,8 @@ Three families of plots:
 from .daily import (
     plot_daily_combined,
     plot_daily_combined_merchant,
+    plot_daily_combined_merchant_with_soc,
+    plot_daily_combined_with_soc,
     plot_daily_dispatch,
     plot_daily_revenue,
     plot_daily_soc,
@@ -83,6 +85,8 @@ __all__ = [
     "plot_daily_surplus",
     "plot_daily_combined",
     "plot_daily_combined_merchant",
+    "plot_daily_combined_with_soc",
+    "plot_daily_combined_merchant_with_soc",
     "plot_daily_dispatch",
     "plot_daily_soc",
     "plot_daily_revenue",

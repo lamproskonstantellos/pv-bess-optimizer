@@ -13,13 +13,15 @@ Two regulatory regimes are supported via the ``mode`` parameter:
   to zero.  The static curtailment cap STILL applies (regulatory
   grid-connection limit per MD YPEN/DAPEEK/53563/1556/2023).
 
-The single objective is **profit** maximisation: under Greek VNB
-economics retail (132 EUR/MWh) > DAM avg (~100 EUR/MWh) in >99 %
-of hours, so the profit objective produces the same dispatch as a
-"green" objective in this market.  Self-consumption is no longer
-emergent: the hard ``LOAD_PV_PRIORITY`` constraint pins
-``pv_to_load[t] == min(pv[t], load[t])`` exactly.  In merchant mode
-there is no load to "be green about".
+The single objective is **profit** maximisation.  When the user's
+retail tariff exceeds the DAM price in the majority of hours (the
+typical case for vnb projects with a co-located load), the profit
+objective produces the same dispatch as a "green" objective —
+self-consumption emerges from economics rather than being a hard
+constraint.  The hard ``LOAD_PV_PRIORITY`` constraint still pins
+``pv_to_load[t] == min(pv[t], load[t])`` exactly so the dispatch
+is correct for any retail / DAM ratio the user supplies.  In merchant
+mode there is no load to "be green about".
 
 Tight big-M values
 ------------------

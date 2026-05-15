@@ -6,10 +6,13 @@ The optimiser ships with a **single objective** — profit maximisation.
 Why not "max-green" or a blended objective?
 -------------------------------------------
 
-Under Greek VNB economics, retail (132 EUR/MWh) > DAM avg (~100 EUR/MWh)
-in **>99 % of hours**.  The ``profit`` objective therefore maximises
-self-consumption emergently via the load-priority slack and produces the
-same dispatch as a green objective would in this market.
+When the user's retail tariff exceeds the DAM price in the majority
+of hours (the typical case for ``vnb`` projects with a co-located
+load) the ``profit`` objective maximises self-consumption
+emergently via the load-priority slack and produces the same
+dispatch a green objective would.  Self-consumption falls out of
+the economics; it is not encoded as a hard preference in the
+objective.
 
 In ``merchant`` mode there is no co-located load to "be green about" in
 the first place.

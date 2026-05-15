@@ -25,7 +25,10 @@ Three asset modes are first-class:
 Highlights:
     * Seven-sheet input workbook (project / pv / bess / economics /
       simulation / curtailment_profile / timeseries) — one theme per
-      sheet for human readability.
+      sheet for human readability.  ``inputs/input.xlsx`` is the
+      single source of truth for the PV shape; the workbook ships
+      with a 1 MW x 1500 kWh/kWp/yr default that the loader rescales
+      to the user's nameplate and specific production at run time.
     * Symmetric BESS power limit (bess_power_kw) and pinned energy
       capacity (bess_capacity_kwh).  e_cap is not a decision variable.
     * Hour-of-day curtailment cap profile (optional monthly axis).

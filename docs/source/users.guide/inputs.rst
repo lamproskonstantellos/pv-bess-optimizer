@@ -132,10 +132,10 @@ The canonical defaults live in
 :data:`pvbess_opt.io.PV_SHEET_DEFAULTS`,
 :data:`pvbess_opt.io.BESS_SHEET_DEFAULTS`,
 :data:`pvbess_opt.io.ECONOMICS_SHEET_DEFAULTS`, and
-:data:`pvbess_opt.io.SIMULATION_SHEET_DEFAULTS`.  Run::
+:data:`pvbess_opt.io.SIMULATION_SHEET_DEFAULTS`.
 
-    python scripts/build_input_xlsx.py
-
-to regenerate the case-study ``inputs/input.xlsx`` from the defaults
-(35 040 fifteen-minute rows for 2026, 4 500 kWp PV, 5 MW / 20 MWh BESS,
-``vnb`` mode, flat 27 % curtailment cap).
+The shipped ``inputs/input.xlsx`` is the single source of truth for
+the PV shape: 35 040 fifteen-minute rows scaled to 1 MW × 1500
+kWh/kWp/yr by default.  The loader rescales the workbook PV column
+to match the user's ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp``
+target at run time; every per-step ratio is preserved.

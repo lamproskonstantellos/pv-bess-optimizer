@@ -21,6 +21,8 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     # Energy
     "plot_daily_supply", "plot_daily_surplus", "plot_daily_combined",
     "plot_daily_combined_merchant",
+    "plot_daily_combined_with_soc",
+    "plot_daily_combined_merchant_with_soc",
     "plot_daily_dispatch", "plot_daily_soc", "plot_daily_revenue",
     "plot_monthly_supply", "plot_monthly_surplus", "plot_monthly_combined",
     "plot_monthly_combined_merchant",
@@ -162,7 +164,13 @@ def test_yearly_uses_mm_yyyy_format(fn_name):
     ["plot_monthly_soc", "plot_yearly_soc", "plot_daily_soc"],
 )
 def test_soc_plots_have_dual_axis(fn_name):
-    """SOC plots must include both SOC (%) and SOC (kWh) axes."""
+    """SOC plots must include both SOC (%) and SOC (kWh) axes.
+
+    Only the SOC-only plots fall under this convention.  The combined
+    energy + SOC plots (``plot_daily_combined_with_soc`` and its
+    merchant sibling) follow a different convention — Energy on the
+    left, SOC (%) on the right — so they are intentionally excluded.
+    """
     fn = getattr(_plotting, fn_name)
     src = inspect.getsource(fn)
     assert "twinx" in src, (
