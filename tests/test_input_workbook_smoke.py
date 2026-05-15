@@ -7,8 +7,6 @@ These tests guard the acceptance criterion that a fresh clone can run
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pandas as pd
@@ -51,16 +49,6 @@ def test_repo_input_xlsx_has_negative_dam_hours():
     ts = pd.read_excel(ROOT / "inputs" / "input.xlsx", sheet_name="timeseries")
     n_neg = int((ts["dam_price_eur_per_mwh"] < 0).sum())
     assert 12 <= n_neg <= 20
-
-
-def test_build_input_xlsx_script_runs(tmp_path, monkeypatch):
-    """``scripts/build_input_xlsx.py`` regenerates a valid workbook."""
-    monkeypatch.chdir(ROOT)
-    proc = subprocess.run(
-        [sys.executable, "scripts/build_input_xlsx.py"],
-        cwd=ROOT, capture_output=True, text=True, timeout=120,
-    )
-    assert proc.returncode == 0, proc.stderr
 
 
 def test_read_workbook_round_trip_after_build_script():

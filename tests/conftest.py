@@ -26,10 +26,10 @@ def _make_short_ts(n_hours: int = 48, *, with_load: bool = True, seed: int = 0) 
     """Synthetic short timeseries for unit tests.
 
     PV is **deterministic** — a downsampled hourly slice of the
-    canonical 8 MW reference shape (``data/pv_shape_15min.csv``)
-    scaled to 4500 kWp.  No randomness in the PV column whatsoever.
-    Load and DAM remain seeded synthetic curves (their tests don't
-    require data-driven realism).
+    case-study workbook's ``timeseries::pv_kwh`` column scaled to
+    4500 kWp.  No randomness in the PV column whatsoever.  Load and
+    DAM remain seeded synthetic curves (their tests don't require
+    data-driven realism).
     """
     rng = np.random.default_rng(seed)
     timestamps = pd.date_range("2026-06-01 00:00", periods=n_hours, freq="h")

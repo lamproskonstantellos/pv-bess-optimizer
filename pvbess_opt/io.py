@@ -247,7 +247,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
 
 
 # ---------------------------------------------------------------------------
-# Sheet row templates (shared with build_input_xlsx.py)
+# Sheet row templates (used by the workbook writer)
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (

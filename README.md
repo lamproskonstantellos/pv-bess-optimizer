@@ -45,7 +45,6 @@ pv-bess-optimizer/
 ├── inputs/
 │   └── input.xlsx                # Seven-sheet workbook
 ├── scripts/
-│   ├── build_input_xlsx.py       # Regenerate inputs/input.xlsx
 │   └── resample_timeseries.py    # Mixed-resolution timeseries harmoniser
 ├── results/                      # Run outputs (gitignored)
 ├── docs/                         # Sphinx documentation source
@@ -72,7 +71,6 @@ responsibility (`solve/`, `finance/`, `uncertainty/`, `plotting/`).
 
 ```bash
 pip install -r requirements/dev.txt           # base + solvers + linters + pytest
-python scripts/build_input_xlsx.py            # regenerate inputs/input.xlsx
 python main.py inputs/input.xlsx --solver highs
 ```
 
