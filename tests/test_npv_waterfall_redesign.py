@@ -15,8 +15,19 @@ matplotlib.use("Agg")  # noqa: E402
 
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
+from matplotlib.offsetbox import AnchoredText  # noqa: E402
 
 from pvbess_opt.plotting.financial import plot_npv_waterfall
+
+
+def _find_anchored_text(ax, needle: str) -> AnchoredText | None:
+    """Return the first AnchoredText on ``ax`` whose text contains
+    ``needle``, or ``None`` if no match exists."""
+    for child in ax.get_children():
+        if isinstance(child, AnchoredText):
+            if needle in child.txt.get_text():
+                return child
+    return None
 
 
 def _yearly_cf() -> pd.DataFrame:
@@ -99,24 +110,23 @@ def test_npv_waterfall_legend_has_all_components(tmp_path: Path):
 
 
 def test_npv_total_annotation_inside_frame(tmp_path: Path):
-    """The "NPV = €X.XM" total annotation lives in axes
-    coordinates inside the frame, not overflowing past the right
-    spine."""
+    """The "NPV = €X.XM" total annotation anchors in the upper-right
+    quadrant of the axes, never overflowing the spines."""
     fig = _render_npv_waterfall(tmp_path)
     ax = fig.axes[0]
-    matches = [t for t in ax.texts if "NPV =" in t.get_text()]
-    assert matches, "NPV total annotation missing"
-    summary = matches[0]
-    # The annotation must be anchored in axes-coordinates (transform
-    # == ax.transAxes) so it never escapes the frame even on long
-    # horizons.
-    assert summary.get_transform() == ax.transAxes, (
-        "NPV total annotation must use axes coordinates (top-right "
-        "of the frame); got data-coordinate transform instead."
+    annotation = _find_anchored_text(ax, "NPV =")
+    assert annotation is not None, "NPV total annotation missing"
+    fig.canvas.draw()
+    bbox = annotation.get_window_extent(
+        renderer=fig.canvas.get_renderer(),
     )
-    x, y = summary.get_position()
-    assert 0.0 <= float(x) <= 1.0, f"NPV total x out of frame: {x}"
-    assert 0.0 <= float(y) <= 1.0, f"NPV total y out of frame: {y}"
+    ax_bbox = ax.get_window_extent()
+    # Sits in the upper-right quadrant.
+    assert (bbox.x0 + bbox.x1) / 2 > ax_bbox.x0 + 0.5 * ax_bbox.width
+    assert (bbox.y0 + bbox.y1) / 2 > ax_bbox.y0 + 0.5 * ax_bbox.height
+    # And inside the axes frame on every side.
+    assert bbox.x0 >= ax_bbox.x0 and bbox.x1 <= ax_bbox.x1
+    assert bbox.y0 >= ax_bbox.y0 and bbox.y1 <= ax_bbox.y1
 
 
 def test_npv_waterfall_has_no_inaxis_capex_devex_text(tmp_path: Path):

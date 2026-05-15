@@ -27,8 +27,8 @@ from matplotlib.ticker import MaxNLocator
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter, format_eur
 from .style import (
+    anchor_corner_value,
     annotate_value_safe,
-    HEADROOM_Y_FRAC,
     apply_universal_margins,
     save_figure,
     show_titles,
@@ -297,17 +297,6 @@ def plot_npv_waterfall(
     ax.axhline(0.0, color="black", linewidth=0.8)
 
     final_npv = float(cum_disc[-1]) if len(cum_disc) > 0 else 0.0
-    # NPV total annotation lives in axes coordinates at the top-right
-    # of the frame, mirroring the total-cycles annotation in
-    # plot_lifetime_cycles.  Robust across project horizons (20 / 25 /
-    # 30 y) since it never expands the data-axis range.
-    annotate_value_safe(
-        ax, 0.98, 0.98,
-        f"NPV = {format_eur(final_npv, fmt_mode)}",
-        transform=ax.transAxes,
-        ha="right", va="top", fontsize=8,
-        bbox_alpha=0.9, bbox_pad=0.4,
-    )
 
     ax.set_xlabel(
         "Calendar year" if "calendar_year" in yearly_cf.columns
@@ -319,7 +308,10 @@ def plot_npv_waterfall(
     _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    apply_universal_margins(ax, y_frac=HEADROOM_Y_FRAC)
+    apply_universal_margins(ax)
+    anchor_corner_value(
+        ax, text=f"NPV = {format_eur(final_npv, fmt_mode)}",
+    )
     return save_figure(out_path)
 
 

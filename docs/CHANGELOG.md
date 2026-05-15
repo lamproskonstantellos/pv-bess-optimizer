@@ -5,65 +5,62 @@ longer carries internal version history — past migration notes and
 breaking-change diffs have been folded into the present-tense
 descriptions across the codebase and Sphinx docs.
 
-## 0.8.5 — current
+## 0.8.7 — current
 
-Plot-polish release covering four areas:
+Corner value annotations (NPV total, lifetime cycle total) now
+anchor at upper-right with deterministic frame expansion when
+needed.  If data would overlap the annotation, the y-axis upper
+limit is computed exactly (measured pixel overlap converted to a
+data-coordinate Δy) and snapped to the next clean tick value via
+matplotlib's standard tick locator.  The annotation home stays
+upper-right; the frame grows to a round number; tick labels remain
+clean.  A figure-level fallback covers pathological cases.
 
-* **Baseline-aware universal margins** — `apply_universal_margins`
-  in `pvbess_opt/plotting/style.py` is now baseline-aware: bar /
-  stacked-bar plots whose data starts at 0 keep their y-min floored
-  at the data baseline (so bars sit flush against the €0 axis line),
-  while plots whose data crosses zero still get symmetric top/bottom
-  padding.  Bar plots also keep the leftmost bar at the left frame
-  edge on the x-axis.  A new `HEADROOM_Y_FRAC` (0.12) constant lets
-  plots with corner annotations opt in to extra breathing room.
-* **Merchant combined energy plots** — new
-  `plot_daily_combined_merchant`, `plot_monthly_combined_merchant`,
-  and `plot_yearly_combined_merchant` give merchant runs a one-shot
-  view of every flow at each resolution: PV→BESS / PV→Grid /
-  PV→Curtailment / BESS→Grid / Import→BESS stacked together, with
-  the PV generation line overlaid as the natural ceiling.  A new
-  `"PV generation"` label (`#FFB300`) is registered in the energy
-  palette.  Rendered from inside the `is_merchant` branch of the
-  dispatcher in `main.py`.
-* **NPV and lifetime-cycles annotation headroom** —
-  `plot_npv_waterfall` and `plot_lifetime_cycles` opt in to
-  `HEADROOM_Y_FRAC` so the "NPV = €X.XM" and "Total: N cycles" boxes
-  sit with at least 5 % axes-fraction whitespace above the topmost
-  data point.
-* **Separate LCOE / LCOS summary PDFs** — `plot_lcoe_lcos_summary`
-  is removed; `plot_lcoe_summary` and `plot_lcos_summary` each emit
-  their own single-row PDF (`lcoe_summary.pdf`, `lcos_summary.pdf`)
-  reusing the same `_draw_benchmark_row` renderer.  The rotated
-  bold y-axis label is dropped — panel context is now implicit from
-  the filename and legend entries.
+Public surface:
+
+* New `pvbess_opt.plotting.style.anchor_corner_value(ax, *, text,
+  loc="upper right", fontsize=8, borderaxespad=0.5)`.  Always
+  anchors at upper-right by default; if the trial placement
+  overlaps any data artist (or the legend), measures the pixel
+  overlap, converts it to a data-coordinate delta, and snaps the
+  new ymax to the next "nice" tick value via
+  `matplotlib.ticker.MaxNLocator` with the standard step family
+  (1, 2, 2.5, 5, 10) so y-axis tick labels stay aligned with the
+  rest of the codebase's tick aesthetics.
+* `plot_npv_waterfall` and `plot_lifetime_cycles` switch from the
+  v4-era `apply_universal_margins(ax, y_frac=HEADROOM_Y_FRAC)` +
+  `annotate_value_safe(..., transform=ax.transAxes, ...)` combo to
+  the new helper.  Strict order of operations: data → legend →
+  `apply_universal_margins(ax)` → `anchor_corner_value(ax, ...)`.
+* The `HEADROOM_Y_FRAC` constant in `style.py` is removed (no
+  callers remain).
 
 Verification log:
 
-* 508 tests pass under
-  `pytest -q --deselect tests/test_bess_utilization.py --deselect
-  tests/test_rolling_horizon.py --deselect tests/test_kpis.py
-  --deselect tests/test_optimization.py` (the deselected suites
-  require an external HiGHS / CBC solver binary that is unavailable
-  in this environment).  Coverage includes the new
-  `test_annotation_safety` suites
-  (`test_apply_universal_margins_pads_top_for_non_negative_data`,
-  `test_apply_universal_margins_pads_both_for_signed_data`,
-  `test_apply_universal_margins_bar_plot_x_tight_left`,
-  `test_bar_plot_revenue_stack_floors_at_zero`,
-  `test_npv_total_annotation_has_full_breathing_room`,
-  `test_lifetime_cycles_total_has_breathing_room`), the new
-  merchant combined-plot suites in `test_merchant_plots`
-  (`test_plot_daily_combined_merchant_renders`,
-  `test_plot_monthly_combined_merchant_renders`,
-  `test_plot_yearly_combined_merchant_renders`,
-  `test_dispatcher_renders_merchant_combined`), and the rewritten
-  `test_lcoe_lcos_redesign` suite covering
-  `test_plot_lcoe_summary_renders`,
-  `test_plot_lcos_summary_renders`,
-  `test_lcoe_lcos_summary_function_is_gone`, and the
-  no-y-axis-label invariants.
+* 453 tests pass under
+  `pytest -q --ignore=tests/test_bess_utilization.py
+  --ignore=tests/test_rolling_horizon.py --ignore=tests/test_kpis.py
+  --ignore=tests/test_optimization.py
+  --ignore=tests/test_asset_modes.py --ignore=tests/test_bess_spec.py
+  --ignore=tests/test_curtailment_profile.py
+  --ignore=tests/test_plot_scopes.py
+  --ignore=tests/test_uncertainty_config.py
+  --ignore=tests/test_merchant_plots.py` (the ignored suites
+  require either the `pyomo` Python package or an external HiGHS /
+  CBC solver binary, neither of which is available in this
+  environment).
+* Coverage includes the new v5 anchor-corner suite in
+  `test_annotation_safety`
+  (`test_anchor_corner_value_snaps_to_nice_tick_when_expanding`,
+  `test_anchor_corner_value_no_expansion_when_corner_already_clear`,
+  `test_anchor_corner_value_expansion_is_single_shot`,
+  `test_anchor_corner_value_lands_in_upper_right_quadrant`,
+  `test_npv_waterfall_zero_overlap_and_clean_ticks`,
+  `test_lifetime_cycles_zero_overlap_and_clean_ticks`) and the
+  refreshed `test_npv_total_annotation_inside_frame` finder in
+  `test_npv_waterfall_redesign` that locates the AnchoredText
+  artist and verifies upper-right quadrant placement inside the
+  axes spines.
 * `test_plotting_universality.test_all_plotting_functions_registered`
-  passes with the three new merchant-combined and two new
-  LCOE / LCOS entries in the registry.
+  remains green; the registry is unchanged.
 * Audits 1–7 grep clean across the plotting package.
