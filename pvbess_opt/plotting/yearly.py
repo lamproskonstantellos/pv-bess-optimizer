@@ -23,6 +23,7 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from matplotlib.ticker import ScalarFormatter
 
@@ -280,15 +281,25 @@ def plot_yearly_combined_merchant(
 def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     """Monthly min / mean / max SOC envelope for the calendar year.
 
-    The right-hand axis mirrors the SOC % range (when the result frame
-    carries a ``soc_pct`` column) so a reader can read both kWh and %
-    off the same envelope without a separate panel.
+    SOC (%) is drawn on the left axis (fixed 0–100), SOC (kWh) appears
+    on the right axis with ticks proportional to the BESS capacity so
+    the two scales line up on every grid line.
     """
     df = res[pd.to_datetime(res["timestamp"]).dt.year == year]
     if df.empty or "soc_kwh" not in df.columns:
         return
-    if float(df["soc_kwh"].max()) <= 1e-9:
+    max_kwh = float(df["soc_kwh"].max())
+    if max_kwh <= 1e-9:
         return  # No BESS in the project.
+    if "soc_pct" in df.columns:
+        max_pct = float(df["soc_pct"].max())
+    else:
+        max_pct = 0.0
+    if max_pct > 1e-9:
+        capacity_kwh = max_kwh / max_pct * 100.0
+    else:
+        capacity_kwh = max_kwh
+
     monthly = (
         df.groupby(pd.to_datetime(df["timestamp"]).dt.to_period("M"))["soc_kwh"]
         .agg(["min", "mean", "max"]).reset_index()
@@ -298,16 +309,20 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     if monthly.empty:
         return
 
+    monthly_min_pct = monthly["min"] / capacity_kwh * 100.0
+    monthly_mean_pct = monthly["mean"] / capacity_kwh * 100.0
+    monthly_max_pct = monthly["max"] / capacity_kwh * 100.0
+
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     soc_colour = FINANCIAL_COLORS["net"]
     ax.fill_between(
-        monthly["month_start"], monthly["min"], monthly["max"],
+        monthly["month_start"], monthly_min_pct, monthly_max_pct,
         color=soc_colour, alpha=0.20, edgecolor=soc_colour,
         label="Monthly min-max",
     )
     ax.plot(
-        monthly["month_start"], monthly["mean"],
+        monthly["month_start"], monthly_mean_pct,
         color=soc_colour, linewidth=1.5, linestyle="-",
         marker="o", markersize=3,
         label="Monthly mean",
@@ -315,30 +330,26 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%Y"))
     plt.setp(ax.get_xticklabels(), rotation=XTICK_ROT, ha="right")
+
+    ax.set_ylim(0.0, 100.0)
+    ax.set_yticks(np.arange(0, 101, 10))
+    ax.set_ylabel("SOC (%)")
+    ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+
     if show_titles():
         ax.set_title(
             f"Merchant — Yearly SOC{title_prefix(get_scenario_label())} "
             f"— {year}"
         )
     ax.set_xlabel("Month")
-    ax.set_ylabel("SOC (kWh)")
-    # Apply universal padding to the primary y-axis BEFORE deriving the
-    # right-side SOC (%) scale so the two axes share identical bounds
-    # after padding.
-    apply_universal_margins(ax, skip_x=True)
-    # Every SOC plot also exposes a right-side SOC (%) axis.  Scale
-    # derived from the soc_pct ↔ soc_kwh ratio in the frame when
-    # available, else fall back to a 0–100 % range.
+
     ax2 = ax.twinx()
-    max_kwh = float(df["soc_kwh"].max())
-    if "soc_pct" in df.columns and max_kwh > 0.0:
-        ratio = float(df["soc_pct"].max()) / max_kwh
-    else:
-        ratio = 100.0 / max_kwh if max_kwh > 0.0 else 1.0
-    ymin, ymax = ax.get_ylim()
-    ax2.set_ylim(ymin * ratio, ymax * ratio)
-    ax2.set_ylabel("SOC (%)")
-    ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    ax2.set_ylim(0.0, capacity_kwh)
+    ax2.set_yticks(np.linspace(0.0, capacity_kwh, 11))
+    ax2.set_ylabel("SOC (kWh)")
+    ax2.grid(False)
+
+    apply_universal_margins(ax, skip_x=True, skip_y=True)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="yearly")
     save_figure(out_dir / "yearly_soc.pdf")
 

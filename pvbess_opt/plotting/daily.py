@@ -28,6 +28,7 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from ..config import FINANCIAL_COLORS, XTICK_ROT
@@ -318,36 +319,53 @@ def plot_daily_soc(
     res: pd.DataFrame, date_str: str, out_dir: Path, *,
     e_cap_kwh: float | None = None,
 ) -> None:
-    """SOC trajectory for one day — kWh on left axis, % on right."""
+    """SOC trajectory for one day — SOC (%) on left, SOC (kWh) on right."""
     day = pd.to_datetime(date_str).date()
     df = res[res["timestamp"].dt.date == day]
     if df.empty:
         return
     soc_kwh = df["soc_kwh"].to_numpy(dtype=float)
-    if soc_kwh.max() <= 1e-9:
+    max_kwh = float(soc_kwh.max())
+    if max_kwh <= 1e-9:
         # No BESS in the project — skip the plot.
         return
     start = pd.Timestamp(day)
     end = start + pd.Timedelta(days=1)
 
+    if "soc_pct" in df.columns:
+        soc_pct = df["soc_pct"].to_numpy(dtype=float)
+        max_pct = float(df["soc_pct"].max())
+    else:
+        soc_pct = np.zeros_like(soc_kwh)
+        max_pct = 0.0
+    if max_pct > 1e-9:
+        capacity_kwh = max_kwh / max_pct * 100.0
+    elif e_cap_kwh is not None and e_cap_kwh > 0.0:
+        capacity_kwh = float(e_cap_kwh)
+        soc_pct = soc_kwh / capacity_kwh * 100.0
+    else:
+        capacity_kwh = max_kwh
+        soc_pct = soc_kwh / capacity_kwh * 100.0
+
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     soc_colour = FINANCIAL_COLORS["net"]
-    t_pad, [soc_pad] = pad_right_to_end(df["timestamp"], [soc_kwh], end)
+    t_pad, [soc_pct_pad] = pad_right_to_end(df["timestamp"], [soc_pct], end)
     ax.plot(
-        t_pad, soc_pad, drawstyle="steps-post",
-        color=soc_colour, linewidth=1.5, label="SOC (kWh / %)",
+        t_pad, soc_pct_pad, drawstyle="steps-post",
+        color=soc_colour, linewidth=1.5, label="SOC",
     )
 
-    if "soc_pct" in df.columns:
-        soc_pct = df["soc_pct"].to_numpy(dtype=float)
-        _t_pct, [soc_pct_pad] = pad_right_to_end(df["timestamp"], [soc_pct], end)
-        ax2 = ax.twinx()
-        ax2.plot(
-            _t_pct, soc_pct_pad, drawstyle="steps-post",
-            color=soc_colour, linewidth=1.5, label="_nolegend_",
-        )
-        ax2.set_ylabel("SOC (%)")
+    ax.set_ylim(0.0, 100.0)
+    ax.set_yticks(np.arange(0, 101, 10))
+    ax.set_ylabel("SOC (%)")
+    ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+
+    ax2 = ax.twinx()
+    ax2.set_ylim(0.0, capacity_kwh)
+    ax2.set_yticks(np.linspace(0.0, capacity_kwh, 11))
+    ax2.set_ylabel("SOC (kWh)")
+    ax2.grid(False)
 
     if show_titles():
         plt.title(
@@ -355,9 +373,8 @@ def plot_daily_soc(
             f"— {pretty_date(date_str)}"
         )
     ax.set_xlabel("Time (HH:mm)")
-    ax.set_ylabel("SOC (kWh)")
     _setup_day_axes(ax, start, end)
-    apply_universal_margins(ax, skip_x=True)
+    apply_universal_margins(ax, skip_x=True, skip_y=True)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="daily")
     save_figure_daily(out_dir / f"daily_soc_{date_str}.pdf", date_str)
 
