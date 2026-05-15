@@ -92,7 +92,7 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "mode": "vnb",
     "settlement_minutes": 15,
     "p_grid_export_max_kw": 5000.0,
-    "retail_tariff_eur_per_mwh": 132.0,
+    "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
     "unavailability_pct": 1.0,
     "currency_format": "auto",
@@ -130,7 +130,7 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
 ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "discount_rate_pct": 7.0,
     "opex_inflation_pct": 1.0,
-    "retail_inflation_pct": 2.0,
+    "retail_inflation_pct": 0.0,
     "dam_inflation_pct": 0.0,
     "aggregator_fee_pct_revenue": 10.0,
     "benchmark_lcoe_low_eur_per_mwh": 30.0,
@@ -271,7 +271,7 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("p_grid_export_max_kw", 5000, "kW",
      "Grid-connection export limit (kW). Project-wide cap applied to "
      "the combined PV + BESS export flow."),
-    ("retail_tariff_eur_per_mwh", 132, "EUR/MWh",
+    ("retail_tariff_eur_per_mwh", 120, "EUR/MWh",
      "Retail tariff used in vnb mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",
      "If TRUE the BESS may charge from the grid in periods with pv_kwh ~ 0."),
@@ -343,9 +343,9 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "WACC. Typical EU RES band 6-8 %."),
     ("opex_inflation_pct", 1.0, "%",
      "Annual OPEX escalation rate."),
-    ("retail_inflation_pct", 2.0, "%",
+    ("retail_inflation_pct", 0.0, "%",
      "Annual indexation of retail tariff / PPA revenue (load-coverage). "
-     "ECB target ~2%. Set to 0 to disable."),
+     "0 = no indexation."),
     ("dam_inflation_pct", 0.0, "%",
      "Annual indexation of wholesale DAM revenue (exports). Default 0 "
      "since DAM prices are driven by gas/CO2/RES penetration, not CPI. "

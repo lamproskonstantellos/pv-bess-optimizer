@@ -51,7 +51,9 @@ References for default values
 * BESS degradation 2%/yr linear (LFP, ~80% capacity at 10y) — typical
   Tier-1 cell warranty.
 * Discount rate 7% — typical EU renewable WACC band 6–8%.
-* Inflation 2% — ECB target.
+* Retail / DAM indexation — user-supplied annual percentages; the
+  workbook defaults to 0 (no indexation) for both so the user has to
+  opt in explicitly.
 """
 
 from __future__ import annotations

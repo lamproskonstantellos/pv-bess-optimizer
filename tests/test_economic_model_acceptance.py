@@ -72,7 +72,14 @@ def _kpis(profit: float = 600_000.0) -> dict:
 
 
 def test_revenue_strictly_increasing_year2_onwards():
-    df = build_yearly_cashflow(_kpis(), _default_econ(), _caps())
+    # The workbook default retail_inflation_pct is 0 (the user must opt
+    # in to indexation explicitly), so this test sets a positive value
+    # locally to verify the indexation mechanism still produces
+    # year-on-year growth that beats degradation.
+    econ = _default_econ()
+    econ["retail_inflation_pct"] = 2.0
+    econ["dam_inflation_pct"] = 2.0
+    df = build_yearly_cashflow(_kpis(), econ, _caps())
     rev = df.loc[df["project_year"] >= 2, "revenue_eur"].astype(float)
     assert rev.is_monotonic_increasing
     assert (rev.diff().dropna() > 0).all()

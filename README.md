@@ -112,11 +112,13 @@ Seven themed sheets:
   `opex_bess_eur_per_kw`, `bess_replacement_year`,
   `bess_replacement_cost_pct`, `bess_degradation_annual_pct`.
 * **`economics`** — `discount_rate_pct`, `opex_inflation_pct`,
-  `retail_inflation_pct` (default 2 %, PPA / VNB load coverage),
-  `dam_inflation_pct` (default 0 %, wholesale exports),
-  `aggregator_fee_pct_revenue` (user-configurable fraction of gross
-  revenue retained by the aggregator), `sensitivity_*` (5 keys),
-  four `benchmark_*` keys for the Lazard LCOE / LCOS bands.
+  `retail_inflation_pct` (user-set annual indexation of the retail
+  tariff / PPA revenue; default 0 = no indexation),
+  `dam_inflation_pct` (annual indexation of wholesale exports;
+  default 0), `aggregator_fee_pct_revenue` (user-configurable
+  fraction of gross revenue retained by the aggregator),
+  `sensitivity_*` (5 keys), four `benchmark_*` keys for the Lazard
+  LCOE / LCOS bands.
 * **`simulation`** — `uncertainty_*` (11 keys), `plot_daily_scope` /
   `plot_monthly_scope` / `plot_yearly_scope` ∈
   `none | year1_only | all`.
@@ -175,15 +177,18 @@ the invariant set.
 
 ## Objective
 
-Single objective: **profit maximisation**.  Under Greek VNB economics
-retail (132 EUR/MWh) > DAM avg (~100 EUR/MWh) in > 99 % of hours, so the
-profit objective produces the same dispatch as a "green" objective in
-this market.  Self-consumption is no longer emergent: the hard
-`LOAD_PV_PRIORITY` constraint pins
-`pv_to_load[t] == min(pv[t], load[t])` exactly (Section 2 of the spec).
-In `merchant` mode there is no load to "be green about" in the first
-place.  See `docs/source/technical.documentation/objectives.rst` for the
-full reasoning.
+Single objective: **profit maximisation**.  When the user's retail
+tariff exceeds the DAM price in the majority of hours (the typical
+case for `vnb` projects with a co-located load), the profit
+objective produces the same dispatch as a "green" objective —
+self-consumption emerges from the economics rather than being a
+hard constraint.  The hard `LOAD_PV_PRIORITY` constraint still pins
+`pv_to_load[t] == min(pv[t], load[t])` exactly (Section 2 of the
+spec) so the dispatch is correct for any retail / DAM ratio the user
+supplies.  In `merchant` mode there is no load to "be green about"
+in the first place.  See
+`docs/source/technical.documentation/objectives.rst` for the full
+reasoning.
 
 ## Rolling horizon (uncertainty)
 
