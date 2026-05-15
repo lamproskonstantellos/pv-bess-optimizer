@@ -27,8 +27,8 @@ from matplotlib.ticker import MaxNLocator
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter, format_eur
 from .style import (
-    anchor_corner_value,
     annotate_value_safe,
+    apply_fine_ticks,
     apply_universal_margins,
     save_figure,
     show_titles,
@@ -162,6 +162,7 @@ def plot_cumulative_cashflow(
     apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -221,6 +222,7 @@ def plot_yearly_cashflow_bars(
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -256,7 +258,6 @@ def plot_npv_waterfall(
     capex_disc = yearly_cf["capex_eur"].astype(float).to_numpy() * disc_factor
     net_disc = yearly_cf["discounted_cf_eur"].astype(float).to_numpy()
     cum_disc = np.cumsum(net_disc)
-    fmt_mode = _resolve_currency_format(econ)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -296,8 +297,6 @@ def plot_npv_waterfall(
     )
     ax.axhline(0.0, color="black", linewidth=0.8)
 
-    final_npv = float(cum_disc[-1]) if len(cum_disc) > 0 else 0.0
-
     ax.set_xlabel(
         "Calendar year" if "calendar_year" in yearly_cf.columns
         else "Project year"
@@ -309,9 +308,7 @@ def plot_npv_waterfall(
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
-    anchor_corner_value(
-        ax, text=f"NPV = {format_eur(final_npv, fmt_mode)}",
-    )
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -576,6 +573,7 @@ def _dumbbell_plot(
     # extent; the universal helper only adds defensive padding to
     # neither axis.
     apply_universal_margins(ax, skip_x=True, skip_y=True)
+    apply_fine_ticks(ax, axis="x")
 
     return save_figure(out_path)
 

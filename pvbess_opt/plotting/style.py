@@ -7,17 +7,15 @@ can be turned on via the ``show_titles`` key in the input workbook.
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.offsetbox import AnchoredText
 from matplotlib.patches import Rectangle
 from matplotlib.ticker import MaxNLocator
-from matplotlib.transforms import Bbox, offset_copy
+from matplotlib.transforms import offset_copy
 
 from ..config import IEEE_RCPARAMS, LEGEND_ORDER, assert_unique_colors
 
@@ -253,8 +251,7 @@ def apply_universal_margins(
 ) -> None:
     """Pad axes so data and annotations never touch the frame.
 
-    Called before :func:`anchor_corner_value` (when used) and as
-    the last step before :func:`save_figure` otherwise.  Idempotent.
+    Called as the last step before :func:`save_figure`.  Idempotent.
 
     Baseline-aware behaviour:
 
@@ -267,11 +264,6 @@ def apply_universal_margins(
       side is padded (the leftmost bar sits at the left frame
       edge). Otherwise both sides padded symmetrically.
 
-    Plots that put a value annotation in the top-right corner
-    (NPV waterfall, lifetime cycles) should call
-    :func:`anchor_corner_value` AFTER this helper.  That helper
-    expands the y-axis upper limit to a clean tick boundary if —
-    and only if — the annotation would overlap data.
     """
     if not skip_y:
         ymin, ymax = ax.get_ylim()
@@ -298,217 +290,37 @@ def apply_universal_margins(
 
 
 # ---------------------------------------------------------------------------
-# Corner-value annotation with deterministic nice-tick expansion (v5)
+# Fine tick density helper
 # ---------------------------------------------------------------------------
 
-# Tunables
-_OVERLAP_TOLERANCE_PX2: float = 4.0   # sub-pixel anti-aliasing slack
-_SAFETY_HEADROOM_PX: float = 6.0      # extra pixels above measured need
-_NICE_TICK_STEPS: list[float] = [1, 2, 2.5, 5, 10]  # matplotlib's default family
 
-
-def anchor_corner_value(
+def apply_fine_ticks(
     ax,
     *,
-    text: str,
-    loc: str = "upper right",
-    fontsize: int = 8,
-    borderaxespad: float = 0.5,
-):
-    """Place a value annotation at the upper-right corner with
-    deterministic ymax expansion to a "nice" tick boundary if the
-    data would overlap.
+    nbins: int = 10,
+    axis: str = "y",
+) -> None:
+    """Use a denser tick locator for plots that benefit from finer
+    granularity (currency, energy).
 
-    Policy
-    ------
-    The annotation always lives in upper-right (predictable
-    placement).  If the current axes don't have room, the y-axis
-    upper limit is extended to the next clean tick value — not by
-    arbitrary percentages, by matplotlib's own tick rules.  The
-    data itself is never modified; only the frame grows.
+    Picks steps from the standard ``[1, 2, 5, 10]`` family — the
+    same family matplotlib uses for default ticks, just at a higher
+    bin count.  For a y-range of 20M, ~10 bins yields a 2M step.
+    For 10M, a 1M step.  For 5M, a 0.5M step.
 
-    Falls back to ``fig.text`` above the axes only in pathological
-    cases where even a generous expansion can't clear the corner.
+    Call as the **last** axis-mutating step in a plotting function,
+    after data is drawn and :func:`apply_universal_margins` has set
+    the final limits.
 
     Parameters
     ----------
-    loc : default ``"upper right"``.  Any other value bypasses the
-        expansion logic and places the annotation at that location
-        with no auto-adjustment (caller is being explicit).
-
-    Returns
-    -------
-    The placed artist.  Usually :class:`AnchoredText` (Steps 1–4),
-    occasionally :class:`~matplotlib.text.Text` (Step 5 fallback).
+    axis : ``"y"`` (default) or ``"x"``.  Tornado plots whose value
+        axis is horizontal pass ``axis="x"``.
     """
-    if loc != "upper right":
-        return _place_anchored(ax, text, loc, fontsize, borderaxespad)
-
-    # --- Step 1: trial placement, measure overlap ---
-    pixel_overlap_y = _measure_vertical_overlap(
-        ax, text, fontsize, borderaxespad,
-    )
-    if pixel_overlap_y <= _OVERLAP_TOLERANCE_PX2 ** 0.5:
-        return _place_anchored(
-            ax, text, "upper right", fontsize, borderaxespad,
-        )
-
-    # --- Step 2: compute required Δy in data coords ---
-    needed_pixels = pixel_overlap_y + _SAFETY_HEADROOM_PX
-    data_delta = _pixels_to_data_y(ax, needed_pixels)
-    ymin, ymax = ax.get_ylim()
-    target_ymax = ymax + data_delta
-
-    # --- Step 3: snap to next nice tick boundary ---
-    nice_ymax = _next_nice_tick_above(target_ymax, ymin)
-    ax.set_ylim(ymin, nice_ymax)
-
-    # --- Step 4: place permanently ---
-    artist = _place_anchored(
-        ax, text, "upper right", fontsize, borderaxespad,
-    )
-
-    # --- Step 5: defensive re-check (should always pass) ---
-    ax.figure.canvas.draw()
-    renderer = ax.figure.canvas.get_renderer()
-    final_bbox = artist.get_window_extent(renderer=renderer)
-    data_bboxes = _collect_data_bboxes(ax)
-    final_overlap = _bbox_overlap_score(final_bbox, data_bboxes)
-    if final_overlap > _OVERLAP_TOLERANCE_PX2:
-        artist.remove()
-        ax.set_ylim(ymin, ymax)
-        return _place_outside_axes(ax, text, fontsize)
-    return artist
-
-
-def _measure_vertical_overlap(
-    ax, text: str, fontsize: int, borderaxespad: float,
-) -> float:
-    """Place a trial AnchoredText at upper-right, measure how many
-    pixels of vertical extent it shares with data artists, then
-    remove the trial.
-
-    Returns 0 if the annotation sits cleanly above all data."""
-    trial = _place_anchored(
-        ax, text, "upper right", fontsize, borderaxespad,
-    )
-    try:
-        ax.figure.canvas.draw()
-        renderer = ax.figure.canvas.get_renderer()
-        trial_bbox = trial.get_window_extent(renderer=renderer)
-        data_bboxes = _collect_data_bboxes(ax)
-        if ax.legend_ is not None:
-            try:
-                data_bboxes.append(
-                    ax.legend_.get_window_extent(renderer=renderer)
-                )
-            except Exception:
-                pass
-        max_overlap = 0.0
-        for b in data_bboxes:
-            if b.x1 < trial_bbox.x0 or b.x0 > trial_bbox.x1:
-                continue
-            if b.y1 > trial_bbox.y0:
-                overlap = b.y1 - trial_bbox.y0
-                if overlap > max_overlap:
-                    max_overlap = overlap
-        return max_overlap
-    finally:
-        trial.remove()
-
-
-def _pixels_to_data_y(ax, pixels: float) -> float:
-    """Convert a pixel delta on the y-axis to a data-coordinate
-    delta, using the current axes transform."""
-    trans = ax.transData.inverted()
-    y0_pix = ax.transData.transform((0, ax.get_ylim()[0]))[1]
-    _, y0_data = trans.transform((0, y0_pix))
-    _, y1_data = trans.transform((0, y0_pix + pixels))
-    return abs(y1_data - y0_data)
-
-
-def _next_nice_tick_above(target: float, ymin: float) -> float:
-    """Return the smallest "nice" tick value >= ``target``, using
-    matplotlib's own :class:`MaxNLocator` with the standard step
-    family.
-
-    This guarantees the new ymax aligns to a value that matplotlib
-    would naturally pick as a tick, so the y-axis tick labels stay
-    clean (e.g. 0, 2M, 4M, 6M, 8M, 10M — not 0, 2.2M, 4.4M).
-    """
-    if target <= ymin:
-        return target
-    locator = MaxNLocator(
-        nbins="auto", steps=_NICE_TICK_STEPS, prune=None,
-    )
-    span = target - ymin
-    ticks = locator.tick_values(ymin, ymin + span * 1.5)
-    for t in ticks:
-        if t >= target:
-            return float(t)
-    magnitude = 10 ** math.floor(math.log10(max(abs(target), 1.0)))
-    return math.ceil(target / magnitude) * magnitude
-
-
-def _place_anchored(
-    ax, text: str, loc: str, fontsize: int, borderaxespad: float,
-) -> AnchoredText:
-    at = AnchoredText(
-        text, loc=loc, pad=0.4, borderpad=borderaxespad,
-        frameon=True, prop={"size": fontsize},
-    )
-    at.patch.set_boxstyle("round,pad=0.3")
-    at.patch.set_facecolor("white")
-    at.patch.set_alpha(0.9)
-    at.patch.set_edgecolor("grey")
-    at.patch.set_linewidth(0.5)
-    ax.add_artist(at)
-    return at
-
-
-def _place_outside_axes(ax, text: str, fontsize: int):
-    fig = ax.figure
-    ax_pos = ax.get_position()
-    x = ax_pos.x1
-    y = ax_pos.y1 + 0.01
-    txt = fig.text(
-        x, y, text, ha="right", va="bottom", fontsize=fontsize,
-        bbox={
-            "facecolor": "white", "edgecolor": "grey",
-            "alpha": 0.9, "linewidth": 0.5,
-            "boxstyle": "round,pad=0.3",
-        },
-    )
-    fig.subplots_adjust(top=min(0.92, fig.subplotpars.top))
-    return txt
-
-
-def _bbox_overlap_score(text_bbox: Bbox, data_bboxes) -> float:
-    score = 0.0
-    for b in data_bboxes:
-        ix0 = max(text_bbox.x0, b.x0)
-        iy0 = max(text_bbox.y0, b.y0)
-        ix1 = min(text_bbox.x1, b.x1)
-        iy1 = min(text_bbox.y1, b.y1)
-        if ix1 > ix0 and iy1 > iy0:
-            score += (ix1 - ix0) * (iy1 - iy0)
-    return score
-
-
-def _collect_data_bboxes(ax):
-    fig = ax.figure
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
-    out = []
-    for artist in ax.get_children():
-        if isinstance(artist, AnchoredText):
-            continue
-        if artist is ax.legend_ or artist is ax.patch:
-            continue
-        try:
-            bbox = artist.get_window_extent(renderer=renderer)
-            if bbox.width > 0 and bbox.height > 0:
-                out.append(bbox)
-        except Exception:
-            continue
-    return out
+    locator = MaxNLocator(nbins=nbins, steps=[1, 2, 5, 10])
+    if axis == "y":
+        ax.yaxis.set_major_locator(locator)
+    elif axis == "x":
+        ax.xaxis.set_major_locator(locator)
+    else:
+        raise ValueError(f"axis must be 'x' or 'y', got {axis!r}")

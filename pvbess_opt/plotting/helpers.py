@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..config import ALPHA_STACK_AREAS, ALPHA_STACK_BARS, COLORS
+from ..config import ALPHA_STACK_AREAS, ALPHA_STACK_BARS, label_color
 
 ZERO_THRESHOLD: float = 1e-9
 
@@ -70,7 +70,7 @@ def plot_stack_filtered(ax, x, series, labels, *, step_post: bool = False):
         return []
     kept_series = [s for s, _ in keep]
     kept_labels = [lab for _, lab in keep]
-    kept_colors = [COLORS.get(lab) for lab in kept_labels]
+    kept_colors = [label_color(lab) for lab in kept_labels]
     if step_post:
         return ax.stackplot(x, *kept_series, labels=kept_labels, colors=kept_colors, step="post")
     return ax.stackplot(x, *kept_series, labels=kept_labels, colors=kept_colors)
@@ -82,7 +82,7 @@ def line_if_nonzero(ax, x, y, label, *, step_post: bool = False, **kwargs):
         return
     if step_post:
         kwargs.setdefault("drawstyle", "steps-post")
-    ax.plot(x, y, label=label, color=COLORS.get(label), **kwargs)
+    ax.plot(x, y, label=label, color=label_color(label), **kwargs)
 
 
 def fill_stacked_above(ax, x, base, series, labels, *, step_post: bool = False):
@@ -99,7 +99,7 @@ def fill_stacked_above(ax, x, base, series, labels, *, step_post: bool = False):
             x,
             y1,
             y2,
-            facecolor=COLORS.get(lab),
+            facecolor=label_color(lab),
             alpha=ALPHA_STACK_AREAS,
             label=lab,
             linewidth=0.0,
@@ -134,7 +134,7 @@ def bar_stacked_bins(ax, left, width_days, series, labels, *, bottom=None):
             width=width_days,
             align="edge",
             bottom=bottoms,
-            color=COLORS.get(lab),
+            color=label_color(lab),
             label=lab,
             linewidth=0.0,
             alpha=ALPHA_STACK_BARS,

@@ -349,8 +349,8 @@ def plot_monthly_soc(
     ymin, ymax = ax.get_ylim()
     ax2.set_ylim(ymin * ratio, ymax * ratio)
     ax2.set_ylabel("SOC (%)")
-    ax.legend(loc="best", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    apply_legend(ax, max_rows=2, custom_order=False, plot_type="monthly")
     save_figure(out_dir / f"monthly_soc_{month:02d}.pdf")
 
 
