@@ -23,6 +23,7 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from matplotlib.ticker import ScalarFormatter
 
@@ -294,15 +295,25 @@ def plot_monthly_soc(
 ) -> None:
     """Daily min / mean / max SOC envelope across the calendar month.
 
-    The right-hand axis mirrors the SOC % range (when the result frame
-    carries a ``soc_pct`` column) so a reader can read both kWh and %
-    off the same envelope without a separate panel.
+    SOC (%) is drawn on the left axis (fixed 0–100), SOC (kWh) appears
+    on the right axis with ticks proportional to the BESS capacity so
+    the two scales line up on every grid line.
     """
     df = res[res["timestamp"].dt.month == month]
     if df.empty or "soc_kwh" not in df.columns:
         return
-    if float(df["soc_kwh"].max()) <= 1e-9:
+    max_kwh = float(df["soc_kwh"].max())
+    if max_kwh <= 1e-9:
         return  # No BESS in the project.
+    if "soc_pct" in df.columns:
+        max_pct = float(df["soc_pct"].max())
+    else:
+        max_pct = 0.0
+    if max_pct > 1e-9:
+        capacity_kwh = max_kwh / max_pct * 100.0
+    else:
+        capacity_kwh = max_kwh
+
     daily = df.groupby(df["timestamp"].dt.date)["soc_kwh"].agg(
         ["min", "mean", "max"],
     ).reset_index().rename(columns={"timestamp": "date"})
@@ -311,45 +322,45 @@ def plot_monthly_soc(
         return
     left, width_days = edges_and_widths_monthly(daily["date"])
 
+    daily_min_pct = daily["min"] / capacity_kwh * 100.0
+    daily_mean_pct = daily["mean"] / capacity_kwh * 100.0
+    daily_max_pct = daily["max"] / capacity_kwh * 100.0
+
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     soc_colour = FINANCIAL_COLORS["net"]
     ax.fill_between(
-        daily["date"], daily["min"], daily["max"],
+        daily["date"], daily_min_pct, daily_max_pct,
         color=soc_colour, alpha=0.20, edgecolor=soc_colour,
         label="Daily min-max",
     )
     ax.plot(
-        daily["date"], daily["mean"],
+        daily["date"], daily_mean_pct,
         color=soc_colour, linewidth=1.5, linestyle="-",
         marker="o", markersize=3,
         label="Daily mean",
     )
+
+    ax.set_ylim(0.0, 100.0)
+    ax.set_yticks(np.arange(0, 101, 10))
+    ax.set_ylabel("SOC (%)")
+    ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+
     if show_titles():
         ax.set_title(
             f"Merchant — Monthly SOC{title_prefix(get_scenario_label())} "
             f"— {month_name[month]}"
         )
     ax.set_xlabel("Day")
-    ax.set_ylabel("SOC (kWh)")
     _setup_day_axis(ax, left, width_days)
-    # Apply universal padding to the primary y-axis BEFORE deriving the
-    # right-side SOC (%) scale so the two axes share identical bounds
-    # after padding.
-    apply_universal_margins(ax, skip_x=True)
-    # Every SOC plot also exposes a right-side SOC (%) axis.  Scale
-    # derived from the soc_pct ↔ soc_kwh ratio in the frame when
-    # available, else fall back to a 0–100 % range.
+
     ax2 = ax.twinx()
-    max_kwh = float(df["soc_kwh"].max())
-    if "soc_pct" in df.columns and max_kwh > 0.0:
-        ratio = float(df["soc_pct"].max()) / max_kwh
-    else:
-        ratio = 100.0 / max_kwh if max_kwh > 0.0 else 1.0
-    ymin, ymax = ax.get_ylim()
-    ax2.set_ylim(ymin * ratio, ymax * ratio)
-    ax2.set_ylabel("SOC (%)")
-    ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    ax2.set_ylim(0.0, capacity_kwh)
+    ax2.set_yticks(np.linspace(0.0, capacity_kwh, 11))
+    ax2.set_ylabel("SOC (kWh)")
+    ax2.grid(False)
+
+    apply_universal_margins(ax, skip_x=True, skip_y=True)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="monthly")
     save_figure(out_dir / f"monthly_soc_{month:02d}.pdf")
 

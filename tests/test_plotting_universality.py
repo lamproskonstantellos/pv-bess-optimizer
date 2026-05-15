@@ -161,15 +161,18 @@ def test_yearly_uses_mm_yyyy_format(fn_name):
     "fn_name",
     ["plot_monthly_soc", "plot_yearly_soc", "plot_daily_soc"],
 )
-def test_soc_plots_have_right_axis(fn_name):
-    """SOC plots must include a right-side SOC % axis."""
+def test_soc_plots_have_dual_axis(fn_name):
+    """SOC plots must include both SOC (%) and SOC (kWh) axes."""
     fn = getattr(_plotting, fn_name)
     src = inspect.getsource(fn)
     assert "twinx" in src, (
-        f"{fn_name}: must include ax.twinx() for SOC % right axis"
+        f"{fn_name}: must include ax.twinx() for the SOC (kWh) right axis"
     )
     assert '"SOC (%)"' in src or "'SOC (%)'" in src, (
-        f"{fn_name}: must label right axis 'SOC (%)'"
+        f"{fn_name}: must label the left axis 'SOC (%)'"
+    )
+    assert '"SOC (kWh)"' in src or "'SOC (kWh)'" in src, (
+        f"{fn_name}: must label the right axis 'SOC (kWh)'"
     )
 
 
