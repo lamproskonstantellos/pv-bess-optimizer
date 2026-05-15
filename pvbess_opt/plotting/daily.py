@@ -357,8 +357,8 @@ def plot_daily_soc(
     ax.set_xlabel("Time (HH:mm)")
     ax.set_ylabel("SOC (kWh)")
     _setup_day_axes(ax, start, end)
-    ax.legend(loc="best", framealpha=0.9, fontsize=7)
     apply_universal_margins(ax, skip_x=True)
+    apply_legend(ax, max_rows=2, custom_order=False, plot_type="daily")
     save_figure_daily(out_dir / f"daily_soc_{date_str}.pdf", date_str)
 
 
