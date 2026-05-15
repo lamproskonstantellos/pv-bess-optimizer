@@ -33,6 +33,7 @@ from .helpers import (
     bar_stacked_bins,
     edges_and_widths_yearly,
     line_if_nonzero,
+    line_masked_zeros,
     pad_line_to_bins_end,
     title_prefix,
     year_aggregate,
@@ -262,8 +263,8 @@ def plot_yearly_combined_merchant(
     t_pad, y_pad = pad_line_to_bins_end(
         left, width_days, (mth["pv_kwh"] / 1000.0).to_numpy(),
     )
-    line_if_nonzero(ax, t_pad, y_pad, "PV generation",
-                    linewidth=1.8, step_post=True)
+    line_masked_zeros(ax, t_pad, y_pad, "PV generation",
+                      linewidth=1.8, step_post=True)
 
     _set_mwh_yaxis(ax, "Energy (MWh/month)")
     if show_titles():
@@ -300,36 +301,62 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     else:
         capacity_kwh = max_kwh
 
-    monthly = (
-        df.groupby(pd.to_datetime(df["timestamp"]).dt.to_period("M"))["soc_kwh"]
-        .agg(["min", "mean", "max"]).reset_index()
+    if "soc_pct" in df.columns and float(df["soc_pct"].max()) > 1e-9:
+        soc_pct_series = df["soc_pct"].astype(float)
+    else:
+        soc_pct_series = (df["soc_kwh"].astype(float) / capacity_kwh) * 100.0
+
+    monthly_agg = (
+        soc_pct_series
+        .groupby(pd.to_datetime(df["timestamp"]).dt.to_period("M"))
+        .agg(["min", "mean", "max"])
+        .reset_index()
     )
-    monthly["month_start"] = monthly["timestamp"].dt.to_timestamp()
-    monthly = monthly.sort_values("month_start").reset_index(drop=True)
-    if monthly.empty:
+    monthly_agg["month_start"] = monthly_agg["timestamp"].dt.to_timestamp()
+    monthly_agg = monthly_agg.sort_values("month_start").reset_index(drop=True)
+    if monthly_agg.empty:
         return
 
-    monthly_min_pct = monthly["min"] / capacity_kwh * 100.0
-    monthly_mean_pct = monthly["mean"] / capacity_kwh * 100.0
-    monthly_max_pct = monthly["max"] / capacity_kwh * 100.0
+    monthly_min_pct = monthly_agg["min"]
+    monthly_mean_pct = monthly_agg["mean"]
+    monthly_max_pct = monthly_agg["max"]
+
+    left, width_days = edges_and_widths_yearly(monthly_agg["month_start"])
+
+    last_start = monthly_agg["month_start"].iloc[-1]
+    end_start = last_start + pd.to_timedelta(
+        float(width_days[-1]), unit="D",
+    )
+    month_pad = pd.concat(
+        [monthly_agg["month_start"], pd.Series([end_start])], ignore_index=True,
+    )
+    min_pct_pad = np.append(
+        monthly_min_pct.to_numpy(), float(monthly_min_pct.iloc[-1]),
+    )
+    mean_pct_pad = np.append(
+        monthly_mean_pct.to_numpy(), float(monthly_mean_pct.iloc[-1]),
+    )
+    max_pct_pad = np.append(
+        monthly_max_pct.to_numpy(), float(monthly_max_pct.iloc[-1]),
+    )
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     soc_colour = FINANCIAL_COLORS["net"]
     ax.fill_between(
-        monthly["month_start"], monthly_min_pct, monthly_max_pct,
+        month_pad, min_pct_pad, max_pct_pad,
+        step="post",
         color=soc_colour, alpha=0.20, edgecolor=soc_colour,
         label="Monthly min-max",
     )
     ax.plot(
-        monthly["month_start"], monthly_mean_pct,
-        color=soc_colour, linewidth=1.5, linestyle="-",
+        month_pad, mean_pct_pad,
+        drawstyle="steps-post",
+        color=soc_colour, linewidth=1.5,
         marker="o", markersize=3,
         label="Monthly mean",
     )
-    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%Y"))
-    plt.setp(ax.get_xticklabels(), rotation=XTICK_ROT, ha="right")
+    _setup_month_axis(ax, left, width_days)
 
     ax.set_ylim(0.0, 100.0)
     ax.set_yticks(np.arange(0, 101, 10))

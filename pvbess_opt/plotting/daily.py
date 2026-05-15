@@ -39,6 +39,7 @@ from ..config import FINANCIAL_COLORS, XTICK_ROT
 from .helpers import (
     fill_stacked_above,
     line_if_nonzero,
+    line_masked_zeros,
     pad_right_to_end,
     plot_stack_filtered,
     pretty_date,
@@ -300,7 +301,7 @@ def plot_daily_combined_merchant(
     plot_stack_filtered(ax, t_pad, ypads, labels, step_post=True)
 
     t_pad, [pv_pad] = pad_right_to_end(t, [df["pv_kwh"].to_numpy()], end)
-    line_if_nonzero(
+    line_masked_zeros(
         ax, t_pad, pv_pad, "PV generation",
         linewidth=1.8, step_post=True,
     )
@@ -556,7 +557,7 @@ def plot_daily_combined_merchant_with_soc(
     plot_stack_filtered(ax, t_pad, ypads, labels, step_post=True)
 
     t_pad, [pv_pad] = pad_right_to_end(t, [df["pv_kwh"].to_numpy()], end)
-    line_if_nonzero(
+    line_masked_zeros(
         ax, t_pad, pv_pad, "PV generation",
         linewidth=1.8, step_post=True,
     )
