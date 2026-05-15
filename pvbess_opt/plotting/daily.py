@@ -1,14 +1,16 @@
 """Daily dispatch plots.
 
-Three vnb-mode figures per calendar day, all written into the
+Four vnb-mode figures per calendar day, all written into the
 ``out_dir/<YYYY>-<MM>/`` subdirectory of the daily plot folder:
 
 * ``daily_supply_<YYYY-MM-DD>.pdf`` — stacked load supply
 * ``daily_surplus_<YYYY-MM-DD>.pdf`` — surplus / charges / curtailment
 * ``daily_combined_<YYYY-MM-DD>.pdf`` — supply + surplus on top of the
   load line
+* ``daily_combined_with_soc_<YYYY-MM-DD>.pdf`` — same combined energy
+  stacks with the battery SOC (%) overlaid on the right axis.
 
-Three merchant-mode figures per calendar day (no
+Four merchant-mode figures per calendar day (no
 load, so the supply / combined views collapse to a single stack):
 
 * ``daily_dispatch_<YYYY-MM-DD>.pdf`` — stacked PV/BESS exports +
@@ -16,6 +18,8 @@ load, so the supply / combined views collapse to a single stack):
 * ``daily_soc_<YYYY-MM-DD>.pdf`` — SOC trajectory (kWh + %).
 * ``daily_revenue_<YYYY-MM-DD>.pdf`` — DAM revenue per step minus
   grid-charging cost.
+* ``daily_combined_with_soc_<YYYY-MM-DD>.pdf`` — merchant combined
+  stacks with the battery SOC (%) overlaid on the right axis.
 
 Filenames intentionally do **not** carry a scenario tag — the scenario
 is encoded in the parent run-output directory (``results/<...>``) so
@@ -377,6 +381,202 @@ def plot_daily_soc(
     apply_universal_margins(ax, skip_x=True, skip_y=True)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="daily")
     save_figure_daily(out_dir / f"daily_soc_{date_str}.pdf", date_str)
+
+
+# ---------------------------------------------------------------------------
+# Combined energy + SOC overlay (one filename, mode-specific content)
+# ---------------------------------------------------------------------------
+
+
+def _draw_soc_overlay(
+    ax, df: pd.DataFrame, end: pd.Timestamp,
+):
+    """Draw the SOC (%) overlay on a twin axis; return the twin axis or None.
+
+    Returns ``None`` when the BESS is absent (every SOC value is zero or
+    the column is missing), in which case no twin axis is created and
+    the calling plot collapses to its plain combined-stack content.
+    """
+    soc_kwh = df["soc_kwh"].to_numpy(dtype=float)
+    bess_present = soc_kwh.max() > 1e-9
+    if not bess_present or "soc_pct" not in df.columns:
+        return None
+    soc_pct = df["soc_pct"].to_numpy(dtype=float)
+    t_soc_pad, [soc_pct_pad] = pad_right_to_end(df["timestamp"], [soc_pct], end)
+    ax2 = ax.twinx()
+    ax2.plot(
+        t_soc_pad, soc_pct_pad,
+        drawstyle="steps-post",
+        color=FINANCIAL_COLORS["net_revenue_line"],
+        linewidth=2.0, label="SOC (%)",
+    )
+    ax2.set_ylim(0.0, 100.0)
+    ax2.set_yticks(np.arange(0, 101, 10))
+    ax2.set_ylabel("SOC (%)")
+    ax2.grid(False)
+    return ax2
+
+
+def _apply_combined_with_soc_legend(ax, ax2) -> None:
+    """Merge legend handles from the energy axis and the SOC twin axis.
+
+    Mirrors the existing ``apply_legend`` placement (``bbox_to_anchor =
+    (0.5, -0.20)``, ``loc = "upper center"``) so the new plot reads the
+    same as the other daily combined plots.
+    """
+    handles_main, labels_main = ax.get_legend_handles_labels()
+    if ax2 is not None:
+        handles_soc, labels_soc = ax2.get_legend_handles_labels()
+    else:
+        handles_soc, labels_soc = [], []
+    combined_handles = handles_main + handles_soc
+    combined_labels = labels_main + labels_soc
+    if not combined_labels:
+        return
+    ncol = max(1, (len(combined_labels) + 1) // 2)
+    ax.legend(
+        combined_handles, combined_labels,
+        bbox_to_anchor=(0.5, -0.20), loc="upper center",
+        ncol=ncol, frameon=True, framealpha=0.9,
+    )
+
+
+def plot_daily_combined_with_soc(
+    res: pd.DataFrame, date_str: str, out_dir: Path,
+) -> None:
+    """VNB combined energy stacks with SOC (%) overlaid on the right axis.
+
+    Energy stacks (PV/BESS/Import → Load + the surplus / charge / export /
+    curtailment block above the load line) sit on the left axis exactly
+    like :func:`plot_daily_combined`; the right axis carries a single
+    SOC (%) line so the reader can correlate dispatch and battery state
+    on one canvas.
+
+    Filename: ``daily_combined_with_soc_<YYYY-MM-DD>.pdf``.  When the
+    project has no BESS the SOC overlay is skipped and the plot collapses
+    to the plain combined content.
+    """
+    day = pd.to_datetime(date_str).date()
+    df = res[res["timestamp"].dt.date == day]
+    if df.empty:
+        return
+    start = pd.Timestamp(day)
+    end = start + pd.Timedelta(days=1)
+    t = df["timestamp"]
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+
+    supply_series = [
+        df["pv_to_load_kwh"].to_numpy(),
+        df["bess_dis_load_kwh"].to_numpy(),
+        df["grid_to_load_kwh"].to_numpy(),
+    ]
+    supply_labels = ["PV→Load", "BESS→Load", "Import→Load"]
+    t_pad, ypads = pad_right_to_end(t, supply_series, end)
+    plot_stack_filtered(ax, t_pad, ypads, supply_labels, step_post=True)
+
+    t_pad, [load_pad] = pad_right_to_end(t, [df["load_kwh"].to_numpy()], end)
+    line_if_nonzero(ax, t_pad, load_pad, "Load (demand)", linewidth=1.8,
+                    step_post=True)
+
+    surplus_series = [
+        df["pv_to_bess_kwh"].to_numpy(),
+        df["pv_to_grid_kwh"].to_numpy(),
+        df["pv_curtail_kwh"].to_numpy(),
+        df["bess_dis_grid_kwh"].to_numpy(),
+        df["bess_charge_grid_kwh"].to_numpy(),
+    ]
+    surplus_labels = [
+        "PV→BESS (charge)",
+        "PV→Grid (export)",
+        "PV→Curtailment",
+        "BESS→Grid (export)",
+        "Import→BESS (charge)",
+    ]
+    t_pad, ypads = pad_right_to_end(t, surplus_series, end)
+    fill_stacked_above(ax, t_pad, load_pad, ypads, surplus_labels,
+                       step_post=True)
+
+    ax2 = _draw_soc_overlay(ax, df, end)
+
+    if show_titles():
+        plt.title(
+            f"Daily Energy Flows + SOC{title_prefix(get_scenario_label())} "
+            f"— {pretty_date(date_str)}"
+        )
+    plt.xlabel("Time (HH:mm)")
+    ax.set_ylabel("Energy (kWh)")
+    _setup_day_axes(ax, start, end)
+    _apply_combined_with_soc_legend(ax, ax2)
+    apply_universal_margins(ax, skip_x=True)
+    save_figure_daily(
+        out_dir / f"daily_combined_with_soc_{date_str}.pdf", date_str,
+    )
+
+
+def plot_daily_combined_merchant_with_soc(
+    res: pd.DataFrame, date_str: str, out_dir: Path,
+) -> None:
+    """Merchant combined stacks with SOC (%) overlaid on the right axis.
+
+    Same content as :func:`plot_daily_combined_merchant` on the left
+    axis (PV-origin stacks + BESS-grid stacks with the PV generation
+    line on top) plus the SOC (%) line on the right.  Skips the SOC
+    overlay when the project has no BESS.
+
+    Filename: ``daily_combined_with_soc_<YYYY-MM-DD>.pdf``.
+    """
+    day = pd.to_datetime(date_str).date()
+    df = res[res["timestamp"].dt.date == day]
+    if df.empty:
+        return
+    start = pd.Timestamp(day)
+    end = start + pd.Timedelta(days=1)
+    t = df["timestamp"]
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+
+    series = [
+        df["pv_to_bess_kwh"].to_numpy(),
+        df["pv_to_grid_kwh"].to_numpy(),
+        df["pv_curtail_kwh"].to_numpy(),
+        df["bess_dis_grid_kwh"].to_numpy(),
+        df["bess_charge_grid_kwh"].to_numpy(),
+    ]
+    labels = [
+        "PV→BESS (charge)",
+        "PV→Grid (export)",
+        "PV→Curtailment",
+        "BESS→Grid (export)",
+        "Import→BESS (charge)",
+    ]
+    t_pad, ypads = pad_right_to_end(t, series, end)
+    plot_stack_filtered(ax, t_pad, ypads, labels, step_post=True)
+
+    t_pad, [pv_pad] = pad_right_to_end(t, [df["pv_kwh"].to_numpy()], end)
+    line_if_nonzero(
+        ax, t_pad, pv_pad, "PV generation",
+        linewidth=1.8, step_post=True,
+    )
+
+    ax2 = _draw_soc_overlay(ax, df, end)
+
+    if show_titles():
+        plt.title(
+            f"Merchant — Daily Combined Flows + SOC"
+            f"{title_prefix(get_scenario_label())} "
+            f"— {pretty_date(date_str)}"
+        )
+    plt.xlabel("Time (HH:mm)")
+    ax.set_ylabel("Energy (kWh)")
+    _setup_day_axes(ax, start, end)
+    _apply_combined_with_soc_legend(ax, ax2)
+    apply_universal_margins(ax, skip_x=True)
+    save_figure_daily(
+        out_dir / f"daily_combined_with_soc_{date_str}.pdf", date_str,
+    )
 
 
 def plot_daily_revenue(
