@@ -65,6 +65,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .lifetime import _bess_factor
+
 logger = logging.getLogger(__name__)
 
 
@@ -270,6 +272,9 @@ def build_yearly_cashflow(
     pv_deg_y1 = float(econ["pv_degradation_year1_pct"]) / 100.0
     pv_deg_annual = float(econ["pv_degradation_annual_pct"]) / 100.0
     bess_deg_annual = float(econ["bess_degradation_annual_pct"]) / 100.0
+    bess_deg_per_cycle = float(
+        econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
+    ) / 100.0
     retail_infl = float(econ.get("retail_inflation_pct", 2.0) or 0.0) / 100.0
     dam_infl = float(econ.get("dam_inflation_pct", 0.0) or 0.0) / 100.0
     opex_infl = float(econ["opex_inflation_pct"]) / 100.0
@@ -277,6 +282,16 @@ def build_yearly_cashflow(
 
     bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
     bess_repl_cost_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
+
+    # Cumulative full-equivalent-cycle accumulator for the cycle-fade
+    # term.  Convention matches compute_financial_kpis' bess_lifetime_cycles
+    # (discharge MWh / capacity MWh).  Resets at project start and at
+    # bess_replacement_year.
+    capacity_mwh = float(capacities.get("bess_kwh", 0.0) or 0.0) / 1000.0
+    year1_discharge_mwh = float(
+        year1_kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
+    )
+    cumulative_cycles = 0.0
 
     rows: list[dict[str, float]] = []
     for y in range(0, n_years + 1):
@@ -295,7 +310,17 @@ def build_yearly_cashflow(
                 pv_factor = 1.0
             else:
                 pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
-            bess_factor = (1.0 - bess_deg_annual) ** (y - 1)
+            if bess_repl_year > 0 and y == bess_repl_year:
+                cumulative_cycles = 0.0
+            bess_factor = _bess_factor(
+                y, bess_deg_annual, replacement_year=bess_repl_year,
+                d_bess_per_cycle=bess_deg_per_cycle,
+                cumulative_cycles_through=cumulative_cycles,
+            )
+            if capacity_mwh > 1e-12:
+                cumulative_cycles += (
+                    year1_discharge_mwh * bess_factor / capacity_mwh
+                )
             # Per-stream inflation.  pv_factor is used for both
             # streams as the convention (downstream scopes
             # like revenue_stack_yearly scale by revenue_eur ratios);
@@ -740,6 +765,51 @@ def compute_financial_kpis(
         if max_y1 > 1e-9:
             extras["pv_capacity_factor"] = float(round(pv_gen_y1 / max_y1, 4))
 
+    # ---- BESS capacity-fade decomposition at the final year (v0.8.8) ------
+    # Splits the year-N fade into its unchanged multiplicative calendar
+    # component and the new additive cycle component.  By construction
+    # calendar_fade + cycle_fade == total_fade whenever the max(0, ...)
+    # floor in _bess_factor is inactive (the normal case).
+    fade: dict[str, float] = {
+        "bess_calendar_fade_pct_y_final": float("nan"),
+        "bess_cycle_fade_pct_y_final": float("nan"),
+        "bess_total_fade_pct_y_final": float("nan"),
+    }
+    if (df[project_year_col] >= 1).any():
+        n_op_years = int(df.loc[df[project_year_col] >= 1, project_year_col].max())
+        d_annual_fade = float(econ.get("bess_degradation_annual_pct", 0.0) or 0.0) / 100.0
+        d_cycle_fade = float(
+            econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
+        ) / 100.0
+        repl_fade = int(econ.get("bess_replacement_year", 0) or 0)
+        if repl_fade > 0 and n_op_years >= repl_fade:
+            years_since_final = n_op_years - repl_fade
+            reset_start = repl_fade
+        else:
+            years_since_final = n_op_years - 1
+            reset_start = 1
+        calendar_factor = (1.0 - d_annual_fade) ** years_since_final
+        cycles_through_final_minus_1 = 0.0
+        if lifetime_yearly is not None and capacities is not None:
+            cap_mwh = float(capacities.get("bess_kwh", 0.0) or 0.0) / 1000.0
+            if (
+                cap_mwh > 1e-12
+                and "bess_discharge_mwh" in lifetime_yearly.columns
+                and "project_year" in lifetime_yearly.columns
+            ):
+                disc_by_year = lifetime_yearly.set_index(
+                    "project_year",
+                )["bess_discharge_mwh"]
+                for yy in range(reset_start, n_op_years):
+                    if yy in disc_by_year.index:
+                        cycles_through_final_minus_1 += float(disc_by_year.loc[yy])
+                cycles_through_final_minus_1 /= cap_mwh
+        cycle_term = d_cycle_fade * cycles_through_final_minus_1
+        factor_final = max(0.0, calendar_factor - cycle_term)
+        fade["bess_calendar_fade_pct_y_final"] = (1.0 - calendar_factor) * 100.0
+        fade["bess_cycle_fade_pct_y_final"] = cycle_term * 100.0
+        fade["bess_total_fade_pct_y_final"] = (1.0 - factor_final) * 100.0
+
     # ---- Year-1 revenue breakdown -----------------------------------------
     breakdown: dict[str, float] = {}
     if year1_kpis is not None:
@@ -784,6 +854,7 @@ def compute_financial_kpis(
         "project_end_year": int(project_end_year),
     }
     out.update(extras)
+    out.update(fade)
     out.update(breakdown)
 
     # ---- LCOE / LCOS audit log --------------------------------------------

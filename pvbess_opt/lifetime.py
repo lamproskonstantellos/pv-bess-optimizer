@@ -89,13 +89,29 @@ def _pv_factor(y: int, lid: float, d_annual: float) -> float:
 
 
 def _bess_factor(
-    y: int, d_bess: float, replacement_year: int = 0,
+    y: int,
+    d_bess_annual: float,
+    replacement_year: int = 0,
+    *,
+    d_bess_per_cycle: float = 0.0,
+    cumulative_cycles_through: float = 0.0,
 ) -> float:
     """Return the BESS capacity factor for project year ``y``.
 
+    Combines the unchanged multiplicative calendar fade with an optional
+    linear cycle-fade term::
+
+        factor = max(0.0,
+            (1 - d_annual)^years_since  -  d_per_cycle * cumulative_cycles
+        )
+
     When ``replacement_year > 0`` and ``y >= replacement_year``, the
-    factor resets to 1.0 at year ``replacement_year`` and degrades
-    fresh from there (linear at ``d_bess`` per year).
+    calendar factor resets to 1.0 at year ``replacement_year`` and
+    degrades fresh from there (linear at ``d_bess_annual`` per year).
+
+    Backward compatible: when called with the legacy 3-argument
+    signature the new keyword-only parameters default to 0 and the
+    result equals the pre-v0.8.8 calendar-only behaviour exactly.
     """
     if y < 1:
         return 1.0
@@ -103,7 +119,9 @@ def _bess_factor(
         years_since_install = y - replacement_year
     else:
         years_since_install = y - 1
-    return (1.0 - d_bess) ** years_since_install
+    calendar = (1.0 - d_bess_annual) ** years_since_install
+    cycle = d_bess_per_cycle * cumulative_cycles_through
+    return max(0.0, calendar - cycle)
 
 
 def build_lifetime_dispatch(
@@ -135,9 +153,25 @@ def build_lifetime_dispatch(
     lid = float(econ.get("pv_degradation_year1_pct", 0.0)) / 100.0
     d_annual = float(econ.get("pv_degradation_annual_pct", 0.0)) / 100.0
     d_bess = float(econ.get("bess_degradation_annual_pct", 0.0)) / 100.0
+    d_bess_per_cycle = float(
+        econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
+    ) / 100.0
     bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
 
-    _ = capacities  # accepted for API symmetry with other multi-year helpers
+    # Full equivalent cycle convention: discharge-only FEC, matching
+    # ``compute_financial_kpis`` (bess_lifetime_cycles = discharge MWh /
+    # capacity MWh in pvbess_opt/economics.py).
+    capacity_mwh = float(capacities.get("bess_kwh", 0.0) or 0.0) / 1000.0
+    _dis_cols = [
+        c for c in ("bess_dis_load_kwh", "bess_dis_grid_kwh")
+        if c in res_year1.columns
+    ]
+    if _dis_cols:
+        year1_discharge_mwh = float(
+            res_year1[_dis_cols].to_numpy(dtype=float).sum()
+        ) / 1000.0
+    else:
+        year1_discharge_mwh = 0.0
 
     pv_cols = [c for c in _PV_ORIGIN_COLUMNS if c in res_year1.columns]
     bess_cols = [c for c in _BESS_ORIGIN_COLUMNS if c in res_year1.columns]
@@ -152,9 +186,18 @@ def build_lifetime_dispatch(
     )
 
     chunks: list[pd.DataFrame] = []
+    cumulative_cycles = 0.0  # reset at project start AND at replacement_year
     for y in range(1, n_years + 1):
+        if bess_repl_year > 0 and y == bess_repl_year:
+            cumulative_cycles = 0.0
         pv_f = _pv_factor(y, lid, d_annual)
-        bess_f = _bess_factor(y, d_bess, replacement_year=bess_repl_year)
+        bess_f = _bess_factor(
+            y, d_bess, replacement_year=bess_repl_year,
+            d_bess_per_cycle=d_bess_per_cycle,
+            cumulative_cycles_through=cumulative_cycles,
+        )
+        if capacity_mwh > 1e-12:
+            cumulative_cycles += (year1_discharge_mwh * bess_f) / capacity_mwh
         chunk = res_year1.copy()
         chunk["project_year"] = int(y)
         target_calendar_year = int(project_start_year + y - 1)

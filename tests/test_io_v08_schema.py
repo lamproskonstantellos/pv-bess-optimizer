@@ -68,7 +68,7 @@ def test_bess_sheet_keys():
         "capex_bess_eur_per_kw", "devex_bess_eur_per_kw",
         "opex_bess_eur_per_kw",
         "bess_replacement_year", "bess_replacement_cost_pct",
-        "bess_degradation_annual_pct",
+        "bess_degradation_annual_pct", "bess_degradation_pct_per_cycle",
     }
     assert set(BESS_SHEET_DEFAULTS) == expected
 

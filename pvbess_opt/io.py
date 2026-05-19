@@ -131,6 +131,10 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "bess_replacement_year": 0,
     "bess_replacement_cost_pct": 50.0,
     "bess_degradation_annual_pct": 2.0,
+    # Defaults to 0.0 so a workbook that omits the key (pre-v0.8.8) keeps
+    # pure calendar-fade behaviour.  The canonical workbook ships the row
+    # with the 0.008 LFP value (see _BESS_ROWS).
+    "bess_degradation_pct_per_cycle": 0.0,
 }
 
 ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
@@ -342,6 +346,11 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Replacement cost as percent of original BESS CAPEX."),
     ("bess_degradation_annual_pct", 2.0, "%",
      "Linear BESS capacity fade. Approximate Tier-1 LFP cell warranty."),
+    ("bess_degradation_pct_per_cycle", 0.008, "%",
+     "Cycle-based BESS capacity fade per full equivalent cycle, in "
+     "percent. LFP default 0.008 (range 0.005-0.010). Set to 0 to "
+     "disable cycle aging and recover pre-v0.8.8 calendar-only "
+     "behavior."),
 )
 
 _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -1048,6 +1057,18 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             pd.read_excel(xlsx_path, sheet_name=sheet_name),
         )
         typed[sheet_name] = _parse_kv_sheet(sheet_name, flat)
+        if (
+            sheet_name == "bess"
+            and "bess_degradation_pct_per_cycle" not in flat
+        ):
+            # Old workbook (pre-v0.8.8): default the cycle-fade coefficient
+            # to 0.0 so the run reproduces calendar-only behaviour.
+            typed["bess"]["bess_degradation_pct_per_cycle"] = 0.0
+            logger.info(
+                "[bess] bess_degradation_pct_per_cycle not found in "
+                "workbook; defaulting to 0.0 (calendar-only mode, "
+                "pre-v0.8.8 behavior)."
+            )
 
     # A finite grid-export cap must be strictly positive.  An empty cell
     # or an 'unlimited' token resolves to float('inf') (cap disabled).
