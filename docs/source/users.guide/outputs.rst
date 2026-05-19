@@ -22,12 +22,20 @@ A run produces a single result directory under ``results/``.
   ``plot_monthly_scope`` / ``plot_yearly_scope``); each accepts
   ``none`` | ``year1_only`` | ``all``.
 
-The monthly and yearly SOC plots draw each aggregate period as a
-vertical range bar (daily / monthly min→max) with a short horizontal
-tick at the mean — there is no connecting line and no point markers,
-since the data is an aggregate rather than an instantaneous reading.
-The daily SOC plot is point-in-time at 15-minute resolution and keeps
-its stepped-line form.
+The monthly and yearly SOC plots draw a stepped mean line (one step
+per day / per month) with a min→max fill envelope.  They carry **no
+point markers**: markers on a daily / monthly aggregate misread as an
+instantaneous SOC reading, whereas the step already conveys each
+period's mean and the envelope shows its range.  The daily SOC plot is
+point-in-time at 15-minute resolution and keeps its stepped-line form
+unchanged.
+
+The IRR and NPV sensitivity tornados annotate each bar end with the
+absolute driver value that produced it, stacked just below the
+IRR% / NPV label and placed strictly outside the bar.  A ``Base =
+...`` annotation sits above the top bar, the base-case value is marked
+with a dashed vertical line, and each y-axis label carries the ±
+sensitivity range applied to that driver.
 
 All plots are PDF-only (IEEE preset) and titles are off by default;
 toggle with ``show_titles`` in the ``economic`` sheet.

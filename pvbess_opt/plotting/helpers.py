@@ -15,13 +15,6 @@ def pretty_date(date_str: str) -> str:
     return pd.to_datetime(date_str).strftime("%d-%m-%Y")
 
 
-def darker_shade(color, factor: float = 0.6):
-    """Return a darker variant of ``color`` for emphasis ticks/markers."""
-    import matplotlib.colors as mcolors
-    r, g, b = mcolors.to_rgb(color)
-    return (r * factor, g * factor, b * factor)
-
-
 def pad_right_to_end(t, ys, end_ts):
     """Pad a time-series so step-post lines extend through `end_ts`.
 

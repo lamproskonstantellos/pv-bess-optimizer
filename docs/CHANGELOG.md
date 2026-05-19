@@ -23,10 +23,16 @@ left disabled (the default-0 / no-cap settings).
   `compute_financial_kpis` reports the year-N calendar / cycle / total
   fade split.  Set the key to 0 — or omit it on an older workbook — to
   recover pre-v0.8.8 calendar-only behaviour exactly.
-- SOC plots: the monthly and yearly SOC figures now render each
-  aggregate period as a vertical range bar (min→max) with a horizontal
-  mean tick, instead of a stepped line with point markers.  The daily
-  SOC plot is unchanged.
+- SOC plots: the monthly and yearly SOC figures drop the misleading
+  point markers.  They keep the stepped mean line (now slightly
+  heavier) and the min→max fill envelope; markers on a daily / monthly
+  aggregate misread as instantaneous SOC.  The daily SOC plot — genuine
+  15-minute point-in-time data — is unchanged.
+- Sensitivity tornados: the IRR and NPV tornado plots annotate each bar
+  end with the absolute driver value that produced it (CAPEX / OPEX /
+  revenue in EUR, discount rate as a percentage), add a `Base = ...`
+  annotation above the top bar, and fold the ± sensitivity range into
+  each y-axis label.  The base-case dashed line is unchanged.
 - Default scenario: `inputs/input.xlsx` ships a 15 MW system
   (`pv_nameplate_kwp`, `p_grid_export_max_kw`, `bess_power_kw` = 15000;
   `bess_capacity_kwh` = 60000; `bess_replacement_year` = 10) over a

@@ -30,6 +30,33 @@ for a PV-only project, both > 0 for a hybrid PV+BESS project.
 The codebase is pure Python and runs on **Linux, macOS, and Windows** with
 Python ≥ 3.11.  All plots are exported as IEEE-styled PDFs.
 
+## What's new in v0.8.8
+
+Five user-visible changes, all backward compatible — old workbooks load
+unchanged and the numerical output is identical to v0.8.7 whenever the
+new features are left disabled:
+
+* **Default scenario refresh** — `inputs/input.xlsx` ships a 15 MW
+  system over a 20-year horizon (`pv_nameplate_kwp`,
+  `p_grid_export_max_kw`, `bess_power_kw` = 15000; `bess_capacity_kwh`
+  = 60000; `bess_replacement_year` = 10).
+* **Unlimited grid export** — `p_grid_export_max_kw` may be left empty
+  or set to `inf` / `unlimited` / `disabled` / `none` to remove the
+  export cap.  Curtailment driven by the cap then becomes zero and a
+  finite Big-M is substituted internally, so the result stays
+  solver-agnostic.  A finite positive cap behaves exactly as before.
+* **Cycle-based BESS degradation** — a new `bess` sheet key
+  `bess_degradation_pct_per_cycle` adds a linear cycle-fade term on
+  top of the unchanged multiplicative calendar fade.  Set it to 0 — or
+  omit it on an older workbook — to recover calendar-only behaviour.
+* **SOC plots** — the monthly and yearly SOC figures drop the
+  misleading point markers; they keep the stepped mean line and the
+  min–max envelope.  The daily SOC plot is unchanged.
+* **Sensitivity tornados** — the IRR and NPV tornado plots annotate
+  each bar end with the absolute driver value that produced it, add a
+  base-case annotation and dashed line, and fold the ± range into the
+  y-axis labels.
+
 ## Repository layout
 
 ```

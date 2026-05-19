@@ -30,7 +30,6 @@ from matplotlib.ticker import ScalarFormatter
 from ..config import FINANCIAL_COLORS, XTICK_ROT
 from .helpers import (
     bar_stacked_bins,
-    darker_shade,
     edges_and_widths_monthly,
     line_if_nonzero,
     line_masked_zeros,
@@ -336,28 +335,43 @@ def plot_monthly_soc(
         return
     left, width_days = edges_and_widths_monthly(daily_agg["date"])
 
-    # Option-B SOC trace: one vertical range bar (min->max) per day with
-    # a short horizontal tick at the daily mean.  No connecting line and
-    # no point markers — the data is a daily aggregate, not an instant.
-    centres = mdates.date2num(left) + width_days / 2.0
-    tick_half = 0.3 * width_days
-    daily_min_pct = daily_agg["min"].to_numpy(dtype=float)
-    daily_mean_pct = daily_agg["mean"].to_numpy(dtype=float)
-    daily_max_pct = daily_agg["max"].to_numpy(dtype=float)
+    daily_min_pct = daily_agg["min"]
+    daily_mean_pct = daily_agg["mean"]
+    daily_max_pct = daily_agg["max"]
+
+    # Pad to the next day after the last data point so fill + line reach
+    # the right edge of the x-axis (matches plot_monthly_combined).
+    last_date = daily_agg["date"].iloc[-1]
+    end_date = last_date + pd.Timedelta(days=1)
+    dates_pad = pd.concat(
+        [daily_agg["date"], pd.Series([end_date])], ignore_index=True,
+    )
+    min_pct_pad = np.append(
+        daily_min_pct.to_numpy(), float(daily_min_pct.iloc[-1]),
+    )
+    mean_pct_pad = np.append(
+        daily_mean_pct.to_numpy(), float(daily_mean_pct.iloc[-1]),
+    )
+    max_pct_pad = np.append(
+        daily_max_pct.to_numpy(), float(daily_max_pct.iloc[-1]),
+    )
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     soc_colour = FINANCIAL_COLORS["net"]
-    mean_colour = darker_shade(soc_colour)
-    ax.vlines(
-        centres, daily_min_pct, daily_max_pct,
-        colors=soc_colour, linewidth=1.5, alpha=0.85,
-        label="SOC range (min-max)",
+    ax.fill_between(
+        dates_pad, min_pct_pad, max_pct_pad,
+        step="post",
+        color=soc_colour, alpha=0.20, edgecolor=soc_colour,
+        label="Daily min-max",
     )
-    ax.hlines(
-        daily_mean_pct, centres - tick_half, centres + tick_half,
-        colors=mean_colour, linewidth=2.0,
-        label="Mean SOC",
+    # No point markers: the step line already conveys each day's mean,
+    # and markers on a daily aggregate misread as instantaneous SOC.
+    ax.plot(
+        dates_pad, mean_pct_pad,
+        drawstyle="steps-post",
+        color=soc_colour, linewidth=2.0,
+        label="Daily mean",
     )
 
     ax.set_ylim(0.0, 100.0)

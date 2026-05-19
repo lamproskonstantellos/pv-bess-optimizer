@@ -24,12 +24,42 @@ Sign conventions
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from .economics import build_yearly_cashflow, compute_financial_kpis
+
+
+@dataclass
+class DriverSensitivity:
+    """One tornado driver's base / low / high state.
+
+    Carries both the absolute driver values (``*_value``) and the
+    resulting metric outcomes (``*_outcome``) so a tornado plot can
+    annotate each bar end with the driver value that produced it.
+    """
+
+    name: str               # e.g. "CAPEX" — the variable identifier
+    driver_type: str         # e.g. "capex" — keys the numeric formatter
+    base_value: float        # base case absolute driver value
+    low_value: float         # absolute driver value at the low end
+    high_value: float        # absolute driver value at the high end
+    low_outcome: float       # IRR or NPV at the low driver end
+    high_outcome: float      # IRR or NPV at the high driver end
+    sensitivity_pct: float   # the +/- magnitude used (e.g. 20.0)
+
+
+# Maps the ``variable`` column to a ``driver_type`` understood by the
+# tornado numeric formatter.
+_DRIVER_TYPE_BY_VARIABLE: dict[str, str] = {
+    "CAPEX": "capex",
+    "OPEX": "opex",
+    "Revenue": "revenue",
+    "DiscountRate": "discount_rate",
+}
 
 
 def variables_for_npv_sensitivity(
@@ -212,8 +242,11 @@ def run_sensitivity_analysis(
 
         if name == "CAPEX":
             base_value = base_capex_total
-            low_value = base_capex_total * (1.0 + delta)
-            high_value = base_capex_total * (1.0 - delta)
+            # "low"/"high" name the signed driver perturbation, so the
+            # absolute value at each scenario must track delta_value:
+            # low => -delta, high => +delta.
+            low_value = base_capex_total * (1.0 - delta)
+            high_value = base_capex_total * (1.0 + delta)
             low_kpis = compute_financial_kpis(
                 _scale_capex(base_yearly_cf, 1.0 - delta), econ,
             )
@@ -283,3 +316,49 @@ def run_sensitivity_analysis(
             continue
 
     return pd.DataFrame(rows)
+
+
+def build_driver_sensitivities(
+    sens_df: pd.DataFrame, metric: str,
+) -> dict[str, DriverSensitivity]:
+    """Build ``{label: DriverSensitivity}`` from a sensitivity frame.
+
+    ``metric`` is the outcome column (``"irr_pct"`` or ``"npv_eur"``).
+    Returns an empty dict when the frame lacks the driver-value
+    metadata (``value`` / ``delta_value``) or any required scenario row
+    — callers then fall back to the metadata-free tornado layout.
+    """
+    if sens_df is None or sens_df.empty:
+        return {}
+    required = {"variable", "label", "scenario", "value", "delta_value", metric}
+    if not required.issubset(sens_df.columns):
+        return {}
+
+    out: dict[str, DriverSensitivity] = {}
+    for label, grp in sens_df.groupby("label"):
+        by_scen = grp.drop_duplicates("scenario").set_index("scenario")
+        if not {"base", "low", "high"}.issubset(by_scen.index):
+            continue
+        variable = str(grp["variable"].iloc[0])
+        driver_type = _DRIVER_TYPE_BY_VARIABLE.get(variable, variable.lower())
+        # Relative drivers store delta_value as a fraction (0.20); the
+        # discount-rate driver stores it directly in percentage points.
+        delta = abs(float(by_scen.loc["low", "delta_value"]))
+        sens_pct = delta if driver_type == "discount_rate" else delta * 100.0
+        try:
+            record = DriverSensitivity(
+                name=variable,
+                driver_type=driver_type,
+                base_value=float(by_scen.loc["base", "value"]),
+                low_value=float(by_scen.loc["low", "value"]),
+                high_value=float(by_scen.loc["high", "value"]),
+                low_outcome=float(by_scen.loc["low", metric]),
+                high_outcome=float(by_scen.loc["high", metric]),
+                sensitivity_pct=float(sens_pct),
+            )
+        except (TypeError, ValueError):
+            continue
+        if np.isnan(record.base_value) or np.isnan(record.low_value):
+            continue
+        out[str(label)] = record
+    return out
