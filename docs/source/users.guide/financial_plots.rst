@@ -22,6 +22,14 @@ Eight plots are produced when the financial pipeline runs:
    ``Discount rate`` row (the IRR is by definition the rate that zeros
    the NPV, so varying the discount rate does not move the IRR).  An
    italic footer note flags the omission.
+
+   Both tornados annotate each bar end with the absolute driver value
+   that produced it — CAPEX / OPEX / revenue in EUR, the discount rate
+   as a percentage — stacked just below the IRR% / NPV label and placed
+   strictly outside the bar.  A ``Base = ...`` annotation sits above the
+   top bar, the base case is marked with a dashed vertical line, and
+   each y-axis label carries the ± sensitivity range used for that
+   driver.
 8. ``rolling_horizon_distribution.pdf`` — Monte Carlo profit histogram
    with vertical markers at P10 / P50 / P90 and a dashed marker at the
    perfect-foresight benchmark (only when ``--rolling-horizon
