@@ -25,18 +25,35 @@ Scaling rules (per year :math:`y`)
 
 * **BESS-origin flows** (``bess_dis_load_kwh``, ``bess_dis_grid_kwh``,
   ``bess_charge_grid_kwh``, ``soc_kwh``, etc.) and the SOC trace are
-  multiplied by a piecewise factor that resets to 1.0 at the
-  ``bess_replacement_year`` (when set) and degrades fresh from there:
+  multiplied by :func:`pvbess_opt.lifetime._bess_factor`, which combines
+  an unchanged multiplicative **calendar fade** with an additive linear
+  **cycle fade**:
 
   .. math::
 
-     \text{bess\_factor}(y) =
-     \begin{cases}
-       1 & y = \text{replacement\_year} \\
-       (1 - d_{\text{bess}})^{y - \text{replacement\_year}}
-            & y > \text{replacement\_year} > 0 \\
-       (1 - d_{\text{bess}})^{y-1} & \text{otherwise}
-     \end{cases}
+     \text{bess\_factor}(y) = \max\!\left(0,\;
+     (1 - d_{\text{annual}})^{\text{years\_since}}
+     - d_{\text{per\_cycle}} \cdot \text{cumulative\_cycles}(y-1)\right)
+
+  where :math:`\text{years\_since}` is :math:`y - 1` before any
+  replacement and :math:`y - \text{replacement\_year}` once a
+  replacement has occurred (the calendar term resets to 1.0 at
+  ``bess_replacement_year``).  :math:`d_{\text{annual}}` and
+  :math:`d_{\text{per\_cycle}}` are the fractional forms of
+  ``bess_degradation_annual_pct`` and ``bess_degradation_pct_per_cycle``.
+
+  ``cumulative_cycles(y-1)`` is the full equivalent cycles accrued
+  **through year y − 1** — the lag avoids a circular dependency, since
+  year-:math:`y` dispatch is what determines year-:math:`y` cycles.
+  Full equivalent cycles use the discharge-only convention
+  (``discharge_mwh / capacity_mwh``) shared with
+  :func:`pvbess_opt.economics.compute_financial_kpis`.  The counter
+  resets to 0 at ``bess_replacement_year``.
+
+  When :math:`d_{\text{per\_cycle}} = 0` the second term vanishes and
+  ``bess_factor`` reduces to the pre-v0.8.8 calendar-only formula
+  exactly; older workbooks without ``bess_degradation_pct_per_cycle``
+  load unchanged and behave identically.
 
   The replacement CAPEX line is added separately by
   :func:`pvbess_opt.economics.build_yearly_cashflow` at year
@@ -57,6 +74,22 @@ The lifetime test asserts:
    \approx \text{pv\_factor}(y)
 
 within 0.1 % for every year.
+
+The BESS capacity-fade decomposition reconciles as well: the calendar
+fade and the cycle fade sum to the total fade,
+
+.. math::
+
+   \underbrace{(1 - (1 - d_{\text{annual}})^{\text{years\_since}})}
+       _{\text{calendar fade}}
+   + \underbrace{d_{\text{per\_cycle}} \cdot \text{cumulative\_cycles}}
+       _{\text{cycle fade}}
+   = \underbrace{1 - \text{bess\_factor}(y)}_{\text{total fade}}
+
+with exact equality whenever the :math:`\max(0, \cdot)` floor in
+``bess_factor`` is inactive — the normal case.  Equality only breaks
+when pathological cycling would otherwise drive the factor negative,
+where the floor clamps the total fade at 100 %.
 
 Calendar mapping
 ----------------
