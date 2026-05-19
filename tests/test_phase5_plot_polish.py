@@ -150,6 +150,31 @@ def _find_line(ax, label: str):
     return None
 
 
+def _lc_by_label(ax, label: str):
+    """Return the LineCollection (vlines / hlines) carrying ``label``."""
+    for coll in ax.collections:
+        if "LineCollection" in type(coll).__name__ and coll.get_label() == label:
+            return coll
+    return None
+
+
+def _range_min_max(ax):
+    """Per-period (min, max) arrays from the SOC range-bar LineCollection."""
+    lc = _lc_by_label(ax, "SOC range (min-max)")
+    assert lc is not None, "missing 'SOC range (min-max)' range bars"
+    segs = lc.get_segments()
+    mins = np.array([float(np.min(s[:, 1])) for s in segs])
+    maxs = np.array([float(np.max(s[:, 1])) for s in segs])
+    return mins, maxs
+
+
+def _mean_ticks(ax):
+    """Per-period mean values from the 'Mean SOC' hlines LineCollection."""
+    lc = _lc_by_label(ax, "Mean SOC")
+    assert lc is not None, "missing 'Mean SOC' ticks"
+    return np.array([float(s[0, 1]) for s in lc.get_segments()])
+
+
 # ---------------------------------------------------------------------------
 # Item 1 — merchant PV-generation overlay masks zero entries
 # ---------------------------------------------------------------------------
@@ -206,24 +231,17 @@ def test_monthly_soc_min_max_match_soc_pct_aggregation(mode):
         .agg(["min", "mean", "max"])
     )
 
-    mean_line = _find_line(ax, "Daily mean")
-    assert mean_line is not None
-    mean_y = np.asarray(mean_line.get_ydata())[:-1]
+    means = _mean_ticks(ax)
     np.testing.assert_allclose(
-        mean_y, expected["mean"].to_numpy(), rtol=1e-9, atol=1e-9,
+        means, expected["mean"].to_numpy(), rtol=1e-9, atol=1e-9,
     )
 
-    poly = next(
-        c for c in ax.collections
-        if "PolyCollection" in c.__class__.__name__
+    mins, maxs = _range_min_max(ax)
+    np.testing.assert_allclose(
+        mins, expected["min"].to_numpy(), rtol=1e-9, atol=1e-9,
     )
-    verts = poly.get_paths()[0].vertices
-    ys = verts[:, 1]
-    assert float(np.nanmin(ys)) == pytest.approx(
-        float(expected["min"].min()), rel=1e-9, abs=1e-9,
-    )
-    assert float(np.nanmax(ys)) == pytest.approx(
-        float(expected["max"].max()), rel=1e-9, abs=1e-9,
+    np.testing.assert_allclose(
+        maxs, expected["max"].to_numpy(), rtol=1e-9, atol=1e-9,
     )
 
 
@@ -240,24 +258,17 @@ def test_yearly_soc_min_max_match_soc_pct_aggregation(mode):
         .agg(["min", "mean", "max"])
     )
 
-    mean_line = _find_line(ax, "Monthly mean")
-    assert mean_line is not None
-    mean_y = np.asarray(mean_line.get_ydata())[:-1]
+    means = _mean_ticks(ax)
     np.testing.assert_allclose(
-        mean_y, expected["mean"].to_numpy(), rtol=1e-9, atol=1e-9,
+        means, expected["mean"].to_numpy(), rtol=1e-9, atol=1e-9,
     )
 
-    poly = next(
-        c for c in ax.collections
-        if "PolyCollection" in c.__class__.__name__
+    mins, maxs = _range_min_max(ax)
+    np.testing.assert_allclose(
+        mins, expected["min"].to_numpy(), rtol=1e-9, atol=1e-9,
     )
-    verts = poly.get_paths()[0].vertices
-    ys = verts[:, 1]
-    assert float(np.nanmin(ys)) == pytest.approx(
-        float(expected["min"].min()), rel=1e-9, abs=1e-9,
-    )
-    assert float(np.nanmax(ys)) == pytest.approx(
-        float(expected["max"].max()), rel=1e-9, abs=1e-9,
+    np.testing.assert_allclose(
+        maxs, expected["max"].to_numpy(), rtol=1e-9, atol=1e-9,
     )
 
 
@@ -269,15 +280,13 @@ def test_monthly_soc_invariant_when_soc_pct_and_kwh_decouple(mode):
         monthly_mod, monthly_mod.plot_monthly_soc, df, 1, Path("/tmp"),
     )
     ax = fig.axes[0]
-    mean_line = _find_line(ax, "Daily mean")
-    assert mean_line is not None
-    mean_y = np.asarray(mean_line.get_ydata())[:-1]
+    means = _mean_ticks(ax)
     expected = (
         df.groupby(df["timestamp"].dt.date)["soc_pct"]
         .agg("mean")
         .to_numpy()
     )
-    np.testing.assert_allclose(mean_y, expected, rtol=1e-9, atol=1e-9)
+    np.testing.assert_allclose(means, expected, rtol=1e-9, atol=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -307,17 +316,19 @@ def test_yearly_soc_xlim_extends_to_next_year_start():
     assert upper == pytest.approx(expected, rel=0, abs=1e-6)
 
 
-def test_monthly_soc_fill_reaches_right_edge():
+def test_monthly_soc_range_bars_span_every_day():
+    """One range bar per day; the last bar sits at the last day's bin
+    centre, inside the axis that extends to the next month."""
     df = _make_soc_fixture(month=1, mode="merchant")
     fig = _capture_save(
         monthly_mod, monthly_mod.plot_monthly_soc, df, 1, Path("/tmp"),
     )
     ax = fig.axes[0]
-    poly = next(
-        c for c in ax.collections
-        if "PolyCollection" in c.__class__.__name__
-    )
-    verts = poly.get_paths()[0].vertices
-    max_x = float(np.max(verts[:, 0]))
-    expected = mdates.date2num(pd.Timestamp("2026-02-01"))
-    assert max_x == pytest.approx(expected, rel=0, abs=1e-6)
+    range_lc = _lc_by_label(ax, "SOC range (min-max)")
+    assert range_lc is not None
+    segs = range_lc.get_segments()
+    assert len(segs) == 31, "January must render 31 daily range bars"
+    last_x = float(segs[-1][0, 0])
+    # Last bin is [31-Jan, 01-Feb); the range bar sits at its centre.
+    expected_centre = mdates.date2num(pd.Timestamp("2026-01-31")) + 0.5
+    assert last_x == pytest.approx(expected_centre, rel=0, abs=1e-6)

@@ -85,7 +85,7 @@ def _close_figures():
     plt.close("all")
 
 
-def _assert_soc_axes(fig: plt.Figure) -> None:
+def _assert_soc_axes(fig: plt.Figure, *, expected_left_lines: int = 1) -> None:
     axes = fig.axes
     assert len(axes) >= 2, "SOC plot must expose a twinx right axis"
     ax, ax2 = axes[0], axes[1]
@@ -106,9 +106,11 @@ def _assert_soc_axes(fig: plt.Figure) -> None:
         "Right (SOC kWh) axis must not draw gridlines"
     )
 
-    # Exactly one SOC curve on the left axis; nothing plotted on the right.
-    assert len(ax.get_lines()) == 1, (
-        "Left axis must carry the single SOC curve"
+    # The daily plot carries a single SOC Line2D; the monthly / yearly
+    # plots draw the SOC trace as range-bar LineCollections instead, so
+    # they expose zero Line2D objects on the left axis.
+    assert len(ax.get_lines()) == expected_left_lines, (
+        f"Left axis must carry {expected_left_lines} SOC Line2D object(s)"
     )
     assert len(ax2.get_lines()) == 0, (
         "Right axis is a pure relabelling — no line should be drawn on it"
@@ -118,7 +120,7 @@ def _assert_soc_axes(fig: plt.Figure) -> None:
 def test_daily_soc_axis_range():
     ts = pd.date_range("2026-04-20", "2026-04-20 23:45", freq="15min")
     fig = _capture_daily("2026-04-20", _soc_frame(ts))
-    _assert_soc_axes(fig)
+    _assert_soc_axes(fig, expected_left_lines=1)
 
 
 def test_monthly_soc_axis_range():
@@ -127,7 +129,7 @@ def test_monthly_soc_axis_range():
         monthly_mod, monthly_mod.plot_monthly_soc,
         _soc_frame(ts), 4, Path("/tmp"),
     )
-    _assert_soc_axes(fig)
+    _assert_soc_axes(fig, expected_left_lines=0)
 
 
 def test_yearly_soc_axis_range():
@@ -136,4 +138,4 @@ def test_yearly_soc_axis_range():
         yearly_mod, yearly_mod.plot_yearly_soc,
         _soc_frame(ts), 2026, Path("/tmp"),
     )
-    _assert_soc_axes(fig)
+    _assert_soc_axes(fig, expected_left_lines=0)

@@ -31,6 +31,7 @@ from ..config import COLORS, FINANCIAL_COLORS, XTICK_ROT
 from .financial import _integer_year_axis
 from .helpers import (
     bar_stacked_bins,
+    darker_shade,
     edges_and_widths_yearly,
     line_if_nonzero,
     line_masked_zeros,
@@ -317,44 +318,30 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     if monthly_agg.empty:
         return
 
-    monthly_min_pct = monthly_agg["min"]
-    monthly_mean_pct = monthly_agg["mean"]
-    monthly_max_pct = monthly_agg["max"]
-
     left, width_days = edges_and_widths_yearly(monthly_agg["month_start"])
 
-    last_start = monthly_agg["month_start"].iloc[-1]
-    end_start = last_start + pd.to_timedelta(
-        float(width_days[-1]), unit="D",
-    )
-    month_pad = pd.concat(
-        [monthly_agg["month_start"], pd.Series([end_start])], ignore_index=True,
-    )
-    min_pct_pad = np.append(
-        monthly_min_pct.to_numpy(), float(monthly_min_pct.iloc[-1]),
-    )
-    mean_pct_pad = np.append(
-        monthly_mean_pct.to_numpy(), float(monthly_mean_pct.iloc[-1]),
-    )
-    max_pct_pad = np.append(
-        monthly_max_pct.to_numpy(), float(monthly_max_pct.iloc[-1]),
-    )
+    # Option-B SOC trace: one vertical range bar (min->max) per month
+    # with a short horizontal tick at the monthly mean.  No connecting
+    # line and no point markers — the data is a monthly aggregate.
+    centres = mdates.date2num(left) + width_days / 2.0
+    tick_half = 0.3 * width_days
+    monthly_min_pct = monthly_agg["min"].to_numpy(dtype=float)
+    monthly_mean_pct = monthly_agg["mean"].to_numpy(dtype=float)
+    monthly_max_pct = monthly_agg["max"].to_numpy(dtype=float)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     soc_colour = FINANCIAL_COLORS["net"]
-    ax.fill_between(
-        month_pad, min_pct_pad, max_pct_pad,
-        step="post",
-        color=soc_colour, alpha=0.20, edgecolor=soc_colour,
-        label="Monthly min-max",
+    mean_colour = darker_shade(soc_colour)
+    ax.vlines(
+        centres, monthly_min_pct, monthly_max_pct,
+        colors=soc_colour, linewidth=1.5, alpha=0.85,
+        label="SOC range (min-max)",
     )
-    ax.plot(
-        month_pad, mean_pct_pad,
-        drawstyle="steps-post",
-        color=soc_colour, linewidth=1.5,
-        marker="o", markersize=3,
-        label="Monthly mean",
+    ax.hlines(
+        monthly_mean_pct, centres - tick_half, centres + tick_half,
+        colors=mean_colour, linewidth=2.0,
+        label="Mean SOC",
     )
     _setup_month_axis(ax, left, width_days)
 
