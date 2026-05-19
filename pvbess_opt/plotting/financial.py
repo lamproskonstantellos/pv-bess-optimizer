@@ -16,6 +16,7 @@ EUR axes use the compact ``EUR 12.3M`` / ``EUR 45k`` formatter via
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Callable
 
@@ -25,6 +26,7 @@ import pandas as pd
 from matplotlib.ticker import MaxNLocator
 
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
+from ..sensitivity import DriverSensitivity, build_driver_sensitivities
 from ._currency import euro_axis_formatter, format_eur
 from .style import (
     annotate_value_safe,
@@ -33,6 +35,8 @@ from .style import (
     save_figure,
     show_titles,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +445,40 @@ def plot_monthly_cashflow_year1(
 # ---------------------------------------------------------------------------
 
 
+def _format_driver_value(
+    value: float, driver_type: str, units: str = "",
+) -> str:
+    """Format a tornado driver's absolute value for a bar-end label.
+
+    ``driver_type`` keys the formatting rule (``capex``, ``opex``,
+    ``revenue``, ``discount_rate``).  An unknown type falls back to a
+    plain thousands-separated EUR string and logs a warning rather
+    than raising.
+    """
+    dt = str(driver_type).strip().lower()
+    # CAPEX / OPEX / revenue are reported as magnitudes: the cashflow
+    # carries CAPEX and OPEX with an outflow (negative) sign that should
+    # not leak into a label meant to read as the EUR figure itself.
+    mag = abs(value)
+    if dt == "capex":
+        return f"€{mag / 1e6:.1f}M"
+    if dt == "opex":
+        if mag < 1e6:
+            return f"€{mag / 1e3:.0f}k"
+        return f"€{mag / 1e6:.1f}M"
+    if dt == "revenue":
+        if mag < 1e7:
+            return f"€{mag / 1e6:.2f}M"
+        return f"€{mag / 1e6:.1f}M"
+    if dt in ("discount_rate", "discount rate"):
+        return f"{value:.1f}%"
+    logger.warning(
+        "tornado: unknown driver_type %r; using fallback EUR format",
+        driver_type,
+    )
+    return f"€{value:,.0f}{units}"
+
+
 def _build_tornado_pivot(
     sens_df: pd.DataFrame,
     metric: str,
@@ -469,6 +507,8 @@ def _dumbbell_plot(
     drop_labels: tuple[str, ...] = (),
     apply_eur_xaxis: bool = False,
     econ: dict[str, Any] | None = None,
+    drivers: dict[str, DriverSensitivity] | None = None,
+    base_suffix: str = "",
 ) -> Path:
     """Shared dumbbell renderer for NPV and IRR sensitivity tornadoes.
 
@@ -477,6 +517,25 @@ def _dumbbell_plot(
     filled circle markers at each endpoint and bbox-wrapped numeric
     labels offset above the line.  Bars are sorted by absolute impact
     (largest at the top).
+
+    When ``drivers`` is populated each bar end additionally carries the
+    absolute driver value that produced it, stacked one label-height
+    below the metric label; the y-axis tick labels gain the ``+/-`` range
+    and a ``Base = ...`` annotation is placed in a headroom band above
+    the top bar.  An empty / ``None`` ``drivers`` reproduces the
+    metadata-free layout exactly.
+
+    Label-collision strategy (deterministic).  Every label is placed
+    strictly outside its bar on one side: the left group's anchor sits
+    ``margin`` points left of ``x_left`` (``ha="right"``) and the right
+    group's anchor ``margin`` points right of ``x_right``
+    (``ha="left"``).  Because ``x_left <= x_right`` for every bar, the
+    left and right groups can never overlap horizontally regardless of
+    how narrow the bar is.  The metric / driver labels on one side are
+    stacked with a fixed +/-7 pt vertical split, which clears adjacent
+    rows for the 3-4 driver tornado.  Were a denser plot ever to need
+    it, the escalation order would be leader lines -> font shrink ->
+    vertical stagger; it is not reached for the supported driver counts.
     """
     out_path = Path(out_path)
 
@@ -511,6 +570,7 @@ def _dumbbell_plot(
     y_pos = np.arange(len(labels))
     lows = pivot["low"].astype(float).to_numpy()
     highs = pivot["high"].astype(float).to_numpy()
+    drivers = drivers or {}
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -524,6 +584,18 @@ def _dumbbell_plot(
 
     for i, (low, high) in enumerate(zip(lows, highs)):
         left, right = sorted((low, high))
+        # Map each segment end to the absolute driver value that
+        # produced it: ``low``/``high`` are the metric outcomes, so the
+        # smaller outcome pairs with its scenario's driver value.
+        left_driver_text = right_driver_text = None
+        ds = drivers.get(labels[i])
+        if ds is not None:
+            if low <= high:
+                lo_dv, hi_dv = ds.low_value, ds.high_value
+            else:
+                lo_dv, hi_dv = ds.high_value, ds.low_value
+            left_driver_text = _format_driver_value(lo_dv, ds.driver_type)
+            right_driver_text = _format_driver_value(hi_dv, ds.driver_type)
         if right <= base_value:
             colour_left = colour_right = red
         elif left >= base_value:
@@ -544,6 +616,8 @@ def _dumbbell_plot(
                        edgecolor="black", linewidth=0.4, zorder=5)
             _annotate_dumbbell_endpoints(
                 ax, left, right, i, value_formatter,
+                left_driver_text=left_driver_text,
+                right_driver_text=right_driver_text,
             )
             continue
         # Same-side branch.
@@ -555,17 +629,45 @@ def _dumbbell_plot(
                    edgecolor="black", linewidth=0.4, zorder=5)
         _annotate_dumbbell_endpoints(
             ax, left, right, i, value_formatter,
+            left_driver_text=left_driver_text,
+            right_driver_text=right_driver_text,
         )
 
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(labels)
+    if drivers:
+        ytick_labels = []
+        for lbl in labels:
+            ds = drivers.get(lbl)
+            if ds is None:
+                ytick_labels.append(lbl)
+                continue
+            unit = "pp" if ds.driver_type == "discount_rate" else "%"
+            ytick_labels.append(
+                f"{lbl} / ±{ds.sensitivity_pct:g}{unit}"
+            )
+        ax.set_yticklabels(ytick_labels)
+    else:
+        ax.set_yticklabels(labels)
     ax.set_xlabel(xlabel)
     if apply_eur_xaxis:
         _apply_eur_xaxis(ax, econ)
     xmin, xmax = ax.get_xlim()
     pad = 0.18 * (xmax - xmin) if xmax > xmin else 1.0
     ax.set_xlim(xmin - pad, xmax + pad)
-    ax.set_ylim(-0.6, len(labels) - 0.4)
+    # When driver metadata is present, reserve a headroom band above the
+    # top bar for the base-case annotation.
+    y_top = len(labels) - 0.4
+    if drivers:
+        annotation_y = y_top + 0.5
+        y_top += 1.1
+    ax.set_ylim(-0.6, y_top)
+    if drivers:
+        annotate_value_safe(
+            ax, base_value, annotation_y,
+            f"Base = {value_formatter(base_value)}{base_suffix}",
+            ha="center", va="center", fontsize=8,
+            bbox_alpha=0.9, bbox_pad=0.3,
+        )
     _maybe_set_title(ax, title)
     ax.legend(loc="lower right", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
@@ -584,29 +686,51 @@ def _annotate_dumbbell_endpoints(
     right: float,
     row: int,
     value_formatter: Callable[[float], str],
+    *,
+    left_driver_text: str | None = None,
+    right_driver_text: str | None = None,
 ) -> None:
     """Place each endpoint label OUTSIDE the corresponding dot.
 
     The left label is right-aligned and offset 8 points to the LEFT of
     the leftmost dot; the right label is left-aligned and offset 8
-    points to the RIGHT of the rightmost dot.  Both are vertically
-    centred on the row.  Labels carry their own numeric value (sorted
-    ``left`` / ``right``) so the printed text always matches its
-    x-axis position even when a "low" scenario yields a higher metric
-    (e.g. low CAPEX → higher IRR).
+    points to the RIGHT of the rightmost dot.  Labels carry their own
+    numeric value (sorted ``left`` / ``right``) so the printed text
+    always matches its x-axis position even when a "low" scenario
+    yields a higher metric (e.g. low CAPEX → higher IRR).
+
+    When ``*_driver_text`` is given, the metric label is lifted +7 pt
+    and the driver-value label is placed -7 pt on the same x anchor,
+    so the two stack vertically without crossing into the bar.
     """
+    has_driver = left_driver_text is not None or right_driver_text is not None
+    metric_dy = 7.0 if has_driver else 0.0
     annotate_value_safe(
         ax, left, row, value_formatter(left),
         ha="right", va="center", fontsize=7,
-        offset_points=(-8.0, 0.0),
+        offset_points=(-8.0, metric_dy),
         bbox_alpha=0.85, bbox_pad=0.18,
     )
     annotate_value_safe(
         ax, right, row, value_formatter(right),
         ha="left", va="center", fontsize=7,
-        offset_points=(8.0, 0.0),
+        offset_points=(8.0, metric_dy),
         bbox_alpha=0.85, bbox_pad=0.18,
     )
+    if left_driver_text is not None:
+        annotate_value_safe(
+            ax, left, row, left_driver_text,
+            ha="right", va="center", fontsize=7,
+            offset_points=(-8.0, -7.0),
+            bbox_alpha=0.85, bbox_pad=0.18,
+        )
+    if right_driver_text is not None:
+        annotate_value_safe(
+            ax, right, row, right_driver_text,
+            ha="left", va="center", fontsize=7,
+            offset_points=(8.0, -7.0),
+            bbox_alpha=0.85, bbox_pad=0.18,
+        )
 
 
 def _econ_title_window(econ: dict[str, Any]) -> str:
@@ -649,6 +773,8 @@ def plot_npv_tornado(
         value_formatter=lambda v: format_eur(float(v), fmt_mode),
         apply_eur_xaxis=True,
         econ=econ,
+        drivers=build_driver_sensitivities(sens_df, "npv_eur"),
+        base_suffix=" NPV",
     )
 
 
@@ -683,4 +809,6 @@ def plot_irr_tornado(
         xlabel="IRR (%)",
         value_formatter=lambda v: f"{v:.1f}%",
         drop_labels=("Discount rate",),
+        drivers=build_driver_sensitivities(sens_df, "irr_pct"),
+        base_suffix=" IRR",
     )
