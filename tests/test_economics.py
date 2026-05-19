@@ -62,7 +62,7 @@ def test_calculate_irr_no_root_returns_nan():
 def test_read_economic_params_via_workbook(repo_input_xlsx):
     econ = read_economic_params(repo_input_xlsx)
     assert econ["discount_rate_pct"] == 7.0
-    assert econ["project_lifecycle_years"] == 25
+    assert econ["project_lifecycle_years"] == 20
 
 
 def test_derive_asset_capacities():

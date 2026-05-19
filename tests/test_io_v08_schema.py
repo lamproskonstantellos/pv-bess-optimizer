@@ -68,7 +68,7 @@ def test_bess_sheet_keys():
         "capex_bess_eur_per_kw", "devex_bess_eur_per_kw",
         "opex_bess_eur_per_kw",
         "bess_replacement_year", "bess_replacement_cost_pct",
-        "bess_degradation_annual_pct",
+        "bess_degradation_annual_pct", "bess_degradation_pct_per_cycle",
     }
     assert set(BESS_SHEET_DEFAULTS) == expected
 
@@ -122,9 +122,9 @@ def test_repo_workbook_loads_typed_dict(repo_input_xlsx):
         assert section in typed and isinstance(typed[section], dict)
     assert typed["project"]["mode"] == "vnb"
     # The case-study workbook ships with the canonical 8 MW shape
-    # scaled to a tidy 1 MW × 1500 kWh/kWp default (1.5 GWh annual).
-    assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(1000.0)
-    assert typed["bess"]["bess_power_kw"] == pytest.approx(5000.0)
+    # rescaled to the 15 MW default scenario.
+    assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(15000.0)
+    assert typed["bess"]["bess_power_kw"] == pytest.approx(15000.0)
     assert "curtailment_profile" in typed
     profile = np.asarray(typed["curtailment_profile"])
     assert profile.shape == (24,) or profile.shape == (24, 12)

@@ -107,6 +107,49 @@ def test_bess_replacement_resets_factor():
     assert _bess_factor(15, 0.02, replacement_year=10) == pytest.approx(0.98 ** 5)
 
 
+def test_bess_factor_with_zero_cycle_pct_matches_legacy():
+    """The new keyword-only signature with d_bess_per_cycle = 0 must equal
+    the legacy calendar-only formula (1 - d_annual)^years_since."""
+    for y, repl in [(1, 0), (7, 0), (5, 10), (12, 10)]:
+        legacy = _bess_factor(y, 0.02, replacement_year=repl)
+        new = _bess_factor(
+            y, 0.02, replacement_year=repl,
+            d_bess_per_cycle=0.0, cumulative_cycles_through=9999.0,
+        )
+        assert new == pytest.approx(legacy, rel=1e-12)
+
+
+def test_bess_factor_combined():
+    """Calendar fade combined with the additive cycle-fade term."""
+    factor = _bess_factor(
+        5, 0.02, replacement_year=0,
+        d_bess_per_cycle=0.00008, cumulative_cycles_through=1500.0,
+    )
+    expected = (1.0 - 0.02) ** 4 - 0.00008 * 1500.0
+    assert factor == pytest.approx(expected, abs=1e-6)
+    assert factor == pytest.approx(0.80237, abs=1e-5)
+
+
+def test_bess_factor_replacement_resets_both():
+    """At the replacement year the calendar factor resets to 1.0; the
+    caller is responsible for resetting the cycle counter to 0."""
+    factor = _bess_factor(
+        10, 0.02, replacement_year=10,
+        d_bess_per_cycle=0.00008, cumulative_cycles_through=0.0,
+    )
+    assert factor == pytest.approx(1.0, rel=1e-12)
+
+
+def test_bess_factor_floor_at_zero():
+    """Pathological cycle accrual cannot drive the factor negative."""
+    factor = _bess_factor(
+        20, 0.05, replacement_year=0,
+        d_bess_per_cycle=0.01, cumulative_cycles_through=1_000_000.0,
+    )
+    assert factor >= 0.0
+    assert factor == 0.0
+
+
 def test_lifetime_dispatch_bess_replacement():
     """End-to-end: bess_dis_load_kwh ratio resets to 1 at replacement year."""
     res1 = _make_year1_dispatch()

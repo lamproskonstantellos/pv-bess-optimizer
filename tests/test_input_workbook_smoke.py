@@ -56,7 +56,7 @@ def test_read_workbook_round_trip_after_build_script():
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     assert typed["dt_minutes"] == 15
     assert typed["project"]["mode"] == "vnb"
-    assert typed["project"]["project_lifecycle_years"] == 25
+    assert typed["project"]["project_lifecycle_years"] == 20
     assert "load_kwh" in typed["ts"].columns
 
 

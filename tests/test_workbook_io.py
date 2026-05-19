@@ -69,6 +69,7 @@ _BESS_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {
     "bess_replacement_year": (int, 0, 200),
     "bess_replacement_cost_pct": (float, 0.0, 100.0),
     "bess_degradation_annual_pct": (float, 0.0, 100.0),
+    "bess_degradation_pct_per_cycle": (float, 0.0, 100.0),
 }
 
 _ECONOMICS_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {

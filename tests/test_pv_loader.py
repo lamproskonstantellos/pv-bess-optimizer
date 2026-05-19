@@ -39,12 +39,17 @@ REPO_INPUT_XLSX = ROOT / "inputs" / "input.xlsx"
 # ---------------------------------------------------------------------------
 
 
-def test_default_workbook_pass_through():
+def test_default_workbook_rescales_canonical_shape():
+    """The canonical workbook ships a 1 MW PV shape; the 15 MW default
+    nameplate rescales it by a constant factor 15 with shape preserved."""
     raw_ts = pd.read_excel(REPO_INPUT_XLSX, sheet_name="timeseries")
     typed = read_workbook(REPO_INPUT_XLSX)
     raw_pv = raw_ts["pv_kwh"].to_numpy(dtype=float)
     loaded_pv = typed["ts"]["pv_kwh"].to_numpy(dtype=float)
-    assert float(np.abs(loaded_pv - raw_pv).max()) < 1.0e-9
+    nonzero = raw_pv > 1.0e-9
+    ratios = loaded_pv[nonzero] / raw_pv[nonzero]
+    assert ratios.std() < 1.0e-9
+    assert float(np.mean(ratios)) == pytest.approx(15.0, rel=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -88,10 +93,13 @@ def test_loader_rescales_to_user_specific_production_only(tmp_path):
 
 
 def test_loader_logs_rescale_factor_only_on_rescale(tmp_path, caplog):
+    # A workbook whose nameplate × specific production already matches
+    # its timeseries annual total must not trigger rescaling.
+    out_default = _user_workbook(tmp_path, pv_kwp=15000.0, sp=1500.0)
     with caplog.at_level(logging.INFO, logger="pvbess_opt.io"):
-        read_workbook(REPO_INPUT_XLSX)
+        read_workbook(out_default)
     rescaled = [r for r in caplog.records if "rescaled" in r.getMessage()]
-    assert not rescaled, "default workbook unexpectedly triggered rescaling"
+    assert not rescaled, "matched workbook unexpectedly triggered rescaling"
 
     caplog.clear()
     out = _user_workbook(tmp_path, pv_kwp=2000.0, sp=1600.0)

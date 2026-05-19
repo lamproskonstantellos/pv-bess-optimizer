@@ -79,6 +79,12 @@ logger = logging.getLogger(__name__)
 TRUTHY = {"true", "1", "yes", "y", "t"}
 FALSY = {"false", "0", "no", "n", "f"}
 
+# Tokens that disable the grid-export cap (treat as unlimited export).
+# An empty cell is also treated as unlimited — see _parse_grid_export_max.
+_GRID_EXPORT_UNLIMITED_TOKENS = {
+    "inf", "infinity", "unlimited", "disabled", "none",
+}
+
 _COERCE_FAILED = object()
 
 
@@ -125,6 +131,10 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "bess_replacement_year": 0,
     "bess_replacement_cost_pct": 50.0,
     "bess_degradation_annual_pct": 2.0,
+    # Defaults to 0.0 so a workbook that omits the key (pre-v0.8.8) keeps
+    # pure calendar-fade behaviour.  The canonical workbook ships the row
+    # with the 0.008 LFP value (see _BESS_ROWS).
+    "bess_degradation_pct_per_cycle": 0.0,
 }
 
 ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
@@ -269,8 +279,8 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Greek VNB settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
      "Currently informational; the MILP timestep is auto-detected."),
     ("p_grid_export_max_kw", 5000, "kW",
-     "Grid-connection export limit (kW). Project-wide cap applied to "
-     "the combined PV + BESS export flow."),
+     "Max grid export (kW). Leave empty or use 'inf' / 'unlimited' / "
+     "'disabled' to remove cap; curtailment then becomes zero."),
     ("retail_tariff_eur_per_mwh", 120, "EUR/MWh",
      "Retail tariff used in vnb mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",
@@ -336,6 +346,11 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Replacement cost as percent of original BESS CAPEX."),
     ("bess_degradation_annual_pct", 2.0, "%",
      "Linear BESS capacity fade. Approximate Tier-1 LFP cell warranty."),
+    ("bess_degradation_pct_per_cycle", 0.008, "%",
+     "Cycle-based BESS capacity fade per full equivalent cycle, in "
+     "percent. LFP default 0.008 (range 0.005-0.010). Set to 0 to "
+     "disable cycle aging and recover pre-v0.8.8 calendar-only "
+     "behavior."),
 )
 
 _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -674,6 +689,45 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
     return coerced
 
 
+def _parse_grid_export_max(raw: Any, default: Any) -> float:
+    """Parse ``p_grid_export_max_kw``.
+
+    Returns ``float('inf')`` when the cap is disabled (empty cell, or one
+    of the ``_GRID_EXPORT_UNLIMITED_TOKENS`` strings, case-insensitive).
+    A finite positive float is returned unchanged.  Negative or zero
+    values are returned as-is so the loader can raise a validation error;
+    unparseable values fall back to ``default`` with a warning.
+    """
+    if raw is None:
+        return float("inf")
+    if isinstance(raw, float) and np.isnan(raw):
+        return float("inf")
+    if isinstance(raw, str):
+        token = raw.strip().lower()
+        if token == "" or token in _GRID_EXPORT_UNLIMITED_TOKENS:
+            return float("inf")
+        try:
+            value = float(raw)
+        except ValueError:
+            logger.warning(
+                "Workbook value for 'p_grid_export_max_kw' could not be "
+                "parsed (got %r); using default %r.", raw, default,
+            )
+            return float(default)
+    else:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Workbook value for 'p_grid_export_max_kw' could not be "
+                "parsed (got %r); using default %r.", raw, default,
+            )
+            return float(default)
+    if np.isinf(value):
+        return float("inf")
+    return value
+
+
 def _parse_kv_sheet(
     sheet_name: str, flat: dict[str, Any],
 ) -> dict[str, Any]:
@@ -681,7 +735,10 @@ def _parse_kv_sheet(
     out = dict(defaults)
     for key, raw in flat.items():
         if key in defaults:
-            out[key] = _parse_value(key, raw, defaults[key])
+            if key == "p_grid_export_max_kw":
+                out[key] = _parse_grid_export_max(raw, defaults[key])
+            else:
+                out[key] = _parse_value(key, raw, defaults[key])
             continue
         if key in _LEGACY_RENAMED:
             new_key, hint = _LEGACY_RENAMED[key]
@@ -1000,6 +1057,28 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             pd.read_excel(xlsx_path, sheet_name=sheet_name),
         )
         typed[sheet_name] = _parse_kv_sheet(sheet_name, flat)
+        if (
+            sheet_name == "bess"
+            and "bess_degradation_pct_per_cycle" not in flat
+        ):
+            # Old workbook (pre-v0.8.8): default the cycle-fade coefficient
+            # to 0.0 so the run reproduces calendar-only behaviour.
+            typed["bess"]["bess_degradation_pct_per_cycle"] = 0.0
+            logger.info(
+                "[bess] bess_degradation_pct_per_cycle not found in "
+                "workbook; defaulting to 0.0 (calendar-only mode, "
+                "pre-v0.8.8 behavior)."
+            )
+
+    # A finite grid-export cap must be strictly positive.  An empty cell
+    # or an 'unlimited' token resolves to float('inf') (cap disabled).
+    grid_cap = typed["project"]["p_grid_export_max_kw"]
+    if not np.isinf(grid_cap) and float(grid_cap) <= 0.0:
+        raise ValueError(
+            "p_grid_export_max_kw must be a positive number, or empty / "
+            "'inf' / 'unlimited' / 'disabled' to remove the cap; got "
+            f"{grid_cap!r}."
+        )
 
     if "curtailment_profile" in sheets:
         try:
@@ -1049,6 +1128,26 @@ def _typed_to_flat(
 
     bess_power_kw = float(bess["bess_power_kw"])
     bess_capacity_kwh = float(bess["bess_capacity_kwh"])
+    pv_nameplate_kwp = float(pv["pv_nameplate_kwp"])
+
+    # Resolve the grid-export cap.  When the workbook value is empty or an
+    # 'unlimited' token it parses to float('inf'); we substitute a finite
+    # Big-M large enough never to bind so the MILP topology is unchanged
+    # and the behaviour stays solver-agnostic (HiGHS / Gurobi / CBC).
+    raw_grid_cap = float(project["p_grid_export_max_kw"])
+    grid_export_unlimited = bool(np.isinf(raw_grid_cap))
+    if grid_export_unlimited:
+        p_grid_export_cap_milp = max(
+            2.0 * (pv_nameplate_kwp + bess_power_kw),
+            1.0e6,
+        )
+        logger.info(
+            "[simulation] Grid export cap disabled (unlimited). "
+            "Curtailment will be zero. Internal MILP bound: %.0f kW.",
+            p_grid_export_cap_milp,
+        )
+    else:
+        p_grid_export_cap_milp = raw_grid_cap
 
     profile = typed.get("curtailment_profile")
     if profile is not None:
@@ -1070,9 +1169,10 @@ def _typed_to_flat(
         "bess_power_kw": bess_power_kw,
         "bess_capacity_kwh": bess_capacity_kwh,
         # pv
-        "pv_nameplate_kwp": float(pv["pv_nameplate_kwp"]),
+        "pv_nameplate_kwp": pv_nameplate_kwp,
         # project
-        "p_grid_export_max_kw": float(project["p_grid_export_max_kw"]),
+        "p_grid_export_max_kw": p_grid_export_cap_milp,
+        "grid_export_unlimited": grid_export_unlimited,
         "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
         "settlement_minutes": int(project["settlement_minutes"]),
         "mode": str(project["mode"]),

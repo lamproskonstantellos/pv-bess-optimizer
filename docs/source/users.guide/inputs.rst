@@ -45,7 +45,14 @@ High-level run configuration:
 * ``mode`` — ``vnb`` | ``merchant``.
 * ``settlement_minutes`` — informational; the MILP timestep is
   auto-detected from the timeseries.
-* ``p_grid_export_max_kw`` — grid-connection export limit (kW).
+* ``p_grid_export_max_kw`` — grid-connection export limit (kW).  A
+  positive number caps the combined PV + BESS export flow.  Leave the
+  cell empty, or set it to ``inf`` / ``infinity`` / ``unlimited`` /
+  ``disabled`` / ``none`` (case-insensitive), to remove the cap; the
+  curtailment driven by the cap then becomes zero.  Internally a finite
+  Big-M is substituted for the disabled cap so the MILP stays
+  solver-agnostic (HiGHS, Gurobi, CBC) — the constraint itself is never
+  removed.  A negative number or ``0`` remains a validation error.
 * ``retail_tariff_eur_per_mwh`` — retail tariff used in vnb mode.
 * ``allow_bess_grid_charging`` — TRUE → BESS may charge from grid in
   PV-zero periods.
@@ -86,7 +93,12 @@ Sheet ``bess``
   default 30 EUR/kW) / ``opex_bess_eur_per_kw``.
 * ``bess_replacement_year`` / ``bess_replacement_cost_pct`` —
   Year-N replacement (0 disables).
-* ``bess_degradation_annual_pct`` — linear BESS capacity fade.
+* ``bess_degradation_annual_pct`` — linear calendar BESS capacity fade.
+* ``bess_degradation_pct_per_cycle`` — cycle-based capacity fade per
+  full equivalent cycle, in percent (LFP default 0.008, range
+  0.005–0.010; NMC ~0.010–0.020).  Layered additively on the calendar
+  fade.  Set to 0 — or omit the row entirely on an older workbook — to
+  recover pre-v0.8.8 calendar-only behaviour.
 
 Sheet ``economics``
 -------------------

@@ -12,6 +12,36 @@ The ``economic`` sheet drives the project-finance pipeline:
   inflation: ``rev_y = rev_1 * pv_factor * (1 + rev_infl)^(y-1)``.
 * **BESS replacement** is optional (``bess_replacement_year > 0``).
 
+BESS capacity fade — calendar plus cycle
+----------------------------------------
+
+The BESS capacity factor combines two terms:
+
+* an **unchanged multiplicative calendar fade**
+  ``(1 - bess_degradation_annual_pct/100)^years_since_install``; and
+* an **additive linear cycle fade** proportional to the full
+  equivalent cycles the battery has accumulated.
+
+.. math::
+
+   \text{bess\_factor}(y) = \max\!\left(0,\;
+   (1 - d_{\text{annual}})^{\text{years\_since}}
+   - d_{\text{per\_cycle}} \cdot \text{cumulative\_cycles}\right)
+
+The cycle term is driven by the ``bess`` sheet key
+``bess_degradation_pct_per_cycle`` — the capacity lost per full
+equivalent cycle, in percent.  The LFP default is ``0.008`` (typical
+range 0.005–0.010; NMC chemistries sit higher, ~0.010–0.020).  A more
+heavily cycled battery therefore degrades faster than an idle one.
+
+Setting ``bess_degradation_pct_per_cycle = 0`` removes the cycle term
+entirely and recovers the pre-v0.8.8 calendar-only behaviour exactly.
+Workbooks that predate the key load unchanged and default it to 0.
+
+``compute_financial_kpis`` reports the year-N decomposition as
+``bess_calendar_fade_pct_y_final``, ``bess_cycle_fade_pct_y_final`` and
+``bess_total_fade_pct_y_final``; the first two sum to the third.
+
 Why analytical scaling instead of solving N MILPs?
 --------------------------------------------------
 
@@ -63,3 +93,5 @@ Headline financial KPIs returned by
 * ``total_opex_eur_lifecycle``
 * ``total_revenue_eur_lifecycle``
 * ``project_start_year`` / ``project_end_year``
+* ``bess_calendar_fade_pct_y_final`` / ``bess_cycle_fade_pct_y_final`` /
+  ``bess_total_fade_pct_y_final`` — year-N BESS capacity-fade split

@@ -1,7 +1,7 @@
 # PV & BESS Optimizer
 
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.8.7-blue)](pvbess_opt/__init__.py)
+[![version](https://img.shields.io/badge/version-0.8.8-blue)](pvbess_opt/__init__.py)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
