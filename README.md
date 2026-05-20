@@ -53,9 +53,12 @@ new features are left disabled:
   misleading point markers; they keep the stepped mean line and the
   min–max envelope.  The daily SOC plot is unchanged.
 * **Sensitivity tornados** — the IRR and NPV tornado plots annotate
-  each bar end with the absolute driver value that produced it, add a
-  base-case annotation and dashed line, and fold the ± range into the
-  y-axis labels.
+  each bar end with the absolute driver value that produced it
+  (CAPEX / OPEX / revenue in EUR, the discount rate in percentage
+  points); the metric itself is read off the x-axis.  The base case
+  is marked once, by a dashed vertical line whose legend entry
+  (``Base = 15.9%`` / ``Base = €9.0M``) carries the formatted base
+  value, and each y-axis label carries the ± sensitivity range.
 
 ## Repository layout
 
