@@ -818,7 +818,7 @@ def _parse_hour_of_day(value: Any) -> int:
     return h
 
 
-def _normalise_profile_frame(
+def _normalise_hourly_profile_frame(
     df: pd.DataFrame, *, sheet_name: str,
 ) -> pd.DataFrame:
     """Validate columns / row count and lowercase column names."""
@@ -872,7 +872,7 @@ def _parse_max_injection_profile_sheet(df: pd.DataFrame) -> np.ndarray:
 
     Returns a (24,) or (24, 12) array of percent-of-grid-export values.
     """
-    df_norm = _normalise_profile_frame(df, sheet_name="max_injection_profile")
+    df_norm = _normalise_hourly_profile_frame(df, sheet_name="max_injection_profile")
     return _extract_profile(
         df_norm,
         scalar_col="max_injection_pct",
@@ -887,7 +887,7 @@ def _parse_curtailment_profile_sheet(df: pd.DataFrame) -> np.ndarray:
     schema (e.g. 27 ⇒ 27 % to curtail).  Callers are responsible for
     converting to the new max-injection semantic via ``100 - x``.
     """
-    df_norm = _normalise_profile_frame(df, sheet_name="curtailment_profile")
+    df_norm = _normalise_hourly_profile_frame(df, sheet_name="curtailment_profile")
     return _extract_profile(
         df_norm,
         scalar_col="curtailment_pct",

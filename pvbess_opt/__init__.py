@@ -7,7 +7,7 @@ Public entry points:
     pvbess_opt.optimization.verify_dispatch_invariants(res, params)
     pvbess_opt.kpis.compute_kpis(res, params)
     pvbess_opt.availability.apply_unavailability_derate(...)
-    pvbess_opt.curtailment.build_per_step_curtailment_frac(...)
+    pvbess_opt.max_injection.build_per_step_max_injection_frac(...)
     pvbess_opt.rolling_horizon.rolling_horizon_dispatch(...)
     pvbess_opt.rolling_horizon.monte_carlo_rolling(...)
     pvbess_opt.plotting.* — figure generation per resolution
@@ -24,14 +24,14 @@ Three asset modes are first-class:
 
 Highlights:
     * Seven-sheet input workbook (project / pv / bess / economics /
-      simulation / curtailment_profile / timeseries) — one theme per
-      sheet for human readability.  ``inputs/input.xlsx`` is the
+      simulation / max_injection_profile / timeseries) — one theme
+      per sheet for human readability.  ``inputs/input.xlsx`` is the
       single source of truth for the PV shape; the workbook ships
       with a 1 MW x 1500 kWh/kWp/yr default that the loader rescales
       to the user's nameplate and specific production at run time.
     * Symmetric BESS power limit (bess_power_kw) and pinned energy
       capacity (bess_capacity_kwh).  e_cap is not a decision variable.
-    * Hour-of-day curtailment cap profile (optional monthly axis).
+    * Hour-of-day max-injection cap profile (optional monthly axis).
     * DEVEX (per-asset development CAPEX), unavailability_pct,
       aggregator_fee_pct_revenue.
     * IRR tornado dumbbell with endpoint labels outside the dots

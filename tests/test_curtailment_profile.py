@@ -8,7 +8,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvbess_opt.curtailment import build_per_step_curtailment_frac
+from pvbess_opt.max_injection import (
+    build_per_step_max_injection_frac as build_per_step_curtailment_frac,
+)
 from pvbess_opt.io import (
     BESS_SHEET_DEFAULTS,
     ECONOMICS_SHEET_DEFAULTS,

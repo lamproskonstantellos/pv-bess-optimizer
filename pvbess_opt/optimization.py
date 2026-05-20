@@ -180,15 +180,22 @@ def _resolve_curtailment_per_step(
 ) -> np.ndarray:
     """Return a per-step curtailment fraction array aligned with ``ts``.
 
-    The loader always populates ``params["curtailment_profile"]`` (the
-    default flat profile is used when the workbook omits the sheet),
-    so this resolver only needs the profile branch.
+    The loader always populates ``params["curtailment_profile"]`` with
+    a (24,) or (24, 12) array of *max-injection* percentages (default
+    flat profile when the workbook omits the sheet).  The MILP
+    constraint is still written in the ``(1 - curtailment_frac)`` form
+    so this resolver inverts the max-injection fraction back to the
+    curtailment fraction.  The constraint is flipped to read
+    max-injection directly in the next commit.
     """
-    from .curtailment import build_per_step_curtailment_frac
+    from .max_injection import build_per_step_max_injection_frac
 
     profile = params.get("curtailment_profile")
     if profile is not None and "timestamp" in ts.columns:
-        return build_per_step_curtailment_frac(ts["timestamp"], profile)
+        frac_allowed = build_per_step_max_injection_frac(
+            ts["timestamp"], profile,
+        )
+        return 1.0 - frac_allowed
     return np.zeros(len(ts), dtype=float)
 
 
