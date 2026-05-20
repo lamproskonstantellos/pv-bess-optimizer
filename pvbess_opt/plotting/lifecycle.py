@@ -85,9 +85,15 @@ def plot_revenue_stack_yearly(
     """Stacked bar per operating year of the four revenue sources minus
     the grid-charging cost, with the net line overlaid.
 
-    Stacks are derived by scaling the Year-1 revenue components by the
-    yearly cashflow's ``revenue_eur`` column — that keeps the plot
-    consistent with the NPV/IRR pipeline.
+    Stacks are scaled per-stream so retail and DAM indexation are
+    rendered separately: retail-priced components (``Load from PV``,
+    ``Load from BESS``) track the year-over-year ratio of
+    ``yearly_cf['revenue_retail_eur']``; DAM-priced components
+    (``Export from PV``, ``Export from BESS``, ``Grid-charging cost``)
+    track ``yearly_cf['revenue_dam_eur']``.  The aggregator-fee bar is
+    read directly from ``yearly_cf['aggregator_fee_eur']``.  Legacy
+    fixtures lacking those columns fall back to a single
+    ``revenue_eur``-based ratio applied uniformly.
     """
     out_path = Path(out_path)
     if yearly_cf.empty:
@@ -97,47 +103,74 @@ def plot_revenue_stack_yearly(
     if op.empty:
         return _empty_placeholder(out_path, "No operating-year rows.")
 
-    y1_total = float(op.loc[op["project_year"] == 1, "revenue_eur"].iloc[0])
     rev_load_pv_y1 = float(year1_kpis.get("profit_load_from_pv_eur", 0.0) or 0.0)
     rev_load_bess_y1 = float(year1_kpis.get("profit_load_from_bess_eur", 0.0) or 0.0)
     rev_exp_pv_y1 = float(year1_kpis.get("profit_export_from_pv_eur", 0.0) or 0.0)
     rev_exp_bess_y1 = float(year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0)
     cost_grid_y1 = float(year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
 
-    if abs(y1_total) > 1e-9:
-        ratio = op["revenue_eur"].astype(float) / y1_total
+    y1_mask = op["project_year"] == 1
+    has_streams = (
+        "revenue_retail_eur" in op.columns
+        and "revenue_dam_eur" in op.columns
+    )
+    if has_streams:
+        y1_retail = float(op.loc[y1_mask, "revenue_retail_eur"].iloc[0])
+        y1_dam = float(op.loc[y1_mask, "revenue_dam_eur"].iloc[0])
+        if abs(y1_retail) > 1e-9:
+            retail_ratio = op["revenue_retail_eur"].astype(float) / y1_retail
+        else:
+            retail_ratio = pd.Series(0.0, index=op.index, dtype=float)
+        if abs(y1_dam) > 1e-9:
+            dam_ratio = op["revenue_dam_eur"].astype(float) / y1_dam
+        else:
+            dam_ratio = pd.Series(0.0, index=op.index, dtype=float)
     else:
-        ratio = pd.Series(0.0, index=op.index, dtype=float)
+        y1_total = float(op.loc[y1_mask, "revenue_eur"].iloc[0])
+        if abs(y1_total) > 1e-9:
+            uniform_ratio = op["revenue_eur"].astype(float) / y1_total
+        else:
+            uniform_ratio = pd.Series(0.0, index=op.index, dtype=float)
+        retail_ratio = uniform_ratio
+        dam_ratio = uniform_ratio
 
     years = (
         op["calendar_year"].to_numpy(dtype=int)
         if "calendar_year" in op.columns
         else op["project_year"].to_numpy(dtype=int)
     )
-    load_pv = (rev_load_pv_y1 * ratio).to_numpy()
-    load_bess = (rev_load_bess_y1 * ratio).to_numpy()
-    exp_pv = (rev_exp_pv_y1 * ratio).to_numpy()
-    exp_bess = (rev_exp_bess_y1 * ratio).to_numpy()
-    cost = -((cost_grid_y1 * ratio).to_numpy())  # drawn negative
+    load_pv = (rev_load_pv_y1 * retail_ratio).to_numpy()
+    load_bess = (rev_load_bess_y1 * retail_ratio).to_numpy()
+    exp_pv = (rev_exp_pv_y1 * dam_ratio).to_numpy()
+    exp_bess = (rev_exp_bess_y1 * dam_ratio).to_numpy()
+    # Grid-charging cost is part of the DAM bundle in economics.py
+    # (revenue_1_dam = exports - grid_charge), so it scales with the
+    # DAM ratio rather than the retail one.  Drawn negative.
+    cost = -((cost_grid_y1 * dam_ratio).to_numpy())
 
     # Aggregator-fee deduction.  yearly_cf's ``revenue_eur`` column is
     # post-fee while the stack components above are pre-fee, so without
     # this bar the stack sums ~aggregator_fee_pct above the net line
     # with no on-plot explanation.  Adding it as an explicit negative
     # component closes the gap.
-    agg_fee_frac = 0.0
-    if econ is not None:
-        agg_fee_frac = max(
-            0.0,
-            float(econ.get("aggregator_fee_pct_revenue", 0.0) or 0.0) / 100.0,
+    if "aggregator_fee_eur" in op.columns:
+        # yearly_cf stores the fee as a signed value (negative when
+        # aggregator_fee_pct_revenue > 0), so use it as-is.
+        agg_fee = op["aggregator_fee_eur"].astype(float).to_numpy()
+    else:
+        agg_fee_frac = 0.0
+        if econ is not None:
+            agg_fee_frac = max(
+                0.0,
+                float(econ.get("aggregator_fee_pct_revenue", 0.0) or 0.0) / 100.0,
+            )
+        gross_y1 = (
+            rev_load_pv_y1 + rev_load_bess_y1
+            + rev_exp_pv_y1 + rev_exp_bess_y1
+            - cost_grid_y1
         )
-    gross_y1 = (
-        rev_load_pv_y1 + rev_load_bess_y1
-        + rev_exp_pv_y1 + rev_exp_bess_y1
-        - cost_grid_y1
-    )
-    agg_fee_y1 = gross_y1 * agg_fee_frac
-    agg_fee = -((agg_fee_y1 * ratio).to_numpy())
+        agg_fee_y1 = gross_y1 * agg_fee_frac
+        agg_fee = -((agg_fee_y1 * retail_ratio).to_numpy())
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()

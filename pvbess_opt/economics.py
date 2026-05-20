@@ -65,6 +65,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .io import PROJECT_SHEET_DEFAULTS
 from .lifetime import _bess_factor
 
 logger = logging.getLogger(__name__)
@@ -191,9 +192,9 @@ def build_yearly_cashflow(
     ``project_start_year - 1``; Years 1..N at
     ``project_start_year .. project_start_year + N - 1``.
     """
-    raw_n_years = econ.get("project_lifecycle_years", 25)
+    raw_n_years = econ.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
     if raw_n_years is None:
-        raw_n_years = 25
+        raw_n_years = PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
     n_years = int(raw_n_years)
     if n_years < 1:
         raise ValueError(
