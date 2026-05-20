@@ -210,6 +210,7 @@ FINANCIAL_COLORS: dict[str, str] = {
     "export_from_pv":   "#42A5F5",  # Material blue 400
     "export_from_bess": "#0D47A1",  # Material blue 900
     "grid_charge_cost": "#D32F2F",  # Material red 700 (negative stack)
+    "aggregator_fee":   "#AD1457",  # Material pink 800 (deduction tone)
     # Foreground net-revenue line — near-black (Material grey 900),
     # IEEE publication-style emphasis colour.  High contrast against
     # every saturated stack colour above; white-edged markers keep it
@@ -306,6 +307,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Export from PV",
     "Export from BESS",
     "Grid-charging cost",
+    "Aggregator fee",
 )
 
 
@@ -330,6 +332,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Export from PV":                   "export_from_pv",
     "Export from BESS":                 "export_from_bess",
     "Grid-charging cost":               "grid_charge_cost",
+    "Aggregator fee":                   "aggregator_fee",
 }
 
 
@@ -357,6 +360,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "DEVEX",
     "CAPEX",
     "Grid-charging cost",
+    "Aggregator fee",
 )
 
 
