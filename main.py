@@ -49,6 +49,7 @@ from pvbess_opt.economics import (
 )
 from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
 from pvbess_opt.io import (
+    PROJECT_SHEET_DEFAULTS,
     copy_input_snapshot,
     make_run_layout,
     read_inputs,
@@ -447,7 +448,7 @@ def _generate_financial_plots(
 ) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
     start = int(econ.get("project_start_year", 2026) or 2026)
-    end = start + int(econ.get("project_lifecycle_years", 25) or 25) - 1
+    end = start + int(econ.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) - 1
     try:
         plot_cumulative_cashflow(
             yearly_cf, plots_dir / f"cumulative_cashflow_{start}-{end}.pdf",
@@ -756,7 +757,7 @@ def _run_one(
     # for a 25-year run.  Warn loudly so the user can interrupt before
     # the post-solve fan-out kicks in.
     if str(econ_pre.get("plot_daily_scope", "year1_only")).strip().lower() == "all":
-        n_years = int(econ_pre.get("project_lifecycle_years", 25) or 25)
+        n_years = int(econ_pre.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
         approx_pdfs = 365 * max(n_years, 1) * 3
         logger.warning(
             "plot_daily_scope='all' selected: ~%d daily PDFs will be "

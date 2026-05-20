@@ -272,7 +272,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("project_lifecycle_years", 25, "years",
+    ("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"], "years",
      "Total project horizon used to project Years 0..N."),
     ("project_start_year", 2026, "year",
      "Calendar year of Year 1 (first operating year). CAPEX is paid in "

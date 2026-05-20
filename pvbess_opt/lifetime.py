@@ -44,6 +44,8 @@ from typing import Any
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
+from .io import PROJECT_SHEET_DEFAULTS
+
 # Columns scaled by the PV degradation curve.
 _PV_ORIGIN_COLUMNS: tuple[str, ...] = (
     "pv_kwh",
@@ -151,9 +153,9 @@ def build_lifetime_dispatch(
             "be a datetime column."
         )
 
-    raw_n_years = econ.get("project_lifecycle_years", 25)
+    raw_n_years = econ.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
     if raw_n_years is None:
-        raw_n_years = 25
+        raw_n_years = PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
     n_years = int(raw_n_years)
     if n_years < 1:
         raise ValueError(
