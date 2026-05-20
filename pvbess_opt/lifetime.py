@@ -128,8 +128,17 @@ def build_lifetime_dispatch(
     res_year1: pd.DataFrame,
     econ: dict[str, Any],
     capacities: dict[str, float],
+    *,
+    year1_discharge_mwh: float | None = None,
 ) -> pd.DataFrame:
-    """Project the Year-1 hourly dispatch across the full project horizon."""
+    """Project the Year-1 hourly dispatch across the full project horizon.
+
+    ``year1_discharge_mwh`` overrides the value derived from ``res_year1``
+    when supplied — used to keep the cycle-counter symmetric with
+    ``build_yearly_cashflow`` which already reads the post-derate value
+    from ``year1_kpis``.  Falls back to the in-frame sum for
+    backward-compat callers that don't plumb KPIs through.
+    """
     if "timestamp" not in res_year1.columns:
         raise ValueError(
             "build_lifetime_dispatch requires a 'timestamp' column on "
@@ -162,16 +171,19 @@ def build_lifetime_dispatch(
     # ``compute_financial_kpis`` (bess_lifetime_cycles = discharge MWh /
     # capacity MWh in pvbess_opt/economics.py).
     capacity_mwh = float(capacities.get("bess_kwh", 0.0) or 0.0) / 1000.0
-    _dis_cols = [
-        c for c in ("bess_dis_load_kwh", "bess_dis_grid_kwh")
-        if c in res_year1.columns
-    ]
-    if _dis_cols:
-        year1_discharge_mwh = float(
-            res_year1[_dis_cols].to_numpy(dtype=float).sum()
-        ) / 1000.0
+    if year1_discharge_mwh is None:
+        _dis_cols = [
+            c for c in ("bess_dis_load_kwh", "bess_dis_grid_kwh")
+            if c in res_year1.columns
+        ]
+        if _dis_cols:
+            year1_discharge_mwh = float(
+                res_year1[_dis_cols].to_numpy(dtype=float).sum()
+            ) / 1000.0
+        else:
+            year1_discharge_mwh = 0.0
     else:
-        year1_discharge_mwh = 0.0
+        year1_discharge_mwh = float(year1_discharge_mwh)
 
     pv_cols = [c for c in _PV_ORIGIN_COLUMNS if c in res_year1.columns]
     bess_cols = [c for c in _BESS_ORIGIN_COLUMNS if c in res_year1.columns]

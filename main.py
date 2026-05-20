@@ -548,7 +548,18 @@ def _build_financials(
     capacities = derive_asset_capacities(econ, params, ts)
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
-    lifetime_df = build_lifetime_dispatch(res, econ, capacities)
+    # Symmetric cycle-count input: build_yearly_cashflow already
+    # reads bess_total_discharge_mwh from the derated kpis dict, so
+    # feed the same number into build_lifetime_dispatch (Bug #3 fix).
+    # Without this both paths run separate cycle counters that drift
+    # by ``unavailability_pct`` over the lifecycle.
+    year1_discharge_for_cycles = float(
+        kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
+    )
+    lifetime_df = build_lifetime_dispatch(
+        res, econ, capacities,
+        year1_discharge_mwh=year1_discharge_for_cycles,
+    )
     lifetime_yearly = aggregate_lifetime_to_yearly(lifetime_df)
     # Post-solve unavailability derate on the lifetime
     # totals (PV generation and BESS discharge) so LCOE / LCOS
