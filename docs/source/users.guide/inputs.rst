@@ -3,7 +3,7 @@ Input workbook
 
 The optimiser consumes a single Excel workbook with **seven sheets**
 (v0.8): ``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
-``simulation``, ``curtailment_profile``.  All keys use lowercase
+``simulation``, ``max_injection_profile``.  All keys use lowercase
 snake_case.
 
 Sheet ``timeseries``
@@ -48,8 +48,8 @@ High-level run configuration:
 * ``p_grid_export_max_kw`` — grid-connection export limit (kW).  A
   positive number caps the combined PV + BESS export flow.  Leave the
   cell empty, or set it to ``inf`` / ``infinity`` / ``unlimited`` /
-  ``disabled`` / ``none`` (case-insensitive), to remove the cap; the
-  curtailment driven by the cap then becomes zero.  Internally a finite
+  ``disabled`` / ``none`` (case-insensitive), to remove the cap; no
+  injection limit is applied in that case.  Internally a finite
   Big-M is substituted for the disabled cap so the MILP stays
   solver-agnostic (HiGHS, Gurobi, CBC) — the constraint itself is never
   removed.  A negative number or ``0`` remains a validation error.
@@ -123,21 +123,27 @@ Sheet ``simulation``
 * ``plot_daily_scope`` / ``plot_monthly_scope`` /
   ``plot_yearly_scope`` ∈ ``none | year1_only | all``.
 
-Sheet ``curtailment_profile`` (NEW in v0.8)
--------------------------------------------
+Sheet ``max_injection_profile``
+-------------------------------
 
-Hour-of-day curtailment cap profile.  Two supported shapes (auto-
-detected by the loader from the column names):
+Hour-of-day cap profile expressing the share of
+``p_grid_export_max_kw`` available for export.  Two supported shapes
+(auto-detected by the loader from the column names):
 
-* **24 × 1** — column ``hour_of_day`` (0..23) plus ``curtailment_pct``
-  (0..100); applied to every day of the year.
+* **24 × 1** — column ``hour_of_day`` (0..23) plus
+  ``max_injection_pct`` (0..100); applied to every day of the year.
 * **24 × 13** — ``hour_of_day`` plus 12 monthly columns
-  ``curtailment_pct_jan`` … ``curtailment_pct_dec``; the cell at
+  ``max_injection_pct_jan`` … ``max_injection_pct_dec``; the cell at
   ``(hour_of_day, month - 1)`` is the cap for that hour-of-day in
   that calendar month.
 
 If the sheet is missing the loader logs an INFO message and falls
-back to a flat 27 % cap.
+back to a flat 73 % cap.  Workbooks still using the legacy
+``curtailment_profile`` schema (with ``curtailment_pct`` columns)
+continue to load with a ``DeprecationWarning`` and are auto-converted
+via ``100 - x``; the legacy schema will be removed in a future release.
+Curtailed energy is reported as an output
+(``pv_curtail_kwh`` / ``pv_energy_curtailed_mwh``).
 
 The canonical defaults live in
 :data:`pvbess_opt.io.PROJECT_SHEET_DEFAULTS`,

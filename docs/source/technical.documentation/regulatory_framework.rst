@@ -4,15 +4,18 @@ Regulatory framework
 The optimiser respects the Greek regulatory framework for distributed
 generation.
 
-Curtailment cap (both modes)
-----------------------------
+Max-injection cap (both modes)
+------------------------------
 
-The static curtailment cap on grid-bound flows is **not** vnb-specific.
-It is a **regulatory grid-connection limit** per **MD YPEN/DAPEEK/53563/
-1556/2023** (FEK B' 3328/19-05-2023):
+The static cap on grid-bound flows is **not** vnb-specific.  It is
+a **regulatory grid-connection limit** per **MD YPEN/DAPEEK/53563/
+1556/2023** (FEK B' 3328/19-05-2023), expressed as the share of
+``p_grid_export_max_kw`` available for export:
 
-* 27 % cap on installations connected to the **distribution** network.
-* 28 % cap on installations connected to the **transmission** network.
+* 73 % allowed on installations connected to the **distribution**
+  network (equivalently 27 % curtailment).
+* 72 % allowed on installations connected to the **transmission**
+  network (equivalently 28 % curtailment).
 
 The constraint is encoded as
 
@@ -20,7 +23,7 @@ The constraint is encoded as
 
    p^{\text{pv→grid}}_t + p^{\text{bess→grid}}_t
    \le p^{\text{export\_max}} \cdot \Delta t \cdot
-   \left( 1 - \frac{\text{curtailment\_pct}}{100} \right) \quad \forall t
+   \frac{\text{max\_injection\_pct}}{100} \quad \forall t
 
 and is **identically enforced in both vnb and merchant modes**.  Any
 suggestion to remove it from merchant mode is wrong; cite the MD and
@@ -48,7 +51,7 @@ Mode definitions
   load is fully met.
 * No simultaneous grid I/O: tight per-instance big-M binary
   (``M_imp = (load_max + p_charge × dt_h) × 1.001``,
-  ``M_exp = p_grid_export_max × dt_h × (1 − curtailment_frac) × 1.001``).
+  ``M_exp = p_grid_export_max × dt_h × max_injection_frac × 1.001``).
 * Retail tariff incentive on PV→load and BESS→load.
 * DAM revenue on grid-bound exports.
 
@@ -68,4 +71,5 @@ Both modes
 
 * PV split: ``pv = pv_to_load + pv_to_bess + pv_to_grid + pv_curtail``.
 * SOC dynamics, charge/discharge power limits, daily cycle limit, E/P ratio.
-* **Hard static curtailment cap** on grid-bound flows (regulatory).
+* **Hard static max-injection cap** on grid-bound flows (regulatory);
+  curtailed energy is reported in the outputs.

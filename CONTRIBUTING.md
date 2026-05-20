@@ -21,12 +21,12 @@ pvbess_opt/
 ├── sensitivity.py
 ├── rolling_horizon.py
 ├── availability.py
-├── curtailment.py
+├── max_injection.py
 └── plotting/
 ```
 
 If the count crosses 12, future PRs should subpackage by responsibility:
-`solve/` (optimization, lifetime, curtailment), `finance/` (economics,
+`solve/` (optimization, lifetime, max_injection), `finance/` (economics,
 sensitivity, availability), `uncertainty/` (rolling_horizon),
 `plotting/` (already a subpackage).
 
@@ -34,7 +34,7 @@ sensitivity, availability), `uncertainty/` (rolling_horizon),
 
 The input workbook is split across **seven themed sheets**:
 `timeseries`, `project`, `pv`, `bess`, `economics`, `simulation`,
-`curtailment_profile`.  See `docs/source/users.guide/inputs.rst` for
+`max_injection_profile`.  See `docs/source/users.guide/inputs.rst` for
 the full reference.
 
 ## Style

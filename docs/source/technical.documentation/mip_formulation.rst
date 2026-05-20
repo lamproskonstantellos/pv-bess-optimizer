@@ -52,13 +52,13 @@ Charge / discharge power limits:
 
    y^{\text{charge}}_t + y^{\text{dis}}_t \le 1
 
-Static curtailment cap (BOTH modes):
+Static max-injection cap (BOTH modes):
 
 .. math::
 
    p^{\text{pv→grid}}_t + p^{\text{bess→grid}}_t
    \le p^{\text{export\_max}} \cdot \Delta t \cdot
-       (1 - \text{curtailment\_frac})
+       \text{max\_injection\_frac}
 
 In ``vnb`` mode additionally:
 
@@ -108,7 +108,7 @@ Big-M values are derived per-instance by
    M^{\text{imp}} = (l^{\text{max}} + p^{\text{ch\_max}} \cdot \Delta t) \cdot 1.001
 
    M^{\text{exp}} = p^{\text{export\_max}} \cdot \Delta t \cdot
-                    (1 - \text{curtailment\_frac}) \cdot 1.001
+                    \text{max\_injection\_frac} \cdot 1.001
 
    M^{\text{ch}} = p^{\text{ch\_max}} \cdot \Delta t \cdot 1.001
 

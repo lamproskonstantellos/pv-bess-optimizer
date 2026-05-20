@@ -5,6 +5,56 @@ longer carries internal version history — past migration notes and
 breaking-change diffs have been folded into the present-tense
 descriptions across the codebase and Sphinx docs.
 
+## Unreleased
+
+### Breaking changes
+
+- Workbook schema: the `curtailment_profile` sheet is renamed to
+  `max_injection_profile`, the `curtailment_pct` column to
+  `max_injection_pct`, and the values are flipped from "share to
+  curtail" to "share allowed to inject" (so the case-study workbook
+  ships 73 in place of the old 27).  This matches the convention used
+  by PyPSA (`p_max_pu`), PLEXOS (`Rating Factor × Max Capacity`),
+  Gridcog (share of grid connection capacity), and PVsyst
+  (`PNom grid`).  The loader still accepts the legacy schema with a
+  `DeprecationWarning` for one release; the curtailed MWh continues to
+  appear in outputs (`pv_curtail_kwh`, `pv_energy_curtailed_mwh`).
+
+### Fixed
+
+- Rolling-horizon `window_hours` and `commit_hours` are now real hours
+  on sub-hourly cadences.  On the 15-minute production workbook a
+  documented 48-hour window previously executed as a 12-hour window;
+  any previously reported foresight gap should be recomputed.
+- Revenue stack plot now renders the aggregator fee as an explicit
+  negative component, removing the unexplained gap between the stack
+  top and the net-revenue line at the default 10 % fee.
+- Unavailability derate is applied symmetrically across the
+  yearly-cashflow and lifetime-dispatch paths, eliminating a silent
+  ~0.4 % cycle-count drift across the 20-year horizon when
+  `unavailability_pct > 0`.
+- `build_lifetime_dispatch` no longer rolls Feb-29 timestamps forward
+  to Mar-1 in non-leap target years (uses
+  `dateutil.relativedelta(years=N)` when the input contains Feb-29).
+
+### Changed
+
+- `PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]` default is now
+  20 (was 25), matching the documented horizon.
+- Default max-injection percentage constant lives in
+  `pvbess_opt/config.py::DEFAULT_MAX_INJECTION_PCT_HOURLY = 73.0`.
+- `aggregate_lifetime_to_yearly` now uses symmetric reindex across
+  every per-year MWh aggregation path (pathological inputs without
+  `pv_kwh` get 0.0 instead of NaN).
+- Module file `pvbess_opt/curtailment.py` is renamed to
+  `pvbess_opt/max_injection.py`; the public helper becomes
+  `build_per_step_max_injection_frac`.
+
+### Removed
+
+- `params["curtailment_frac"]`: computed but never read in production
+  (the loader always populates the per-step profile).
+
 ## 0.8.8 — 2026-05-19
 
 Backward compatible throughout: old workbooks load unchanged, and the
