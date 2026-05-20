@@ -8,8 +8,13 @@ The ``economic`` sheet drives the project-finance pipeline:
   ``project_start_year .. project_start_year + N - 1``.
 * **OPEX** scales by ``(1 + opex_inflation_pct/100)^(y-1)``.
 * **Revenue** uses the Year-1 ``profit_total_eur`` from the dispatch
-  KPIs as the base, scaled by the PV degradation curve and revenue
-  inflation: ``rev_y = rev_1 * pv_factor * (1 + rev_infl)^(y-1)``.
+  KPIs as the base.  Revenue is split into a retail-indexed stream
+  (load offset / PPA) and a DAM-indexed stream (wholesale exports);
+  each is scaled by the PV degradation curve and its own inflation
+  rate:
+  ``rev_retail_y = rev_retail_1 * pv_factor * (1 + retail_infl)^(y-1)``
+  and
+  ``rev_dam_y = rev_dam_1 * pv_factor * (1 + dam_infl)^(y-1)``.
 * **BESS replacement** is optional (``bess_replacement_year > 0``).
 
 BESS capacity fade — calendar plus cycle
@@ -57,9 +62,10 @@ Sign convention
 ---------------
 
 * CAPEX rows are stored as **negative** numbers (cash outflow).
+* DEVEX rows are stored as **negative** numbers (cash outflow).
 * OPEX rows are stored as **negative** numbers (cash outflow).
 * Revenue rows are stored as **positive** numbers (cash inflow).
-* ``net_cashflow_eur = revenue_eur + opex_eur + capex_eur``.
+* ``net_cashflow_eur = revenue_eur + opex_eur + capex_eur + devex_eur``.
 
 Default values
 --------------

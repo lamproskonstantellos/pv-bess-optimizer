@@ -416,5 +416,5 @@ def monte_carlo_rolling(
 def verify_window_invariants(
     res: pd.DataFrame, params: dict[str, Any],
 ) -> dict[str, float]:
-    """Run the 8 audit invariants on a single committed window."""
+    """Run the 9 audit invariants on a single committed window."""
     return verify_dispatch_invariants(res, params, mode=str(params.get("mode", "vnb")))

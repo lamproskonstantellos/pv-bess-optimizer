@@ -2,17 +2,24 @@
 
 Energy-flow conventions (all per timestep, kWh):
 
-    PV split:
-        pv_kwh = pv_to_load_kwh + pv_to_bess_kwh
-              + pv_to_grid_kwh + pv_curtail_kwh
-    Load balance (vnb only):
-        load_kwh = pv_to_load_kwh + bess_dis_load_kwh + grid_to_load_kwh
-    BESS state-of-charge dynamics:
-        soc_kwh[t+1] - soc_kwh[t] =
-            efficiency_charge * (pv_to_bess_kwh + bess_charge_grid_kwh)
-          - (bess_dis_load_kwh + bess_dis_grid_kwh) / efficiency_discharge
-    Grid export (subject to export-cap constraint):
-        grid_export_total_kwh = pv_to_grid_kwh + bess_dis_grid_kwh
+* PV split::
+
+    pv_kwh = pv_to_load_kwh + pv_to_bess_kwh
+           + pv_to_grid_kwh + pv_curtail_kwh
+
+* Load balance (vnb only)::
+
+    load_kwh = pv_to_load_kwh + bess_dis_load_kwh + grid_to_load_kwh
+
+* BESS state-of-charge dynamics::
+
+    soc_kwh[t+1] - soc_kwh[t] =
+        efficiency_charge * (pv_to_bess_kwh + bess_charge_grid_kwh)
+      - (bess_dis_load_kwh + bess_dis_grid_kwh) / efficiency_discharge
+
+* Grid export (subject to export-cap constraint)::
+
+    grid_export_total_kwh = pv_to_grid_kwh + bess_dis_grid_kwh
 
 In ``mode == "merchant"`` the load-balance check, all load-coverage
 ratios, and the ``profit_load_*`` revenue components are skipped or

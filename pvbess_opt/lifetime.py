@@ -33,8 +33,9 @@ Reconciliation invariant
 
     sum(pv_kwh in lifetime[y]) / sum(pv_kwh in Year 1) ≈ pv_factor[y]
 
-within 0.1 % for every year.  See
-:doc:`technical.documentation/lifetime_scaling` for the derivation.
+within 0.1 % for every year.  See the lifetime-scaling note under
+``docs/source/technical.documentation/lifetime_scaling.rst`` for the
+derivation.
 """
 
 from __future__ import annotations

@@ -41,7 +41,7 @@ new features are left disabled:
   `p_grid_export_max_kw`, `bess_power_kw` = 15000; `bess_capacity_kwh`
   = 60000; `bess_replacement_year` = 10).
 * **Unlimited grid export** — `p_grid_export_max_kw` may be left empty
-  or set to `inf` / `unlimited` / `disabled` / `none` to remove the
+  or set to `inf` / `infinity` / `unlimited` / `disabled` / `none` to remove the
   export cap.  No injection limit is applied and a finite Big-M is
   substituted internally, so the result stays solver-agnostic.  A
   finite positive cap behaves exactly as before.

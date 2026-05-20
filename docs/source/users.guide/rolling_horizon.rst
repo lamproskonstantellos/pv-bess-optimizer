@@ -49,9 +49,9 @@ For each window starting at hour :math:`t \in \{0, c, 2c, \ldots\}` where
 
 The MILP's ``terminal_soc_equal`` constraint is **disabled** inside
 rolling-horizon windows (it only makes sense for the annual closed-cycle
-benchmark).  The BESS energy capacity ``e_cap`` is pinned after the
-first window so subsequent windows operate against the same physical
-asset.
+benchmark).  The BESS energy capacity ``e_cap`` is pinned at workbook
+load (the per-window MILP reads ``e_cap`` as a constant from the
+start) so every window operates against the same physical asset.
 
 Re-evaluation with actuals
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

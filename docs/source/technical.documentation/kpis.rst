@@ -8,7 +8,8 @@ throughout.  Selected keys:
 Dispatch metrics
 ----------------
 
-* ``e_cap_opt_mwh`` — solved BESS energy capacity (MWh).
+* ``e_cap_mwh`` — BESS energy capacity (MWh), pinned from
+  ``bess_capacity_kwh`` at workbook load.
 * ``system_total_import_mwh`` / ``system_total_export_mwh``.
 * ``bess_total_charge_mwh`` / ``bess_total_discharge_mwh``.
 * ``pv_to_bess_mwh`` / ``bess_charge_grid_mwh``.
