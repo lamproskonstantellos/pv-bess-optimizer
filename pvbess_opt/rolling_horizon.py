@@ -28,6 +28,7 @@ Load             0.05 (MAPE) Predictable-customer benchmark (booking horizon)
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import numpy as np
@@ -358,6 +359,7 @@ def monte_carlo_rolling(
     """
     seeds = [int(base_seed) + i for i in range(int(n_seeds))]
     rows: list[dict[str, Any]] = []
+    t_start = time.perf_counter()
     for seed in seeds:
         _full, kpis = rolling_horizon_dispatch(
             params, ts,
@@ -388,6 +390,17 @@ def monte_carlo_rolling(
             "bess_cycles_total": float(kpis.get("bess_equivalent_cycles_total", 0.0)),
             "foresight_gap_pct": gap,
         })
+        elapsed = time.perf_counter() - t_start
+        done = len(rows)
+        eta_s = elapsed / done * (len(seeds) - done) if done else 0.0
+        logger.info(
+            "monte_carlo_rolling: seed %d/%d done in %.1fs "
+            "(profit=%.0f EUR, gap=%.2f%%, ETA %.1f min)",
+            done, len(seeds), elapsed, profit, gap, eta_s / 60.0,
+        )
+        # Force flush so a long-running ensemble shows live progress.
+        for h in logger.handlers + logging.getLogger().handlers:
+            h.flush()
     return pd.DataFrame(rows)
 
 
