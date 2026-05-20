@@ -22,17 +22,17 @@ from pvbess_opt.rolling_horizon import (
 def test_noise_zero_sigma_dam_byte_identical(short_ts):
     rng = np.random.default_rng(42)
     out = add_forecast_noise(
-        short_ts, commit_hours=0, rng=rng,
+        short_ts, commit_steps=0, rng=rng,
         sigma_dam=0.0, sigma_pv=0.0, sigma_load=0.0,
     )
     pd.testing.assert_frame_equal(out, short_ts)
 
 
 def test_noise_commit_horizon_byte_identical(short_ts):
-    """Rows < commit_hours are byte-identical to the input regardless of seed."""
+    """Rows < commit_steps are byte-identical to the input regardless of seed."""
     for seed in (1, 7, 999):
         rng = np.random.default_rng(seed)
-        out = add_forecast_noise(short_ts, commit_hours=24, rng=rng)
+        out = add_forecast_noise(short_ts, commit_steps=24, rng=rng)
         pd.testing.assert_frame_equal(
             out.iloc[:24].reset_index(drop=True),
             short_ts.iloc[:24].reset_index(drop=True),
@@ -51,7 +51,7 @@ def test_noise_negative_dam_preserved():
         "dam_price_eur_per_mwh": [-25.0] * 10,
     })
     rng = np.random.default_rng(42)
-    out = add_forecast_noise(ts, commit_hours=0, rng=rng, sigma_dam=0.20)
+    out = add_forecast_noise(ts, commit_steps=0, rng=rng, sigma_dam=0.20)
     assert (out["dam_price_eur_per_mwh"] < 0).all()
 
 
@@ -66,7 +66,7 @@ def test_noise_dam_mape_close_to_sigma():
         "dam_price_eur_per_mwh": [base_price] * n,
     })
     rng = np.random.default_rng(42)
-    out = add_forecast_noise(ts, commit_hours=0, rng=rng, sigma_dam=0.20)
+    out = add_forecast_noise(ts, commit_steps=0, rng=rng, sigma_dam=0.20)
     perturbed = out["dam_price_eur_per_mwh"].to_numpy()
     mape = float(np.mean(np.abs(perturbed - base_price) / base_price))
     # Theoretical mean abs deviation of log-normal(0, 0.20) is roughly 0.16-0.17;
@@ -83,8 +83,83 @@ def test_noise_skips_load_when_absent():
         "dam_price_eur_per_mwh": [100.0] * 10,
     })
     rng = np.random.default_rng(42)
-    out = add_forecast_noise(ts, commit_hours=0, rng=rng)
+    out = add_forecast_noise(ts, commit_steps=0, rng=rng)
     assert "load_kwh" not in out.columns
+
+
+# ---------------------------------------------------------------------------
+# Bug #1 regression: window_hours / commit_hours are real hours
+# ---------------------------------------------------------------------------
+
+
+def test_hours_to_steps_helper_rejects_bad_inputs():
+    from pvbess_opt.rolling_horizon import _hours_to_steps
+
+    assert _hours_to_steps(48, 15) == 192       # 48 h @ 15 min
+    assert _hours_to_steps(48, 60) == 48        # 48 h @ 60 min
+    assert _hours_to_steps(24, 30) == 48        # 24 h @ 30 min
+    with pytest.raises(ValueError):
+        _hours_to_steps(1, 0)
+    with pytest.raises(ValueError):
+        # Less than one full step.
+        _hours_to_steps(0, 15)
+
+
+def test_window_hours_means_real_hours_on_15min_data(
+    short_params_15min, short_ts_15min, monkeypatch,
+):
+    """Documented 48-hour window must produce a 192-step window on
+    15-min data (= 48 real hours × 4 steps/hour).  The previous
+    behaviour was that ``window_hours`` was treated as a row count,
+    so 48 became 12 real hours on this cadence."""
+    from pvbess_opt import rolling_horizon as rh
+
+    seen: list[int] = []
+    sentinel = RuntimeError("captured")
+
+    def _spy(_params, window_ts, **_kw):
+        seen.append(len(window_ts))
+        raise sentinel
+
+    monkeypatch.setattr(rh, "run_scenario", _spy)
+
+    with pytest.raises(RuntimeError):
+        rh.rolling_horizon_dispatch(
+            short_params_15min, short_ts_15min,
+            window_hours=48, commit_hours=24,
+            forecast_seed=None,
+        )
+
+    # First window: 48 h * 4 steps/h = 192 rows from a 672-row series.
+    assert seen == [192], (
+        f"first window expected 192 steps (48 h @ 15 min), got {seen}"
+    )
+
+
+def test_window_hours_means_real_hours_on_hourly_data(
+    short_params, short_ts, monkeypatch,
+):
+    """On hourly data steps == hours, so behaviour is unchanged from
+    pre-fix: a 24-hour window slices 24 rows."""
+    from pvbess_opt import rolling_horizon as rh
+
+    seen: list[int] = []
+    sentinel = RuntimeError("captured")
+
+    def _spy(_params, window_ts, **_kw):
+        seen.append(len(window_ts))
+        raise sentinel
+
+    monkeypatch.setattr(rh, "run_scenario", _spy)
+
+    with pytest.raises(RuntimeError):
+        rh.rolling_horizon_dispatch(
+            short_params, short_ts,
+            window_hours=24, commit_hours=12,
+            forecast_seed=None,
+        )
+
+    assert seen == [24]
 
 
 # ---------------------------------------------------------------------------

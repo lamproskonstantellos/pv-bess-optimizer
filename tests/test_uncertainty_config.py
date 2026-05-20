@@ -69,7 +69,7 @@ def _ts(n: int = 48) -> pd.DataFrame:
 
 def test_disable_dam_keeps_dam_unchanged():
     rng = np.random.default_rng(42)
-    out = add_forecast_noise(_ts(), commit_hours=0, rng=rng,
+    out = add_forecast_noise(_ts(), commit_steps=0, rng=rng,
                               enable_dam=False, enable_pv=True, enable_load=True)
     assert (out["dam_price_eur_per_mwh"] == 80.0).all()
     # PV / load WERE perturbed.
@@ -79,21 +79,21 @@ def test_disable_dam_keeps_dam_unchanged():
 
 def test_disable_pv_keeps_pv_unchanged():
     rng = np.random.default_rng(42)
-    out = add_forecast_noise(_ts(), commit_hours=0, rng=rng,
+    out = add_forecast_noise(_ts(), commit_steps=0, rng=rng,
                               enable_dam=True, enable_pv=False, enable_load=True)
     assert (out["pv_kwh"] == 100.0).all()
 
 
 def test_disable_load_keeps_load_unchanged():
     rng = np.random.default_rng(42)
-    out = add_forecast_noise(_ts(), commit_hours=0, rng=rng,
+    out = add_forecast_noise(_ts(), commit_steps=0, rng=rng,
                               enable_dam=True, enable_pv=True, enable_load=False)
     assert (out["load_kwh"] == 50.0).all()
 
 
 def test_disable_all_returns_unchanged_frame():
     rng = np.random.default_rng(42)
-    out = add_forecast_noise(_ts(), commit_hours=0, rng=rng,
+    out = add_forecast_noise(_ts(), commit_steps=0, rng=rng,
                               enable_dam=False, enable_pv=False, enable_load=False)
     pd.testing.assert_frame_equal(out, _ts())
 
