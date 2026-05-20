@@ -1,14 +1,11 @@
-"""Regression test: tornado endpoint labels must match their x-axis position.
+"""Regression tests: tornado endpoint driver-value labels must match
+the scenario that produced the metric at that x position.
 
 Issue: when the "low" scenario yields a HIGHER metric than the "high"
-scenario (e.g. low CAPEX → higher IRR), the old implementation labelled
-the leftmost endpoint with the "low_value" text and the rightmost with
-the "high_value" text, which then disagreed with the x-axis coordinates
-the labels were drawn at.
-
-The fix re-formats each endpoint label from its own numeric position
-(``left`` / ``right`` after ``sorted((low, high))``), guaranteeing
-agreement between text and x-coordinate.
+scenario (e.g. low CAPEX → higher IRR), the leftmost dot corresponds
+to the HIGH driver value and the rightmost dot to the LOW driver
+value.  The endpoint label on each side must therefore carry the
+driver value of the scenario whose metric outcome sits at that x.
 """
 
 from __future__ import annotations
@@ -32,23 +29,37 @@ def _econ() -> dict:
 
 
 def _inverted_sens_df() -> pd.DataFrame:
-    """Sensitivity frame where 'low' yields HIGHER IRR than 'high' —
-    the swap territory that broke the previous implementation."""
+    """Sensitivity frame where the 'low' scenario yields a HIGHER IRR
+    than the 'high' scenario — the swap territory that broke the
+    previous implementation.  Carries the full driver-value metadata
+    so the endpoint labels render with the v0.8.8+ layout."""
     rows = []
-    for label, low_irr, high_irr in (
-        ("Total CAPEX", 13.9, 8.7),       # low CAPEX → higher IRR
-        ("Total annual OPEX", 12.5, 9.4),  # low OPEX → higher IRR
-    ):
-        rows.append({"label": label, "scenario": "low", "irr_pct": low_irr})
-        rows.append({"label": label, "scenario": "high", "irr_pct": high_irr})
+    # (variable, label, base_v, low_v, high_v, delta, low_irr, high_irr)
+    drivers = (
+        ("CAPEX", "Total CAPEX",
+         30.0e6, 17.6e6, 42.9e6, 0.20, 13.9, 8.7),
+        ("OPEX", "Total annual OPEX",
+         500.0e3, 400.0e3, 600.0e3, 0.20, 12.5, 9.4),
+    )
+    for var, label, base_v, low_v, high_v, delta, low_irr, high_irr in drivers:
+        common = {"variable": var, "label": label}
+        rows.append({**common, "scenario": "base", "delta_value": 0.0,
+                     "value": base_v, "irr_pct": 11.0})
+        rows.append({**common, "scenario": "low", "delta_value": -delta,
+                     "value": low_v, "irr_pct": low_irr})
+        rows.append({**common, "scenario": "high", "delta_value": +delta,
+                     "value": high_v, "irr_pct": high_irr})
     return pd.DataFrame(rows)
 
 
 def test_endpoint_labels_match_axis_position(tmp_path, monkeypatch):
-    """Render the tornado and inspect each text artist on its row.
+    """Each endpoint's driver-value label must come from the scenario
+    that produced the metric outcome at that x position.
 
-    To inspect the figure we monkey-patch ``save_figure`` so it skips
-    ``plt.close()`` — that leaves the current Axes alive for assertion.
+    The fixture inverts the usual ordering (low CAPEX → high IRR), so
+    the leftmost dot — corresponding to the smallest IRR — must carry
+    the HIGH-scenario driver value (€42.9M for CAPEX), and the
+    rightmost dot the LOW-scenario value (€17.6M).
     """
     captured: dict[str, plt.Figure] = {}
 
@@ -66,39 +77,57 @@ def test_endpoint_labels_match_axis_position(tmp_path, monkeypatch):
     fig = captured["fig"]
     ax = fig.axes[0]
 
-    by_row: dict[int, list[tuple[float, float]]] = {}
+    # Map each ytick row index → row label.
+    yticklabels = [t.get_text() for t in ax.get_yticklabels()]
+
+    # Collect bbox-wrapped texts anchored exactly on a row.
+    by_row: dict[int, list[tuple[float, str]]] = {}
     for txt in ax.texts:
         if not txt.get_bbox_patch():
             continue
         x_data, y_data = txt.get_position()
         if abs(y_data - round(y_data)) > 1e-6:
             continue
-        raw = txt.get_text().strip().rstrip("%")
-        try:
-            value = float(raw)
-        except ValueError:
-            continue
-        by_row.setdefault(int(round(y_data)), []).append((float(x_data), value))
+        by_row.setdefault(int(round(y_data)), []).append(
+            (float(x_data), txt.get_text())
+        )
 
     plt.close("all")
 
+    # Expected leftmost / rightmost driver-value labels per row label.
+    # Leftmost dot == smallest IRR → labelled with the HIGH-scenario
+    # driver value; rightmost dot == largest IRR → labelled with the
+    # LOW-scenario driver value.
+    expected = {
+        "Total CAPEX": ("€42.9M", "€17.6M"),
+        "Total annual OPEX": ("€600k", "€400k"),
+    }
+
     assert by_row, "no bbox-wrapped endpoint labels found"
+    matched_labels = set()
     for row, items in by_row.items():
         assert len(items) >= 2, f"row {row} has fewer than 2 endpoint labels"
         items.sort(key=lambda t: t[0])
-        leftmost_x, leftmost_val = items[0]
-        rightmost_x, rightmost_val = items[-1]
-        # Printed value must match its x-coordinate (within rounding).
-        assert abs(leftmost_val - leftmost_x) < 0.05, (
-            f"row {row}: leftmost label {leftmost_val} != x {leftmost_x}"
+        leftmost_text = items[0][1]
+        rightmost_text = items[-1][1]
+        # Strip any ``/ ±...`` suffix the y-tick label may carry.
+        row_label = yticklabels[row].split(" / ")[0]
+        assert row_label in expected, (
+            f"unexpected row label {row_label!r} (yticklabels={yticklabels})"
         )
-        assert abs(rightmost_val - rightmost_x) < 0.05, (
-            f"row {row}: rightmost label {rightmost_val} != x {rightmost_x}"
+        want_left, want_right = expected[row_label]
+        assert leftmost_text == want_left, (
+            f"row {row_label}: leftmost label {leftmost_text!r} != "
+            f"expected {want_left!r}"
         )
-        # Leftmost numeric value must not exceed rightmost.
-        assert leftmost_val <= rightmost_val + 1e-9, (
-            f"row {row}: leftmost {leftmost_val} > rightmost {rightmost_val}"
+        assert rightmost_text == want_right, (
+            f"row {row_label}: rightmost label {rightmost_text!r} != "
+            f"expected {want_right!r}"
         )
+        matched_labels.add(row_label)
+    assert matched_labels == set(expected), (
+        f"missing rows: {set(expected) - matched_labels}"
+    )
 
 
 # ---------------------------------------------------------------------------

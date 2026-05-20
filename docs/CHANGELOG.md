@@ -30,9 +30,12 @@ left disabled (the default-0 / no-cap settings).
   15-minute point-in-time data — is unchanged.
 - Sensitivity tornados: the IRR and NPV tornado plots annotate each bar
   end with the absolute driver value that produced it (CAPEX / OPEX /
-  revenue in EUR, discount rate as a percentage), add a `Base = ...`
-  annotation above the top bar, and fold the ± sensitivity range into
-  each y-axis label.  The base-case dashed line is unchanged.
+  revenue in EUR, discount rate as a percentage) and fold the ±
+  sensitivity range into each y-axis label.  The base-case dashed line
+  is unchanged.
+- Tornado endpoint labels carry the driver value only — the metric is
+  read off the x-axis — and the base appears once, via the dashed line
+  and its legend entry (`Base = 15.9%` / `Base = €9.0M`).
 - Default scenario: `inputs/input.xlsx` ships a 15 MW system
   (`pv_nameplate_kwp`, `p_grid_export_max_kw`, `bess_power_kw` = 15000;
   `bess_capacity_kwh` = 60000; `bess_replacement_year` = 10) over a

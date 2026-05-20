@@ -25,11 +25,12 @@ Eight plots are produced when the financial pipeline runs:
 
    Both tornados annotate each bar end with the absolute driver value
    that produced it — CAPEX / OPEX / revenue in EUR, the discount rate
-   as a percentage — stacked just below the IRR% / NPV label and placed
-   strictly outside the bar.  A ``Base = ...`` annotation sits above the
-   top bar, the base case is marked with a dashed vertical line, and
-   each y-axis label carries the ± sensitivity range used for that
-   driver.
+   as a percentage — placed strictly outside the bar and anchored on
+   the row centerline.  The metric itself is read off the x-axis.  The
+   base case is marked once, by a dashed vertical line whose legend
+   entry (``Base = 15.9%`` / ``Base = €9.0M``) carries the formatted
+   base value.  Each y-axis label carries the ± sensitivity range used
+   for that driver.
 8. ``rolling_horizon_distribution.pdf`` — Monte Carlo profit histogram
    with vertical markers at P10 / P50 / P90 and a dashed marker at the
    perfect-foresight benchmark (only when ``--rolling-horizon
