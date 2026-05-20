@@ -1,0 +1,164 @@
+{
+  "n_rows": 35040,
+  "dt_minutes": 15,
+  "grid_export_unlimited": false,
+  "run1": {
+    "label": "run1",
+    "solver": "highs",
+    "wallclock_s": 49.99071813899991,
+    "invariants": {
+      "invariant_1_pv_balance_kwh": 0.00010000000020227162,
+      "invariant_2_load_balance_kwh": 0.00010000000003174137,
+      "invariant_3_soc_dynamics_kwh": 0.00014400000020486914,
+      "invariant_4_rte_bound_excess_kwh": 0.0,
+      "invariant_5_no_sim_grid_io_max_product_kwh2": 0.0,
+      "invariant_6_load_priority_violations": 0.0,
+      "invariant_7_curtail_behavior_kwh": 0.0,
+      "invariant_8_soc_closed_cycle_kwh": 0.0,
+      "invariant_9_pv_load_priority_kwh": 0.0
+    },
+    "residuals": {
+      "max_pv_split_residual_kwh": 0.00010000000020227162,
+      "max_load_balance_residual_kwh": 9.999999997489795e-05,
+      "max_export_definition_residual_kwh": 0.0,
+      "max_soc_dynamics_residual_kwh": 0.00014400000020486914
+    },
+    "kpis": {
+      "profit_total_eur": 2868833.61,
+      "pv_generation_mwh": 22500.0,
+      "bess_total_charge_mwh": 10206.9896,
+      "bess_total_discharge_mwh": 9603.7565,
+      "system_total_export_mwh": 7887.874,
+      "system_total_import_mwh": 18182.794,
+      "pv_energy_curtailed_mwh": 0.0,
+      "bess_equivalent_cycles_total": 160.0626,
+      "soc_initial_pct": 50.0,
+      "soc_min_pct": 20.0,
+      "soc_max_pct": 95.0,
+      "soc_avg_pct": 57.29
+    }
+  },
+  "run2": {
+    "label": "run2",
+    "solver": "highs",
+    "wallclock_s": 52.37515168300001,
+    "invariants": {
+      "invariant_1_pv_balance_kwh": 0.00010000000020227162,
+      "invariant_2_load_balance_kwh": 0.00010000000003174137,
+      "invariant_3_soc_dynamics_kwh": 0.00014400000020486914,
+      "invariant_4_rte_bound_excess_kwh": 0.0,
+      "invariant_5_no_sim_grid_io_max_product_kwh2": 0.0,
+      "invariant_6_load_priority_violations": 0.0,
+      "invariant_7_curtail_behavior_kwh": 0.0,
+      "invariant_8_soc_closed_cycle_kwh": 0.0,
+      "invariant_9_pv_load_priority_kwh": 0.0
+    },
+    "residuals": {
+      "max_pv_split_residual_kwh": 0.00010000000020227162,
+      "max_load_balance_residual_kwh": 9.999999997489795e-05,
+      "max_export_definition_residual_kwh": 0.0,
+      "max_soc_dynamics_residual_kwh": 0.00014400000020486914
+    },
+    "kpis": {
+      "profit_total_eur": 2868833.61,
+      "pv_generation_mwh": 22500.0,
+      "bess_total_charge_mwh": 10206.9896,
+      "bess_total_discharge_mwh": 9603.7565,
+      "system_total_export_mwh": 7887.874,
+      "system_total_import_mwh": 18182.794,
+      "pv_energy_curtailed_mwh": 0.0,
+      "bess_equivalent_cycles_total": 160.0626,
+      "soc_initial_pct": 50.0,
+      "soc_min_pct": 20.0,
+      "soc_max_pct": 95.0,
+      "soc_avg_pct": 57.29
+    }
+  },
+  "kpis_diff": {
+    "profit_total_eur": {
+      "r1": 2868833.61,
+      "r2": 2868833.61,
+      "abs_diff": 0.0
+    },
+    "pv_generation_mwh": {
+      "r1": 22500.0,
+      "r2": 22500.0,
+      "abs_diff": 0.0
+    },
+    "bess_total_charge_mwh": {
+      "r1": 10206.9896,
+      "r2": 10206.9896,
+      "abs_diff": 0.0
+    },
+    "bess_total_discharge_mwh": {
+      "r1": 9603.7565,
+      "r2": 9603.7565,
+      "abs_diff": 0.0
+    },
+    "system_total_export_mwh": {
+      "r1": 7887.874,
+      "r2": 7887.874,
+      "abs_diff": 0.0
+    },
+    "system_total_import_mwh": {
+      "r1": 18182.794,
+      "r2": 18182.794,
+      "abs_diff": 0.0
+    },
+    "pv_energy_curtailed_mwh": {
+      "r1": 0.0,
+      "r2": 0.0,
+      "abs_diff": 0.0
+    },
+    "bess_equivalent_cycles_total": {
+      "r1": 160.0626,
+      "r2": 160.0626,
+      "abs_diff": 0.0
+    },
+    "soc_initial_pct": {
+      "r1": 50.0,
+      "r2": 50.0,
+      "abs_diff": 0.0
+    },
+    "soc_min_pct": {
+      "r1": 20.0,
+      "r2": 20.0,
+      "abs_diff": 0.0
+    },
+    "soc_max_pct": {
+      "r1": 95.0,
+      "r2": 95.0,
+      "abs_diff": 0.0
+    },
+    "soc_avg_pct": {
+      "r1": 57.29,
+      "r2": 57.29,
+      "abs_diff": 0.0
+    }
+  },
+  "max_per_step_diff": {
+    "load_kwh": 0.0,
+    "pv_kwh": 0.0,
+    "pv_to_load_kwh": 0.0,
+    "pv_to_bess_kwh": 0.0,
+    "bess_charge_grid_kwh": 0.0,
+    "bess_dis_load_kwh": 0.0,
+    "bess_dis_grid_kwh": 0.0,
+    "pv_to_grid_kwh": 0.0,
+    "pv_curtail_kwh": 0.0,
+    "grid_to_load_kwh": 0.0,
+    "grid_export_total_kwh": 0.0,
+    "grid_export_cap_kwh": 0.0,
+    "soc_kwh": 0.0,
+    "soc_pct": 0.0,
+    "dam_price_eur_per_mwh": 0.0,
+    "bess_dis_load_green_kwh": 0.0,
+    "bess_dis_grid_green_kwh": 0.0,
+    "soc_green_kwh": 0.0,
+    "profit_load_from_pv_eur": 0.0,
+    "profit_load_from_bess_eur": 0.0,
+    "profit_export_from_pv_eur": 0.0,
+    "profit_export_from_bess_eur": 0.0,
+    "expense_charge_bess_grid_eur": 0.0
+  }
+}

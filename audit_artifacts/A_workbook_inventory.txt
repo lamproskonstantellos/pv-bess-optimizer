@@ -1,0 +1,42 @@
+=== timeseries: shape (35041, 5) ===
+  'timestamp' | 'load_kwh' | 'pv_kwh' | 'pv_kwh_override' | 'dam_price_eur_per_mwh'
+  datetime.datetime(2026, 1, 1, 0, 0) | 781.5724 | 0 | None | 154.1915
+  datetime.datetime(2026, 1, 1, 0, 15) | 773.5996 | 0 | None | 154.1915
+  datetime.datetime(2026, 1, 1, 0, 30) | 756.2551 | 0 | None | 154.1915
+  datetime.datetime(2026, 1, 1, 0, 45) | 742.3577 | 0 | None | 154.1915
+=== project: shape (11, 4) ===
+  'key' | 'value' | 'unit' | 'notes'
+  'project_lifecycle_years' | 20 | 'years' | 'Total project horizon used ...'
+  'project_start_year' | 2026 | 'year' | 'Calendar year of Year 1 (fi...'
+  'mode' | 'vnb' | 'enum' | 'vnb | merchant. vnb require...'
+  'settlement_minutes' | 15 | 'int' | 'Greek VNB settles every 15 ...'
+=== pv: shape (8, 4) ===
+  'key' | 'value' | 'unit' | 'notes'
+  'pv_nameplate_kwp' | 15000 | 'kWp' | 'PV nameplate capacity. 0 = ...'
+  'specific_production_kwh_per...' | 1500 | 'kWh/kWp/yr' | 'Annual specific production ...'
+  'pv_degradation_year1_pct' | 2.5 | '%' | 'Initial light-induced degra...'
+  'pv_degradation_annual_pct' | 0.55 | '%' | 'Linear PV degradation after...'
+=== bess: shape (17, 4) ===
+  'key' | 'value' | 'unit' | 'notes'
+  'bess_power_kw' | 15000 | 'kW' | 'BESS power rating (symmetri...'
+  'bess_capacity_kwh' | 60000 | 'kWh' | 'BESS energy capacity. Pinne...'
+  'efficiency_charge' | 0.97 | '-' | 'Charge efficiency (0..1). R...'
+  'efficiency_discharge' | 0.97 | '-' | 'Discharge efficiency (0..1).'
+=== economics: shape (15, 4) ===
+  'key' | 'value' | 'unit' | 'notes'
+  'discount_rate_pct' | 7 | '%' | 'WACC. Typical EU RES band 6...'
+  'opex_inflation_pct' | 1 | '%' | 'Annual OPEX escalation rate.'
+  'retail_inflation_pct' | 0 | '%' | 'Annual indexation of retail...'
+  'dam_inflation_pct' | 0 | '%' | 'Annual indexation of wholes...'
+=== simulation: shape (15, 4) ===
+  'key' | 'value' | 'unit' | 'notes'
+  'uncertainty_enabled' | False | 'bool' | 'Run rolling-horizon Monte C...'
+  'uncertainty_compare_sources' | False | 'bool' | 'When TRUE run 4 ensembles (...'
+  'uncertainty_n_seeds' | 30 | 'int' | 'Monte Carlo seeds per ensem...'
+  'uncertainty_window_hours' | 48 | 'int' | 'Rolling window length.'
+=== max_injection_profile: shape (25, 2) ===
+  'hour_of_day' | 'max_injection_pct'
+  '00:00-01:00' | 73
+  '01:00-02:00' | 73
+  '02:00-03:00' | 73
+  '03:00-04:00' | 73

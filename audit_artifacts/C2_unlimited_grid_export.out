@@ -1,0 +1,26 @@
+=== _parse_grid_export_max(token) ===
+  ''                 → inf
+  'inf'              → inf
+  'Inf'              → inf
+  'INF'              → inf
+  'infinity'         → inf
+  'unlimited'        → inf
+  'UNLIMITED'        → inf
+  'disabled'         → inf
+  'Disabled'         → inf
+  'none'             → inf
+  'NONE'             → inf
+  None               → inf
+  nan                → inf
+
+_GRID_EXPORT_UNLIMITED_TOKENS = ['disabled', 'inf', 'infinity', 'none', 'unlimited']
+
+=== Finite vs unlimited: confirm internal substitution ===
+  Finite workbook p_grid_export_max_kw (raw): 15000.0
+  Finite params p_grid_export_max_kw (MILP): 15000.0
+  Finite params grid_export_unlimited: False
+
+  Unlimited workbook p_grid_export_max_kw (MILP): 1000000.0
+  Unlimited workbook grid_export_unlimited: True
+  Expected internal big-M: max(2.0*(pv+bess)=2.0*(15000.0+15000.0), 1e6) = 1000000.0
+  big-M derivation: MATCH ✓

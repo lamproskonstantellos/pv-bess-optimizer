@@ -1,0 +1,97 @@
+=== project (full) ===
+  project_lifecycle_years = 20
+  project_start_year = 2026
+  mode = vnb
+  settlement_minutes = 15
+  p_grid_export_max_kw = 15000
+  retail_tariff_eur_per_mwh = 120
+  allow_bess_grid_charging = False
+  unavailability_pct = 1
+  currency_format = auto
+  show_titles = False
+
+=== pv (full) ===
+  pv_nameplate_kwp = 15000
+  specific_production_kwh_per_kwp = 1500
+  pv_degradation_year1_pct = 2.5
+  pv_degradation_annual_pct = 0.55
+  capex_pv_eur_per_kw = 525
+  devex_pv_eur_per_kw = 60
+  opex_pv_eur_per_kwp = 7
+
+=== bess (full) ===
+  bess_power_kw = 15000
+  bess_capacity_kwh = 60000
+  efficiency_charge = 0.97
+  efficiency_discharge = 0.97
+  soc_min_frac = 0.2
+  soc_max_frac = 0.95
+  initial_soc_frac = 0.5
+  terminal_soc_equal = 1
+  max_cycles_per_day = 1
+  capex_bess_eur_per_kw = 200
+  devex_bess_eur_per_kw = 30
+  opex_bess_eur_per_kw = 14
+  bess_replacement_year = 10
+  bess_replacement_cost_pct = 50
+  bess_degradation_annual_pct = 2
+  bess_degradation_pct_per_cycle = 0.008
+
+=== economics (full) ===
+  discount_rate_pct = 7
+  opex_inflation_pct = 1
+  retail_inflation_pct = 0
+  dam_inflation_pct = 0
+  aggregator_fee_pct_revenue = 10
+  benchmark_lcoe_low_eur_per_mwh = 30
+  benchmark_lcoe_high_eur_per_mwh = 85
+  benchmark_lcos_low_eur_per_mwh = 157
+  benchmark_lcos_high_eur_per_mwh = 274
+  sensitivity_enabled = 1
+  sensitivity_capex_delta_pct = 10
+  sensitivity_opex_delta_pct = 10
+  sensitivity_revenue_delta_pct = 10
+  sensitivity_discount_rate_delta_pp = 2
+
+=== simulation (full) ===
+  uncertainty_enabled = False
+  uncertainty_compare_sources = False
+  uncertainty_n_seeds = 30
+  uncertainty_window_hours = 48
+  uncertainty_commit_hours = 24
+  uncertainty_dam_enabled = True
+  uncertainty_pv_enabled = True
+  uncertainty_load_enabled = True
+  uncertainty_sigma_dam = 0.2
+  uncertainty_sigma_pv = 0.12
+  uncertainty_sigma_load = 0.05
+  plot_daily_scope = year1_only
+  plot_monthly_scope = all
+  plot_yearly_scope = all
+
+=== max_injection_profile rows ===
+  ('hour_of_day', 'max_injection_pct')
+  ('00:00-01:00', 73)
+  ('01:00-02:00', 73)
+  ('02:00-03:00', 73)
+  ('03:00-04:00', 73)
+  ('04:00-05:00', 73)
+  ('05:00-06:00', 73)
+  ('06:00-07:00', 73)
+  ('07:00-08:00', 73)
+  ('08:00-09:00', 73)
+  ('09:00-10:00', 73)
+  ('10:00-11:00', 73)
+  ('11:00-12:00', 73)
+  ('12:00-13:00', 73)
+  ('13:00-14:00', 73)
+  ('14:00-15:00', 73)
+  ('15:00-16:00', 73)
+  ('16:00-17:00', 73)
+  ('17:00-18:00', 73)
+  ('18:00-19:00', 73)
+  ('19:00-20:00', 73)
+  ('20:00-21:00', 73)
+  ('21:00-22:00', 73)
+  ('22:00-23:00', 73)
+  ('23:00-24:00', 73)

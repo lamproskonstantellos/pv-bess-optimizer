@@ -1,0 +1,5 @@
+NPV(100x5y@5%): computed=432.947667  expected=432.947667  abs_err=0.00e+00
+IRR ([-1000,250x5]): computed=0.079308  ref=0.079308  abs_err=8.33e-17
+  relative_err=1.05e-15  (PASS)
+
+All OK.
