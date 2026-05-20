@@ -22,6 +22,13 @@ if str(ROOT) not in sys.path:
 from tests._pv_helpers import hourly_canonical_pv_window  # noqa: E402
 
 
+def pytest_configure(config):  # noqa: D401  -- pytest hook
+    config.addinivalue_line(
+        "markers",
+        "slow: tests that exercise the real-scale workbook (~minutes wall-clock)",
+    )
+
+
 def _make_short_ts(n_hours: int = 48, *, with_load: bool = True, seed: int = 0) -> pd.DataFrame:
     """Synthetic short timeseries for unit tests.
 
