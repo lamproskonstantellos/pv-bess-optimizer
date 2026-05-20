@@ -58,7 +58,6 @@ def _short_params(mode: str = "vnb") -> dict:
         "pv_nameplate_kwp": 4500.0,
         "bess_power_kw": 5000.0,
         "bess_capacity_kwh": 20000.0,
-        "curtailment_frac": 0.27,
         "retail_tariff_eur_per_mwh": 132.0,
         "settlement_minutes": 15,
         "mode": mode,
@@ -67,9 +66,53 @@ def _short_params(mode: str = "vnb") -> dict:
     }
 
 
+def _make_short_ts_15min(n_steps: int = 96 * 7, *, seed: int = 0) -> pd.DataFrame:
+    """Synthetic 15-min cadence timeseries — one week by default.
+
+    Mirrors :func:`_make_short_ts` but at the production workbook's
+    15-minute step so tests that depend on the real-hours semantic of
+    ``window_hours`` / ``commit_hours`` can exercise the cadence-aware
+    code path.
+    """
+    rng = np.random.default_rng(seed)
+    timestamps = pd.date_range("2026-06-01 00:00", periods=n_steps, freq="15min")
+    # Hour-of-day repeated across the week (each hour has 4 quarter-hour rows).
+    h = (np.arange(n_steps) / 4.0) % 24.0
+    pv_hourly = hourly_canonical_pv_window(
+        n_steps // 4 + 1, pv_nameplate_kwp=4500.0,
+    )
+    # Repeat each hourly PV value 4 times to fill the quarter-hour steps and
+    # rescale to a per-step kWh (canonical_pv is kWh/h).
+    pv = np.repeat(pv_hourly, 4)[:n_steps] / 4.0
+    dam = 100.0 - 50.0 * np.sin(np.pi * (h - 6) / 12.0) + rng.normal(0, 5, n_steps)
+    load = 3000.0 + 1500.0 * np.exp(-((h - 9) ** 2) / 8.0) + rng.normal(0, 50, n_steps)
+    # 15-min cadence ⇒ per-step kWh = kW * 0.25 h.  Existing _short_params
+    # are sized for hourly cadence, so scale load down to match.
+    return pd.DataFrame({
+        "timestamp": timestamps,
+        "pv_kwh": pv,
+        "dam_price_eur_per_mwh": dam,
+        "load_kwh": np.maximum(load, 800.0) / 4.0,
+    })
+
+
 @pytest.fixture(scope="module")
 def short_ts() -> pd.DataFrame:
     return _make_short_ts(48)
+
+
+@pytest.fixture(scope="module")
+def short_ts_15min() -> pd.DataFrame:
+    """One week of synthetic 15-min cadence data (672 steps)."""
+    return _make_short_ts_15min(96 * 7)
+
+
+@pytest.fixture(scope="module")
+def short_params_15min() -> dict:
+    """Hourly :func:`_short_params` with ``dt_minutes`` flipped to 15."""
+    p = _short_params("vnb")
+    p["dt_minutes"] = 15
+    return p
 
 
 @pytest.fixture(scope="module")

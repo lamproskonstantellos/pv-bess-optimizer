@@ -3,7 +3,7 @@
 Covers:
 
 * The seven-sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
-  ``economics`` / ``simulation`` / ``curtailment_profile``).
+  ``economics`` / ``simulation`` / ``max_injection_profile``).
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
@@ -112,7 +112,7 @@ def test_seven_sheets_present(repo_input_xlsx):
     sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "curtailment_profile",
+        "simulation", "max_injection_profile",
     }
 
 
@@ -125,8 +125,8 @@ def test_repo_workbook_loads_typed_dict(repo_input_xlsx):
     # rescaled to the 15 MW default scenario.
     assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(15000.0)
     assert typed["bess"]["bess_power_kw"] == pytest.approx(15000.0)
-    assert "curtailment_profile" in typed
-    profile = np.asarray(typed["curtailment_profile"])
+    assert "max_injection_profile" in typed
+    profile = np.asarray(typed["max_injection_profile"])
     assert profile.shape == (24,) or profile.shape == (24, 12)
 
 
@@ -152,7 +152,8 @@ def _build_minimal_typed(year: int = 2026) -> dict:
         ),
         "economics": dict(ECONOMICS_SHEET_DEFAULTS),
         "simulation": dict(SIMULATION_SHEET_DEFAULTS),
-        "curtailment_profile": np.full(24, 27.0, dtype=float),
+        # Post-refactor max-injection semantic: 73 % allowed ≡ 27 % curtailment.
+        "max_injection_profile": np.full(24, 73.0, dtype=float),
     }
 
 
@@ -228,28 +229,28 @@ def test_legacy_removed_keys_warn(removed_key, caplog):
 
 
 # ---------------------------------------------------------------------------
-# Curtailment-profile loader
+# Max-injection-profile loader
 # ---------------------------------------------------------------------------
 
 
-def test_curtailment_profile_missing_logs_info(tmp_path, caplog):
+def test_max_injection_profile_missing_logs_info(tmp_path, caplog):
     typed = _build_minimal_typed()
-    dst = tmp_path / "v08_no_curt.xlsx"
+    dst = tmp_path / "v08_no_max_inj.xlsx"
     write_workbook(typed, dst)
-    # Re-open and drop the curtailment_profile sheet.
+    # Re-open and drop the max_injection_profile sheet.
     with pd.ExcelFile(dst) as xls:
         keep = {
             name: pd.read_excel(dst, sheet_name=name)
-            for name in xls.sheet_names if name != "curtailment_profile"
+            for name in xls.sheet_names if name != "max_injection_profile"
         }
     with pd.ExcelWriter(dst, engine="openpyxl") as writer:
         for name, df in keep.items():
             df.to_excel(writer, sheet_name=name, index=False)
     with caplog.at_level("INFO", logger="pvbess_opt.io"):
         out = read_workbook(dst)
-    # Constant 27 % default applied.
-    assert np.allclose(np.asarray(out["curtailment_profile"]), 27.0)
+    # Constant 73 % default applied.
+    assert np.allclose(np.asarray(out["max_injection_profile"]), 73.0)
     assert any(
-        "curtailment_profile" in rec.getMessage().lower()
+        "max_injection_profile" in rec.getMessage().lower()
         for rec in caplog.records
     )

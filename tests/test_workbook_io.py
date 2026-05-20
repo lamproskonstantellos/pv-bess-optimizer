@@ -4,7 +4,7 @@ The repo's canonical workbook is also the executable contract for the
 v0.8 seven-sheet schema. This test loads it, checks every typed key
 for type and plausible range, locks down ``p_grid_export_max_kw`` to
 the project sheet, walks the timeseries shape, sanity-checks the
-curtailment profile, and finally round-trips the typed dict through
+max-injection profile, and finally round-trips the typed dict through
 ``write_workbook`` / ``read_workbook`` to catch any silent re-coding.
 """
 
@@ -181,10 +181,10 @@ def test_full_roundtrip(tmp_path):
     assert pd.Timedelta(diffs[0]) == pd.Timedelta(minutes=15)
     assert (timestamps.diff().dropna() > pd.Timedelta(0)).all()
 
-    # Curtailment profile: shape (24,) or (24, 12), values in [0, 100].
-    profile = np.asarray(typed["curtailment_profile"], dtype=float)
+    # Max-injection profile: shape (24,) or (24, 12), values in [0, 100].
+    profile = np.asarray(typed["max_injection_profile"], dtype=float)
     assert profile.shape == (24,) or profile.shape == (24, 12), (
-        f"curtailment_profile shape {profile.shape} not in [(24,), (24, 12)]"
+        f"max_injection_profile shape {profile.shape} not in [(24,), (24, 12)]"
     )
     assert (profile >= 0.0).all() and (profile <= 100.0).all()
 
@@ -213,7 +213,7 @@ def test_full_roundtrip(tmp_path):
                     f"{section_name}.{key} drifted: {original_value!r} -> {roundtrip_value!r}"
                 )
 
-    # Curtailment profile round-trips numerically.
-    profile_rt = np.asarray(typed_rt["curtailment_profile"], dtype=float)
+    # Max-injection profile round-trips numerically.
+    profile_rt = np.asarray(typed_rt["max_injection_profile"], dtype=float)
     assert profile_rt.shape == profile.shape
     assert np.allclose(profile_rt, profile, rtol=1e-9, atol=1e-9)

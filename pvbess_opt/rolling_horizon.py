@@ -40,6 +40,41 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Time-axis helper
+# ---------------------------------------------------------------------------
+
+
+def _hours_to_steps(hours: int, dt_minutes: int) -> int:
+    """Convert a duration in real hours to the equivalent row count.
+
+    The rolling-horizon kwargs (``window_hours``, ``commit_hours``) and
+    the workbook keys (``uncertainty_window_hours``,
+    ``uncertainty_commit_hours``) are expressed in real hours.  Internal
+    arithmetic against the timeseries DataFrame needs row counts.  This
+    helper bridges the two so a documented 48-hour window is genuinely
+    48 hours on every supported cadence (15-min, 30-min, hourly).
+
+    Raises
+    ------
+    ValueError
+        If ``dt_minutes`` is non-positive, or if the resulting step
+        count is non-positive (e.g. requesting fewer than one full step
+        at the configured cadence).
+    """
+    if dt_minutes <= 0:
+        raise ValueError(
+            f"dt_minutes must be > 0, got {dt_minutes!r}"
+        )
+    steps = int(hours) * 60 // int(dt_minutes)
+    if steps <= 0:
+        raise ValueError(
+            f"window of {hours}h at dt={dt_minutes}min yields "
+            f"{steps} steps; increase the horizon."
+        )
+    return steps
+
+
+# ---------------------------------------------------------------------------
 # Forecast noise
 # ---------------------------------------------------------------------------
 
@@ -56,7 +91,7 @@ def _lognormal_multiplier(rng: np.random.Generator, sigma: float, n: int) -> np.
 def add_forecast_noise(
     ts: pd.DataFrame,
     *,
-    commit_hours: int,
+    commit_steps: int,
     rng: np.random.Generator,
     sigma_dam: float = 0.20,
     sigma_pv: float = 0.12,
@@ -67,10 +102,12 @@ def add_forecast_noise(
 ) -> pd.DataFrame:
     """Apply log-normal multiplicative noise BEYOND the commit horizon.
 
-    Rows ``[0, commit_hours)`` are byte-identical to the input — those
-    are the committed decisions for the current window.  Rows
-    ``[commit_hours, len(ts))`` get independent multiplicative log-normal
-    noise on the enabled source columns.
+    ``commit_steps`` is the commitment horizon expressed in
+    timeseries-row indices (i.e. steps at the workbook's configured
+    cadence).  Rows ``[0, commit_steps)`` are byte-identical to the
+    input — those are the committed decisions for the current window.
+    Rows ``[commit_steps, len(ts))`` get independent multiplicative
+    log-normal noise on the enabled source columns.
 
     The three ``enable_*`` flags toggle each source independently.  A
     disabled source forces its sigma to 0 internally — the column is
@@ -78,14 +115,16 @@ def add_forecast_noise(
     noise is applied to the absolute value and the sign is restored.
     ``load_kwh`` is skipped when absent (merchant mode).
     """
-    if commit_hours < 0:
-        raise ValueError(f"commit_hours must be non-negative, got {commit_hours!r}")
+    if commit_steps < 0:
+        raise ValueError(
+            f"commit_steps must be non-negative, got {commit_steps!r}"
+        )
     out = ts.copy()
     n = len(out)
-    if commit_hours >= n:
+    if commit_steps >= n:
         return out
 
-    n_perturb = n - commit_hours
+    n_perturb = n - commit_steps
 
     eff_sigma_dam = sigma_dam if enable_dam else 0.0
     eff_sigma_pv = sigma_pv if enable_pv else 0.0
@@ -96,19 +135,19 @@ def add_forecast_noise(
         sign = np.where(prices < 0, -1.0, 1.0)
         magnitude = np.abs(prices)
         mult = _lognormal_multiplier(rng, eff_sigma_dam, n_perturb)
-        magnitude[commit_hours:] = magnitude[commit_hours:] * mult
+        magnitude[commit_steps:] = magnitude[commit_steps:] * mult
         out["dam_price_eur_per_mwh"] = sign * magnitude
 
     if "pv_kwh" in out.columns:
         pv = out["pv_kwh"].to_numpy(dtype=float).copy()
         mult = _lognormal_multiplier(rng, eff_sigma_pv, n_perturb)
-        pv[commit_hours:] = np.maximum(pv[commit_hours:] * mult, 0.0)
+        pv[commit_steps:] = np.maximum(pv[commit_steps:] * mult, 0.0)
         out["pv_kwh"] = pv
 
     if "load_kwh" in out.columns:
         load = out["load_kwh"].to_numpy(dtype=float).copy()
         mult = _lognormal_multiplier(rng, eff_sigma_load, n_perturb)
-        load[commit_hours:] = np.maximum(load[commit_hours:] * mult, 0.0)
+        load[commit_steps:] = np.maximum(load[commit_steps:] * mult, 0.0)
         out["load_kwh"] = load
 
     return out
@@ -143,15 +182,21 @@ def rolling_horizon_dispatch(
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Sliding-window MILP solve with imperfect foresight.
 
-    For each window starting at hour t in {0, commit_hours, 2*commit_hours, ...}:
+    ``window_hours`` and ``commit_hours`` are expressed in real hours.
+    They are converted to row counts at the cadence given by
+    ``params["dt_minutes"]`` before indexing into ``ts``, so a 48-hour
+    window is genuinely 48 hours on every supported cadence (15-min,
+    30-min, hourly).
 
-        1. Slice ts[t : t + window_hours].
-        2. Apply forecast noise beyond commit_hours
+    For each window starting at step c in {0, commit_steps, 2*commit_steps, ...}:
+
+        1. Slice ts[c : c + window_steps].
+        2. Apply forecast noise beyond commit_steps
            (skipped if forecast_seed is None — gives deterministic RH).
         3. Solve the MILP with the noisy window; pin initial_soc to the
            SOC carried over from the previous window.
-        4. Keep the first commit_hours of the dispatch.
-        5. Pass SOC[commit_hours] as initial_soc to the next window.
+        4. Keep the first commit_steps of the dispatch.
+        5. Pass SOC[commit_steps] as initial_soc to the next window.
 
     If ``evaluate_with_actuals`` is True the returned KPIs are recomputed
     against the original (noise-free) ``ts`` — this reflects realised
@@ -175,6 +220,10 @@ def rolling_horizon_dispatch(
     if n == 0:
         raise ValueError("timeseries is empty; nothing to dispatch.")
 
+    dt_minutes = int(params.get("dt_minutes", 60) or 60)
+    window_steps = _hours_to_steps(window_hours, dt_minutes)
+    commit_steps = _hours_to_steps(commit_hours, dt_minutes)
+
     rng = (
         np.random.default_rng(int(forecast_seed))
         if forecast_seed is not None else None
@@ -188,17 +237,17 @@ def rolling_horizon_dispatch(
 
     cursor = 0
     while cursor < n:
-        win_end = min(cursor + window_hours, n)
-        commit_end_global = min(cursor + commit_hours, n)
+        win_end = min(cursor + window_steps, n)
+        commit_end_global = min(cursor + commit_steps, n)
         window_ts = _slice_window(ts, cursor, win_end)
 
         if rng is not None:
             # Local commit horizon = global commit horizon truncated to
             # window length; noise beyond that.
-            local_commit = min(commit_hours, len(window_ts))
+            local_commit = min(commit_steps, len(window_ts))
             window_noisy = add_forecast_noise(
                 window_ts,
-                commit_hours=local_commit,
+                commit_steps=local_commit,
                 rng=rng,
                 sigma_dam=sigma_dam,
                 sigma_pv=sigma_pv,
@@ -218,7 +267,7 @@ def rolling_horizon_dispatch(
             **solve_kwargs,
         )
 
-        # Keep the first ``commit_hours`` slice of the solved dispatch.
+        # Keep the first ``commit_steps`` slice of the solved dispatch.
         local_commit_n = commit_end_global - cursor
         committed = res_window.iloc[:local_commit_n].copy()
         # Re-attach the original (un-noised) timestamps so the year-long

@@ -19,8 +19,8 @@ Two regulatory regimes and three asset modes are supported:
   day-ahead market price.
 * `merchant` — pure utility-scale dispatch with **no co-located load**.
   PV and BESS dispatch entirely to the day-ahead market.  The hourly
-  static curtailment cap on grid-bound flows still applies and is
-  supplied by the user through the `curtailment_profile` sheet, in
+  static max-injection cap on grid-bound flows still applies and is
+  supplied by the user through the `max_injection_profile` sheet, in
   line with the applicable grid-connection regulations.
 
 The asset mode is read literally from the workbook — set
@@ -42,9 +42,9 @@ new features are left disabled:
   = 60000; `bess_replacement_year` = 10).
 * **Unlimited grid export** — `p_grid_export_max_kw` may be left empty
   or set to `inf` / `unlimited` / `disabled` / `none` to remove the
-  export cap.  Curtailment driven by the cap then becomes zero and a
-  finite Big-M is substituted internally, so the result stays
-  solver-agnostic.  A finite positive cap behaves exactly as before.
+  export cap.  No injection limit is applied and a finite Big-M is
+  substituted internally, so the result stays solver-agnostic.  A
+  finite positive cap behaves exactly as before.
 * **Cycle-based BESS degradation** — a new `bess` sheet key
   `bess_degradation_pct_per_cycle` adds a linear cycle-fade term on
   top of the unchanged multiplicative calendar fade.  Set it to 0 — or
@@ -86,7 +86,7 @@ pv-bess-optimizer/
     ├── kpis.py                   # KPIs, green attribution, energy verification
     ├── economics.py              # Cashflow + NPV/IRR/ROI/BCR + DEVEX + fee
     ├── availability.py           # Post-solve unavailability derate
-    ├── curtailment.py            # Hour-of-day cap profile expander
+    ├── max_injection.py          # Hour-of-day cap profile expander
     ├── lifetime.py               # Multi-year analytical hourly dispatch projection
     ├── sensitivity.py            # One-at-a-time tornado sensitivity
     ├── rolling_horizon.py        # Rolling-horizon dispatch + Monte Carlo
@@ -152,23 +152,28 @@ Seven themed sheets:
 * **`simulation`** — `uncertainty_*` (11 keys), `plot_daily_scope` /
   `plot_monthly_scope` / `plot_yearly_scope` ∈
   `none | year1_only | all`.
-* **`curtailment_profile`** — user-configurable hourly cap profile.
-  24 hourly rows × 1 col (`curtailment_pct`) for a constant-by-month
-  cap, or 24 rows × 12 cols (`curtailment_pct_jan` …
-  `curtailment_pct_dec`) for a per-month hour-of-day cap.  Missing
-  sheet ⇒ the loader falls back to a flat default.
+* **`max_injection_profile`** — user-configurable hourly cap profile.
+  24 hourly rows × 1 col (`max_injection_pct`) for a constant-by-month
+  cap, or 24 rows × 12 cols (`max_injection_pct_jan` …
+  `max_injection_pct_dec`) for a per-month hour-of-day cap.  Values
+  express the share of `p_grid_export_max_kw` available for export
+  in that hour (e.g. 73 ⇒ 73 % allowed).  Missing sheet ⇒ the loader
+  falls back to a flat 73 %.  Workbooks using the legacy
+  `curtailment_profile` schema continue to load with a
+  `DeprecationWarning` and are auto-converted via `100 - x`.
 
 ### How the export cap is enforced
 
 The per-step grid-export cap is computed as
-`p_grid_export_max_kw × dt_h × (1 − curtailment_fraction)` and
-applied to the **combined** PV + BESS export flow
+`p_grid_export_max_kw × dt_h × max_injection_fraction` and applied
+to the **combined** PV + BESS export flow
 (`grid_export_total[t] = pv_to_grid[t] + bess_dis_grid[t]`), not
 separately to PV exports or BESS-discharge exports.
 `p_grid_export_max_kw` is the nameplate grid-connection limit;
-`curtailment_profile` is the per-hour regulatory derate that scales
-the nameplate down for that step.  The same cap applies in both
-`vnb` and `merchant` modes.
+`max_injection_profile` is the per-hour share of that limit
+actually available for export.  Curtailed energy appears in the
+outputs (`pv_curtail_kwh`, `pv_energy_curtailed_mwh`).  The same
+cap applies in both `vnb` and `merchant` modes.
 
 Setting `pv_nameplate_kwp = 0` makes the project BESS-only;
 `bess_power_kw = 0` makes it PV-only; both > 0 ⇒ hybrid.  Setting both

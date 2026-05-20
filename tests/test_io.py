@@ -14,7 +14,6 @@ from pvbess_opt.io import (
     SIMULATION_SHEET_DEFAULTS,
     _flat_dict_from_sheet,
     _parse_bool,
-    _parse_curtailment,
     _parse_kv_sheet,
     detect_timestep_minutes,
     read_inputs,
@@ -40,7 +39,9 @@ def _minimal_typed(year: int = 2026) -> dict:
         ),
         "economics": dict(ECONOMICS_SHEET_DEFAULTS),
         "simulation": dict(SIMULATION_SHEET_DEFAULTS),
-        "curtailment_profile": np.full(24, 27.0, dtype=float),
+        # Values flipped to the post-refactor max-injection semantic:
+        # 73 % allowed to inject equals the historical 27 % curtailment.
+        "max_injection_profile": np.full(24, 73.0, dtype=float),
     }
 
 
@@ -59,13 +60,6 @@ def test_parse_bool_accepts_canonical_tokens():
     assert _parse_bool(0, True) is False
     assert _parse_bool(None, True) is True
     assert _parse_bool("", True) is True
-
-
-def test_parse_curtailment_accepts_pct_and_frac():
-    assert _parse_curtailment(27) == pytest.approx(0.27)
-    assert _parse_curtailment(0.27) == pytest.approx(0.27)
-    assert _parse_curtailment(101) == 1.0
-    assert _parse_curtailment(-1) == 0.0
 
 
 def test_flat_dict_skips_separator_rows():
@@ -168,5 +162,115 @@ def test_write_workbook_emits_seven_sheets(tmp_path, repo_input_xlsx):
     write_workbook(typed, dst)
     assert set(pd.ExcelFile(dst).sheet_names) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "curtailment_profile",
+        "simulation", "max_injection_profile",
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase-3 schema shim: max_injection_profile (new) + curtailment_profile
+# (legacy, with DeprecationWarning) + default fallback.
+# ---------------------------------------------------------------------------
+
+
+def _write_minimal_workbook_with_sheet(
+    tmp_path,
+    sheet_name: str,
+    column_name: str,
+    values: np.ndarray,
+):
+    """Write a minimal valid workbook whose only profile sheet is
+    ``sheet_name`` with column ``column_name`` and ``values``.
+
+    Used by the legacy-schema and default-fallback tests.  All other
+    sheets come from :func:`_minimal_typed` via :func:`write_workbook`,
+    then the profile sheet is replaced in-place via openpyxl.
+    """
+    import openpyxl
+
+    typed = _minimal_typed()
+    dst = tmp_path / "shim.xlsx"
+    write_workbook(typed, dst)
+
+    wb = openpyxl.load_workbook(dst)
+    # Drop the canonical max_injection_profile sheet written by
+    # write_workbook so the test workbook only has the sheet we want.
+    if "max_injection_profile" in wb.sheetnames:
+        del wb["max_injection_profile"]
+    if sheet_name and column_name is not None:
+        ws = wb.create_sheet(sheet_name)
+        ws.cell(1, 1, "hour_of_day")
+        ws.cell(1, 2, column_name)
+        for h in range(24):
+            ws.cell(h + 2, 1, h)
+            ws.cell(h + 2, 2, float(values[h]))
+    wb.save(dst)
+    return dst
+
+
+def test_loader_reads_new_schema(tmp_path):
+    """max_injection_profile sheet → array returned verbatim."""
+    vals = np.full(24, 73.0, dtype=float)
+    vals[6:8] = 40.0  # asymmetric values to prove no 100-x conversion
+    dst = _write_minimal_workbook_with_sheet(
+        tmp_path, "max_injection_profile", "max_injection_pct", vals,
+    )
+    typed = read_workbook(dst)
+    np.testing.assert_array_equal(typed["max_injection_profile"], vals)
+
+
+def test_loader_reads_legacy_schema_with_warning(tmp_path):
+    """Legacy curtailment_profile sheet → values flipped (100 - x) +
+    DeprecationWarning."""
+    legacy = np.full(24, 27.0, dtype=float)
+    legacy[6:8] = 60.0
+    dst = _write_minimal_workbook_with_sheet(
+        tmp_path, "curtailment_profile", "curtailment_pct", legacy,
+    )
+    with pytest.warns(DeprecationWarning, match="legacy sheet"):
+        typed = read_workbook(dst)
+    np.testing.assert_array_equal(
+        typed["max_injection_profile"], 100.0 - legacy,
+    )
+
+
+def test_loader_falls_back_to_default_when_sheet_missing(tmp_path):
+    """No profile sheet at all → flat default at 73.0."""
+    from pvbess_opt.config import DEFAULT_MAX_INJECTION_PCT_HOURLY
+
+    dst = _write_minimal_workbook_with_sheet(tmp_path, "", None, np.array([]))
+    typed = read_workbook(dst)
+    expected = np.full(24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float)
+    np.testing.assert_array_equal(typed["max_injection_profile"], expected)
+
+
+def test_loader_new_schema_takes_precedence_over_legacy(tmp_path):
+    """Both sheets present → loader prefers the new schema and does NOT
+    emit the legacy DeprecationWarning."""
+    import openpyxl
+    import warnings as _w
+
+    typed_in = _minimal_typed()
+    dst = tmp_path / "both.xlsx"
+    write_workbook(typed_in, dst)  # writes max_injection_profile with 73s
+
+    wb = openpyxl.load_workbook(dst)
+    ws = wb.create_sheet("curtailment_profile")
+    ws.cell(1, 1, "hour_of_day")
+    ws.cell(1, 2, "curtailment_pct")
+    for h in range(24):
+        ws.cell(h + 2, 1, h)
+        ws.cell(h + 2, 2, 99.0)  # sentinel — should NOT be read
+    wb.save(dst)
+
+    with _w.catch_warnings():
+        _w.simplefilter("error", DeprecationWarning)
+        typed = read_workbook(dst)
+    # New-schema values (from _minimal_typed: flat 73) come through.
+    np.testing.assert_array_equal(
+        typed["max_injection_profile"], np.full(24, 73.0),
+    )
+
+
+def test_project_lifecycle_years_default_is_twenty():
+    """Bug #4: default project_lifecycle_years aligned with docs (was 25)."""
+    assert PROJECT_SHEET_DEFAULTS["project_lifecycle_years"] == 20

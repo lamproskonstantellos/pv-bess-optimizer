@@ -96,7 +96,8 @@ def test_read_inputs_raises_when_both_assets_zero(tmp_path):
         ),
         "economics": dict(ECONOMICS_SHEET_DEFAULTS),
         "simulation": dict(SIMULATION_SHEET_DEFAULTS),
-        "curtailment_profile": np.full(24, 27.0, dtype=float),
+        # Post-refactor max-injection semantic: 73 % allowed ≡ 27 % curtailment.
+        "max_injection_profile": np.full(24, 73.0, dtype=float),
     }
     dst = tmp_path / "no_assets.xlsx"
     write_workbook(typed, dst)
@@ -138,7 +139,6 @@ def _params(pv_kwp: float, bess_kw: float, *, mode: str = "vnb") -> dict:
         "pv_nameplate_kwp": pv_kwp,
         "bess_power_kw": bess_kw,
         "bess_capacity_kwh": bess_kw * 4.0,
-        "curtailment_frac": 0.27,
         "retail_tariff_eur_per_mwh": 132.0,
         "settlement_minutes": 15,
         "mode": mode,

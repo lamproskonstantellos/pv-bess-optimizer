@@ -37,12 +37,18 @@ def _solved_merchant(short_params_merchant, short_ts):
 
 
 def test_big_m_values_are_tight(short_params, short_ts):
+    # The short_params fixture omits max_injection_profile so the
+    # resolver's no-cap fallback is 1.0; supply an explicit 73 % cap
+    # (post-refactor equivalent of the legacy 27 % curtailment) so
+    # M_exp can be tight.
+    params = dict(short_params)
+    params["max_injection_profile"] = np.full(24, 73.0, dtype=float)
     big_m = derive_tight_big_m(
-        short_params, short_ts, dt_h=1.0, mode="vnb",
+        params, short_ts, dt_h=1.0, mode="vnb",
     )
     # Tight Ms: M_imp ~ load_max + bess_power ~ 4500 + 5000 = 9500 << 1e6
     assert big_m["M_imp"] < 20000
-    assert big_m["M_exp"] < 5000  # p_export*(1-0.27) = 3650
+    assert big_m["M_exp"] < 5000  # p_export * 0.73 = 3650
     assert big_m["M_charge"] < 6000
 
 

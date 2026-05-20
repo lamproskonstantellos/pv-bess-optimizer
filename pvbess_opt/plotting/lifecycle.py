@@ -120,6 +120,25 @@ def plot_revenue_stack_yearly(
     exp_bess = (rev_exp_bess_y1 * ratio).to_numpy()
     cost = -((cost_grid_y1 * ratio).to_numpy())  # drawn negative
 
+    # Aggregator-fee deduction.  yearly_cf's ``revenue_eur`` column is
+    # post-fee while the stack components above are pre-fee, so without
+    # this bar the stack sums ~aggregator_fee_pct above the net line
+    # with no on-plot explanation.  Adding it as an explicit negative
+    # component closes the gap.
+    agg_fee_frac = 0.0
+    if econ is not None:
+        agg_fee_frac = max(
+            0.0,
+            float(econ.get("aggregator_fee_pct_revenue", 0.0) or 0.0) / 100.0,
+        )
+    gross_y1 = (
+        rev_load_pv_y1 + rev_load_bess_y1
+        + rev_exp_pv_y1 + rev_exp_bess_y1
+        - cost_grid_y1
+    )
+    agg_fee_y1 = gross_y1 * agg_fee_frac
+    agg_fee = -((agg_fee_y1 * ratio).to_numpy())
+
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     bottoms = np.zeros_like(load_pv)
@@ -137,6 +156,16 @@ def plot_revenue_stack_yearly(
         ax.bar(years, cost, color=financial_color("Grid-charging cost"),
                edgecolor="black", linewidth=0.4,
                label="Grid-charging cost")
+    if np.any(agg_fee < -1e-9):
+        # Stack the aggregator fee bar BELOW the grid-charging-cost bar
+        # so the two negative components sit side by side rather than
+        # one obscuring the other.
+        ax.bar(
+            years, agg_fee, bottom=cost,
+            color=financial_color("Aggregator fee"),
+            edgecolor="black", linewidth=0.4,
+            label="Aggregator fee",
+        )
     net = (op["revenue_eur"].astype(float)).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  Round-3
     # universality rule forbids markeredgecolor="white" rings; line
