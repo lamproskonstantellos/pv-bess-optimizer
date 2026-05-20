@@ -30,7 +30,7 @@ Big-Ms are derived per-instance using the symmetric ``bess_power_kw``
 limit (the asymmetric p_charge_max / p_dis_max pair is not supported):
 
 * ``M_imp = (load_max + bess_power_kw × dt_h) × 1.001``
-* ``M_exp = p_grid_export_max × dt_h × (1 − curtailment_frac) × 1.001``
+* ``M_exp = p_grid_export_max × dt_h × max_injection_frac × 1.001``
 * ``M_charge = bess_power_kw × dt_h × 1.001`` (only when grid-charging)
 * ``M_pv = max(pv_kwh) × 1.001`` (only when grid-charging)
 
@@ -175,28 +175,24 @@ def _check_solver_status(result, solver_name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_curtailment_per_step(
+def _resolve_max_injection_per_step(
     params: dict[str, Any], ts: pd.DataFrame,
 ) -> np.ndarray:
-    """Return a per-step curtailment fraction array aligned with ``ts``.
+    """Return a per-step max-injection fraction array aligned with ``ts``.
 
-    The loader always populates ``params["curtailment_profile"]`` with
-    a (24,) or (24, 12) array of *max-injection* percentages (default
-    flat profile when the workbook omits the sheet).  The MILP
-    constraint is still written in the ``(1 - curtailment_frac)`` form
-    so this resolver inverts the max-injection fraction back to the
-    curtailment fraction.  The constraint is flipped to read
-    max-injection directly in the next commit.
+    The loader populates ``params["curtailment_profile"]`` with a (24,)
+    or (24, 12) array of max-injection percentages (default flat
+    profile when the workbook omits the sheet).  This resolver expands
+    it to a per-timestep fraction in [0, 1].  When no profile is
+    supplied the fallback is 1.0 (no cap) — the previous behaviour was
+    a 0-fraction "frac to curtail" which carried the same semantic.
     """
     from .max_injection import build_per_step_max_injection_frac
 
     profile = params.get("curtailment_profile")
     if profile is not None and "timestamp" in ts.columns:
-        frac_allowed = build_per_step_max_injection_frac(
-            ts["timestamp"], profile,
-        )
-        return 1.0 - frac_allowed
-    return np.zeros(len(ts), dtype=float)
+        return build_per_step_max_injection_frac(ts["timestamp"], profile)
+    return np.ones(len(ts), dtype=float)
 
 
 def derive_tight_big_m(
@@ -205,15 +201,17 @@ def derive_tight_big_m(
     """Compute the tight big-M values.
 
     Charge / discharge limits are symmetric — both come from
-    ``bess_power_kw``.  The export big-M uses the worst-case (smallest)
-    curtailment cap across the timeseries — a single global cap that
-    over-bounds the per-step constraint.
+    ``bess_power_kw``.  The export big-M uses the worst-case (largest)
+    max-injection share across the timeseries — a single global cap
+    that over-bounds the per-step constraint.
     """
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
     p_bess = float(params.get("bess_power_kw", 0.0) or 0.0)
-    per_step_curt = _resolve_curtailment_per_step(params, ts)
-    # Worst-case (largest export-cap) → smallest curtailment fraction.
-    tightest_curt_frac = float(per_step_curt.min()) if len(per_step_curt) else 0.0
+    per_step_max_inj = _resolve_max_injection_per_step(params, ts)
+    # Worst-case export ⇒ largest max-injection fraction.
+    tightest_max_inj_frac = (
+        float(per_step_max_inj.max()) if len(per_step_max_inj) else 1.0
+    )
 
     if mode == "vnb" and "load_kwh" in ts.columns:
         load_max = float(ts["load_kwh"].max())
@@ -223,7 +221,7 @@ def derive_tight_big_m(
 
     return {
         "M_imp": (load_max + p_bess * dt_h) * 1.001,
-        "M_exp": p_export * dt_h * (1.0 - tightest_curt_frac) * 1.001,
+        "M_exp": p_export * dt_h * tightest_max_inj_frac * 1.001,
         "M_charge": p_bess * dt_h * 1.001,
         "M_pv": pv_max * 1.001,
     }
@@ -326,7 +324,7 @@ def build_model(
     else:
         retail_price = {t: retail_default for t in time_index}
 
-    curtail_per_step = _resolve_curtailment_per_step(params, ts)
+    max_injection_per_step = _resolve_max_injection_per_step(params, ts)
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
     # Symmetric charge / discharge limit from bess_power_kw.
     p_bess = float(params.get("bess_power_kw", 0.0) or 0.0)
@@ -334,9 +332,9 @@ def build_model(
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
 
-    # Per-step export cap derived from the curtailment profile (Phase 3).
+    # Per-step export cap derived from the max-injection profile.
     export_cap_kwh_per_step = {
-        t: float(p_export * dt_h * (1.0 - curtail_per_step[t]))
+        t: float(p_export * dt_h * max_injection_per_step[t])
         for t in time_index
     }
     big_m = derive_tight_big_m(params, ts, dt_h=dt_h, mode=mode)
@@ -538,19 +536,19 @@ def build_model(
             lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
             m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * e_cap_param)
 
-    # --- Hourly curtailment cap (HARD constraint, BOTH modes) -------------
+    # --- Hourly max-injection cap (HARD constraint, BOTH modes) ----------
     # Section 8 of the VNB spec — regulatory grid-connection limit.
     # Applies in vnb AND merchant modes. Cap may vary by hour-of-day
-    # (and optionally by month) via the ``curtailment_profile`` sheet.
+    # (and optionally by month) via the ``max_injection_profile`` sheet.
     #
     # Project-wide combined export:
     #   grid_export_total[t] = pv_to_grid[t] + bess_dis_grid[t]
     # The per-step cap is
-    #   p_grid_export_max_kw * dt_h * (1 - curtailment_per_step[t])
+    #   p_grid_export_max_kw * dt_h * max_injection_per_step[t]
     # and applies to that COMBINED flow — not separately to PV exports
     # or to BESS-discharge exports. ``p_grid_export_max_kw`` is the
-    # nameplate grid-connection limit; ``curtailment_profile`` is the
-    # per-hour regulatory derate that scales it down.
+    # nameplate grid-connection limit; ``max_injection_profile`` is the
+    # per-hour share of that limit actually available for export.
     m.EXPORT_CAP = pyo.Constraint(
         m.T,
         rule=lambda m, t: m.grid_export_total[t] <= export_cap_kwh_per_step[t],
@@ -682,9 +680,9 @@ def model_to_dataframe(
     time_index = range(n_steps)
     dt_h = params["dt_minutes"] / 60.0
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
-    curtail_per_step = _resolve_curtailment_per_step(params, ts)
+    max_injection_per_step = _resolve_max_injection_per_step(params, ts)
     export_cap_kwh_per_step = (
-        p_export * dt_h * (1.0 - curtail_per_step)
+        p_export * dt_h * max_injection_per_step
     )
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
