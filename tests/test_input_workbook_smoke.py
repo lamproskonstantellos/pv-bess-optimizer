@@ -31,7 +31,7 @@ def test_repo_input_xlsx_has_seven_sheets():
     sheets = pd.ExcelFile(ROOT / "inputs" / "input.xlsx").sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "curtailment_profile",
+        "simulation", "max_injection_profile",
     }
 
 
@@ -102,3 +102,77 @@ def test_main_merchant_short_horizon(tmp_path, monkeypatch):
         "--time-limit", "180",
     ])
     assert rc == 0
+
+
+@pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_repo_input_xlsx_headline_kpis_pinned():
+    """End-to-end pin of headline year-1 KPIs against the pre-refactor
+    baseline on inputs/input.xlsx (perfect-foresight, vnb mode, full
+    year).  These numbers were captured at the Phase-0 baseline and
+    must hold across the curtailment-to-max-injection refactor since
+    the constraint is mathematically equivalent.
+
+    Tight tolerances pick up any sign error or fixture drift.
+    """
+    from pvbess_opt.io import read_inputs
+    from pvbess_opt.optimization import run_scenario
+    from pvbess_opt.kpis import compute_kpis
+    from pvbess_opt.availability import apply_unavailability_derate
+    from pvbess_opt.economics import (
+        read_economic_params,
+        build_yearly_cashflow,
+        derive_asset_capacities,
+        compute_financial_kpis,
+    )
+    from pvbess_opt.lifetime import (
+        aggregate_lifetime_to_yearly, build_lifetime_dispatch,
+    )
+
+    excel_path = ROOT / "inputs" / "input.xlsx"
+    params, ts = read_inputs(excel_path)
+    econ = read_economic_params(excel_path)
+
+    res, _solver = run_scenario(
+        params, ts, solver_name="highs",
+        mip_gap=0.01, time_limit_seconds=600,
+    )
+    kpis = compute_kpis(res, params, verify_balance=False)
+    kpis = apply_unavailability_derate(
+        kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
+    )
+    capacities = derive_asset_capacities(econ, params, ts)
+    year1_for_cycles = float(kpis.get("bess_total_discharge_mwh", 0.0) or 0.0)
+    yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
+    lifetime_df = build_lifetime_dispatch(
+        res, econ, capacities, year1_discharge_mwh=year1_for_cycles,
+    )
+    lifetime_yearly = aggregate_lifetime_to_yearly(lifetime_df)
+    avail_factor = max(
+        0.0,
+        min(1.0, 1.0 - float(econ.get("unavailability_pct", 0.0) or 0.0) / 100.0),
+    )
+    if avail_factor < 1.0 and not lifetime_yearly.empty:
+        for col in (
+            "pv_generation_mwh", "bess_discharge_mwh", "bess_charge_mwh",
+            "pv_to_load_mwh", "pv_to_grid_mwh", "import_to_load_mwh",
+            "export_total_mwh", "revenue_eur_total",
+        ):
+            if col in lifetime_yearly.columns:
+                lifetime_yearly[col] = (
+                    lifetime_yearly[col].astype(float) * avail_factor
+                )
+    fin_kpis = compute_financial_kpis(
+        yearly_cf, econ,
+        capacities=capacities,
+        lifetime_yearly=lifetime_yearly,
+        year1_kpis=kpis,
+    )
+
+    # Phase-0 baseline (perfect-foresight, MIP gap 0.01, HiGHS).
+    assert abs(float(kpis["pv_generation_mwh"]) - 22_275.0) < 1.0e-2
+    assert abs(
+        float(kpis["bess_total_discharge_mwh"]) - 9_507.72
+    ) < 1.0e-2
+    assert abs(float(kpis["profit_total_eur"]) - 2_840_145.28) < 1.0
+    assert abs(float(fin_kpis["npv_eur"]) - 8_975_262.78) < 1.0
+    assert abs(float(fin_kpis["irr_pct"]) - 15.9272) < 1.0e-2

@@ -41,7 +41,7 @@ Public loader API
          "bess":               {...},
          "economics":          {...},
          "simulation":         {...},
-         "curtailment_profile": np.ndarray,  # shape (24,) or (24, 12)
+         "max_injection_profile": np.ndarray,  # shape (24,) or (24, 12)
          "dt_minutes": int,                # auto-detected from the timeseries
      }
 
@@ -528,7 +528,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     economics_df = _build_kv_sheet(typed["economics"], _ECONOMICS_ROWS)
     simulation_df = _build_kv_sheet(typed["simulation"], _SIMULATION_ROWS)
 
-    profile = typed.get("curtailment_profile")
+    profile = typed.get("max_injection_profile")
     if profile is None:
         profile = np.full(24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float)
     max_injection_df = _build_max_injection_sheet(profile)
@@ -609,19 +609,6 @@ def _parse_bool(value: Any, default: bool) -> bool:
     if token in FALSY:
         return False
     return default
-
-
-def _parse_curtailment(raw: Any) -> float:
-    """Accept curtailment as fraction (0.27) or percent (27 -> 0.27)."""
-    if raw is None or (isinstance(raw, float) and np.isnan(raw)):
-        return 0.0
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return 0.0
-    if value > 1.0:
-        value /= 100.0
-    return float(np.clip(value, 0.0, 1.0))
 
 
 def _parse_string_enum(
@@ -1167,7 +1154,7 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     )
     out: dict[str, Any] = {
         "ts": ts,
-        "curtailment_profile": profile,
+        "max_injection_profile": profile,
         "dt_minutes": detect_timestep_minutes(ts),
     }
     out.update(typed)
@@ -1233,7 +1220,7 @@ def _typed_to_flat(
         # Max-injection cap profile (24,) or (24, 12), in percent of
         # p_grid_export_max_kw.  Expanded to a per-step array by the
         # max-injection helper module before entering the MILP.
-        "curtailment_profile": typed.get("curtailment_profile"),
+        "max_injection_profile": typed.get("max_injection_profile"),
         # simulation
         "plot_daily_scope": str(sim["plot_daily_scope"]),
         "plot_monthly_scope": str(sim["plot_monthly_scope"]),
@@ -1330,9 +1317,9 @@ def write_assumptions_summary(
     for key in sorted(params):
         if key.startswith("_"):
             continue
-        # Hide the array-valued curtailment_profile from the snapshot —
-        # it's already in the workbook's curtailment_profile sheet.
-        if key == "curtailment_profile":
+        # Hide the array-valued max_injection_profile from the snapshot —
+        # it's already in the workbook's max_injection_profile sheet.
+        if key == "max_injection_profile":
             continue
         lines.append(f"  {key} = {params[key]!r}")
     lines.append("")

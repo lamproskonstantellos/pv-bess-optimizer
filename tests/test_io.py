@@ -14,7 +14,6 @@ from pvbess_opt.io import (
     SIMULATION_SHEET_DEFAULTS,
     _flat_dict_from_sheet,
     _parse_bool,
-    _parse_curtailment,
     _parse_kv_sheet,
     detect_timestep_minutes,
     read_inputs,
@@ -40,7 +39,9 @@ def _minimal_typed(year: int = 2026) -> dict:
         ),
         "economics": dict(ECONOMICS_SHEET_DEFAULTS),
         "simulation": dict(SIMULATION_SHEET_DEFAULTS),
-        "curtailment_profile": np.full(24, 27.0, dtype=float),
+        # Values flipped to the post-refactor max-injection semantic:
+        # 73 % allowed to inject equals the historical 27 % curtailment.
+        "max_injection_profile": np.full(24, 73.0, dtype=float),
     }
 
 
@@ -59,13 +60,6 @@ def test_parse_bool_accepts_canonical_tokens():
     assert _parse_bool(0, True) is False
     assert _parse_bool(None, True) is True
     assert _parse_bool("", True) is True
-
-
-def test_parse_curtailment_accepts_pct_and_frac():
-    assert _parse_curtailment(27) == pytest.approx(0.27)
-    assert _parse_curtailment(0.27) == pytest.approx(0.27)
-    assert _parse_curtailment(101) == 1.0
-    assert _parse_curtailment(-1) == 0.0
 
 
 def test_flat_dict_skips_separator_rows():
@@ -221,7 +215,7 @@ def test_loader_reads_new_schema(tmp_path):
         tmp_path, "max_injection_profile", "max_injection_pct", vals,
     )
     typed = read_workbook(dst)
-    np.testing.assert_array_equal(typed["curtailment_profile"], vals)
+    np.testing.assert_array_equal(typed["max_injection_profile"], vals)
 
 
 def test_loader_reads_legacy_schema_with_warning(tmp_path):
@@ -235,7 +229,7 @@ def test_loader_reads_legacy_schema_with_warning(tmp_path):
     with pytest.warns(DeprecationWarning, match="legacy sheet"):
         typed = read_workbook(dst)
     np.testing.assert_array_equal(
-        typed["curtailment_profile"], 100.0 - legacy,
+        typed["max_injection_profile"], 100.0 - legacy,
     )
 
 
@@ -246,7 +240,7 @@ def test_loader_falls_back_to_default_when_sheet_missing(tmp_path):
     dst = _write_minimal_workbook_with_sheet(tmp_path, "", None, np.array([]))
     typed = read_workbook(dst)
     expected = np.full(24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float)
-    np.testing.assert_array_equal(typed["curtailment_profile"], expected)
+    np.testing.assert_array_equal(typed["max_injection_profile"], expected)
 
 
 def test_loader_new_schema_takes_precedence_over_legacy(tmp_path):
@@ -257,7 +251,7 @@ def test_loader_new_schema_takes_precedence_over_legacy(tmp_path):
 
     typed_in = _minimal_typed()
     dst = tmp_path / "both.xlsx"
-    write_workbook(typed_in, dst)  # writes max_injection_profile with 27s
+    write_workbook(typed_in, dst)  # writes max_injection_profile with 73s
 
     wb = openpyxl.load_workbook(dst)
     ws = wb.create_sheet("curtailment_profile")
@@ -271,9 +265,9 @@ def test_loader_new_schema_takes_precedence_over_legacy(tmp_path):
     with _w.catch_warnings():
         _w.simplefilter("error", DeprecationWarning)
         typed = read_workbook(dst)
-    # New-schema values (from _minimal_typed: flat 27) come through.
+    # New-schema values (from _minimal_typed: flat 73) come through.
     np.testing.assert_array_equal(
-        typed["curtailment_profile"], np.full(24, 27.0),
+        typed["max_injection_profile"], np.full(24, 73.0),
     )
 
 

@@ -180,16 +180,15 @@ def _resolve_max_injection_per_step(
 ) -> np.ndarray:
     """Return a per-step max-injection fraction array aligned with ``ts``.
 
-    The loader populates ``params["curtailment_profile"]`` with a (24,)
-    or (24, 12) array of max-injection percentages (default flat
+    The loader populates ``params["max_injection_profile"]`` with a
+    (24,) or (24, 12) array of max-injection percentages (default flat
     profile when the workbook omits the sheet).  This resolver expands
     it to a per-timestep fraction in [0, 1].  When no profile is
-    supplied the fallback is 1.0 (no cap) — the previous behaviour was
-    a 0-fraction "frac to curtail" which carried the same semantic.
+    supplied the fallback is 1.0 (no cap).
     """
     from .max_injection import build_per_step_max_injection_frac
 
-    profile = params.get("curtailment_profile")
+    profile = params.get("max_injection_profile")
     if profile is not None and "timestamp" in ts.columns:
         return build_per_step_max_injection_frac(ts["timestamp"], profile)
     return np.ones(len(ts), dtype=float)
