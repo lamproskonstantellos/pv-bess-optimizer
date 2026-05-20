@@ -142,7 +142,11 @@ def add_forecast_noise(
     if "pv_kwh" in out.columns:
         pv = out["pv_kwh"].to_numpy(dtype=float).copy()
         mult = _lognormal_multiplier(rng, eff_sigma_pv, n_perturb)
-        pv[commit_steps:] = np.maximum(pv[commit_steps:] * mult, 0.0)
+        pv_max = float(pv.max()) if pv.size else 0.0
+        pv[commit_steps:] = np.minimum(
+            np.maximum(pv[commit_steps:] * mult, 0.0),
+            pv_max,
+        )
         out["pv_kwh"] = pv
 
     if "load_kwh" in out.columns:
