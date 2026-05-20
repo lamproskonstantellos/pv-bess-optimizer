@@ -20,9 +20,12 @@ The schema is **seven sheets**, one logical theme per sheet:
   sensitivity deltas.
 * ``simulation`` — uncertainty (rolling-horizon Monte Carlo) and plot
   scope flags.
-* ``curtailment_profile`` — hour-of-day curtailment cap profile (24
-  rows), optionally with one column per calendar month.  Missing →
-  fall back to a constant 27 % and log INFO.
+* ``max_injection_profile`` — hour-of-day cap profile (24 rows),
+  optionally with one column per calendar month, expressing the share
+  of ``p_grid_export_max_kw`` available for export.  Missing → fall
+  back to a constant 73 % and log INFO.  The legacy schema
+  (``curtailment_profile`` sheet with ``curtailment_pct`` column) is
+  still read and converted via ``100 - x`` with a ``DeprecationWarning``.
 
 Public loader API
 -----------------
@@ -283,7 +286,7 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Currently informational; the MILP timestep is auto-detected."),
     ("p_grid_export_max_kw", 5000, "kW",
      "Max grid export (kW). Leave empty or use 'inf' / 'unlimited' / "
-     "'disabled' to remove cap; curtailment then becomes zero."),
+     "'disabled' to remove cap; no injection limit is applied."),
     ("retail_tariff_eur_per_mwh", 120, "EUR/MWh",
      "Retail tariff used in vnb mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",

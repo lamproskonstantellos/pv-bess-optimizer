@@ -166,6 +166,38 @@ def test_lifetime_dispatch_bess_replacement():
     assert abs(y11 / y1 - 0.98) < 1e-3
 
 
+def test_feb29_lifetime_does_not_roll_over_in_non_leap_target_years():
+    """Bug #6c regression: a Year-1 timestamp on Feb 29 must shift to
+    Feb 28 in non-leap target years rather than to Mar 1."""
+    # Tiny dispatch containing exactly one Feb-29 timestamp.
+    feb29 = pd.Timestamp("2024-02-29 12:00")
+    res1 = pd.DataFrame({
+        "timestamp": [feb29],
+        "pv_kwh": [1.0], "load_kwh": [1.0],
+        "pv_to_load_kwh": [0.5], "pv_to_grid_kwh": [0.3],
+        "pv_curtail_kwh": [0.0], "pv_to_bess_kwh": [0.2],
+        "bess_dis_load_kwh": [0.4], "bess_dis_grid_kwh": [0.2],
+        "bess_charge_grid_kwh": [0.0], "grid_to_load_kwh": [0.1],
+        "grid_export_total_kwh": [0.5], "grid_export_cap_kwh": [5.0],
+        "soc_kwh": [100.0], "soc_pct": [50.0],
+    })
+    capacities = {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    econ = _econ()
+    econ["project_start_year"] = 2024
+    econ["project_lifecycle_years"] = 3  # 2024 (leap), 2025, 2026
+
+    lifetime = build_lifetime_dispatch(res1, econ, capacities)
+    y2025_ts = lifetime.loc[lifetime["project_year"] == 2, "timestamp"].iloc[0]
+    y2026_ts = lifetime.loc[lifetime["project_year"] == 3, "timestamp"].iloc[0]
+    # pd.DateOffset would have rolled these forward to Mar 1.
+    assert y2025_ts.month == 2 and y2025_ts.day == 28, (
+        f"expected 2025-02-28, got {y2025_ts}"
+    )
+    assert y2026_ts.month == 2 and y2026_ts.day == 28, (
+        f"expected 2026-02-28, got {y2026_ts}"
+    )
+
+
 def test_build_lifetime_dispatch_accepts_year1_discharge_override():
     """Bug #3 fix: when the caller supplies year1_discharge_mwh, the
     cycle-counter uses it instead of recomputing from res_year1.  This

@@ -42,6 +42,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 
 # Columns scaled by the PV degradation curve.
 _PV_ORIGIN_COLUMNS: tuple[str, ...] = (
@@ -214,10 +215,26 @@ def build_lifetime_dispatch(
         chunk["project_year"] = int(y)
         target_calendar_year = int(project_start_year + y - 1)
         chunk["calendar_year"] = target_calendar_year
-        chunk["timestamp"] = (
-            chunk["timestamp"]
-            + pd.DateOffset(years=target_calendar_year - input_first_year)
-        )
+        # dateutil.relativedelta is leap-day safe: shifting Feb-29 by
+        # N years lands on Feb-28 in non-leap target years instead of
+        # rolling over to Mar-1 like pd.DateOffset(years=N) does.
+        # The element-wise apply is materially slower than the
+        # vectorised DateOffset so we only take the safe path when the
+        # input actually contains a Feb-29 timestamp; otherwise both
+        # are equivalent.
+        n_years_shift = target_calendar_year - input_first_year
+        if n_years_shift:
+            ts_in = chunk["timestamp"]
+            has_feb29 = bool(
+                ((ts_in.dt.month == 2) & (ts_in.dt.day == 29)).any()
+            )
+            if has_feb29:
+                shift = relativedelta(years=n_years_shift)
+                chunk["timestamp"] = ts_in.apply(lambda t: t + shift)
+            else:
+                chunk["timestamp"] = ts_in + pd.DateOffset(
+                    years=n_years_shift,
+                )
         for col in pv_cols:
             chunk[col] = chunk[col].astype(float) * pv_f
         for col in bess_cols:
@@ -251,11 +268,21 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
         )
 
     df = lifetime_df.copy()
+    grouped = df.groupby("calendar_year")
+    year_index = grouped.size().index
 
     def _sum_kwh(col: str) -> pd.Series:
+        """Return per-year MWh sums reindexed against the year axis.
+
+        Missing columns yield 0.0 instead of NaN so the multi-path
+        combinations below (e.g. ``bess_charge_mwh = pv_to_bess +
+        grid_to_bess``) stay symmetric across all KPIs.
+        """
         if col in df.columns:
-            return df.groupby("calendar_year")[col].sum() / 1000.0
-        return pd.Series(dtype=float)
+            s = grouped[col].sum() / 1000.0
+        else:
+            s = pd.Series(dtype=float)
+        return s.reindex(year_index, fill_value=0.0)
 
     revenue_cols = [
         c for c in (
@@ -278,7 +305,6 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
         expense = pd.Series(0.0, index=df.index, dtype=float)
     df["_net_revenue_per_step"] = revenue - expense
 
-    grouped = df.groupby("calendar_year")
     out = pd.DataFrame(
         {
             "project_year": grouped["project_year"].first().astype(int),
@@ -286,20 +312,12 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
             "pv_to_load_mwh": _sum_kwh("pv_to_load_kwh"),
             "pv_to_grid_mwh": _sum_kwh("pv_to_grid_kwh"),
             "bess_charge_mwh": (
-                _sum_kwh("pv_to_bess_kwh").reindex(
-                    grouped.size().index, fill_value=0.0,
-                )
-                + _sum_kwh("bess_charge_grid_kwh").reindex(
-                    grouped.size().index, fill_value=0.0,
-                )
+                _sum_kwh("pv_to_bess_kwh")
+                + _sum_kwh("bess_charge_grid_kwh")
             ),
             "bess_discharge_mwh": (
-                _sum_kwh("bess_dis_load_kwh").reindex(
-                    grouped.size().index, fill_value=0.0,
-                )
-                + _sum_kwh("bess_dis_grid_kwh").reindex(
-                    grouped.size().index, fill_value=0.0,
-                )
+                _sum_kwh("bess_dis_load_kwh")
+                + _sum_kwh("bess_dis_grid_kwh")
             ),
             "import_to_load_mwh": _sum_kwh("grid_to_load_kwh"),
             "export_total_mwh": _sum_kwh("grid_export_total_kwh"),
