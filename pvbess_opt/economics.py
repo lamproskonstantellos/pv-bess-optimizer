@@ -201,7 +201,10 @@ def build_yearly_cashflow(
             f"project_lifecycle_years must be >= 1, got {n_years!r}"
         )
 
-    project_start_year = int(econ.get("project_start_year", 2026) or 2026)
+    project_start_year = int(
+        econ.get("project_start_year", PROJECT_SHEET_DEFAULTS["project_start_year"])
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
 
     pv_kwp = float(capacities["pv_kwp"])
     bess_kw = float(capacities["bess_kw"])
@@ -276,7 +279,7 @@ def build_yearly_cashflow(
     bess_deg_per_cycle = float(
         econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
     ) / 100.0
-    retail_infl = float(econ.get("retail_inflation_pct", 2.0) or 0.0) / 100.0
+    retail_infl = float(econ.get("retail_inflation_pct", 0.0) or 0.0) / 100.0
     dam_infl = float(econ.get("dam_inflation_pct", 0.0) or 0.0) / 100.0
     opex_infl = float(econ["opex_inflation_pct"]) / 100.0
     discount_rate = float(econ["discount_rate_pct"]) / 100.0

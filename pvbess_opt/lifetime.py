@@ -161,7 +161,10 @@ def build_lifetime_dispatch(
         raise ValueError(
             f"project_lifecycle_years must be >= 1, got {n_years!r}"
         )
-    project_start_year = int(econ.get("project_start_year", 2026) or 2026)
+    project_start_year = int(
+        econ.get("project_start_year", PROJECT_SHEET_DEFAULTS["project_start_year"])
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
     lid = float(econ.get("pv_degradation_year1_pct", 0.0)) / 100.0
     d_annual = float(econ.get("pv_degradation_annual_pct", 0.0)) / 100.0
     d_bess = float(econ.get("bess_degradation_annual_pct", 0.0)) / 100.0

@@ -1336,7 +1336,7 @@ def write_dispatch_artifacts(
     res_year1: pd.DataFrame,
     lifetime_df: pd.DataFrame | None,
     *,
-    project_start_year: int = 2026,
+    project_start_year: int = PROJECT_SHEET_DEFAULTS["project_start_year"],
 ) -> dict[str, Path]:
     """Write the ``02_dispatch/`` artefacts."""
     dispatch_dir = Path(dispatch_dir)
