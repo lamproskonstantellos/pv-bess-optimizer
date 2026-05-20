@@ -68,11 +68,14 @@ are ignored:
 from __future__ import annotations
 
 import logging
+import warnings
 from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
+
+from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +96,7 @@ _COERCE_FAILED = object()
 # ---------------------------------------------------------------------------
 
 PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
-    "project_lifecycle_years": 25,
+    "project_lifecycle_years": 20,
     "project_start_year": 2026,
     "mode": "vnb",
     "settlement_minutes": 15,
@@ -436,9 +439,9 @@ _SHEET_ROW_TEMPLATES: dict[
     "simulation": _SIMULATION_ROWS,
 }
 
-# Default constant 27 % curtailment cap (24 hourly rows) applied when the
-# workbook omits the curtailment_profile sheet.
-_DEFAULT_CURTAILMENT_PCT_HOURLY: float = 27.0
+# Default share of p_grid_export_max_kw available for export (24 hourly
+# rows) applied when the workbook omits the max_injection_profile sheet.
+# Single source of truth lives in pvbess_opt.config; re-imported above.
 
 
 # ---------------------------------------------------------------------------
@@ -464,43 +467,43 @@ def _hour_interval_labels() -> list[str]:
     return [f"{h:02d}:00-{(h + 1):02d}:00" for h in range(24)]
 
 
-def _build_curtailment_sheet(profile: Any) -> pd.DataFrame:
-    """Render the ``curtailment_profile`` sheet from a 1-D or 2-D array.
+def _build_max_injection_sheet(profile: Any) -> pd.DataFrame:
+    """Render the ``max_injection_profile`` sheet from a 1-D or 2-D array.
 
     Accepts:
-    * shape ``(24,)`` → single ``curtailment_pct`` column.
-    * shape ``(24, 12)`` → per-month columns (``curtailment_pct_jan`` ..
-      ``curtailment_pct_dec``).
+    * shape ``(24,)`` → single ``max_injection_pct`` column.
+    * shape ``(24, 12)`` → per-month columns (``max_injection_pct_jan`` ..
+      ``max_injection_pct_dec``).
 
     The ``hour_of_day`` column is rendered as **24-hour interval
     strings** (``"00:00-01:00"`` … ``"23:00-24:00"``) for human
-    readability.  The loader (:func:`_parse_curtailment_profile_sheet`)
-    accepts both this string format and the legacy integer format.
+    readability.  Values are interpreted as the percent of
+    ``p_grid_export_max_kw`` available for export in that hour.
     """
     arr = np.asarray(profile, dtype=float)
     hour_labels = _hour_interval_labels()
     if arr.ndim == 1:
         if arr.shape[0] != 24:
             raise ValueError(
-                "curtailment_profile must have 24 rows "
+                "max_injection_profile must have 24 rows "
                 f"(got {arr.shape[0]})."
             )
         return pd.DataFrame({
             "hour_of_day": hour_labels,
-            "curtailment_pct": arr,
+            "max_injection_pct": arr,
         })
     if arr.ndim == 2:
         if arr.shape != (24, 12):
             raise ValueError(
-                "curtailment_profile (2-D) must be shape (24, 12) "
+                "max_injection_profile (2-D) must be shape (24, 12) "
                 f"(got {arr.shape})."
             )
         cols: dict[str, Any] = {"hour_of_day": hour_labels}
         for m_idx, m_name in enumerate(_MONTH_TOKENS):
-            cols[f"curtailment_pct_{m_name}"] = arr[:, m_idx]
+            cols[f"max_injection_pct_{m_name}"] = arr[:, m_idx]
         return pd.DataFrame(cols)
     raise ValueError(
-        "curtailment_profile must be 1-D (24,) or 2-D (24, 12); "
+        "max_injection_profile must be 1-D (24,) or 2-D (24, 12); "
         f"got shape {arr.shape}."
     )
 
@@ -524,8 +527,8 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
 
     profile = typed.get("curtailment_profile")
     if profile is None:
-        profile = np.full(24, _DEFAULT_CURTAILMENT_PCT_HOURLY, dtype=float)
-    curtailment_df = _build_curtailment_sheet(profile)
+        profile = np.full(24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float)
+    max_injection_df = _build_max_injection_sheet(profile)
 
     with pd.ExcelWriter(dst, engine="openpyxl") as writer:
         typed["ts"].to_excel(writer, sheet_name="timeseries", index=False)
@@ -534,8 +537,8 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         bess_df.to_excel(writer, sheet_name="bess", index=False)
         economics_df.to_excel(writer, sheet_name="economics", index=False)
         simulation_df.to_excel(writer, sheet_name="simulation", index=False)
-        curtailment_df.to_excel(
-            writer, sheet_name="curtailment_profile", index=False,
+        max_injection_df.to_excel(
+            writer, sheet_name="max_injection_profile", index=False,
         )
     return dst
 
@@ -776,7 +779,7 @@ def _parse_kv_sheet(
 
 
 # ---------------------------------------------------------------------------
-# Curtailment-profile parser
+# Max-injection profile parser (with legacy curtailment_profile shim)
 # ---------------------------------------------------------------------------
 
 
@@ -815,47 +818,80 @@ def _parse_hour_of_day(value: Any) -> int:
     return h
 
 
-def _parse_curtailment_profile_sheet(df: pd.DataFrame) -> np.ndarray:
-    """Parse a curtailment_profile sheet into a (24,) or (24, 12) array."""
+def _normalise_profile_frame(
+    df: pd.DataFrame, *, sheet_name: str,
+) -> pd.DataFrame:
+    """Validate columns / row count and lowercase column names."""
     if df is None or df.empty:
-        raise ValueError("curtailment_profile sheet is empty.")
-
+        raise ValueError(f"{sheet_name} sheet is empty.")
     cols = {c.strip().lower() for c in df.columns}
     if "hour_of_day" not in cols:
         raise ValueError(
-            "curtailment_profile sheet must contain a 'hour_of_day' column."
+            f"{sheet_name} sheet must contain a 'hour_of_day' column."
         )
-
     df_norm = df.rename(columns={c: c.strip().lower() for c in df.columns})
     df_norm["hour_of_day"] = df_norm["hour_of_day"].map(_parse_hour_of_day)
     df_norm = df_norm.sort_values("hour_of_day").reset_index(drop=True)
     if len(df_norm) != 24:
         raise ValueError(
-            "curtailment_profile sheet must have exactly 24 rows "
+            f"{sheet_name} sheet must have exactly 24 rows "
             f"(got {len(df_norm)})."
         )
     hours = df_norm["hour_of_day"].astype(int).to_numpy()
     if not np.array_equal(hours, np.arange(24)):
         raise ValueError(
-            "curtailment_profile 'hour_of_day' column must cover 0..23 "
+            f"{sheet_name} 'hour_of_day' column must cover 0..23 "
             f"exactly once; got {hours.tolist()}."
         )
+    return df_norm
 
-    monthly_cols = [f"curtailment_pct_{m}" for m in _MONTH_TOKENS]
-    has_monthly = all(col in df_norm.columns for col in monthly_cols)
-    if has_monthly:
+
+def _extract_profile(
+    df_norm: pd.DataFrame, *, scalar_col: str, monthly_prefix: str,
+) -> np.ndarray:
+    """Pull the (24,) or (24, 12) array from a normalised profile frame."""
+    monthly_cols = [f"{monthly_prefix}_{m}" for m in _MONTH_TOKENS]
+    if all(col in df_norm.columns for col in monthly_cols):
         arr = np.zeros((24, 12), dtype=float)
         for m_idx, m_name in enumerate(_MONTH_TOKENS):
             arr[:, m_idx] = (
-                df_norm[f"curtailment_pct_{m_name}"].astype(float).to_numpy()
+                df_norm[f"{monthly_prefix}_{m_name}"]
+                .astype(float).to_numpy()
             )
         return arr
-    if "curtailment_pct" in df_norm.columns:
-        return df_norm["curtailment_pct"].astype(float).to_numpy()
+    if scalar_col in df_norm.columns:
+        return df_norm[scalar_col].astype(float).to_numpy()
     raise ValueError(
-        "curtailment_profile sheet must contain either a "
-        "'curtailment_pct' column (24x1) or all 12 "
-        "'curtailment_pct_<month>' columns (24x12)."
+        f"profile sheet must contain either a '{scalar_col}' column "
+        f"(24x1) or all 12 '{monthly_prefix}_<month>' columns (24x12)."
+    )
+
+
+def _parse_max_injection_profile_sheet(df: pd.DataFrame) -> np.ndarray:
+    """Parse the new-schema ``max_injection_profile`` sheet.
+
+    Returns a (24,) or (24, 12) array of percent-of-grid-export values.
+    """
+    df_norm = _normalise_profile_frame(df, sheet_name="max_injection_profile")
+    return _extract_profile(
+        df_norm,
+        scalar_col="max_injection_pct",
+        monthly_prefix="max_injection_pct",
+    )
+
+
+def _parse_curtailment_profile_sheet(df: pd.DataFrame) -> np.ndarray:
+    """Parse the legacy ``curtailment_profile`` sheet.
+
+    The returned array is in the **curtailment-share** units of the old
+    schema (e.g. 27 ⇒ 27 % to curtail).  Callers are responsible for
+    converting to the new max-injection semantic via ``100 - x``.
+    """
+    df_norm = _normalise_profile_frame(df, sheet_name="curtailment_profile")
+    return _extract_profile(
+        df_norm,
+        scalar_col="curtailment_pct",
+        monthly_prefix="curtailment_pct",
     )
 
 
@@ -1080,20 +1116,39 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             f"{grid_cap!r}."
         )
 
-    if "curtailment_profile" in sheets:
+    if "max_injection_profile" in sheets:
         try:
-            profile = _parse_curtailment_profile_sheet(
+            profile = _parse_max_injection_profile_sheet(
+                pd.read_excel(xlsx_path, sheet_name="max_injection_profile"),
+            )
+        except ValueError as exc:
+            raise ValueError(f"max_injection_profile: {exc}") from exc
+    elif "curtailment_profile" in sheets:
+        warnings.warn(
+            "Workbook uses legacy sheet 'curtailment_profile' with column "
+            "'curtailment_pct'. Migrate to 'max_injection_profile' + "
+            "'max_injection_pct' with values inverted as (100 - x). "
+            "Auto-converting for this run; the legacy schema will be "
+            "removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        try:
+            legacy = _parse_curtailment_profile_sheet(
                 pd.read_excel(xlsx_path, sheet_name="curtailment_profile"),
             )
         except ValueError as exc:
             raise ValueError(f"curtailment_profile: {exc}") from exc
+        profile = 100.0 - legacy
     else:
         logger.info(
-            "curtailment_profile sheet not found in %s; falling back to "
-            "constant %.1f %% for every hour.",
-            xlsx_path, _DEFAULT_CURTAILMENT_PCT_HOURLY,
+            "max_injection_profile sheet not found in %s; falling back "
+            "to constant %.1f %% for every hour.",
+            xlsx_path, DEFAULT_MAX_INJECTION_PCT_HOURLY,
         )
-        profile = np.full(24, _DEFAULT_CURTAILMENT_PCT_HOURLY, dtype=float)
+        profile = np.full(
+            24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float,
+        )
 
     mode = str(typed["project"]["mode"]).lower()
     ts = _normalise_timeseries(
@@ -1149,13 +1204,6 @@ def _typed_to_flat(
     else:
         p_grid_export_cap_milp = raw_grid_cap
 
-    profile = typed.get("curtailment_profile")
-    if profile is not None:
-        curtailment_frac = float(np.mean(np.asarray(profile, dtype=float))) / 100.0
-    else:
-        curtailment_frac = _DEFAULT_CURTAILMENT_PCT_HOURLY / 100.0
-    curtailment_frac = float(np.clip(curtailment_frac, 0.0, 1.0))
-
     params: dict[str, Any] = {
         "dt_minutes": int(typed["dt_minutes"]),
         # bess
@@ -1179,8 +1227,9 @@ def _typed_to_flat(
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
         "unavailability_pct": float(project["unavailability_pct"]),
         "show_titles": bool(project["show_titles"]),
-        # curtailment — scalar fraction for Phase 2; per-step profile for Phase 3.
-        "curtailment_frac": curtailment_frac,
+        # Max-injection cap profile (24,) or (24, 12), in percent of
+        # p_grid_export_max_kw.  Expanded to a per-step array by the
+        # max-injection helper module before entering the MILP.
         "curtailment_profile": typed.get("curtailment_profile"),
         # simulation
         "plot_daily_scope": str(sim["plot_daily_scope"]),

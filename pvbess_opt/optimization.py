@@ -175,29 +175,21 @@ def _check_solver_status(result, solver_name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_curtailment_frac(value: Any) -> float:
-    """Accept curtailment as fraction (0.27) or percent (27 → 0.27)."""
-    raw = float(value or 0.0)
-    if raw > 1.0:
-        raw /= 100.0
-    return max(0.0, min(1.0, raw))
-
-
 def _resolve_curtailment_per_step(
     params: dict[str, Any], ts: pd.DataFrame,
 ) -> np.ndarray:
     """Return a per-step curtailment fraction array aligned with ``ts``.
 
-    Falls back to the scalar ``curtailment_frac`` (Phase-1 backward-
-    compat) when ``curtailment_profile`` is missing.
+    The loader always populates ``params["curtailment_profile"]`` (the
+    default flat profile is used when the workbook omits the sheet),
+    so this resolver only needs the profile branch.
     """
     from .curtailment import build_per_step_curtailment_frac
 
     profile = params.get("curtailment_profile")
     if profile is not None and "timestamp" in ts.columns:
         return build_per_step_curtailment_frac(ts["timestamp"], profile)
-    scalar = _resolve_curtailment_frac(params.get("curtailment_frac", 0.0))
-    return np.full(len(ts), scalar, dtype=float)
+    return np.zeros(len(ts), dtype=float)
 
 
 def derive_tight_big_m(

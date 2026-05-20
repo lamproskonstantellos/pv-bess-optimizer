@@ -138,7 +138,6 @@ def _params(pv_kwp: float, bess_kw: float, *, mode: str = "vnb") -> dict:
         "pv_nameplate_kwp": pv_kwp,
         "bess_power_kw": bess_kw,
         "bess_capacity_kwh": bess_kw * 4.0,
-        "curtailment_frac": 0.27,
         "retail_tariff_eur_per_mwh": 132.0,
         "settlement_minutes": 15,
         "mode": mode,

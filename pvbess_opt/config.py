@@ -5,6 +5,18 @@ from __future__ import annotations
 import logging
 import math
 
+
+# ---------------------------------------------------------------------------
+# Project-level defaults
+# ---------------------------------------------------------------------------
+
+# Default share of p_grid_export_max_kw that is available for export, in
+# percent (per hour-of-day).  Applied when the workbook omits the
+# max_injection_profile sheet.  Matches the inverse of the historical
+# 27 % regulatory curtailment used as the project's reference scenario
+# (100 - 27 = 73).
+DEFAULT_MAX_INJECTION_PCT_HOURLY: float = 73.0
+
 # ---------------------------------------------------------------------------
 # Plot labels and colors
 # ---------------------------------------------------------------------------
