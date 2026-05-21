@@ -685,13 +685,18 @@ def model_to_dataframe(
     )
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
+    pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
+
     res = pd.DataFrame(index=ts.index)
     res["timestamp"] = ts["timestamp"].values
     res["load_kwh"] = [
         float(ts.loc[t, "load_kwh"]) if "load_kwh" in ts.columns else 0.0
         for t in time_index
     ]
-    res["pv_kwh"] = [float(ts.loc[t, "pv_kwh"]) for t in time_index]
+    res["pv_kwh"] = [
+        float(ts.loc[t, "pv_kwh"]) if pv_present else 0.0
+        for t in time_index
+    ]
     res["pv_to_load_kwh"] = [pyo.value(model.pv_to_load[t]) for t in time_index]
     res["pv_to_bess_kwh"] = [pyo.value(model.pv_to_bess[t]) for t in time_index]
     res["bess_charge_grid_kwh"] = [pyo.value(model.grid_to_bess[t]) for t in time_index]
