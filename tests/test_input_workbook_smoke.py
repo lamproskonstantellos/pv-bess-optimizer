@@ -186,5 +186,5 @@ def test_repo_input_xlsx_headline_kpis_pinned():
         float(kpis["bess_total_discharge_mwh"]) - 9_507.72
     ) < 1.0e-2
     assert abs(float(kpis["profit_total_eur"]) - 2_840_145.28) < 1.0
-    assert abs(float(fin_kpis["npv_eur"]) - 8_975_262.78) < 1.0
-    assert abs(float(fin_kpis["irr_pct"]) - 15.9272) < 1.0e-2
+    assert abs(float(fin_kpis["npv_eur"]) - 8_143_881.82) < 1.0
+    assert abs(float(fin_kpis["irr_pct"]) - 15.2628) < 1.0e-2

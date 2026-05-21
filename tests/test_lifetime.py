@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from pvbess_opt.economics import build_yearly_cashflow
 from pvbess_opt.lifetime import (
     _bess_factor,
     aggregate_lifetime_to_yearly,
@@ -72,6 +73,77 @@ def test_calendar_year_alignment():
     lifetime = build_lifetime_dispatch(res1, _econ(), capacities)
     y1_cal = int(lifetime.loc[lifetime["project_year"] == 1, "calendar_year"].iloc[0])
     assert y1_cal == 2026
+
+
+def _bess_only_econ() -> dict:
+    """20-year BESS-only economics; inflation off so revenue ratios are
+    pure bess_factor (F2 reconciliation)."""
+    return {
+        "project_lifecycle_years": 20,
+        "project_start_year": 2026,
+        "discount_rate_pct": 7.0,
+        "opex_inflation_pct": 0.0,
+        "retail_inflation_pct": 0.0,
+        "dam_inflation_pct": 0.0,
+        "pv_degradation_year1_pct": 2.5,
+        "pv_degradation_annual_pct": 0.55,
+        "bess_degradation_annual_pct": 2.0,
+        "bess_degradation_pct_per_cycle": 0.0,
+        "bess_replacement_year": 0,
+        "bess_replacement_cost_pct": 50.0,
+        "capex_pv_eur_per_kw": 0.0,
+        "capex_bess_eur_per_kw": 300.0,
+        "devex_pv_eur_per_kw": 0.0,
+        "devex_bess_eur_per_kw": 0.0,
+        "opex_pv_eur_per_kwp": 0.0,
+        "opex_bess_eur_per_kw": 0.0,
+        "aggregator_fee_pct_revenue": 0.0,
+    }
+
+
+def test_f2_cashflow_lifetime_bess_revenue_ratio_reconcile():
+    """BESS-only: cashflow_yearly and lifetime_dispatch_yearly must agree
+    on the BESS-revenue degradation ratio, both equal to bess_factor[y]."""
+    econ = _bess_only_econ()
+    capacities = {"pv_kwp": 0.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+
+    # Year-1 KPIs: revenue is entirely BESS-origin (no PV streams).
+    year1_kpis = {
+        "profit_load_from_pv_eur": 0.0,
+        "profit_load_from_bess_eur": 120_000.0,
+        "profit_export_from_pv_eur": 0.0,
+        "profit_export_from_bess_eur": 80_000.0,
+        "expense_charge_bess_grid_eur": 20_000.0,
+        "bess_total_discharge_mwh": 0.0,
+    }
+    cf = build_yearly_cashflow(year1_kpis, econ, capacities)
+    cf_rev1 = float(cf.loc[cf["project_year"] == 1, "revenue_eur"].iloc[0])
+
+    # Year-1 dispatch carrying only BESS-origin revenue columns.
+    res1 = _make_year1_dispatch()
+    res1["profit_load_from_pv_eur"] = 0.0
+    res1["profit_export_from_pv_eur"] = 0.0
+    res1["profit_load_from_bess_eur"] = 120_000.0 / 8760.0
+    res1["profit_export_from_bess_eur"] = 80_000.0 / 8760.0
+    res1["expense_charge_bess_grid_eur"] = 20_000.0 / 8760.0
+    lifetime = build_lifetime_dispatch(res1, econ, capacities)
+    agg = aggregate_lifetime_to_yearly(lifetime)
+    lt_rev1 = float(
+        agg.loc[agg["project_year"] == 1, "revenue_eur_total"].iloc[0]
+    )
+
+    d_bess = econ["bess_degradation_annual_pct"] / 100.0
+    for y in (5, 10, 20):
+        bf = _bess_factor(y, d_bess)
+        cf_ratio = float(
+            cf.loc[cf["project_year"] == y, "revenue_eur"].iloc[0]
+        ) / cf_rev1
+        lt_ratio = float(
+            agg.loc[agg["project_year"] == y, "revenue_eur_total"].iloc[0]
+        ) / lt_rev1
+        assert abs(cf_ratio - bf) < 1e-9, (y, cf_ratio, bf)
+        assert abs(lt_ratio - bf) < 1e-9, (y, lt_ratio, bf)
+        assert abs(cf_ratio - lt_ratio) < 1e-9, (y, cf_ratio, lt_ratio)
 
 
 def test_aggregate_lifetime_yearly_columns():

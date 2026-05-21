@@ -238,15 +238,18 @@ def build_yearly_cashflow(
         )
     )
     if _has_breakdown:
-        revenue_1_retail = float(
-            (year1_kpis.get("profit_load_from_pv_eur", 0.0) or 0.0)
-            + (year1_kpis.get("profit_load_from_bess_eur", 0.0) or 0.0)
+        # PV-origin vs BESS-origin Year-1 revenue (mirrors lifetime.py's
+        # _PV_REVENUE_COLUMNS / _BESS_REVENUE_COLUMNS so the two sheets agree).
+        rev1_retail_pv = float(year1_kpis.get("profit_load_from_pv_eur", 0.0) or 0.0)
+        rev1_retail_bess = float(
+            year1_kpis.get("profit_load_from_bess_eur", 0.0) or 0.0
         )
-        revenue_1_dam = float(
-            (year1_kpis.get("profit_export_from_pv_eur", 0.0) or 0.0)
-            + (year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0)
-            - (year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
-        )
+        rev1_dam_pv = float(year1_kpis.get("profit_export_from_pv_eur", 0.0) or 0.0)
+        rev1_dam_bess = float(
+            year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0
+        ) - float(year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
+        revenue_1_retail = rev1_retail_pv + rev1_retail_bess
+        revenue_1_dam = rev1_dam_pv + rev1_dam_bess
         revenue_1_gross = revenue_1_retail + revenue_1_dam
         # Reconciliation guard — when the KPI dict carries
         # profit_total_eur it should equal retail + DAM within rounding.
@@ -268,6 +271,17 @@ def build_yearly_cashflow(
         revenue_1_gross = float(year1_kpis.get("profit_total_eur", 0.0) or 0.0)
         revenue_1_retail = revenue_1_gross
         revenue_1_dam = 0.0
+        # No per-stream breakdown — degrade the whole revenue base on
+        # pv_factor (legacy single-curve behaviour) by routing it all to
+        # the PV-origin retail component.
+        logger.debug(
+            "build_yearly_cashflow: year1_kpis lacks per-stream breakdown; "
+            "degrading all revenue on pv_factor (legacy fallback)."
+        )
+        rev1_retail_pv = revenue_1_gross
+        rev1_retail_bess = 0.0
+        rev1_dam_pv = 0.0
+        rev1_dam_bess = 0.0
 
     opex_pv_1 = float(econ["opex_pv_eur_per_kwp"]) * pv_kwp
     opex_bess_1 = float(econ["opex_bess_eur_per_kw"]) * bess_kw
@@ -325,20 +339,16 @@ def build_yearly_cashflow(
                 cumulative_cycles += (
                     year1_discharge_mwh * bess_factor / capacity_mwh
                 )
-            # Per-stream inflation.  pv_factor is used for both
-            # streams as the convention (downstream scopes
-            # like revenue_stack_yearly scale by revenue_eur ratios);
-            # per-stream BESS degradation is a future enhancement.
+            # Degrade PV-origin revenue on pv_factor and BESS-origin
+            # revenue on bess_factor, mirroring lifetime.py:248-251 so the
+            # two sheets in 03_results.xlsx agree.  Inflation is applied
+            # per stream (retail vs DAM index).
             revenue_retail_y = (
-                revenue_1_retail
-                * pv_factor
-                * (1.0 + retail_infl) ** (y - 1)
-            )
+                rev1_retail_pv * pv_factor + rev1_retail_bess * bess_factor
+            ) * (1.0 + retail_infl) ** (y - 1)
             revenue_dam_y = (
-                revenue_1_dam
-                * pv_factor
-                * (1.0 + dam_infl) ** (y - 1)
-            )
+                rev1_dam_pv * pv_factor + rev1_dam_bess * bess_factor
+            ) * (1.0 + dam_infl) ** (y - 1)
             revenue_gross_y = revenue_retail_y + revenue_dam_y
             aggregator_fee_y = -revenue_gross_y * aggregator_fee_frac
             opex_y = opex_1 * (1.0 + opex_infl) ** (y - 1)
