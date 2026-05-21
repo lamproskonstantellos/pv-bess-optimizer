@@ -43,6 +43,9 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     # Inputs
     "plot_input_forecast_band", "plot_input_seasonal_boxplot",
     "plot_dam_intraday_heatmap",
+    # Uncertainty diagnostics
+    "plot_uncertainty_coverage_by_horizon", "plot_uncertainty_pit_histogram",
+    "plot_uncertainty_crps_timeline", "plot_uncertainty_residual_qq",
 )
 
 

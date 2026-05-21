@@ -98,6 +98,7 @@ def test_simulation_sheet_keys():
         "uncertainty_load_enabled",
         "uncertainty_sigma_dam", "uncertainty_sigma_pv",
         "uncertainty_sigma_load",
+        "uncertainty_diagnostics_enabled",
         "plot_daily_scope", "plot_monthly_scope", "plot_yearly_scope",
     }
     assert set(SIMULATION_SHEET_DEFAULTS) == expected

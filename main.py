@@ -412,14 +412,30 @@ def _generate_all_energy_plots(
 def _generate_uncertainty_plots(
     ts: pd.DataFrame,
     out_dir: Path,
+    *,
+    diagnostics_enabled: bool = True,
+    sigma_dam: float = 0.20,
+    sigma_pv: float = 0.12,
+    sigma_load: float = 0.05,
+    commit_steps: int = 96,
 ) -> None:
-    """Render the three input-uncertainty PDFs into ``out_dir``."""
+    """Render the input-uncertainty PDFs into ``out_dir``.
+
+    Always writes the forecast band, seasonal boxplot and DAM heatmap.
+    When ``diagnostics_enabled`` is True (simulation-sheet flag
+    ``uncertainty_diagnostics_enabled``), also writes the four
+    forecast-calibration diagnostic plots.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
         from pvbess_opt.plotting import (
             plot_dam_intraday_heatmap,
             plot_input_forecast_band,
             plot_input_seasonal_boxplot,
+            plot_uncertainty_coverage_by_horizon,
+            plot_uncertainty_crps_timeline,
+            plot_uncertainty_pit_histogram,
+            plot_uncertainty_residual_qq,
         )
         plot_input_forecast_band(
             ts, out_dir / "inputs_forecast_band.pdf",
@@ -431,6 +447,21 @@ def _generate_uncertainty_plots(
         plot_dam_intraday_heatmap(
             ts, out_dir / "dam_intraday_heatmap.pdf",
         )
+        if diagnostics_enabled:
+            sig = dict(sigma_dam=sigma_dam, sigma_pv=sigma_pv, sigma_load=sigma_load)
+            plot_uncertainty_coverage_by_horizon(
+                ts, out_dir / "coverage_by_horizon.pdf",
+                commit_steps=commit_steps, **sig,
+            )
+            plot_uncertainty_pit_histogram(
+                ts, out_dir / "pit_histogram.pdf", **sig,
+            )
+            plot_uncertainty_crps_timeline(
+                ts, out_dir / "crps_timeline.pdf", **sig,
+            )
+            plot_uncertainty_residual_qq(
+                ts, out_dir / "residual_qq.pdf", **sig,
+            )
     except Exception:
         logger.exception("Uncertainty plot generation failed")
 
@@ -989,7 +1020,20 @@ def _run_one(
             mode=str(params.get("mode", "vnb")).lower(),
         )
 
-        _generate_uncertainty_plots(ts, layout["uncertainty_plots"])
+        _dt_min = int(params.get("dt_minutes", 60) or 60)
+        _commit_steps = max(
+            1, int(round(int(unc_cfg["commit_hours"]) * 60 / _dt_min))
+        )
+        _generate_uncertainty_plots(
+            ts, layout["uncertainty_plots"],
+            diagnostics_enabled=bool(
+                econ_pre.get("uncertainty_diagnostics_enabled", True)
+            ),
+            sigma_dam=unc_cfg["sigma_dam"],
+            sigma_pv=unc_cfg["sigma_pv"],
+            sigma_load=unc_cfg["sigma_load"],
+            commit_steps=_commit_steps,
+        )
 
         print(f"=== KPIs ({slug}) ===")
         for key, value in kpis.items():
