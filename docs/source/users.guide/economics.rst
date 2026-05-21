@@ -1,7 +1,7 @@
 Multi-year financial pipeline
 =============================
 
-The ``economic`` sheet drives the project-finance pipeline:
+The ``economics`` sheet drives the project-finance pipeline:
 
 * **CAPEX** is paid in Year 0 (calendar
   ``project_start_year - 1``); operating Years 1..N cover

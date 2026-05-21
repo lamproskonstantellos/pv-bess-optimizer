@@ -9,12 +9,14 @@ Output layout — written to ``results/<input>_<scenario>_<timestamp>/``::
     04_financial_plots/ cumulative / waterfall / payback / tornados
     05_energy_plots/<calendar_year>/{daily,monthly,yearly}/...
                        lifetime_summary_<start>-<end>.pdf
+    06_uncertainty_plots/ input forecast band, seasonal boxplot,
+                       DAM heatmap, forecast-gap comparison
 
 All figures use the IEEE matplotlib preset and are exported as PDF.
 Plot titles default to off; toggle with ``show_titles`` in the
-``economic`` sheet.
+``project`` sheet.
 
-Plot-scope flags in ``economic`` control how many energy PDFs are
+Plot-scope flags in ``simulation`` control how many energy PDFs are
 produced.  All three share the same vocabulary:
 
 * ``plot_daily_scope``   — none / year1_only / all   (default ``year1_only``)
@@ -814,7 +816,7 @@ def _run_one(
         )
 
         invariants = verify_dispatch_invariants(
-            res_full, params, mode=str(params.get("mode", "vnb")),
+            res_full, params, mode=str(params.get("mode", "vnb")).lower(),
         )
         print(
             "[invariants] "

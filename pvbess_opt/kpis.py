@@ -405,6 +405,10 @@ def compute_kpis(
             100.0 * actual_cycles_year1 / max_cycles_year
             if max_cycles_year > 1e-9 else 0.0
         )
+        # Note: this nested-dict diagnostic is NOT derated by
+        # unavailability (unlike the headline MWh keys that
+        # apply_unavailability_derate scales) — it reports the raw
+        # Year-1 dispatch utilisation.
         kpis["bess_utilization_diagnostics"] = {
             "bess_charge_pv_surplus_mwh": round(pv_to_bess, 4),
             "bess_charge_grid_mwh": round(bess_charge_grid, 4),

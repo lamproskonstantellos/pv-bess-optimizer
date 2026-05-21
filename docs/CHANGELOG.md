@@ -1,9 +1,54 @@
 # Changelog
 
-This file tracks only the most recent release.  The repository no
-longer carries internal version history — past migration notes and
+This file tracks all releases since v0.8.7.  Older migration notes and
 breaking-change diffs have been folded into the present-tense
 descriptions across the codebase and Sphinx docs.
+
+## 0.8.10 — 2026-05-21
+
+The v0.8.9 full-codebase audit remediation (findings F1–F12) plus a
+consistency pass on the uncertainty-plot family.
+
+### Fixed
+
+- **F1 (P0)** — `model_to_dataframe` copied the raw input `pv_kwh`
+  column into BESS-only output frames (`pv_nameplate_kwp == 0`) while
+  the model pinned PV flows to zero, producing ~800–3200 kWh per-step
+  energy-balance residuals, breaching `invariant_1` / `invariant_9`,
+  surfacing phantom `pv_generation_mwh` KPIs, and crashing `--strict`.
+  PV flows are now zeroed in the output frame to match the model.
+- **F2** — `build_yearly_cashflow` degraded all revenue (including
+  BESS-origin streams) on `pv_factor`; BESS-origin revenue now degrades
+  on `bess_factor`, reconciling the cashflow and lifetime sheets.
+- **F5** — dispatch invariants are computed on unrounded model values,
+  so the sum-based `invariant_4` no longer accumulates round(4) error
+  across 35,040 rows and trips `--strict`.
+- **F6** — NaN gaps in the input timeseries now emit a warning
+  (column, count, first timestamp) before ffill/bfill.
+- **F9** — the solver-status guard requires a feasible incumbent before
+  accepting a `maxTimeLimit` / `maxIterations` termination.
+
+### Changed
+
+- **F3** — dependency floors bumped to the tested majors with upper
+  bounds added (`pandas<4`, `numpy<3`, `matplotlib<4`, `pyomo<7`,
+  `highspy<2`, `python-dateutil<3`, `openpyxl<4`, `Sphinx<10`).
+- **F4** — upfront `[mc-runtime-estimate]` Monte-Carlo runtime warning
+  and per-window rolling-horizon progress logging.
+
+### Tooling / docs / tests
+
+- **F8** — `ruff check` added as a CI lint gate ahead of pytest; two
+  unused imports removed.
+- **F7** — parametrized real-scale 9-invariant test across all six
+  mode × asset combinations.
+- **F10 / F11 / F12** — sheet-name and cross-reference fixes, output
+  layout listings updated with `06_uncertainty_plots/`, malformed
+  `inputs.rst` table repaired, and a bundle of P3 nits.
+- **Plots** — the `06_uncertainty_plots/` family standardised on
+  `DD-MM-YYYY` date ticks and `upper right` legends, with four new
+  diagnostic plots (coverage-by-horizon, PIT histogram, CRPS timeline,
+  residual Q-Q) behind the `uncertainty_diagnostics_enabled` flag.
 
 ## 0.8.9 — 2026-05-20
 

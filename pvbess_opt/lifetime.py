@@ -29,7 +29,7 @@ DataFrame carries a plausible datetime aligned with the
 Reconciliation invariant
 ------------------------
 
-``test_lifetime_dispatch.py`` asserts:
+``tests/test_lifetime.py`` asserts:
 
     sum(pv_kwh in lifetime[y]) / sum(pv_kwh in Year 1) ≈ pv_factor[y]
 

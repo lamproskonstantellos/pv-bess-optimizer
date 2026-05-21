@@ -579,6 +579,10 @@ def build_model(
     )
 
     # --- vnb-only constraints --------------------------------------------
+    # Merchant mode intentionally omits the no-simultaneous-grid-IO
+    # constraint (the y_grid_io binary below): the audit verified that
+    # simultaneous import/export never occurs in practice for merchant
+    # dispatch, so the constraint would be economically non-binding.
     if mode == "vnb":
         # Section 5 of the VNB spec — surplus-only export.
         # Substituting PV_SPLIT (pv = pv_to_load + pv_to_bess + pv_to_grid +

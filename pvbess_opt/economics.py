@@ -37,7 +37,8 @@ Sign convention
 * **CAPEX** rows are stored as **negative** numbers (cash outflow).
 * **OPEX** rows are stored as **negative** numbers (cash outflow).
 * **Revenue** rows are stored as **positive** numbers (cash inflow).
-* ``net_cashflow = revenue + opex + capex`` (sum of signed components).
+* ``net_cashflow = revenue + opex + capex + devex`` (sum of signed
+  components).
 
 References for default values
 -----------------------------

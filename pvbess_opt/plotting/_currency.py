@@ -1,15 +1,15 @@
 """Compact EUR formatter shared by every financial plot in :mod:`pvbess_opt.plotting.financial`.
 
 Replaces matplotlib's default scientific notation (``1e6``, ``1e7``)
-with a magnitude-aware string (``EUR 12.3M``, ``EUR 45k``, ``EUR 850``).
+with a magnitude-aware string (``€12.3M``, ``€45k``, ``€850``).
 The same helper drives the tornado-plot annotations so axes and labels
 speak the same language.
 
 Three modes:
 
 * ``auto``    — pick ``B`` / ``M`` / ``k`` / no-suffix automatically.
-* ``millions``— always render in millions (``EUR 0.5M``, ``EUR 12.3M``).
-* ``raw``     — full digits with thousands separators (``EUR 12,345,678``).
+* ``millions``— always render in millions (``€0.5M``, ``€12.3M``).
+* ``raw``     — full digits with thousands separators (``€12,345,678``).
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ def format_eur(
 
     Examples (auto mode)::
 
-        12_345_678  -> "EUR 12.3M"
-        45_000      -> "EUR 45k"
-        850         -> "EUR 850"
-        -3_200_000  -> "-EUR 3.2M"
+        12_345_678  -> "€12.3M"
+        45_000      -> "€45k"
+        850         -> "€850"
+        -3_200_000  -> "-€3.2M"
     """
     if value is None or (isinstance(value, float) and value != value):  # NaN
         return ""

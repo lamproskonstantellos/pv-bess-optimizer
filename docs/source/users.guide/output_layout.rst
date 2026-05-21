@@ -20,5 +20,10 @@ See :doc:`outputs` for the full reference.  Quick summary::
     │   ├── sensitivity_npv_tornado.pdf
     │   ├── sensitivity_irr_tornado.pdf
     │   └── rolling_horizon_distribution.pdf
-    └── 05_energy_plots/
-        └── <calendar_year>/{daily,monthly,yearly}/...
+    ├── 05_energy_plots/
+    │   └── <calendar_year>/{daily,monthly,yearly}/...
+    └── 06_uncertainty_plots/
+        ├── inputs_forecast_band.pdf
+        ├── inputs_seasonal_boxplot.pdf
+        ├── dam_intraday_heatmap.pdf
+        └── rolling_horizon_foresight_gap_comparison.pdf
