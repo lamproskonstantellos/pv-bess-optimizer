@@ -12,13 +12,13 @@ import pandas as pd
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
-from pvbess_opt.plotting import lifecycle as life_mod  # noqa: E402
-from pvbess_opt.plotting.lifecycle import (  # noqa: E402
+from pvbess_opt.plotting import lifecycle as life_mod
+from pvbess_opt.plotting.lifecycle import (
     plot_revenue_stack_yearly,
 )
-from pvbess_opt.plotting.style import (  # noqa: E402
+from pvbess_opt.plotting.style import (
     apply_universal_margins,
 )
 

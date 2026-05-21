@@ -29,9 +29,11 @@ from ..config import COLORS, FINANCIAL_COLORS
 from ._dates import apply_house_date_axis
 from .style import (
     apply_universal_margins,
-    empty_placeholder as _placeholder,
     save_figure,
     show_titles,
+)
+from .style import (
+    empty_placeholder as _placeholder,
 )
 
 _Z90 = 1.2816  # Phi^{-1}(0.90)
@@ -85,12 +87,12 @@ def plot_input_forecast_band(
             FINANCIAL_COLORS["revenue"],
         ))
 
-    fig, axes = plt.subplots(len(panels), 1, figsize=(7, 6.5), sharex=True)
+    _fig, axes = plt.subplots(len(panels), 1, figsize=(7, 6.5), sharex=True)
     if len(panels) == 1:
         axes = [axes]
 
     t = sub["timestamp"]
-    for ax, (col, ylabel, sigma, color) in zip(axes, panels):
+    for ax, (col, ylabel, sigma, color) in zip(axes, panels, strict=False):
         actual = sub[col].to_numpy(dtype=float)
         # Sign-aware band on DAM (preserves negative-price sign).
         if col == "dam_price_eur_per_mwh":
@@ -128,7 +130,7 @@ def plot_input_seasonal_boxplot(
     has_load = "load_kwh" in ts.columns
     n_panels = 3 if has_load else 2
 
-    fig, axes = plt.subplots(n_panels, 1, figsize=(7, 2.2 * n_panels))
+    _fig, axes = plt.subplots(n_panels, 1, figsize=(7, 2.2 * n_panels))
     if n_panels == 1:
         axes = [axes]
 
@@ -141,7 +143,7 @@ def plot_input_seasonal_boxplot(
             "load_kwh", "Load (kWh / step)", FINANCIAL_COLORS["revenue"],
         ))
 
-    for ax, (col, ylabel, color) in zip(axes, panels):
+    for ax, (col, ylabel, color) in zip(axes, panels, strict=False):
         data = [ts.loc[months == m, col].to_numpy(dtype=float)
                 for m in range(1, 13)]
         ax.boxplot(data, positions=range(1, 13), showfliers=False,
@@ -171,7 +173,7 @@ def plot_dam_intraday_heatmap(
     # 24×365 grid; aggregate by mean within each (doy, hod) cell so
     # 15-min DAM (constant per hour) collapses cleanly.
     grid = np.full((24, 365), np.nan)
-    for h, d, p in zip(hod, doy, dam):
+    for h, d, p in zip(hod, doy, dam, strict=False):
         if 1 <= d <= 365:
             r, c = h, d - 1
             cur = grid[r, c]
@@ -347,11 +349,11 @@ def plot_uncertainty_pit_histogram(
     if not panels:
         return _placeholder(out_path, "PIT histogram: no data.")
 
-    fig, axes = plt.subplots(len(panels), 1, figsize=(7, 2.2 * len(panels)))
+    _fig, axes = plt.subplots(len(panels), 1, figsize=(7, 2.2 * len(panels)))
     if len(panels) == 1:
         axes = [axes]
     rng = np.random.default_rng(base_seed)
-    for ax, (col, label, sigma, color) in zip(axes, panels):
+    for ax, (col, label, sigma, color) in zip(axes, panels, strict=False):
         actual = ts[col].to_numpy(dtype=float)
         median, sigma_step, realised, valid = _forecast_vs_realised(actual, sigma, rng)
         z = (realised[valid] - median[valid]) / sigma_step[valid]
@@ -429,11 +431,11 @@ def plot_uncertainty_residual_qq(
     if not panels:
         return _placeholder(out_path, "Residual Q-Q: no data.")
 
-    fig, axes = plt.subplots(len(panels), 1, figsize=(7, 2.4 * len(panels)))
+    _fig, axes = plt.subplots(len(panels), 1, figsize=(7, 2.4 * len(panels)))
     if len(panels) == 1:
         axes = [axes]
     rng = np.random.default_rng(base_seed)
-    for ax, (col, label, sigma, color) in zip(axes, panels):
+    for ax, (col, label, sigma, color) in zip(axes, panels, strict=False):
         actual = ts[col].to_numpy(dtype=float)
         median, sigma_step, realised, valid = _forecast_vs_realised(actual, sigma, rng)
         resid = np.sort((realised[valid] - median[valid]) / sigma_step[valid])

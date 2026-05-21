@@ -23,12 +23,12 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pytest
 
-import pvbess_opt.plotting.daily as daily_mod  # noqa: E402
+import pvbess_opt.plotting.daily as daily_mod
 
 
 def _make_dispatch_vnb(n_hours: int = 48) -> pd.DataFrame:

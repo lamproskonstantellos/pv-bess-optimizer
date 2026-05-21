@@ -48,7 +48,7 @@ def test_f5_invariant4_unrounded_full_year_bess_only():
     params["allow_bess_grid_charging"] = True
     params["mode"] = "vnb"
 
-    res, _, res_full = run_scenario(
+    _res, _, res_full = run_scenario(
         params, ts, solver_name="highs", mip_gap=0.01, time_limit_seconds=1800,
         return_unrounded=True,
     )

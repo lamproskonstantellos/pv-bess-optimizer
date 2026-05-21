@@ -47,7 +47,7 @@ def test_scope_combinations_3x3_truth_table():
 
 
 def test_econ_defaults_use_unified_vocabulary():
-    from pvbess_opt.io import SIMULATION_SHEET_DEFAULTS, _ALLOWED_VALUES
+    from pvbess_opt.io import _ALLOWED_VALUES, SIMULATION_SHEET_DEFAULTS
     daily_default = str(SIMULATION_SHEET_DEFAULTS["plot_daily_scope"]).lower()
     assert daily_default in {"none", "year1_only", "all"}
     expected = frozenset({"none", "year1_only", "all"})
@@ -59,6 +59,7 @@ def test_econ_defaults_use_unified_vocabulary():
 def test_main_dispatcher_drops_legacy_token():
     """main.py must not contain plot_daily_year1 outside the legacy path."""
     import inspect
+
     import main
     src = inspect.getsource(main)
     assert "plot_daily_year1" not in src
@@ -67,6 +68,7 @@ def test_main_dispatcher_drops_legacy_token():
 def test_warning_when_plot_daily_scope_is_all(caplog):
     """Selecting plot_daily_scope=all logs a WARNING with the PDF count."""
     import argparse
+
     from main import _resolve_uncertainty_config
 
     # Synthesize the args + econ a real run would produce.

@@ -328,8 +328,8 @@ def test_unavailability_derate_is_symmetric_between_cashflow_and_lifetime():
     be identical.  With unavailability_pct=1 the values must STILL
     match within float precision because main.py feeds the same
     derated year1_discharge_mwh into both."""
-    from pvbess_opt.economics import build_yearly_cashflow
     from pvbess_opt.availability import apply_unavailability_derate
+    from pvbess_opt.economics import build_yearly_cashflow
 
     res1 = _make_year1_dispatch()
     capacities = {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}

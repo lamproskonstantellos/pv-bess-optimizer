@@ -206,6 +206,7 @@ def test_repo_input_xlsx_loads_through_loader_cleanly(caplog):
     """inputs/input.xlsx must load through read_workbook with no
     legacy-key warnings."""
     import logging
+
     from pvbess_opt.io import read_workbook
 
     with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
@@ -253,6 +254,7 @@ def test_inputs_xlsx_uses_seven_sheet_schema():
 def test_pvbess_version_string_matches_init_version():
     """The version exposed by the package equals the README badge."""
     import re
+
     import pvbess_opt
 
     version = pvbess_opt.__version__

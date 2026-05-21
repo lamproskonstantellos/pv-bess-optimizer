@@ -222,7 +222,8 @@ def test_pv_only_no_pv_in_timeseries_still_works():
 
 def test_project_mode_label_setter_roundtrip():
     from pvbess_opt.plotting.style import (
-        get_project_mode_label, set_project_mode_label,
+        get_project_mode_label,
+        set_project_mode_label,
     )
     set_project_mode_label("PV-only")
     assert get_project_mode_label() == "PV-only"

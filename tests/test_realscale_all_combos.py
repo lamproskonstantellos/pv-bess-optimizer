@@ -82,7 +82,7 @@ def _assert_combo(mode: str, asset: str, params: dict, res_full):
 def test_realscale_combo_fastlane(mode, asset):
     """1-day slice — runs in the default fast lane for PR feedback."""
     base_params, ts = read_inputs("inputs/input.xlsx")
-    steps_per_day = int(round(24 * 60 / base_params["dt_minutes"]))
+    steps_per_day = round(24 * 60 / base_params["dt_minutes"])
     ts = ts.iloc[:steps_per_day].reset_index(drop=True)
     params = _params_for(mode, asset, base_params)
     _res, _solver, res_full = run_scenario(

@@ -13,21 +13,21 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.dates as mdates  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pytest
 
-from pvbess_opt.plotting import (  # noqa: E402
+from pvbess_opt.plotting import (
     plot_input_forecast_band,
     plot_uncertainty_coverage_by_horizon,
     plot_uncertainty_crps_timeline,
     plot_uncertainty_pit_histogram,
     plot_uncertainty_residual_qq,
 )
-from pvbess_opt.plotting._dates import DATE_FMT, apply_house_date_axis  # noqa: E402
-from pvbess_opt.plotting.inputs_uncertainty import (  # noqa: E402
+from pvbess_opt.plotting._dates import DATE_FMT, apply_house_date_axis
+from pvbess_opt.plotting.inputs_uncertainty import (
     LEGEND_KWARGS,
     LEGEND_LOC,
 )

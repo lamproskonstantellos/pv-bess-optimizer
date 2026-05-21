@@ -246,8 +246,9 @@ def test_loader_falls_back_to_default_when_sheet_missing(tmp_path):
 def test_loader_new_schema_takes_precedence_over_legacy(tmp_path):
     """Both sheets present → loader prefers the new schema and does NOT
     emit the legacy DeprecationWarning."""
-    import openpyxl
     import warnings as _w
+
+    import openpyxl
 
     typed_in = _minimal_typed()
     dst = tmp_path / "both.xlsx"

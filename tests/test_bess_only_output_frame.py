@@ -34,7 +34,7 @@ def _highs_available() -> bool:
 def _bess_only_one_day():
     """Default workbook, first day, PV nameplate zeroed but pv_kwh left in."""
     params, ts = read_inputs("inputs/input.xlsx")
-    steps_per_day = int(round(24 * 60 / params["dt_minutes"]))
+    steps_per_day = round(24 * 60 / params["dt_minutes"])
     ts = ts.iloc[:steps_per_day].reset_index(drop=True)
     params = dict(params)
     params["pv_nameplate_kwp"] = 0.0

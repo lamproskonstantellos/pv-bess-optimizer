@@ -44,15 +44,19 @@ from ..constants import (
 )
 from ._currency import (
     euro_axis_formatter,
+)
+from ._currency import (
     resolve_currency_format as _resolve_currency_format,
 )
 from .financial import _integer_year_axis
 from .style import (
     apply_fine_ticks,
     apply_universal_margins,
-    empty_placeholder as _empty_placeholder,
     save_figure,
     show_titles,
+)
+from .style import (
+    empty_placeholder as _empty_placeholder,
 )
 
 # ---------------------------------------------------------------------------

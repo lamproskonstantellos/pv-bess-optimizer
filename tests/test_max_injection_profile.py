@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvbess_opt.max_injection import build_per_step_max_injection_frac
 from pvbess_opt.io import (
     BESS_SHEET_DEFAULTS,
     ECONOMICS_SHEET_DEFAULTS,
@@ -18,6 +17,7 @@ from pvbess_opt.io import (
     read_workbook,
     write_workbook,
 )
+from pvbess_opt.max_injection import build_per_step_max_injection_frac
 from pvbess_opt.optimization import run_scenario
 
 
@@ -312,9 +312,9 @@ def test_loader_rejects_garbage_hour_of_day(tmp_path):
     from pvbess_opt.io import _parse_hour_of_day
     with pytest.raises(ValueError, match="cannot parse"):
         _parse_hour_of_day("not a time")
-    with pytest.raises(ValueError, match="must be in 0..23"):
+    with pytest.raises(ValueError, match=r"must be in 0\.\.23"):
         _parse_hour_of_day(24)
-    with pytest.raises(ValueError, match="must be in 0..23"):
+    with pytest.raises(ValueError, match=r"must be in 0\.\.23"):
         _parse_hour_of_day("99:00-100:00")
 
 

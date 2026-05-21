@@ -161,7 +161,10 @@ def build_lifetime_dispatch(
         )
     require_economic_columns(res_year1, context="build_lifetime_dispatch")
 
-    raw_n_years = econ.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+    raw_n_years = econ.get(
+        "project_lifecycle_years",
+        PROJECT_SHEET_DEFAULTS["project_lifecycle_years"],
+    )
     if raw_n_years is None:
         raw_n_years = PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
     n_years = int(raw_n_years)
@@ -243,7 +246,7 @@ def build_lifetime_dispatch(
             )
             if has_feb29:
                 shift = relativedelta(years=n_years_shift)
-                chunk["timestamp"] = ts_in.apply(lambda t: t + shift)
+                chunk["timestamp"] = ts_in.apply(lambda t, shift=shift: t + shift)
             else:
                 chunk["timestamp"] = ts_in + pd.DateOffset(
                     years=n_years_shift,

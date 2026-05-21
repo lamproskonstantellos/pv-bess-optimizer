@@ -17,8 +17,9 @@ EUR axes use the compact ``EUR 12.3M`` / ``EUR 45k`` formatter via
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,6 +31,8 @@ from ..sensitivity import DriverSensitivity, build_driver_sensitivities
 from ._currency import (
     euro_axis_formatter,
     format_eur,
+)
+from ._currency import (
     resolve_currency_format as _resolve_currency_format,
 )
 from .style import (
@@ -552,7 +555,7 @@ def _dumbbell_plot(
     red = FINANCIAL_COLORS["tornado_neg"]
     green = FINANCIAL_COLORS["tornado_pos"]
 
-    for i, (low, high) in enumerate(zip(lows, highs)):
+    for i, (low, high) in enumerate(zip(lows, highs, strict=False)):
         left, right = sorted((low, high))
         # Map each segment end to the absolute driver value that
         # produced it: ``low``/``high`` are the metric outcomes, so the
@@ -585,7 +588,7 @@ def _dumbbell_plot(
             ax.scatter([right], [i], s=64, color=colour_right,
                        edgecolor="black", linewidth=0.4, zorder=5)
             _annotate_dumbbell_endpoints(
-                ax, left, right, i, value_formatter,
+                ax, left, right, i,
                 left_driver_text=left_driver_text,
                 right_driver_text=right_driver_text,
             )
@@ -598,7 +601,7 @@ def _dumbbell_plot(
         ax.scatter([left, right], [i, i], s=64, color=colour_left,
                    edgecolor="black", linewidth=0.4, zorder=5)
         _annotate_dumbbell_endpoints(
-            ax, left, right, i, value_formatter,
+            ax, left, right, i,
             left_driver_text=left_driver_text,
             right_driver_text=right_driver_text,
         )
@@ -642,7 +645,6 @@ def _annotate_dumbbell_endpoints(
     left: float,
     right: float,
     row: int,
-    value_formatter: Callable[[float], str],
     *,
     left_driver_text: str | None = None,
     right_driver_text: str | None = None,

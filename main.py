@@ -34,10 +34,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pandas as pd
 
@@ -49,7 +50,6 @@ from pvbess_opt.economics import (
     derive_monthly_cashflow,
     read_economic_params,
 )
-from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
 from pvbess_opt.io import (
     PROJECT_SHEET_DEFAULTS,
     copy_input_snapshot,
@@ -110,6 +110,7 @@ from pvbess_opt.plotting import (
     set_scenario_label,
     set_show_titles,
 )
+from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
 from pvbess_opt.rolling_horizon import monte_carlo_rolling, rolling_horizon_dispatch
 from pvbess_opt.sensitivity import run_sensitivity_analysis
 
@@ -493,7 +494,12 @@ def _generate_financial_plots(
         econ.get("project_start_year", PROJECT_SHEET_DEFAULTS["project_start_year"])
         or PROJECT_SHEET_DEFAULTS["project_start_year"]
     )
-    end = start + int(econ.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) - 1
+    n_years = int(
+        econ.get("project_lifecycle_years",
+                 PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+        or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+    )
+    end = start + n_years - 1
     try:
         plot_cumulative_cashflow(
             yearly_cf, plots_dir / f"cumulative_cashflow_{start}-{end}.pdf",
@@ -801,7 +807,11 @@ def _run_one(
     # for a 25-year run.  Warn loudly so the user can interrupt before
     # the post-solve fan-out kicks in.
     if str(econ_pre.get("plot_daily_scope", "year1_only")).strip().lower() == "all":
-        n_years = int(econ_pre.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+        n_years = int(
+            econ_pre.get("project_lifecycle_years",
+                         PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+            or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+        )
         approx_pdfs = 365 * max(n_years, 1) * 3
         logger.warning(
             "plot_daily_scope='all' selected: ~%d daily PDFs will be "
@@ -1027,7 +1037,7 @@ def _run_one(
 
         _dt_min = int(params.get("dt_minutes", 60) or 60)
         _commit_steps = max(
-            1, int(round(int(unc_cfg["commit_hours"]) * 60 / _dt_min))
+            1, round(int(unc_cfg["commit_hours"]) * 60 / _dt_min)
         )
         _generate_uncertainty_plots(
             ts, layout["uncertainty_plots"],

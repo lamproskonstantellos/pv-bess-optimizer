@@ -144,7 +144,7 @@ def apply_legend(
                 idx = labels.index(desired)
                 ordered_handles.append(handles[idx])
                 ordered_labels.append(labels[idx])
-        for handle, label in zip(handles, labels):
+        for handle, label in zip(handles, labels, strict=False):
             if label not in ordered_labels:
                 ordered_handles.append(handle)
                 ordered_labels.append(label)

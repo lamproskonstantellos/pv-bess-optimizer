@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import math
 
-
 # ---------------------------------------------------------------------------
 # Project-level defaults
 # ---------------------------------------------------------------------------
@@ -404,7 +403,7 @@ def apply_financial_legend(ax, *, max_rows: int = 2, loc: str = "best") -> None:
     # benchmark bands when both rows share one ax).
     by_key: dict[str, list[tuple]] = {}
     extras: list[tuple] = []
-    for h, lab in zip(handles, labels):
+    for h, lab in zip(handles, labels, strict=False):
         key = _canonical_match_key(lab)
         if key is None:
             extras.append((h, lab))

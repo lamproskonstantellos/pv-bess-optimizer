@@ -2,11 +2,15 @@
 # Install with:
 #     pip install -r requirements/base.txt
 #
-# Floors are the majors the suite is tested against; upper bounds guard
-# against untested future majors (pandas 4 / numpy 3 / etc.).
+# Floors and ceilings both track the majors the suite is actually
+# exercised against: pandas 2.x and numpy 1.x.  The ceilings are kept
+# below the next major so an unvetted pandas 3 / numpy 2 is not pulled
+# in silently.
+# matplotlib>=3.10 is required for the boxplot ``orientation=`` /
+# ``tick_labels=`` keyword arguments used in the uncertainty plots.
 
-pandas>=2.2,<4
-numpy>=1.26,<3
+pandas>=2.2,<3
+numpy>=1.26,<2
 matplotlib>=3.10,<4
 openpyxl>=3.1,<4
 pyomo>=6.7,<7

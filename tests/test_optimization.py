@@ -66,7 +66,7 @@ def test_big_m_merchant_skips_load(short_params_merchant, short_ts):
 
 
 def test_vnb_solve_returns_dataframe(short_params, short_ts):
-    res, solver = run_scenario(
+    res, _solver = run_scenario(
         short_params, short_ts, solver_name="highs",
         mip_gap=0.01, time_limit_seconds=30,
     )

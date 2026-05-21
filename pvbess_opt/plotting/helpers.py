@@ -62,7 +62,7 @@ def pad_line_to_bins_end(left: pd.Series, width_days, y):
 def plot_stack_filtered(ax, x, series, labels, *, step_post: bool = False):
     """Draw a stackplot, dropping any series that is identically zero."""
     keep = []
-    for s, lab in zip(series, labels):
+    for s, lab in zip(series, labels, strict=False):
         total = np.nansum(np.asarray(s))
         if total > ZERO_THRESHOLD:
             keep.append((s, lab))
@@ -107,7 +107,7 @@ def fill_stacked_above(ax, x, base, series, labels, *, step_post: bool = False):
     """Stacked filled areas drawn above a base curve."""
     cum = np.nan_to_num(np.asarray(base, dtype=float), nan=0.0)
     artists = []
-    for s, lab in zip(series, labels):
+    for s, lab in zip(series, labels, strict=False):
         s = np.nan_to_num(np.asarray(s, dtype=float), nan=0.0)
         if np.nansum(s) <= ZERO_THRESHOLD:
             continue
@@ -131,7 +131,7 @@ def fill_stacked_above(ax, x, base, series, labels, *, step_post: bool = False):
 def bar_stacked_bins(ax, left, width_days, series, labels, *, bottom=None):
     """Stacked bars that exactly fill each bin width."""
     keep = []
-    for s, lab in zip(series, labels):
+    for s, lab in zip(series, labels, strict=False):
         arr = np.nan_to_num(np.asarray(s, dtype=float), nan=0.0)
         if np.nansum(arr) > ZERO_THRESHOLD:
             keep.append((arr, lab))

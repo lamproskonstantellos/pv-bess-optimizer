@@ -12,11 +12,12 @@ from ..config import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
 from ._currency import euro_axis_formatter
 from .style import (
     apply_universal_margins,
-    empty_placeholder as _empty_placeholder,
     save_figure,
     show_titles,
 )
-
+from .style import (
+    empty_placeholder as _empty_placeholder,
+)
 
 # Backwards-compatibility alias; the canonical palette is
 # :data:`pvbess_opt.config.UNCERTAINTY_SOURCE_COLORS`.
@@ -147,7 +148,7 @@ def plot_foresight_gap_comparison(
         data, orientation="horizontal", patch_artist=True, widths=0.6,
         tick_labels=sources,
     )
-    for patch, colour in zip(bplot["boxes"], colours):
+    for patch, colour in zip(bplot["boxes"], colours, strict=False):
         patch.set_facecolor(colour)
         patch.set_alpha(0.45)
         patch.set_edgecolor("black")

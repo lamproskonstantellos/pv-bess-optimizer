@@ -11,10 +11,10 @@ from pathlib import Path
 
 import matplotlib
 
-matplotlib.use("Agg")  # noqa: E402
+matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
+import matplotlib.pyplot as plt
+import pandas as pd
 
 from pvbess_opt.plotting.financial import plot_npv_waterfall
 
@@ -50,7 +50,7 @@ def _yearly_cf() -> pd.DataFrame:
 
 def _read_legend_labels(fig) -> set[str]:
     ax = fig.axes[0]
-    handles, labels = ax.get_legend_handles_labels()
+    _handles, labels = ax.get_legend_handles_labels()
     return set(labels)
 
 
