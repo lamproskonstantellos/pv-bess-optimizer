@@ -52,7 +52,11 @@ def verify_energy_balance(
     *,
     raise_on_failure: bool = False,
 ) -> dict[str, float]:
-    """Verify the per-step energy balances against the dispatch DataFrame."""
+    """Verify the per-step energy balances against the dispatch DataFrame.
+
+    Pass the full-precision frame from ``run_scenario(return_unrounded=True)``
+    to avoid round(4) accumulation in the per-step residuals.
+    """
     mode = str(params.get("mode", "vnb") or "vnb").lower()
 
     pv_residual = np.abs(

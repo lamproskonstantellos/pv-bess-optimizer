@@ -906,7 +906,17 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
 
     for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh", "retail_price_eur_per_mwh"):
         if col in ts.columns:
-            ts[col] = ts[col].astype(float).ffill().bfill()
+            numeric = ts[col].astype(float)
+            nan_mask = numeric.isna()
+            nan_count = int(nan_mask.sum())
+            if nan_count > 0:
+                first_nan = ts.loc[nan_mask.idxmax(), "timestamp"]
+                logger.warning(
+                    "Column '%s' had %d NaN value(s) filled via ffill/bfill; "
+                    "first NaN at %s. Check the input timeseries for gaps.",
+                    col, nan_count, first_nan,
+                )
+            ts[col] = numeric.ffill().bfill()
     # pv_kwh_override deliberately stays out of the ffill/bfill loop so
     # partial NaN survives long enough for _resolve_pv_column to raise.
     return ts

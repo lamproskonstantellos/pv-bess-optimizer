@@ -780,13 +780,15 @@ def _run_one(
 
         # Perfect-foresight base run (also serves as the rolling-horizon
         # benchmark when --rolling-horizon is on).
-        res, resolved_solver = run_scenario(
+        res, resolved_solver, res_full = run_scenario(
             params, ts, solver_name=args.solver,
             mip_gap=args.mip_gap, time_limit_seconds=args.time_limit,
-            tee=args.tee,
+            tee=args.tee, return_unrounded=True,
         )
+        # Verify on the full-precision frame so the sum-based invariant_4
+        # is not tripped by round(4) accumulation; KPIs / output use res.
         residuals = verify_energy_balance(
-            res, params, raise_on_failure=False,
+            res_full, params, raise_on_failure=False,
         )
         print(
             f"[verify] solver={resolved_solver}  residuals(kWh): "
@@ -794,7 +796,7 @@ def _run_one(
         )
 
         invariants = verify_dispatch_invariants(
-            res, params, mode=str(params.get("mode", "vnb")),
+            res_full, params, mode=str(params.get("mode", "vnb")),
         )
         print(
             "[invariants] "
