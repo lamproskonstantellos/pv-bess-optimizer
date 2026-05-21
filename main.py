@@ -772,6 +772,24 @@ def _run_one(
             approx_pdfs, n_years,
         )
 
+    # Upfront Monte-Carlo runtime estimate.  The default 30-seed ensemble
+    # takes ~1 h on a 4-vCPU machine; compare-sources (x4) ~4 h.  Warn
+    # before the solve so the user can interrupt.
+    if unc_cfg["enabled"] and unc_cfg["n_seeds"] > 0:
+        n_seeds = int(unc_cfg["n_seeds"])
+        n_sources = 4 if unc_cfg["compare_sources"] else 1
+        # ~126.5 s per full-year (35,040-step) seed; scale by the actual
+        # step count so coarser cadences / shorter horizons estimate lower.
+        per_seed_s = len(ts) / 35040.0 * 126.5
+        total_s = per_seed_s * n_seeds * n_sources
+        total_min = int(-(-total_s // 60))  # ceil to the nearest minute
+        logger.warning(
+            "[mc-runtime-estimate] rolling-horizon Monte-Carlo enabled: "
+            "%d seed(s) x %d source set(s) ~ %d min projected wall-clock "
+            "(~%.0f s/seed at %d steps).",
+            n_seeds, n_sources, total_min, per_seed_s, len(ts),
+        )
+
     with _tee_stdout_to_log(log_path):
         print(f"[run] mode={params.get('mode')}  "
               f"allow_bess_grid_charging={params.get('allow_bess_grid_charging')}  "
