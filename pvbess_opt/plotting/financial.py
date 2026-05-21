@@ -17,8 +17,9 @@ EUR axes use the compact ``EUR 12.3M`` / ``EUR 45k`` formatter via
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,12 +27,20 @@ import pandas as pd
 from matplotlib.ticker import MaxNLocator
 
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
+from ..io import PROJECT_SHEET_DEFAULTS
 from ..sensitivity import DriverSensitivity, build_driver_sensitivities
-from ._currency import euro_axis_formatter, format_eur
+from ._currency import (
+    euro_axis_formatter,
+    format_eur,
+)
+from ._currency import (
+    resolve_currency_format as _resolve_currency_format,
+)
 from .style import (
     annotate_value_safe,
     apply_fine_ticks,
     apply_universal_margins,
+    empty_placeholder,
     save_figure,
     show_titles,
 )
@@ -103,15 +112,6 @@ def _title_window(yearly_cf: pd.DataFrame) -> str:
 def _maybe_set_title(ax, text: str) -> None:
     if show_titles():
         ax.set_title(text)
-
-
-def _resolve_currency_format(econ: dict[str, Any] | None) -> str:
-    if econ is None:
-        return "auto"
-    raw = str(econ.get("currency_format", "auto") or "auto").strip().lower()
-    if raw not in ("auto", "millions", "raw"):
-        return "auto"
-    return raw
 
 
 def _apply_eur_yaxis(ax, econ: dict[str, Any] | None) -> None:
@@ -291,8 +291,9 @@ def plot_npv_waterfall(
     )
 
     ax.plot(
-        years, net_disc, color=financial_color("Net cash-flow"), linewidth=1.5,
-        marker="o", markersize=3, label="Net cash-flow",
+        years, net_disc,
+        color=financial_color("Net cash-flow (discounted)"), linewidth=1.5,
+        marker="o", markersize=3, label="Net cash-flow (discounted)",
     )
     ax.plot(
         years, cum_disc,
@@ -528,14 +529,7 @@ def _dumbbell_plot(
     out_path = Path(out_path)
 
     if pivot.empty:
-        plt.figure(figsize=(7, 4))
-        ax = plt.gca()
-        ax.text(0.5, 0.5, "Sensitivity disabled or empty.",
-                ha="center", va="center", fontsize=10,
-                transform=ax.transAxes)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        return save_figure(out_path)
+        return empty_placeholder(out_path, "Sensitivity disabled or empty.")
 
     drop_set = {label.strip().lower() for label in drop_labels}
     if drop_set:
@@ -545,14 +539,7 @@ def _dumbbell_plot(
     pivot = pivot.sort_values("impact", ascending=True)
 
     if pivot.empty:
-        plt.figure(figsize=(7, 4))
-        ax = plt.gca()
-        ax.text(0.5, 0.5, "No drivers with non-zero impact.",
-                ha="center", va="center", fontsize=10,
-                transform=ax.transAxes)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        return save_figure(out_path)
+        return empty_placeholder(out_path, "No drivers with non-zero impact.")
 
     labels = pivot.index.tolist()
     y_pos = np.arange(len(labels))
@@ -570,7 +557,7 @@ def _dumbbell_plot(
     red = FINANCIAL_COLORS["tornado_neg"]
     green = FINANCIAL_COLORS["tornado_pos"]
 
-    for i, (low, high) in enumerate(zip(lows, highs)):
+    for i, (low, high) in enumerate(zip(lows, highs, strict=False)):
         left, right = sorted((low, high))
         # Map each segment end to the absolute driver value that
         # produced it: ``low``/``high`` are the metric outcomes, so the
@@ -603,7 +590,7 @@ def _dumbbell_plot(
             ax.scatter([right], [i], s=64, color=colour_right,
                        edgecolor="black", linewidth=0.4, zorder=5)
             _annotate_dumbbell_endpoints(
-                ax, left, right, i, value_formatter,
+                ax, left, right, i,
                 left_driver_text=left_driver_text,
                 right_driver_text=right_driver_text,
             )
@@ -616,7 +603,7 @@ def _dumbbell_plot(
         ax.scatter([left, right], [i, i], s=64, color=colour_left,
                    edgecolor="black", linewidth=0.4, zorder=5)
         _annotate_dumbbell_endpoints(
-            ax, left, right, i, value_formatter,
+            ax, left, right, i,
             left_driver_text=left_driver_text,
             right_driver_text=right_driver_text,
         )
@@ -660,7 +647,6 @@ def _annotate_dumbbell_endpoints(
     left: float,
     right: float,
     row: int,
-    value_formatter: Callable[[float], str],
     *,
     left_driver_text: str | None = None,
     right_driver_text: str | None = None,
@@ -697,10 +683,16 @@ def _annotate_dumbbell_endpoints(
 
 def _econ_title_window(econ: dict[str, Any]) -> str:
     """Build the ``2026-2045 (CAPEX in 2025)`` fragment from the econ dict."""
-    start = int(econ.get("project_start_year", 0) or 0)
-    n = int(econ.get("project_lifecycle_years", 0) or 0)
-    if not start or not n:
-        return ""
+    start = int(
+        econ.get("project_start_year",
+                 PROJECT_SHEET_DEFAULTS["project_start_year"])
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
+    n = int(
+        econ.get("project_lifecycle_years",
+                 PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+        or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+    )
     end = start + n - 1
     capex_year = start - 1
     return f"{start}-{end} (CAPEX in {capex_year})"

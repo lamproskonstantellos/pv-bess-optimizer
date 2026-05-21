@@ -45,6 +45,8 @@ Python ≥ 3.11.
    technical.documentation/lifetime_scaling
    technical.documentation/mip_formulation
    technical.documentation/regulatory_framework
+   technical.documentation/asset_modes
+   technical.documentation/uncertainty_modelling
 
 .. toctree::
    :maxdepth: 2

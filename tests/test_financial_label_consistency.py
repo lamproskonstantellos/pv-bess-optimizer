@@ -17,29 +17,28 @@ from pathlib import Path
 
 import matplotlib
 
-matplotlib.use("Agg")  # noqa: E402
+matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
+import matplotlib.pyplot as plt
+import pandas as pd
+import pytest
 
-from pvbess_opt.config import (  # noqa: E402
+from pvbess_opt.config import (
     FINANCIAL_COLORS,
-    FINANCIAL_LABELS,
     FINANCIAL_LABEL_TO_COLOR_KEY,
+    FINANCIAL_LABELS,
     FINANCIAL_LEGEND_ORDER,
     apply_financial_legend,
     financial_color,
 )
-from pvbess_opt.plotting.financial import (  # noqa: E402
+from pvbess_opt.plotting.financial import (
     plot_cumulative_cashflow,
     plot_monthly_cashflow_year1,
     plot_npv_waterfall,
     plot_payback,
     plot_yearly_cashflow_bars,
 )
-from pvbess_opt.plotting.lifecycle import plot_revenue_stack_yearly  # noqa: E402
-
+from pvbess_opt.plotting.lifecycle import plot_revenue_stack_yearly
 
 # ---------------------------------------------------------------------------
 # Static contracts

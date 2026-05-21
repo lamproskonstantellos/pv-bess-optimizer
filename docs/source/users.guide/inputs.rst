@@ -124,8 +124,7 @@ Sheet ``simulation``
 --------------------
 
 * The 11 ``uncertainty_*`` keys driving the rolling-horizon Monte
-  Carlo (see
-  ``docs/technical.documentation/uncertainty_modelling.md``).
+  Carlo (see :doc:`/technical.documentation/uncertainty_modelling`).
 * ``plot_daily_scope`` / ``plot_monthly_scope`` /
   ``plot_yearly_scope`` ∈ ``none | year1_only | all``.
 * ``uncertainty_diagnostics_enabled`` (default ``TRUE``) — render the

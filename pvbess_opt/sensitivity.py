@@ -30,6 +30,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .constants import (
+    DEFAULT_SENSITIVITY_DELTA_PCT,
+    DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+)
 from .economics import build_yearly_cashflow, compute_financial_kpis
 
 
@@ -66,10 +70,19 @@ def variables_for_npv_sensitivity(
     econ: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Return the four canonical NPV-sensitivity variables."""
-    capex_d = float(econ.get("sensitivity_capex_delta_pct", 10.0)) / 100.0
-    opex_d = float(econ.get("sensitivity_opex_delta_pct", 10.0)) / 100.0
-    rev_d = float(econ.get("sensitivity_revenue_delta_pct", 10.0)) / 100.0
-    rate_d = float(econ.get("sensitivity_discount_rate_delta_pp", 2.0))
+    capex_d = float(
+        econ.get("sensitivity_capex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT)
+    ) / 100.0
+    opex_d = float(
+        econ.get("sensitivity_opex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT)
+    ) / 100.0
+    rev_d = float(
+        econ.get("sensitivity_revenue_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT)
+    ) / 100.0
+    rate_d = float(econ.get(
+        "sensitivity_discount_rate_delta_pp",
+        DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+    ))
     raw = [
         {"name": "CAPEX", "kind": "relative", "delta": capex_d,
          "label": "Total CAPEX"},
@@ -299,7 +312,7 @@ def run_sensitivity_analysis(
                 low_kpis = compute_financial_kpis(
                     low_cf, {**econ, "discount_rate_pct": low_value},
                 )
-            except Exception:
+            except (ValueError, ArithmeticError, KeyError, TypeError):
                 low_kpis = None
             try:
                 high_cf = _rebuild_with_discount_rate(
@@ -308,7 +321,7 @@ def run_sensitivity_analysis(
                 high_kpis = compute_financial_kpis(
                     high_cf, {**econ, "discount_rate_pct": high_value},
                 )
-            except Exception:
+            except (ValueError, ArithmeticError, KeyError, TypeError):
                 high_kpis = None
             _record(name, label, "base", 0.0, base_value, base_kpis)
             _record(name, label, "low", -delta, low_value, low_kpis)

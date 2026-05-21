@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def _highs_available() -> bool:
     try:
-        import highspy  # noqa: F401
+        import highspy
     except ImportError:
         return False
     return bool(highspy)
@@ -126,19 +126,20 @@ def test_repo_input_xlsx_headline_kpis_pinned():
 
     Tight tolerances pick up any sign error or fixture drift.
     """
-    from pvbess_opt.io import read_inputs
-    from pvbess_opt.optimization import run_scenario
-    from pvbess_opt.kpis import compute_kpis
     from pvbess_opt.availability import apply_unavailability_derate
     from pvbess_opt.economics import (
-        read_economic_params,
         build_yearly_cashflow,
-        derive_asset_capacities,
         compute_financial_kpis,
+        derive_asset_capacities,
+        read_economic_params,
     )
+    from pvbess_opt.io import read_inputs
+    from pvbess_opt.kpis import compute_kpis
     from pvbess_opt.lifetime import (
-        aggregate_lifetime_to_yearly, build_lifetime_dispatch,
+        aggregate_lifetime_to_yearly,
+        build_lifetime_dispatch,
     )
+    from pvbess_opt.optimization import run_scenario
 
     excel_path = ROOT / "inputs" / "input.xlsx"
     params, ts = read_inputs(excel_path)

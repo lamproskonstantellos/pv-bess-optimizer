@@ -71,14 +71,23 @@ are ignored:
 from __future__ import annotations
 
 import logging
+import re
 import warnings
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
+from .constants import (
+    BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOE_LOW_EUR_PER_MWH,
+    BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOS_LOW_EUR_PER_MWH,
+    DEFAULT_SENSITIVITY_DELTA_PCT,
+    DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,10 +146,9 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "bess_replacement_year": 0,
     "bess_replacement_cost_pct": 50.0,
     "bess_degradation_annual_pct": 2.0,
-    # Defaults to 0.0 so a workbook that omits the key (pre-v0.8.8) keeps
-    # pure calendar-fade behaviour.  The canonical workbook ships the row
-    # with the 0.008 LFP value (see _BESS_ROWS).
-    "bess_degradation_pct_per_cycle": 0.0,
+    # LFP cycle-fade default (matches the canonical workbook row in
+    # _BESS_ROWS and the schema default); range 0.005-0.010.
+    "bess_degradation_pct_per_cycle": 0.008,
 }
 
 ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
@@ -149,15 +157,15 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "retail_inflation_pct": 0.0,
     "dam_inflation_pct": 0.0,
     "aggregator_fee_pct_revenue": 10.0,
-    "benchmark_lcoe_low_eur_per_mwh": 30.0,
-    "benchmark_lcoe_high_eur_per_mwh": 85.0,
-    "benchmark_lcos_low_eur_per_mwh": 157.0,
-    "benchmark_lcos_high_eur_per_mwh": 274.0,
+    "benchmark_lcoe_low_eur_per_mwh": BENCHMARK_LCOE_LOW_EUR_PER_MWH,
+    "benchmark_lcoe_high_eur_per_mwh": BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
+    "benchmark_lcos_low_eur_per_mwh": BENCHMARK_LCOS_LOW_EUR_PER_MWH,
+    "benchmark_lcos_high_eur_per_mwh": BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
     "sensitivity_enabled": True,
-    "sensitivity_capex_delta_pct": 10.0,
-    "sensitivity_opex_delta_pct": 10.0,
-    "sensitivity_revenue_delta_pct": 10.0,
-    "sensitivity_discount_rate_delta_pp": 2.0,
+    "sensitivity_capex_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
+    "sensitivity_opex_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
+    "sensitivity_revenue_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
+    "sensitivity_discount_rate_delta_pp": DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
 }
 
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
@@ -377,27 +385,27 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("aggregator_fee_pct_revenue", 10.0, "%",
      "Aggregator fee on gross revenue (Gridcog convention; see public "
      "Gridcog cost / pricing docs)."),
-    ("benchmark_lcoe_low_eur_per_mwh", 30.0, "EUR/MWh",
+    ("benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
-    ("benchmark_lcoe_high_eur_per_mwh", 85.0, "EUR/MWh",
+    ("benchmark_lcoe_high_eur_per_mwh", BENCHMARK_LCOE_HIGH_EUR_PER_MWH, "EUR/MWh",
      "Upper edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD)."),
-    ("benchmark_lcos_low_eur_per_mwh", 157.0, "EUR/MWh",
+    ("benchmark_lcos_low_eur_per_mwh", BENCHMARK_LCOS_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale 4-hour Li-ion LCOS "
      "band (EUR-equivalent at ~1.08 EUR/USD)."),
-    ("benchmark_lcos_high_eur_per_mwh", 274.0, "EUR/MWh",
+    ("benchmark_lcos_high_eur_per_mwh", BENCHMARK_LCOS_HIGH_EUR_PER_MWH, "EUR/MWh",
      "Upper edge of the Lazard 2024 utility-scale 4-hour Li-ion LCOS "
      "band (EUR-equivalent at ~1.08 EUR/USD)."),
     ("sensitivity_enabled", True, "bool",
      "Run a one-at-a-time tornado sensitivity after the base run."),
-    ("sensitivity_capex_delta_pct", 10, "%",
+    ("sensitivity_capex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT, "%",
      "Symmetric +/- delta on total CAPEX (incl. DEVEX)."),
-    ("sensitivity_opex_delta_pct", 10, "%",
+    ("sensitivity_opex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT, "%",
      "Symmetric +/- delta on total annual OPEX."),
-    ("sensitivity_revenue_delta_pct", 10, "%",
+    ("sensitivity_revenue_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT, "%",
      "Symmetric +/- delta on Year-1 revenue base."),
-    ("sensitivity_discount_rate_delta_pp", 2.0, "pp",
+    ("sensitivity_discount_rate_delta_pp", DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP, "pp",
      "Symmetric +/- delta on the discount rate, in percentage points. "
      "NPV tornado only - drops out of IRR tornado by definition."),
 )
@@ -568,33 +576,6 @@ def _coerce(value: Any, cast: type, default: Any) -> Any:
         return cast(value)
     except (TypeError, ValueError):
         return _COERCE_FAILED
-
-
-def _get_param(
-    params: dict[str, Any],
-    keys: str | Iterable[str],
-    default: Any = None,
-    cast: type = float,
-) -> Any:
-    """Look up the first non-empty param under any of ``keys``, casting to ``cast``."""
-    if isinstance(keys, str):
-        keys = (keys,)
-    for key in keys:
-        if key in params:
-            value = params[key]
-            if isinstance(value, float) and np.isnan(value):
-                continue
-            if isinstance(value, str) and value.strip() == "":
-                continue
-            coerced = _coerce(value, cast, default)
-            if coerced is _COERCE_FAILED:
-                logger.warning(
-                    "Param %r could not be parsed as %s (got %r); using default %r.",
-                    key, getattr(cast, "__name__", str(cast)), value, default,
-                )
-                return default
-            return coerced
-    return default
 
 
 def _parse_bool(value: Any, default: bool) -> bool:
@@ -778,9 +759,7 @@ def _parse_kv_sheet(
 # ---------------------------------------------------------------------------
 
 
-import re as _re  # noqa: E402
-
-_HOUR_PARSE_RE = _re.compile(r"^\s*(\d{1,2})")
+_HOUR_PARSE_RE = re.compile(r"^\s*(\d{1,2})")
 
 
 def _parse_hour_of_day(value: Any) -> int:
@@ -1225,6 +1204,9 @@ def _typed_to_flat(
         "pv_nameplate_kwp": pv_nameplate_kwp,
         # project
         "p_grid_export_max_kw": p_grid_export_cap_milp,
+        # Contract fields: not consumed by the internal dispatch but part of
+        # the published params schema (asserted by the test suite / available
+        # to API consumers), so they are retained intentionally.
         "grid_export_unlimited": grid_export_unlimited,
         "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
         "settlement_minutes": int(project["settlement_minutes"]),
@@ -1378,6 +1360,34 @@ def write_dispatch_artifacts(
     return {"hourly_xlsx": out}
 
 
+def _flatten_kpis_for_sheet(kpis: dict[str, Any]) -> dict[str, Any]:
+    """Flatten nested-dict KPI values into prefixed scalar rows.
+
+    The ``kpis_year1`` sheet is a flat ``metric``/``value`` table, so a
+    nested dict (e.g. ``bess_utilization_diagnostics``) would otherwise be
+    stringified into a single ``{...}`` cell.  Each sub-key is hoisted to
+    its own row instead; the in-memory KPI dict keeps the nested form for
+    API consumers.
+    """
+    flat: dict[str, Any] = {}
+    for key, value in kpis.items():
+        if isinstance(value, dict):
+            prefix = (
+                "bess_util"
+                if key == "bess_utilization_diagnostics"
+                else key
+            )
+            for sub_key, sub_value in value.items():
+                if key == "bess_utilization_diagnostics":
+                    name = f"bess_util_{sub_key.removeprefix('bess_')}"
+                else:
+                    name = f"{prefix}_{sub_key}"
+                flat[name] = sub_value
+        else:
+            flat[key] = value
+    return flat
+
+
 def write_results_workbook(
     out_path: Path,
     res_year1: pd.DataFrame,
@@ -1399,7 +1409,8 @@ def write_results_workbook(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         pd.DataFrame(
-            list(kpis_year1.items()), columns=["metric", "value"],
+            list(_flatten_kpis_for_sheet(kpis_year1).items()),
+            columns=["metric", "value"],
         ).to_excel(writer, sheet_name="kpis_year1", index=False)
         if kpis_monthly_year1 is not None and not kpis_monthly_year1.empty:
             kpis_monthly_year1.reset_index(names="month").to_excel(

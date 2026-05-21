@@ -66,7 +66,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .constants import (
+    BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOE_LOW_EUR_PER_MWH,
+    BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOS_LOW_EUR_PER_MWH,
+)
 from .io import PROJECT_SHEET_DEFAULTS
+from .kpis import require_economic_columns
 from .lifetime import _bess_factor
 
 logger = logging.getLogger(__name__)
@@ -193,7 +200,10 @@ def build_yearly_cashflow(
     ``project_start_year - 1``; Years 1..N at
     ``project_start_year .. project_start_year + N - 1``.
     """
-    raw_n_years = econ.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+    raw_n_years = econ.get(
+        "project_lifecycle_years",
+        PROJECT_SHEET_DEFAULTS["project_lifecycle_years"],
+    )
     if raw_n_years is None:
         raw_n_years = PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
     n_years = int(raw_n_years)
@@ -408,12 +418,18 @@ def derive_monthly_cashflow(
     yearly_cf: pd.DataFrame,
     econ: dict[str, Any],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Derive monthly and quarterly cash-flows from the yearly projection."""
+    """Derive monthly and quarterly cash-flows from the yearly projection.
+
+    Requires ``compute_kpis`` to have been called first so the per-step
+    EUR columns are present on ``res``; raises otherwise rather than
+    silently defaulting revenue to zero.
+    """
     if not pd.api.types.is_datetime64_any_dtype(res["timestamp"]):
         raise ValueError(
             "derive_monthly_cashflow requires res['timestamp'] to be a "
             "datetime column."
         )
+    require_economic_columns(res, context="derive_monthly_cashflow")
 
     discount_rate = float(econ["discount_rate_pct"]) / 100.0
 
@@ -634,11 +650,17 @@ def compute_financial_kpis(
         project_start_year = int(df["calendar_year"].iloc[0])
         project_end_year = int(df["calendar_year"].iloc[-1])
     else:
-        project_start_year = int(econ.get("project_start_year", 0) or 0)
-        n_years = int(econ.get("project_lifecycle_years", 0) or 0)
-        project_end_year = (
-            project_start_year + n_years - 1 if project_start_year else 0
+        project_start_year = int(
+            econ.get("project_start_year",
+                     PROJECT_SHEET_DEFAULTS["project_start_year"])
+            or PROJECT_SHEET_DEFAULTS["project_start_year"]
         )
+        n_years = int(
+            econ.get("project_lifecycle_years",
+                     PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+            or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+        )
+        project_end_year = project_start_year + n_years - 1
 
     if "calendar_year" in df.columns and (df["project_year"] == 0).any():
         capex_year = int(
@@ -875,10 +897,14 @@ def compute_financial_kpis(
     # ---- LCOE / LCOS audit log --------------------------------------------
     # Single INFO line so the run_log.txt records the headline cost
     # numbers next to the Lazard 2024 reference bands.
-    lcoe_bench_low = float(econ.get("benchmark_lcoe_low_eur_per_mwh", 30.0))
-    lcoe_bench_high = float(econ.get("benchmark_lcoe_high_eur_per_mwh", 85.0))
-    lcos_bench_low = float(econ.get("benchmark_lcos_low_eur_per_mwh", 157.0))
-    lcos_bench_high = float(econ.get("benchmark_lcos_high_eur_per_mwh", 274.0))
+    lcoe_bench_low = float(econ.get(
+        "benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH))
+    lcoe_bench_high = float(econ.get(
+        "benchmark_lcoe_high_eur_per_mwh", BENCHMARK_LCOE_HIGH_EUR_PER_MWH))
+    lcos_bench_low = float(econ.get(
+        "benchmark_lcos_low_eur_per_mwh", BENCHMARK_LCOS_LOW_EUR_PER_MWH))
+    lcos_bench_high = float(econ.get(
+        "benchmark_lcos_high_eur_per_mwh", BENCHMARK_LCOS_HIGH_EUR_PER_MWH))
     lcoe_val = extras.get("lcoe_eur_per_mwh", float("nan"))
     lcos_val = extras.get("lcos_eur_per_mwh", float("nan"))
     cycles_val = extras.get("bess_lifetime_cycles", float("nan"))

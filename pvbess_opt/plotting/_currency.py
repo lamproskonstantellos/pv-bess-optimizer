@@ -14,9 +14,21 @@ Three modes:
 
 from __future__ import annotations
 
+from typing import Any
+
 from matplotlib.ticker import FuncFormatter
 
 EUR = "€"  # € — single Unicode point so the formatter is portable.
+
+
+def resolve_currency_format(econ: dict[str, Any] | None) -> str:
+    """Return a validated ``currency_format`` ('auto' | 'millions' | 'raw')."""
+    if econ is None:
+        return "auto"
+    raw = str(econ.get("currency_format", "auto") or "auto").strip().lower()
+    if raw not in ("auto", "millions", "raw"):
+        return "auto"
+    return raw
 
 
 def format_eur(
@@ -54,7 +66,9 @@ def format_eur(
     return f"{sign}{EUR}{abs_v:.0f}"
 
 
-def euro_axis_formatter(format_mode: str = "auto") -> FuncFormatter:
+def euro_axis_formatter(
+    format_mode: str = "auto", *, decimals: int = 1,
+) -> FuncFormatter:
     """Return a matplotlib ``FuncFormatter`` rendering ticks via :func:`format_eur`.
 
     Apply via::
@@ -63,8 +77,9 @@ def euro_axis_formatter(format_mode: str = "auto") -> FuncFormatter:
 
     The closure captures ``format_mode`` so callers can lock a plot
     into ``millions`` or ``raw`` while the rest of the run uses
-    ``auto``.
+    ``auto``.  ``decimals`` controls the magnitude-suffix precision
+    (default 1, preserving the historical ``€12.3M`` style).
     """
     def _fmt(x: float, _pos: int) -> str:
-        return format_eur(float(x), format_mode, decimals=1)
+        return format_eur(float(x), format_mode, decimals=decimals)
     return FuncFormatter(_fmt)

@@ -13,7 +13,6 @@ from pvbess_opt.rolling_horizon import (
     rolling_horizon_dispatch,
 )
 
-
 # ---------------------------------------------------------------------------
 # Forecast noise — sign-aware, commit-protected
 # ---------------------------------------------------------------------------
@@ -200,7 +199,7 @@ def test_rh_curtailment_cap_holds_per_window(_rh_short):
 
 def test_rh_kpi_reevaluation_uses_actual_prices(short_params, short_ts):
     """With evaluate_with_actuals=True, the realised profit uses original prices."""
-    full_actuals, kpis_actuals = rolling_horizon_dispatch(
+    _full_actuals, kpis_actuals = rolling_horizon_dispatch(
         short_params, short_ts.iloc[:48].reset_index(drop=True),
         window_hours=24, commit_hours=12,
         forecast_seed=7,
@@ -214,13 +213,13 @@ def test_rh_kpi_reevaluation_uses_actual_prices(short_params, short_ts):
 
 def test_rh_deterministic_when_seed_none(short_params, short_ts):
     """forecast_seed=None gives a deterministic noiseless RH (reproducible)."""
-    full1, kpis1 = rolling_horizon_dispatch(
+    _full1, kpis1 = rolling_horizon_dispatch(
         short_params, short_ts.iloc[:48].reset_index(drop=True),
         window_hours=24, commit_hours=12,
         forecast_seed=None,
         solver_name="highs", mip_gap=0.01, time_limit_seconds=30,
     )
-    full2, kpis2 = rolling_horizon_dispatch(
+    _full2, kpis2 = rolling_horizon_dispatch(
         short_params, short_ts.iloc[:48].reset_index(drop=True),
         window_hours=24, commit_hours=12,
         forecast_seed=None,
@@ -307,7 +306,7 @@ def test_monte_carlo_columns(short_params, short_ts):
 
 def test_rh_merchant_mode_parity(short_params_merchant, short_ts):
     """Rolling horizon works end-to-end in merchant mode."""
-    full, kpis = rolling_horizon_dispatch(
+    full, _kpis = rolling_horizon_dispatch(
         short_params_merchant, short_ts,
         window_hours=24, commit_hours=12,
         forecast_seed=7,

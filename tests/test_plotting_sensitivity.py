@@ -14,12 +14,12 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
+import matplotlib.pyplot as plt
+import pandas as pd
+import pytest
 
-from pvbess_opt.plotting import financial as fin_mod  # noqa: E402
-from pvbess_opt.plotting.financial import (  # noqa: E402
+from pvbess_opt.plotting import financial as fin_mod
+from pvbess_opt.plotting.financial import (
     _format_driver_value,
     plot_irr_tornado,
     plot_npv_tornado,
@@ -289,7 +289,7 @@ def test_tornado_labels_outside_bar(tmp_path, monkeypatch):
         ys = ln.get_ydata()
         if abs(ys[0] - ys[1]) > 1e-6:
             continue
-        row = int(round(ys[0]))
+        row = round(ys[0])
         lo, hi = sorted(map(float, xs))
         cur = row_range.setdefault(row, [lo, hi])
         cur[0] = min(cur[0], lo)
@@ -298,7 +298,7 @@ def test_tornado_labels_outside_bar(tmp_path, monkeypatch):
 
     for t in _endpoint_texts(ax):
         _, y = t.get_position()
-        row = int(round(y))
+        row = round(y)
         if row not in row_range:
             continue
         x_left, x_right = row_range[row]

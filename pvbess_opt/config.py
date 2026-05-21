@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import math
 
-
 # ---------------------------------------------------------------------------
 # Project-level defaults
 # ---------------------------------------------------------------------------
@@ -32,7 +31,6 @@ ALL_LABELS: list[str] = [
     "PV→Grid (export)",
     "BESS→Grid (export)",
     "PV→Curtailment",
-    "Export cap",
 ]
 
 COLORS: dict[str, str] = {
@@ -51,8 +49,6 @@ COLORS: dict[str, str] = {
     # Grid-origin flows (slate)
     "Import→Load": "#607D8B",
     "Import→BESS (charge)": "#B0BEC5",
-    # Annotations
-    "Export cap": "#7f7f7f",
 }
 
 # ---------------------------------------------------------------------------
@@ -76,15 +72,6 @@ MERCHANT_COLORS: dict[str, str] = {
     "BESS→Grid (revenue)": COLORS["BESS→Grid (export)"],
     "Import→BESS (cost)":  COLORS["Import→BESS (charge)"],
 }
-
-
-def merchant_color(label: str) -> str:
-    """Return the hex colour for a merchant revenue-plot label.
-
-    Raises ``KeyError`` for unknown labels so typos surface at plot
-    time rather than silently producing an off-palette colour.
-    """
-    return MERCHANT_COLORS[label]
 
 
 def label_color(label: str) -> str | None:
@@ -114,7 +101,6 @@ LEGEND_ORDER: list[str] = [
     "BESS→Grid (export)",
     "Import→Load",
     "Import→BESS (charge)",
-    "Export cap",
 ]
 
 # Stack alphas for area / bar plots
@@ -162,9 +148,6 @@ IEEE_RCPARAMS: dict[str, object] = {
     "figure.figsize": (3.5, 2.5),
 }
 
-# Default IEEE figure size for PDF export.
-PDF_FIGSIZE: tuple[float, float] = (3.5, 2.5)
-
 
 def assert_unique_colors() -> None:
     """Sanity check: every label has a colour, no colour is reused."""
@@ -196,6 +179,7 @@ FINANCIAL_COLORS: dict[str, str] = {
     "devex":          "#8E44AD",  # Material purple
     "net":            "#1565C0",  # Material blue 800
     "discounted":     "#6A1B9A",  # Material purple 800
+    "net_discounted": "#283593",  # Material indigo 800 (discounted net line)
     # Tornado halves (below / above base)
     "tornado_neg":    "#B71C1C",  # Material red 900
     "tornado_pos":    "#1B5E20",  # Material green 900
@@ -289,6 +273,7 @@ assert_unique_financial_colors()
 FINANCIAL_LABELS: tuple[str, ...] = (
     # Lines / markers
     "Net cash-flow",
+    "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
     "Cumulative NPV",
@@ -316,6 +301,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
 # both read off ``net`` vs ``discounted`` consistently).
 FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Net cash-flow":                    "net",
+    "Net cash-flow (discounted)":       "net_discounted",
     "Cumulative cash-flow":             "net",
     "Cumulative discounted cash-flow":  "discounted",
     "Cumulative NPV":                   "discounted",
@@ -342,6 +328,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
 FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     # Lines first (headline series)
     "Net cash-flow",
+    "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
     "Cumulative NPV",
@@ -420,7 +407,7 @@ def apply_financial_legend(ax, *, max_rows: int = 2, loc: str = "best") -> None:
     # benchmark bands when both rows share one ax).
     by_key: dict[str, list[tuple]] = {}
     extras: list[tuple] = []
-    for h, lab in zip(handles, labels):
+    for h, lab in zip(handles, labels, strict=False):
         key = _canonical_match_key(lab)
         if key is None:
             extras.append((h, lab))

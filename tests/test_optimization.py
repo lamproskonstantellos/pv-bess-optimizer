@@ -66,7 +66,7 @@ def test_big_m_merchant_skips_load(short_params_merchant, short_ts):
 
 
 def test_vnb_solve_returns_dataframe(short_params, short_ts):
-    res, solver = run_scenario(
+    res, _solver = run_scenario(
         short_params, short_ts, solver_name="highs",
         mip_gap=0.01, time_limit_seconds=30,
     )
@@ -144,9 +144,9 @@ def test_initial_soc_kwh_override(short_params, short_ts):
 
 
 def test_invalid_mode_raises():
-    from pvbess_opt.optimization import _resolve_mode
+    from pvbess_opt.modes import resolve_mode
     with pytest.raises(ValueError, match="Unknown mode"):
-        _resolve_mode({"mode": "bogus"})
+        resolve_mode({"mode": "bogus"})
 
 
 # ---------------------------------------------------------------------------

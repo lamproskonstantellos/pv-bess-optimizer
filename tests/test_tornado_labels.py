@@ -15,10 +15,10 @@ import pandas as pd
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
-from pvbess_opt.plotting import financial as fin_mod  # noqa: E402
-from pvbess_opt.plotting.financial import plot_irr_tornado  # noqa: E402
+from pvbess_opt.plotting import financial as fin_mod
+from pvbess_opt.plotting.financial import plot_irr_tornado
 
 
 def _econ() -> dict:
@@ -88,7 +88,7 @@ def test_endpoint_labels_match_axis_position(tmp_path, monkeypatch):
         x_data, y_data = txt.get_position()
         if abs(y_data - round(y_data)) > 1e-6:
             continue
-        by_row.setdefault(int(round(y_data)), []).append(
+        by_row.setdefault(round(y_data), []).append(
             (float(x_data), txt.get_text())
         )
 
@@ -163,10 +163,10 @@ def _bbox_labels_by_row(ax) -> dict[int, list]:
     for txt in ax.texts:
         if not txt.get_bbox_patch():
             continue
-        x_data, y_data = txt.get_position()
+        _x_data, y_data = txt.get_position()
         if abs(y_data - round(y_data)) > 1e-6:
             continue
-        out.setdefault(int(round(y_data)), []).append(txt)
+        out.setdefault(round(y_data), []).append(txt)
     return out
 
 

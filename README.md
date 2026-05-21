@@ -176,8 +176,8 @@ Setting `pv_nameplate_kwp = 0` makes the project BESS-only;
 to zero raises `ValueError` from `read_inputs`.
 
 See `docs/source/users.guide/inputs.rst` for the full reference and
-`docs/technical.documentation/uncertainty_modelling.md` plus
-`docs/technical.documentation/asset_modes.md` for the technical
+`docs/source/technical.documentation/uncertainty_modelling.rst` plus
+`docs/source/technical.documentation/asset_modes.rst` for the technical
 notes.
 
 ## CLI

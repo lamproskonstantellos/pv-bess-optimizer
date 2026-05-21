@@ -11,10 +11,10 @@ from pathlib import Path
 
 import matplotlib
 
-matplotlib.use("Agg")  # noqa: E402
+matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
+import matplotlib.pyplot as plt
+import pandas as pd
 
 from pvbess_opt.plotting.financial import plot_npv_waterfall
 
@@ -50,7 +50,7 @@ def _yearly_cf() -> pd.DataFrame:
 
 def _read_legend_labels(fig) -> set[str]:
     ax = fig.axes[0]
-    handles, labels = ax.get_legend_handles_labels()
+    _handles, labels = ax.get_legend_handles_labels()
     return set(labels)
 
 
@@ -90,8 +90,11 @@ def test_npv_waterfall_legend_has_all_components(tmp_path: Path):
     fig = _render_npv_waterfall(tmp_path)
     ax = fig.axes[0]
     _, labels = ax.get_legend_handles_labels()
+    # The waterfall's net line is discounted (it sums to the NPV), so its
+    # label is explicitly "(discounted)" to distinguish it from the
+    # undiscounted "Net cash-flow" in plot_yearly_cashflow_bars.
     expected = {"Revenue", "OPEX", "DEVEX", "CAPEX",
-                "Net cash-flow", "Cumulative NPV"}
+                "Net cash-flow (discounted)", "Cumulative NPV"}
     assert expected.issubset(set(labels)), (
         f"plot_npv_waterfall missing legend entries: "
         f"{expected - set(labels)}"

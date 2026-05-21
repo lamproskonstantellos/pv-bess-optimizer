@@ -7,6 +7,17 @@ Public entry points:
     pvbess_opt.optimization.verify_dispatch_invariants(res, params)
     pvbess_opt.kpis.compute_kpis(res, params)
     pvbess_opt.availability.apply_unavailability_derate(...)
+
+Ordering contract:
+    ``compute_kpis`` (via ``kpis.add_economic_columns``) writes the
+    per-step EUR columns onto the dispatch frame.  The financial
+    pipeline — ``economics.derive_monthly_cashflow``,
+    ``lifetime.build_lifetime_dispatch``,
+    ``lifetime.aggregate_lifetime_to_yearly`` — depends on those
+    columns and raises ``ValueError`` if they are missing rather than
+    silently defaulting revenue to zero.  Always call ``compute_kpis``
+    before any of those financial entry points.
+
     pvbess_opt.max_injection.build_per_step_max_injection_frac(...)
     pvbess_opt.rolling_horizon.rolling_horizon_dispatch(...)
     pvbess_opt.rolling_horizon.monte_carlo_rolling(...)

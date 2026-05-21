@@ -15,7 +15,7 @@ import pytest
 
 from pvbess_opt.kpis import compute_kpis
 from pvbess_opt.optimization import run_scenario
-from tests._pv_helpers import hourly_canonical_pv_window  # noqa: E402
+from tests._pv_helpers import hourly_canonical_pv_window
 
 
 def _surplus_ts(n_hours: int = 168) -> pd.DataFrame:

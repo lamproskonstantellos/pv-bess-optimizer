@@ -24,7 +24,7 @@ ATB 2024 reports ~99 % availability for fixed-tilt PV).
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 
 def availability_factor(unavailability_pct: float) -> float:

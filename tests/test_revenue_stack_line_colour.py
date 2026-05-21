@@ -14,8 +14,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
+import matplotlib.pyplot as plt
+import pandas as pd
 
 from pvbess_opt.config import FINANCIAL_COLORS
 from pvbess_opt.plotting.lifecycle import plot_revenue_stack_yearly
@@ -180,7 +180,7 @@ def test_revenue_stack_sums_to_net_line(tmp_path: Path):
     xs = net_line.get_xdata()
     ys = net_line.get_ydata()
 
-    for x, y in zip(xs, ys):
+    for x, y in zip(xs, ys, strict=False):
         stacked = sums[round(float(x))]
         assert abs(stacked - float(y)) < 1.0e-6, (
             f"Year {x}: stack sum {stacked} != net line {y}"

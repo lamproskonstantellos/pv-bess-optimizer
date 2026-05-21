@@ -14,9 +14,9 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
-from pvbess_opt.plotting.lifecycle import (  # noqa: E402
+from pvbess_opt.plotting.lifecycle import (
     BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH,
     BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH,
     plot_lcoe_summary,

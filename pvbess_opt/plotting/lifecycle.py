@@ -35,13 +35,28 @@ import numpy as np
 import pandas as pd
 
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
-from ._currency import euro_axis_formatter
+from ..constants import (
+    BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOE_LOW_EUR_PER_MWH,
+    BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOS_LOW_EUR_PER_MWH,
+    DEFAULT_SENSITIVITY_DELTA_PCT,
+)
+from ._currency import (
+    euro_axis_formatter,
+)
+from ._currency import (
+    resolve_currency_format as _resolve_currency_format,
+)
 from .financial import _integer_year_axis
 from .style import (
     apply_fine_ticks,
     apply_universal_margins,
     save_figure,
     show_titles,
+)
+from .style import (
+    empty_placeholder as _empty_placeholder,
 )
 
 # ---------------------------------------------------------------------------
@@ -60,18 +75,15 @@ from .style import (
 # Workbook overrides: the four benchmark_lcoe_* / benchmark_lcos_* keys
 # in the economics sheet override these per-project.
 
-BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH: tuple[float, float] = (30.0, 85.0)
+BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH: tuple[float, float] = (
+    BENCHMARK_LCOE_LOW_EUR_PER_MWH, BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
+)
 
-BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH: tuple[float, float] = (157.0, 274.0)
+BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH: tuple[float, float] = (
+    BENCHMARK_LCOS_LOW_EUR_PER_MWH, BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
+)
 
 
-def _resolve_currency_format(econ: dict[str, Any] | None) -> str:
-    if econ is None:
-        return "auto"
-    raw = str(econ.get("currency_format", "auto") or "auto").strip().lower()
-    if raw not in ("auto", "millions", "raw"):
-        return "auto"
-    return raw
 
 
 def plot_revenue_stack_yearly(
@@ -299,8 +311,12 @@ def plot_lifetime_cycles(
 
 
 def _sensitivity_factors(econ: dict[str, Any]) -> tuple[float, float]:
-    capex_d = float(econ.get("sensitivity_capex_delta_pct", 10.0)) / 100.0
-    opex_d = float(econ.get("sensitivity_opex_delta_pct", 10.0)) / 100.0
+    capex_d = float(
+        econ.get("sensitivity_capex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT)
+    ) / 100.0
+    opex_d = float(
+        econ.get("sensitivity_opex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT)
+    ) / 100.0
     return (1.0 - capex_d) * (1.0 - opex_d), (1.0 + capex_d) * (1.0 + opex_d)
 
 
@@ -414,16 +430,6 @@ def plot_lcos_summary(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _empty_placeholder(out_path: Path, message: str) -> Path:
-    plt.figure(figsize=(7, 4))
-    ax = plt.gca()
-    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=10,
-            transform=ax.transAxes)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    return save_figure(out_path)
 
 
 def _draw_benchmark_row(

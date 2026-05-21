@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
 from tests._pv_helpers import hourly_canonical_pv_window  # noqa: E402
 
 
-def pytest_configure(config):  # noqa: D401  -- pytest hook
+def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "slow: tests that exercise the real-scale workbook (~minutes wall-clock)",

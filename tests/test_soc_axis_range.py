@@ -22,14 +22,14 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pytest
 
-import pvbess_opt.plotting.daily as daily_mod  # noqa: E402
-import pvbess_opt.plotting.monthly as monthly_mod  # noqa: E402
-import pvbess_opt.plotting.yearly as yearly_mod  # noqa: E402
+import pvbess_opt.plotting.daily as daily_mod
+import pvbess_opt.plotting.monthly as monthly_mod
+import pvbess_opt.plotting.yearly as yearly_mod
 
 CAPACITY_KWH = 50_000.0
 EXPECTED_LEFT_TICKS = list(np.arange(0, 101, 10).astype(float))

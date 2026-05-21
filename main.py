@@ -34,14 +34,15 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pandas as pd
 
-from pvbess_opt.availability import apply_unavailability_derate
+from pvbess_opt.availability import apply_unavailability_derate, availability_factor
 from pvbess_opt.economics import (
     build_yearly_cashflow,
     compute_financial_kpis,
@@ -49,7 +50,6 @@ from pvbess_opt.economics import (
     derive_monthly_cashflow,
     read_economic_params,
 )
-from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
 from pvbess_opt.io import (
     PROJECT_SHEET_DEFAULTS,
     copy_input_snapshot,
@@ -59,8 +59,14 @@ from pvbess_opt.io import (
     write_dispatch_artifacts,
     write_results_workbook,
 )
-from pvbess_opt.kpis import compute_kpis, compute_monthly_kpis, verify_energy_balance
+from pvbess_opt.kpis import (
+    ENERGY_TOLERANCE,
+    compute_kpis,
+    compute_monthly_kpis,
+    verify_energy_balance,
+)
 from pvbess_opt.lifetime import aggregate_lifetime_to_yearly, build_lifetime_dispatch
+from pvbess_opt.modes import resolve_mode
 from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
 from pvbess_opt.plotting import (
     apply_ieee_style,
@@ -104,6 +110,7 @@ from pvbess_opt.plotting import (
     set_scenario_label,
     set_show_titles,
 )
+from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
 from pvbess_opt.rolling_horizon import monte_carlo_rolling, rolling_horizon_dispatch
 from pvbess_opt.sensitivity import run_sensitivity_analysis
 
@@ -487,7 +494,12 @@ def _generate_financial_plots(
         econ.get("project_start_year", PROJECT_SHEET_DEFAULTS["project_start_year"])
         or PROJECT_SHEET_DEFAULTS["project_start_year"]
     )
-    end = start + int(econ.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) - 1
+    n_years = int(
+        econ.get("project_lifecycle_years",
+                 PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+        or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+    )
+    end = start + n_years - 1
     try:
         plot_cumulative_cashflow(
             yearly_cf, plots_dir / f"cumulative_cashflow_{start}-{end}.pdf",
@@ -604,9 +616,8 @@ def _build_financials(
     # Post-solve unavailability derate on the lifetime
     # totals (PV generation and BESS discharge) so LCOE / LCOS
     # denominators reflect the realistic operating envelope.
-    avail_factor = max(
-        0.0,
-        min(1.0, 1.0 - float(econ.get("unavailability_pct", 0.0) or 0.0) / 100.0),
+    avail_factor = availability_factor(
+        float(econ.get("unavailability_pct", 0.0) or 0.0)
     )
     if avail_factor < 1.0 and not lifetime_yearly.empty:
         for col in (
@@ -647,13 +658,13 @@ def _build_financials(
 
 def _scenario_slug(params: dict[str, Any]) -> str:
     """Return the ``<mode>[_grid_ch]`` folder slug."""
-    mode = str(params.get("mode", "vnb")).lower()
+    mode = resolve_mode(params)
     suffix = "_grid_ch" if params.get("allow_bess_grid_charging") else ""
     return f"{mode}{suffix}"
 
 
 def _check_strict_invariants(invariants: dict[str, float]) -> None:
-    tol = 1.0e-3
+    tol = ENERGY_TOLERANCE
     # Invariant 6 is an integer count and piggybacks on the same tol;
     # the smallest non-zero count is 1, which trivially exceeds tol=1e-3.
     offenders = {
@@ -789,14 +800,18 @@ def _run_one(
     # resolved before the perfect-foresight solve produces its KPIs.
     econ_pre = read_economic_params(Path(args.excel))
     unc_cfg = _resolve_uncertainty_config(
-        args, econ_pre, mode=str(params.get("mode", "vnb")).lower(),
+        args, econ_pre, mode=resolve_mode(params),
     )
 
     # plot_daily_scope = "all" with a long horizon produces ~9 000 PDFs
     # for a 25-year run.  Warn loudly so the user can interrupt before
     # the post-solve fan-out kicks in.
     if str(econ_pre.get("plot_daily_scope", "year1_only")).strip().lower() == "all":
-        n_years = int(econ_pre.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+        n_years = int(
+            econ_pre.get("project_lifecycle_years",
+                         PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+            or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+        )
         approx_pdfs = 365 * max(n_years, 1) * 3
         logger.warning(
             "plot_daily_scope='all' selected: ~%d daily PDFs will be "
@@ -847,7 +862,7 @@ def _run_one(
         )
 
         invariants = verify_dispatch_invariants(
-            res_full, params, mode=str(params.get("mode", "vnb")).lower(),
+            res_full, params, mode=resolve_mode(params),
         )
         print(
             "[invariants] "
@@ -1017,12 +1032,12 @@ def _run_one(
             res, bundle.get("lifetime_df"), bundle.get("lifetime_yearly"),
             econ,
             layout["energy_plots"],
-            mode=str(params.get("mode", "vnb")).lower(),
+            mode=resolve_mode(params),
         )
 
         _dt_min = int(params.get("dt_minutes", 60) or 60)
         _commit_steps = max(
-            1, int(round(int(unc_cfg["commit_hours"]) * 60 / _dt_min))
+            1, round(int(unc_cfg["commit_hours"]) * 60 / _dt_min)
         )
         _generate_uncertainty_plots(
             ts, layout["uncertainty_plots"],

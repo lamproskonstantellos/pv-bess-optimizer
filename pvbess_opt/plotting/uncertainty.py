@@ -10,22 +10,14 @@ import pandas as pd
 
 from ..config import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
 from ._currency import euro_axis_formatter
-from .style import apply_universal_margins, save_figure, show_titles
-
-
-# Backwards-compatibility alias; the canonical palette is
-# :data:`pvbess_opt.config.UNCERTAINTY_SOURCE_COLORS`.
-_SOURCE_SET_COLORS = UNCERTAINTY_SOURCE_COLORS
-
-
-def _empty_placeholder(out_path: Path, message: str) -> Path:
-    plt.figure(figsize=(7, 4))
-    ax = plt.gca()
-    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=10,
-            transform=ax.transAxes)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    return save_figure(out_path)
+from .style import (
+    apply_universal_margins,
+    save_figure,
+    show_titles,
+)
+from .style import (
+    empty_placeholder as _empty_placeholder,
+)
 
 
 def plot_rolling_horizon_distribution(
@@ -55,7 +47,7 @@ def plot_rolling_horizon_distribution(
         fallback_colour = COLORS["BESS→Grid (export)"]
         for source_set, group in mc_df.groupby("source_set"):
             profits = group["profit_total_eur"].astype(float).to_numpy()
-            colour = _SOURCE_SET_COLORS.get(str(source_set), fallback_colour)
+            colour = UNCERTAINTY_SOURCE_COLORS.get(str(source_set), fallback_colour)
             ax.hist(
                 profits,
                 bins=max(10, len(profits) // 3),
@@ -142,15 +134,17 @@ def plot_foresight_gap_comparison(
     sources = sorted(grouped, key=lambda s: float(np.median(grouped[s])))
     data = [grouped[s] for s in sources]
     fallback_colour = COLORS["BESS→Grid (export)"]
-    colours = [_SOURCE_SET_COLORS.get(s, fallback_colour) for s in sources]
+    colours = [UNCERTAINTY_SOURCE_COLORS.get(s, fallback_colour) for s in sources]
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
+    # ``orientation=`` / ``tick_labels=`` require matplotlib >= 3.9; the
+    # project pins matplotlib >= 3.10 in requirements/base.txt.
     bplot = ax.boxplot(
         data, orientation="horizontal", patch_artist=True, widths=0.6,
         tick_labels=sources,
     )
-    for patch, colour in zip(bplot["boxes"], colours):
+    for patch, colour in zip(bplot["boxes"], colours, strict=False):
         patch.set_facecolor(colour)
         patch.set_alpha(0.45)
         patch.set_edgecolor("black")

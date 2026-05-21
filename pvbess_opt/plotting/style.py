@@ -97,6 +97,17 @@ def save_figure_daily(figpath: Path, date_str: str) -> Path:
     return save_figure(target)
 
 
+def empty_placeholder(out_path: Path, message: str) -> Path:
+    """Render a centered-message placeholder figure (empty-input guard)."""
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=10,
+            transform=ax.transAxes)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    return save_figure(out_path)
+
+
 # ---------------------------------------------------------------------------
 # Legends
 # ---------------------------------------------------------------------------
@@ -133,7 +144,7 @@ def apply_legend(
                 idx = labels.index(desired)
                 ordered_handles.append(handles[idx])
                 ordered_labels.append(labels[idx])
-        for handle, label in zip(handles, labels):
+        for handle, label in zip(handles, labels, strict=False):
             if label not in ordered_labels:
                 ordered_handles.append(handle)
                 ordered_labels.append(label)
@@ -212,22 +223,6 @@ def annotate_value_safe(
         ha=ha, va=va, fontsize=fontsize, color=color,
         bbox=bbox_kwargs,
     )
-
-
-def expand_axes_for_annotations(ax, *, pad: float = 0.05) -> None:
-    """Enlarge the current xlim / ylim by ``pad`` so bbox annotations
-    placed near the data edges do not clip outside the frame.
-
-    Idempotent enough for normal use: re-running with a small pad
-    won't drift the axes.  Call at the END of a plotting function,
-    after every annotation has been placed.
-    """
-    xmin, xmax = ax.get_xlim()
-    ymin, ymax = ax.get_ylim()
-    dx = pad * (xmax - xmin) if xmax > xmin else pad
-    dy = pad * (ymax - ymin) if ymax > ymin else pad
-    ax.set_xlim(xmin - dx, xmax + dx)
-    ax.set_ylim(ymin - dy, ymax + dy)
 
 
 # ---------------------------------------------------------------------------

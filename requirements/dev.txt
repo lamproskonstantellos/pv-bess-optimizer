@@ -16,4 +16,6 @@ pyflakes>=3.1
 pycodestyle>=2.11
 
 # Tests
-pytest>=7.4
+# Cap below the next major above the currently resolved version (9.x) so
+# a future pytest 10 with breaking changes is not pulled in untested.
+pytest>=7.4,<10

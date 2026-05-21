@@ -15,14 +15,14 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-import pytest  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pytest
 
-import pvbess_opt.plotting.daily as daily_mod  # noqa: E402
-import pvbess_opt.plotting.monthly as monthly_mod  # noqa: E402
-import pvbess_opt.plotting.yearly as yearly_mod  # noqa: E402
+import pvbess_opt.plotting.daily as daily_mod
+import pvbess_opt.plotting.monthly as monthly_mod
+import pvbess_opt.plotting.yearly as yearly_mod
 
 _DAYS_IN_MONTH = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
                    7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}

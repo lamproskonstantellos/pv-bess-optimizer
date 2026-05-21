@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pvbess-optimizer"
+description = "PV + BESS dispatch optimizer (MILP) with project-finance pipeline."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dynamic = ["version", "dependencies"]
+
+[tool.setuptools]
+packages = ["pvbess_opt", "pvbess_opt.plotting"]
+py-modules = ["main"]
+
+[tool.setuptools.dynamic]
+version = { attr = "pvbess_opt.__version__" }
+dependencies = { file = ["requirements/base.txt"] }
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["F", "E", "I", "B", "UP", "ARG", "RUF"]
+# The codebase uses Unicode intentionally and meaningfully: energy-flow
+# labels such as "PV→Load" are dict keys in the colour registry, prices
+# use the € sign, and the docs reference Greek regulatory terms.  The
+# ambiguous-unicode rules would flag (and tempt auto-rewrites of) these,
+# so they are disabled.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest fixtures are injected by parameter name and frequently requested
+# only for their side effects (caplog, tmp_path, monkeypatch), so they read
+# as "unused arguments" but cannot be renamed.
+"tests/**" = ["ARG001", "ARG002"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = [
+    "slow: tests that exercise the real-scale workbook (~minutes wall-clock)",
+]

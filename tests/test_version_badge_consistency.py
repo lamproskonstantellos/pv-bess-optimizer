@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pvbess_opt
 
-
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
 

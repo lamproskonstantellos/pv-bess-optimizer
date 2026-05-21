@@ -5,22 +5,33 @@ Use this when your raw inputs have different native resolutions
 regular timestep, and :func:`pvbess_opt.io.detect_timestep_minutes` raises
 when it sees mixed step sizes.
 
+Columns fall into two kinds, resampled in opposite ways:
+
+* **Flows** — energy columns (``load_kwh``, ``pv_kwh``) accumulate over
+  their interval, so the *total* must be conserved across a resolution
+  change. Upsampling (e.g. 60→15 min) splits each native value equally
+  across the finer sub-intervals (1-h kWh → 4 × kWh/4). Downsampling
+  (e.g. 15→60 min) **sums** the sub-intervals, so
+  ``[10, 20, 30, 40] kWh`` at 15 min → ``100 kWh`` at 60 min.
+* **Stocks** — price columns (``dam_price_eur_per_mwh``,
+  ``retail_price_eur_per_mwh``) are instantaneous levels, not totals.
+  Upsampling forward-fills (prices are piecewise-constant over their
+  native period); downsampling takes the **mean** over the coarser
+  interval.
+
 The resampler:
 
 * detects the native resolution of each numeric column;
-* upsamples *prices* (``dam_price_eur_per_mwh``,
-  ``retail_price_eur_per_mwh``) by forward-filling — prices are
-  piecewise-constant over their native period;
-* upsamples *energy* columns (``load_kwh``, ``pv_kwh``) by splitting
-  each native value equally across the finer-grained intervals (e.g.
-  1-h kWh → 4 × kWh/4 in 15-min intervals);
+* resamples flows and stocks per the rules above;
 * writes the result to a new workbook (or overwrites the source with
   ``--in-place``) keeping the ``project`` / ``economic`` sheets
   untouched.
 
 Usage::
 
+    # Upsample 60→15 min: each hourly kWh is split into 4 equal quarters.
     python scripts/resample_timeseries.py input.xlsx --target-minutes 15
+    # Downsample 15→60 min: four 15-min kWh values are summed per hour.
     python scripts/resample_timeseries.py input.xlsx --target-minutes 60 \\
         --out resampled.xlsx
 """
@@ -77,9 +88,16 @@ def _resample_column(
 ) -> pd.Series:
     """Resample one column to ``target_minutes`` using the right aggregation.
 
-    ``kind`` is either ``"price"`` (forward-fill) or ``"energy"`` (split
-    equally across sub-intervals).  Other columns pass through unchanged
-    when they already match the target step.
+    ``kind`` selects the conservation rule:
+
+    * ``"energy"`` — a *flow*; the total is conserved. Upsampling splits
+      each native value equally across the finer sub-intervals;
+      downsampling sums the sub-intervals.
+    * ``"price"`` — a *stock* (instantaneous level). Upsampling
+      forward-fills; downsampling takes the mean over the coarser bin.
+
+    Other columns pass through unchanged when they already match the
+    target step.
     """
     src_minutes = _detect_native_minutes(series, idx)
     if src_minutes == 0 or src_minutes == target_minutes:
@@ -87,24 +105,30 @@ def _resample_column(
 
     resampled = series.copy()
     resampled.index = idx
+    # target finer than source ⇒ upsampling; coarser ⇒ downsampling.
+    upsampling = target_minutes < src_minutes
+
     if kind == "price":
-        # Forward-fill at native resolution then reindex.
-        target_idx = pd.date_range(
-            idx.min(), idx.max(), freq=f"{target_minutes}min",
-        )
-        resampled = resampled.reindex(target_idx, method="ffill")
-        return resampled
+        if upsampling:
+            target_idx = pd.date_range(
+                idx.min(), idx.max(), freq=f"{target_minutes}min",
+            )
+            return resampled.reindex(target_idx, method="ffill")
+        # Downsample a stock: average the native levels in each bin.
+        return resampled.resample(f"{target_minutes}min").mean()
     if kind == "energy":
-        # Split the source value equally across the sub-intervals.
-        ratio = src_minutes / target_minutes
-        if ratio <= 0:
-            return series
-        target_idx = pd.date_range(
-            idx.min(), idx.max(), freq=f"{target_minutes}min",
-        )
-        resampled = resampled.reindex(target_idx, method="ffill")
-        resampled = resampled / ratio
-        return resampled
+        if upsampling:
+            # Split the source value equally across the sub-intervals so
+            # the total energy is conserved.
+            ratio = src_minutes / target_minutes
+            if ratio <= 0:
+                return series
+            target_idx = pd.date_range(
+                idx.min(), idx.max(), freq=f"{target_minutes}min",
+            )
+            return resampled.reindex(target_idx, method="ffill") / ratio
+        # Downsample a flow: sum the sub-intervals so the total is conserved.
+        return resampled.resample(f"{target_minutes}min").sum()
     return series
 
 

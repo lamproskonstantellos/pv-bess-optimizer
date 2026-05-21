@@ -62,6 +62,10 @@ import pandas as pd
 import pyomo.environ as pyo
 from pyomo.opt import SolverStatus, TerminationCondition
 
+from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
+from .kpis import ENERGY_TOLERANCE
+from .modes import resolve_mode
+
 logger = logging.getLogger(__name__)
 
 
@@ -187,7 +191,7 @@ def _check_solver_status(result, solver_name: str, model=None) -> None:
             return
         raise RuntimeError(
             f"Solver '{solver_name}' hit {condition} with no feasible "
-            "incumbent — increase --solver-time-limit or relax --mip-gap."
+            "incumbent — increase --time-limit or relax --mip-gap."
         )
     raise RuntimeError(
         f"Solver '{solver_name}' did not produce an acceptable solution: "
@@ -209,14 +213,19 @@ def _resolve_max_injection_per_step(
     (24,) or (24, 12) array of max-injection percentages (default flat
     profile when the workbook omits the sheet).  This resolver expands
     it to a per-timestep fraction in [0, 1].  When no profile is
-    supplied the fallback is 1.0 (no cap).
+    supplied the fallback is the canonical
+    :data:`~pvbess_opt.config.DEFAULT_MAX_INJECTION_PCT_HOURLY` (as a
+    fraction) — matching the loader's default — rather than an
+    inconsistent no-cap 1.0.
     """
     from .max_injection import build_per_step_max_injection_frac
 
     profile = params.get("max_injection_profile")
     if profile is not None and "timestamp" in ts.columns:
         return build_per_step_max_injection_frac(ts["timestamp"], profile)
-    return np.ones(len(ts), dtype=float)
+    return np.full(
+        len(ts), DEFAULT_MAX_INJECTION_PCT_HOURLY / 100.0, dtype=float,
+    )
 
 
 def derive_tight_big_m(
@@ -254,13 +263,6 @@ def derive_tight_big_m(
 # ---------------------------------------------------------------------------
 # Model construction
 # ---------------------------------------------------------------------------
-
-
-def _resolve_mode(params: dict[str, Any]) -> str:
-    mode = str(params.get("mode", "vnb") or "vnb").strip().lower()
-    if mode not in ("vnb", "merchant"):
-        raise ValueError(f"Unknown mode {mode!r}; expected 'vnb' or 'merchant'.")
-    return mode
 
 
 def build_model(
@@ -307,7 +309,7 @@ def build_model(
     if n_steps == 0:
         raise ValueError("timeseries is empty; nothing to optimise.")
     time_index = range(n_steps)
-    mode = _resolve_mode(params)
+    mode = resolve_mode(params)
     pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
     bess_present = float(params.get("bess_power_kw", 0.0) or 0.0) > 0.0
     allow_grid_charge = (
@@ -818,7 +820,7 @@ def verify_dispatch_invariants(
     params: dict[str, Any],
     *,
     mode: str | None = None,
-    tol_kwh: float = 1.0e-3,
+    tol_kwh: float = ENERGY_TOLERANCE,
 ) -> dict[str, float]:
     """Check the nine audit invariants on a solved dispatch.
 
@@ -839,7 +841,7 @@ def verify_dispatch_invariants(
             ``invariant_9_pv_load_priority_kwh``  (vnb only; Section 2)
     """
     if mode is None:
-        mode = _resolve_mode(params)
+        mode = resolve_mode(params)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
 
