@@ -41,7 +41,7 @@ from typing import Any, Iterator
 
 import pandas as pd
 
-from pvbess_opt.availability import apply_unavailability_derate
+from pvbess_opt.availability import apply_unavailability_derate, availability_factor
 from pvbess_opt.economics import (
     build_yearly_cashflow,
     compute_financial_kpis,
@@ -59,8 +59,14 @@ from pvbess_opt.io import (
     write_dispatch_artifacts,
     write_results_workbook,
 )
-from pvbess_opt.kpis import compute_kpis, compute_monthly_kpis, verify_energy_balance
+from pvbess_opt.kpis import (
+    ENERGY_TOLERANCE,
+    compute_kpis,
+    compute_monthly_kpis,
+    verify_energy_balance,
+)
 from pvbess_opt.lifetime import aggregate_lifetime_to_yearly, build_lifetime_dispatch
+from pvbess_opt.modes import resolve_mode
 from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
 from pvbess_opt.plotting import (
     apply_ieee_style,
@@ -604,9 +610,8 @@ def _build_financials(
     # Post-solve unavailability derate on the lifetime
     # totals (PV generation and BESS discharge) so LCOE / LCOS
     # denominators reflect the realistic operating envelope.
-    avail_factor = max(
-        0.0,
-        min(1.0, 1.0 - float(econ.get("unavailability_pct", 0.0) or 0.0) / 100.0),
+    avail_factor = availability_factor(
+        float(econ.get("unavailability_pct", 0.0) or 0.0)
     )
     if avail_factor < 1.0 and not lifetime_yearly.empty:
         for col in (
@@ -647,13 +652,13 @@ def _build_financials(
 
 def _scenario_slug(params: dict[str, Any]) -> str:
     """Return the ``<mode>[_grid_ch]`` folder slug."""
-    mode = str(params.get("mode", "vnb")).lower()
+    mode = resolve_mode(params)
     suffix = "_grid_ch" if params.get("allow_bess_grid_charging") else ""
     return f"{mode}{suffix}"
 
 
 def _check_strict_invariants(invariants: dict[str, float]) -> None:
-    tol = 1.0e-3
+    tol = ENERGY_TOLERANCE
     # Invariant 6 is an integer count and piggybacks on the same tol;
     # the smallest non-zero count is 1, which trivially exceeds tol=1e-3.
     offenders = {
@@ -789,7 +794,7 @@ def _run_one(
     # resolved before the perfect-foresight solve produces its KPIs.
     econ_pre = read_economic_params(Path(args.excel))
     unc_cfg = _resolve_uncertainty_config(
-        args, econ_pre, mode=str(params.get("mode", "vnb")).lower(),
+        args, econ_pre, mode=resolve_mode(params),
     )
 
     # plot_daily_scope = "all" with a long horizon produces ~9 000 PDFs
@@ -847,7 +852,7 @@ def _run_one(
         )
 
         invariants = verify_dispatch_invariants(
-            res_full, params, mode=str(params.get("mode", "vnb")).lower(),
+            res_full, params, mode=resolve_mode(params),
         )
         print(
             "[invariants] "
@@ -1017,7 +1022,7 @@ def _run_one(
             res, bundle.get("lifetime_df"), bundle.get("lifetime_yearly"),
             econ,
             layout["energy_plots"],
-            mode=str(params.get("mode", "vnb")).lower(),
+            mode=resolve_mode(params),
         )
 
         _dt_min = int(params.get("dt_minutes", 60) or 60)

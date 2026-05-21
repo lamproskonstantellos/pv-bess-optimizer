@@ -79,6 +79,14 @@ import numpy as np
 import pandas as pd
 
 from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
+from .constants import (
+    BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOE_LOW_EUR_PER_MWH,
+    BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOS_LOW_EUR_PER_MWH,
+    DEFAULT_SENSITIVITY_DELTA_PCT,
+    DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,15 +157,15 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "retail_inflation_pct": 0.0,
     "dam_inflation_pct": 0.0,
     "aggregator_fee_pct_revenue": 10.0,
-    "benchmark_lcoe_low_eur_per_mwh": 30.0,
-    "benchmark_lcoe_high_eur_per_mwh": 85.0,
-    "benchmark_lcos_low_eur_per_mwh": 157.0,
-    "benchmark_lcos_high_eur_per_mwh": 274.0,
+    "benchmark_lcoe_low_eur_per_mwh": BENCHMARK_LCOE_LOW_EUR_PER_MWH,
+    "benchmark_lcoe_high_eur_per_mwh": BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
+    "benchmark_lcos_low_eur_per_mwh": BENCHMARK_LCOS_LOW_EUR_PER_MWH,
+    "benchmark_lcos_high_eur_per_mwh": BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
     "sensitivity_enabled": True,
-    "sensitivity_capex_delta_pct": 10.0,
-    "sensitivity_opex_delta_pct": 10.0,
-    "sensitivity_revenue_delta_pct": 10.0,
-    "sensitivity_discount_rate_delta_pp": 2.0,
+    "sensitivity_capex_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
+    "sensitivity_opex_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
+    "sensitivity_revenue_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
+    "sensitivity_discount_rate_delta_pp": DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
 }
 
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
@@ -377,27 +385,27 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("aggregator_fee_pct_revenue", 10.0, "%",
      "Aggregator fee on gross revenue (Gridcog convention; see public "
      "Gridcog cost / pricing docs)."),
-    ("benchmark_lcoe_low_eur_per_mwh", 30.0, "EUR/MWh",
+    ("benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
-    ("benchmark_lcoe_high_eur_per_mwh", 85.0, "EUR/MWh",
+    ("benchmark_lcoe_high_eur_per_mwh", BENCHMARK_LCOE_HIGH_EUR_PER_MWH, "EUR/MWh",
      "Upper edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD)."),
-    ("benchmark_lcos_low_eur_per_mwh", 157.0, "EUR/MWh",
+    ("benchmark_lcos_low_eur_per_mwh", BENCHMARK_LCOS_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale 4-hour Li-ion LCOS "
      "band (EUR-equivalent at ~1.08 EUR/USD)."),
-    ("benchmark_lcos_high_eur_per_mwh", 274.0, "EUR/MWh",
+    ("benchmark_lcos_high_eur_per_mwh", BENCHMARK_LCOS_HIGH_EUR_PER_MWH, "EUR/MWh",
      "Upper edge of the Lazard 2024 utility-scale 4-hour Li-ion LCOS "
      "band (EUR-equivalent at ~1.08 EUR/USD)."),
     ("sensitivity_enabled", True, "bool",
      "Run a one-at-a-time tornado sensitivity after the base run."),
-    ("sensitivity_capex_delta_pct", 10, "%",
+    ("sensitivity_capex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT, "%",
      "Symmetric +/- delta on total CAPEX (incl. DEVEX)."),
-    ("sensitivity_opex_delta_pct", 10, "%",
+    ("sensitivity_opex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT, "%",
      "Symmetric +/- delta on total annual OPEX."),
-    ("sensitivity_revenue_delta_pct", 10, "%",
+    ("sensitivity_revenue_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT, "%",
      "Symmetric +/- delta on Year-1 revenue base."),
-    ("sensitivity_discount_rate_delta_pp", 2.0, "pp",
+    ("sensitivity_discount_rate_delta_pp", DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP, "pp",
      "Symmetric +/- delta on the discount rate, in percentage points. "
      "NPV tornado only - drops out of IRR tornado by definition."),
 )

@@ -66,6 +66,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .constants import (
+    BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOE_LOW_EUR_PER_MWH,
+    BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
+    BENCHMARK_LCOS_LOW_EUR_PER_MWH,
+)
 from .io import PROJECT_SHEET_DEFAULTS
 from .kpis import require_economic_columns
 from .lifetime import _bess_factor
@@ -882,10 +888,14 @@ def compute_financial_kpis(
     # ---- LCOE / LCOS audit log --------------------------------------------
     # Single INFO line so the run_log.txt records the headline cost
     # numbers next to the Lazard 2024 reference bands.
-    lcoe_bench_low = float(econ.get("benchmark_lcoe_low_eur_per_mwh", 30.0))
-    lcoe_bench_high = float(econ.get("benchmark_lcoe_high_eur_per_mwh", 85.0))
-    lcos_bench_low = float(econ.get("benchmark_lcos_low_eur_per_mwh", 157.0))
-    lcos_bench_high = float(econ.get("benchmark_lcos_high_eur_per_mwh", 274.0))
+    lcoe_bench_low = float(econ.get(
+        "benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH))
+    lcoe_bench_high = float(econ.get(
+        "benchmark_lcoe_high_eur_per_mwh", BENCHMARK_LCOE_HIGH_EUR_PER_MWH))
+    lcos_bench_low = float(econ.get(
+        "benchmark_lcos_low_eur_per_mwh", BENCHMARK_LCOS_LOW_EUR_PER_MWH))
+    lcos_bench_high = float(econ.get(
+        "benchmark_lcos_high_eur_per_mwh", BENCHMARK_LCOS_HIGH_EUR_PER_MWH))
     lcoe_val = extras.get("lcoe_eur_per_mwh", float("nan"))
     lcos_val = extras.get("lcos_eur_per_mwh", float("nan"))
     cycles_val = extras.get("bess_lifetime_cycles", float("nan"))

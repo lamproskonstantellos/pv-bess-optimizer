@@ -14,9 +14,21 @@ Three modes:
 
 from __future__ import annotations
 
+from typing import Any
+
 from matplotlib.ticker import FuncFormatter
 
 EUR = "€"  # € — single Unicode point so the formatter is portable.
+
+
+def resolve_currency_format(econ: dict[str, Any] | None) -> str:
+    """Return a validated ``currency_format`` ('auto' | 'millions' | 'raw')."""
+    if econ is None:
+        return "auto"
+    raw = str(econ.get("currency_format", "auto") or "auto").strip().lower()
+    if raw not in ("auto", "millions", "raw"):
+        return "auto"
+    return raw
 
 
 def format_eur(

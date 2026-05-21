@@ -62,6 +62,9 @@ import pandas as pd
 import pyomo.environ as pyo
 from pyomo.opt import SolverStatus, TerminationCondition
 
+from .kpis import ENERGY_TOLERANCE
+from .modes import resolve_mode
+
 logger = logging.getLogger(__name__)
 
 
@@ -256,13 +259,6 @@ def derive_tight_big_m(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_mode(params: dict[str, Any]) -> str:
-    mode = str(params.get("mode", "vnb") or "vnb").strip().lower()
-    if mode not in ("vnb", "merchant"):
-        raise ValueError(f"Unknown mode {mode!r}; expected 'vnb' or 'merchant'.")
-    return mode
-
-
 def build_model(
     params: dict[str, Any],
     ts: pd.DataFrame,
@@ -307,7 +303,7 @@ def build_model(
     if n_steps == 0:
         raise ValueError("timeseries is empty; nothing to optimise.")
     time_index = range(n_steps)
-    mode = _resolve_mode(params)
+    mode = resolve_mode(params)
     pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
     bess_present = float(params.get("bess_power_kw", 0.0) or 0.0) > 0.0
     allow_grid_charge = (
@@ -818,7 +814,7 @@ def verify_dispatch_invariants(
     params: dict[str, Any],
     *,
     mode: str | None = None,
-    tol_kwh: float = 1.0e-3,
+    tol_kwh: float = ENERGY_TOLERANCE,
 ) -> dict[str, float]:
     """Check the nine audit invariants on a solved dispatch.
 
@@ -839,7 +835,7 @@ def verify_dispatch_invariants(
             ``invariant_9_pv_load_priority_kwh``  (vnb only; Section 2)
     """
     if mode is None:
-        mode = _resolve_mode(params)
+        mode = resolve_mode(params)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
 

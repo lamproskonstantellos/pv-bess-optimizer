@@ -10,7 +10,12 @@ import pandas as pd
 
 from ..config import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
 from ._currency import euro_axis_formatter
-from .style import apply_universal_margins, save_figure, show_titles
+from .style import (
+    apply_universal_margins,
+    empty_placeholder as _empty_placeholder,
+    save_figure,
+    show_titles,
+)
 
 
 # Backwards-compatibility alias; the canonical palette is
@@ -18,14 +23,6 @@ from .style import apply_universal_margins, save_figure, show_titles
 _SOURCE_SET_COLORS = UNCERTAINTY_SOURCE_COLORS
 
 
-def _empty_placeholder(out_path: Path, message: str) -> Path:
-    plt.figure(figsize=(7, 4))
-    ax = plt.gca()
-    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=10,
-            transform=ax.transAxes)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    return save_figure(out_path)
 
 
 def plot_rolling_horizon_distribution(

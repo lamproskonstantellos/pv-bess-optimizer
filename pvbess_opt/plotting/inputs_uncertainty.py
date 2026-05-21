@@ -27,7 +27,12 @@ import pandas as pd
 
 from ..config import COLORS, FINANCIAL_COLORS
 from ._dates import apply_house_date_axis
-from .style import apply_universal_margins, save_figure, show_titles
+from .style import (
+    apply_universal_margins,
+    empty_placeholder as _placeholder,
+    save_figure,
+    show_titles,
+)
 
 _Z90 = 1.2816  # Phi^{-1}(0.90)
 
@@ -36,15 +41,6 @@ LEGEND_LOC = "upper right"
 LEGEND_KWARGS = dict(loc=LEGEND_LOC, framealpha=0.85, fontsize=9)
 
 
-def _placeholder(out_path: Path, message: str) -> Path:
-    """Render a centered-message placeholder figure (empty-input guard)."""
-    plt.figure(figsize=(7, 4))
-    ax = plt.gca()
-    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=10,
-            transform=ax.transAxes)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    return save_figure(out_path)
 
 
 def _lognormal_band(actual: np.ndarray, sigma: float) -> tuple[np.ndarray, np.ndarray]:

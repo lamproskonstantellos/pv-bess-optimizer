@@ -144,9 +144,9 @@ def test_initial_soc_kwh_override(short_params, short_ts):
 
 
 def test_invalid_mode_raises():
-    from pvbess_opt.optimization import _resolve_mode
+    from pvbess_opt.modes import resolve_mode
     with pytest.raises(ValueError, match="Unknown mode"):
-        _resolve_mode({"mode": "bogus"})
+        resolve_mode({"mode": "bogus"})
 
 
 # ---------------------------------------------------------------------------

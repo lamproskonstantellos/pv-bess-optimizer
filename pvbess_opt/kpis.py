@@ -36,6 +36,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .modes import resolve_mode
+
 logger = logging.getLogger(__name__)
 
 ENERGY_TOLERANCE: float = 1.0e-3  # kWh per timestep
@@ -57,7 +59,7 @@ def verify_energy_balance(
     Pass the full-precision frame from ``run_scenario(return_unrounded=True)``
     to avoid round(4) accumulation in the per-step residuals.
     """
-    mode = str(params.get("mode", "vnb") or "vnb").lower()
+    mode = resolve_mode(params)
 
     pv_residual = np.abs(
         res["pv_kwh"].to_numpy(dtype=float)
@@ -294,7 +296,7 @@ def compute_kpis(
     attribute_green_discharge(res, params)
     add_economic_columns(res, params)
 
-    mode = str(params.get("mode", "vnb") or "vnb").lower()
+    mode = resolve_mode(params)
     e_cap_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
     pv_gen = _sum_mwh(res, "pv_kwh")

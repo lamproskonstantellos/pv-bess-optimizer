@@ -97,6 +97,17 @@ def save_figure_daily(figpath: Path, date_str: str) -> Path:
     return save_figure(target)
 
 
+def empty_placeholder(out_path: Path, message: str) -> Path:
+    """Render a centered-message placeholder figure (empty-input guard)."""
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=10,
+            transform=ax.transAxes)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    return save_figure(out_path)
+
+
 # ---------------------------------------------------------------------------
 # Legends
 # ---------------------------------------------------------------------------

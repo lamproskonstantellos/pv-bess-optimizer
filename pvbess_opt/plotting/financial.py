@@ -27,11 +27,16 @@ from matplotlib.ticker import MaxNLocator
 
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ..sensitivity import DriverSensitivity, build_driver_sensitivities
-from ._currency import euro_axis_formatter, format_eur
+from ._currency import (
+    euro_axis_formatter,
+    format_eur,
+    resolve_currency_format as _resolve_currency_format,
+)
 from .style import (
     annotate_value_safe,
     apply_fine_ticks,
     apply_universal_margins,
+    empty_placeholder,
     save_figure,
     show_titles,
 )
@@ -103,15 +108,6 @@ def _title_window(yearly_cf: pd.DataFrame) -> str:
 def _maybe_set_title(ax, text: str) -> None:
     if show_titles():
         ax.set_title(text)
-
-
-def _resolve_currency_format(econ: dict[str, Any] | None) -> str:
-    if econ is None:
-        return "auto"
-    raw = str(econ.get("currency_format", "auto") or "auto").strip().lower()
-    if raw not in ("auto", "millions", "raw"):
-        return "auto"
-    return raw
 
 
 def _apply_eur_yaxis(ax, econ: dict[str, Any] | None) -> None:
@@ -528,14 +524,7 @@ def _dumbbell_plot(
     out_path = Path(out_path)
 
     if pivot.empty:
-        plt.figure(figsize=(7, 4))
-        ax = plt.gca()
-        ax.text(0.5, 0.5, "Sensitivity disabled or empty.",
-                ha="center", va="center", fontsize=10,
-                transform=ax.transAxes)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        return save_figure(out_path)
+        return empty_placeholder(out_path, "Sensitivity disabled or empty.")
 
     drop_set = {label.strip().lower() for label in drop_labels}
     if drop_set:
@@ -545,14 +534,7 @@ def _dumbbell_plot(
     pivot = pivot.sort_values("impact", ascending=True)
 
     if pivot.empty:
-        plt.figure(figsize=(7, 4))
-        ax = plt.gca()
-        ax.text(0.5, 0.5, "No drivers with non-zero impact.",
-                ha="center", va="center", fontsize=10,
-                transform=ax.transAxes)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        return save_figure(out_path)
+        return empty_placeholder(out_path, "No drivers with non-zero impact.")
 
     labels = pivot.index.tolist()
     y_pos = np.arange(len(labels))
