@@ -76,7 +76,7 @@ def plot_input_forecast_band(
     mask = (doy >= week_start_doy) & (doy < week_start_doy + 7)
     sub = ts.loc[mask].reset_index(drop=True)
     if sub.empty:
-        return save_figure(out_path)
+        return _placeholder(out_path, "Forecast band: no data.")
 
     panels = [
         ("dam_price_eur_per_mwh", "DAM (EUR/MWh)", sigma_dam,
@@ -181,11 +181,12 @@ def plot_dam_intraday_heatmap(
             cur = grid[r, c]
             grid[r, c] = p if np.isnan(cur) else 0.5 * (cur + p)
 
-    plt.figure(figsize=(7, 4))
-    ax = plt.gca()
     finite = grid[np.isfinite(grid)]
     if finite.size == 0:
-        return save_figure(out_path)
+        return _placeholder(out_path, "DAM intraday heatmap: no data.")
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
     vmin = float(np.nanpercentile(grid, 5))
     vmax = float(np.nanpercentile(grid, 95))
     if vmin == vmax:

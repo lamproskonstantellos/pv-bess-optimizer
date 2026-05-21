@@ -187,7 +187,7 @@ def _check_solver_status(result, solver_name: str, model=None) -> None:
             return
         raise RuntimeError(
             f"Solver '{solver_name}' hit {condition} with no feasible "
-            "incumbent — increase --solver-time-limit or relax --mip-gap."
+            "incumbent — increase --time-limit or relax --mip-gap."
         )
     raise RuntimeError(
         f"Solver '{solver_name}' did not produce an acceptable solution: "

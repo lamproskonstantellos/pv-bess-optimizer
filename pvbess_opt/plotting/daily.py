@@ -358,7 +358,7 @@ def plot_daily_soc(
     t_pad, [soc_pct_pad] = pad_right_to_end(df["timestamp"], [soc_pct], end)
     ax.plot(
         t_pad, soc_pct_pad, drawstyle="steps-post",
-        color=soc_colour, linewidth=1.5, label="SOC",
+        color=soc_colour, linewidth=1.5, label="SOC (%)",
     )
 
     ax.set_ylim(0.0, 100.0)
@@ -408,7 +408,7 @@ def _draw_soc_overlay(
     ax2.plot(
         t_soc_pad, soc_pct_pad,
         drawstyle="steps-post",
-        color=FINANCIAL_COLORS["net_revenue_line"],
+        color=FINANCIAL_COLORS["net"],
         linewidth=2.0, label="SOC (%)",
     )
     ax2.set_ylim(0.0, 100.0)
