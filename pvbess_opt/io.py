@@ -71,6 +71,7 @@ are ignored:
 from __future__ import annotations
 
 import logging
+import re
 import warnings
 from pathlib import Path
 from typing import Any
@@ -145,10 +146,9 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "bess_replacement_year": 0,
     "bess_replacement_cost_pct": 50.0,
     "bess_degradation_annual_pct": 2.0,
-    # Defaults to 0.0 so a workbook that omits the key (pre-v0.8.8) keeps
-    # pure calendar-fade behaviour.  The canonical workbook ships the row
-    # with the 0.008 LFP value (see _BESS_ROWS).
-    "bess_degradation_pct_per_cycle": 0.0,
+    # LFP cycle-fade default (matches the canonical workbook row in
+    # _BESS_ROWS and the schema default); range 0.005-0.010.
+    "bess_degradation_pct_per_cycle": 0.008,
 }
 
 ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
@@ -759,9 +759,7 @@ def _parse_kv_sheet(
 # ---------------------------------------------------------------------------
 
 
-import re as _re  # noqa: E402
-
-_HOUR_PARSE_RE = _re.compile(r"^\s*(\d{1,2})")
+_HOUR_PARSE_RE = re.compile(r"^\s*(\d{1,2})")
 
 
 def _parse_hour_of_day(value: Any) -> int:

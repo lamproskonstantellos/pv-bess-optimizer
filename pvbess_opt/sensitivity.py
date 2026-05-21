@@ -312,7 +312,7 @@ def run_sensitivity_analysis(
                 low_kpis = compute_financial_kpis(
                     low_cf, {**econ, "discount_rate_pct": low_value},
                 )
-            except Exception:
+            except (ValueError, ArithmeticError, KeyError, TypeError):
                 low_kpis = None
             try:
                 high_cf = _rebuild_with_discount_rate(
@@ -321,7 +321,7 @@ def run_sensitivity_analysis(
                 high_kpis = compute_financial_kpis(
                     high_cf, {**econ, "discount_rate_pct": high_value},
                 )
-            except Exception:
+            except (ValueError, ArithmeticError, KeyError, TypeError):
                 high_kpis = None
             _record(name, label, "base", 0.0, base_value, base_kpis)
             _record(name, label, "low", -delta, low_value, low_kpis)

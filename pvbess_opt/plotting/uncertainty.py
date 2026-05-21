@@ -19,12 +19,6 @@ from .style import (
     empty_placeholder as _empty_placeholder,
 )
 
-# Backwards-compatibility alias; the canonical palette is
-# :data:`pvbess_opt.config.UNCERTAINTY_SOURCE_COLORS`.
-_SOURCE_SET_COLORS = UNCERTAINTY_SOURCE_COLORS
-
-
-
 
 def plot_rolling_horizon_distribution(
     mc_df: pd.DataFrame,
@@ -53,7 +47,7 @@ def plot_rolling_horizon_distribution(
         fallback_colour = COLORS["BESS→Grid (export)"]
         for source_set, group in mc_df.groupby("source_set"):
             profits = group["profit_total_eur"].astype(float).to_numpy()
-            colour = _SOURCE_SET_COLORS.get(str(source_set), fallback_colour)
+            colour = UNCERTAINTY_SOURCE_COLORS.get(str(source_set), fallback_colour)
             ax.hist(
                 profits,
                 bins=max(10, len(profits) // 3),
@@ -140,10 +134,12 @@ def plot_foresight_gap_comparison(
     sources = sorted(grouped, key=lambda s: float(np.median(grouped[s])))
     data = [grouped[s] for s in sources]
     fallback_colour = COLORS["BESS→Grid (export)"]
-    colours = [_SOURCE_SET_COLORS.get(s, fallback_colour) for s in sources]
+    colours = [UNCERTAINTY_SOURCE_COLORS.get(s, fallback_colour) for s in sources]
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
+    # ``orientation=`` / ``tick_labels=`` require matplotlib >= 3.9; the
+    # project pins matplotlib >= 3.10 in requirements/base.txt.
     bplot = ax.boxplot(
         data, orientation="horizontal", patch_artist=True, widths=0.6,
         tick_labels=sources,

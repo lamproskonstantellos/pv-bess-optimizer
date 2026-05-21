@@ -100,8 +100,8 @@ REQUIRED_TOKENS: tuple[str, ...] = (
 )
 
 REQUIRED_FILES: tuple[str, ...] = (
-    "docs/technical.documentation/uncertainty_modelling.md",
-    "docs/technical.documentation/asset_modes.md",
+    "docs/source/technical.documentation/uncertainty_modelling.rst",
+    "docs/source/technical.documentation/asset_modes.rst",
     "docs/CHANGELOG.md",
     "pvbess_opt/plotting/lifecycle.py",
     "tests/test_io_v08_schema.py",

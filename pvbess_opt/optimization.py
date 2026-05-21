@@ -62,6 +62,7 @@ import pandas as pd
 import pyomo.environ as pyo
 from pyomo.opt import SolverStatus, TerminationCondition
 
+from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .kpis import ENERGY_TOLERANCE
 from .modes import resolve_mode
 
@@ -212,14 +213,19 @@ def _resolve_max_injection_per_step(
     (24,) or (24, 12) array of max-injection percentages (default flat
     profile when the workbook omits the sheet).  This resolver expands
     it to a per-timestep fraction in [0, 1].  When no profile is
-    supplied the fallback is 1.0 (no cap).
+    supplied the fallback is the canonical
+    :data:`~pvbess_opt.config.DEFAULT_MAX_INJECTION_PCT_HOURLY` (as a
+    fraction) — matching the loader's default — rather than an
+    inconsistent no-cap 1.0.
     """
     from .max_injection import build_per_step_max_injection_frac
 
     profile = params.get("max_injection_profile")
     if profile is not None and "timestamp" in ts.columns:
         return build_per_step_max_injection_frac(ts["timestamp"], profile)
-    return np.ones(len(ts), dtype=float)
+    return np.full(
+        len(ts), DEFAULT_MAX_INJECTION_PCT_HOURLY / 100.0, dtype=float,
+    )
 
 
 def derive_tight_big_m(

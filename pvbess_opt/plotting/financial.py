@@ -27,6 +27,7 @@ import pandas as pd
 from matplotlib.ticker import MaxNLocator
 
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
+from ..io import PROJECT_SHEET_DEFAULTS
 from ..sensitivity import DriverSensitivity, build_driver_sensitivities
 from ._currency import (
     euro_axis_formatter,
@@ -290,8 +291,9 @@ def plot_npv_waterfall(
     )
 
     ax.plot(
-        years, net_disc, color=financial_color("Net cash-flow"), linewidth=1.5,
-        marker="o", markersize=3, label="Net cash-flow",
+        years, net_disc,
+        color=financial_color("Net cash-flow (discounted)"), linewidth=1.5,
+        marker="o", markersize=3, label="Net cash-flow (discounted)",
     )
     ax.plot(
         years, cum_disc,
@@ -681,10 +683,16 @@ def _annotate_dumbbell_endpoints(
 
 def _econ_title_window(econ: dict[str, Any]) -> str:
     """Build the ``2026-2045 (CAPEX in 2025)`` fragment from the econ dict."""
-    start = int(econ.get("project_start_year", 0) or 0)
-    n = int(econ.get("project_lifecycle_years", 0) or 0)
-    if not start or not n:
-        return ""
+    start = int(
+        econ.get("project_start_year",
+                 PROJECT_SHEET_DEFAULTS["project_start_year"])
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
+    n = int(
+        econ.get("project_lifecycle_years",
+                 PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+        or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+    )
     end = start + n - 1
     capex_year = start - 1
     return f"{start}-{end} (CAPEX in {capex_year})"

@@ -650,11 +650,17 @@ def compute_financial_kpis(
         project_start_year = int(df["calendar_year"].iloc[0])
         project_end_year = int(df["calendar_year"].iloc[-1])
     else:
-        project_start_year = int(econ.get("project_start_year", 0) or 0)
-        n_years = int(econ.get("project_lifecycle_years", 0) or 0)
-        project_end_year = (
-            project_start_year + n_years - 1 if project_start_year else 0
+        project_start_year = int(
+            econ.get("project_start_year",
+                     PROJECT_SHEET_DEFAULTS["project_start_year"])
+            or PROJECT_SHEET_DEFAULTS["project_start_year"]
         )
+        n_years = int(
+            econ.get("project_lifecycle_years",
+                     PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+            or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+        )
+        project_end_year = project_start_year + n_years - 1
 
     if "calendar_year" in df.columns and (df["project_year"] == 0).any():
         capex_year = int(

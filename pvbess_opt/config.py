@@ -179,6 +179,7 @@ FINANCIAL_COLORS: dict[str, str] = {
     "devex":          "#8E44AD",  # Material purple
     "net":            "#1565C0",  # Material blue 800
     "discounted":     "#6A1B9A",  # Material purple 800
+    "net_discounted": "#283593",  # Material indigo 800 (discounted net line)
     # Tornado halves (below / above base)
     "tornado_neg":    "#B71C1C",  # Material red 900
     "tornado_pos":    "#1B5E20",  # Material green 900
@@ -272,6 +273,7 @@ assert_unique_financial_colors()
 FINANCIAL_LABELS: tuple[str, ...] = (
     # Lines / markers
     "Net cash-flow",
+    "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
     "Cumulative NPV",
@@ -299,6 +301,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
 # both read off ``net`` vs ``discounted`` consistently).
 FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Net cash-flow":                    "net",
+    "Net cash-flow (discounted)":       "net_discounted",
     "Cumulative cash-flow":             "net",
     "Cumulative discounted cash-flow":  "discounted",
     "Cumulative NPV":                   "discounted",
@@ -325,6 +328,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
 FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     # Lines first (headline series)
     "Net cash-flow",
+    "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
     "Cumulative NPV",

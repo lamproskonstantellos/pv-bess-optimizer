@@ -346,9 +346,7 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
             "revenue_eur_total": grouped["_net_revenue_per_step"].sum(),
         }
     )
-    out = out.reset_index().rename(
-        columns={"calendar_year": "calendar_year"},
-    )
+    out = out.reset_index()
     cols = ["project_year", "calendar_year"] + [
         c for c in out.columns if c not in ("project_year", "calendar_year")
     ]

@@ -66,7 +66,9 @@ def format_eur(
     return f"{sign}{EUR}{abs_v:.0f}"
 
 
-def euro_axis_formatter(format_mode: str = "auto") -> FuncFormatter:
+def euro_axis_formatter(
+    format_mode: str = "auto", *, decimals: int = 1,
+) -> FuncFormatter:
     """Return a matplotlib ``FuncFormatter`` rendering ticks via :func:`format_eur`.
 
     Apply via::
@@ -75,8 +77,9 @@ def euro_axis_formatter(format_mode: str = "auto") -> FuncFormatter:
 
     The closure captures ``format_mode`` so callers can lock a plot
     into ``millions`` or ``raw`` while the rest of the run uses
-    ``auto``.
+    ``auto``.  ``decimals`` controls the magnitude-suffix precision
+    (default 1, preserving the historical ``€12.3M`` style).
     """
     def _fmt(x: float, _pos: int) -> str:
-        return format_eur(float(x), format_mode, decimals=1)
+        return format_eur(float(x), format_mode, decimals=decimals)
     return FuncFormatter(_fmt)

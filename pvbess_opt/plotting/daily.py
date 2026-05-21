@@ -56,7 +56,12 @@ from .style import (
 
 def _setup_day_axes(ax, start: pd.Timestamp, end: pd.Timestamp) -> None:
     ax.set_xlim(start, end)
-    ticks = pd.date_range(start, end, freq="1h")
+    # Derive the hour step from the axis extent so a single day stays
+    # hourly (25 ticks) while wider spans (multi-day) don't crowd the
+    # axis: aim for at most ~24 ticks.
+    span_hours = max(1, round((end - start) / pd.Timedelta(hours=1)))
+    step = max(1, int(np.ceil(span_hours / 24)))
+    ticks = pd.date_range(start, end, freq=f"{step}h")
     ax.set_xticks(ticks)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     plt.setp(ax.get_xticklabels(), rotation=XTICK_ROT, ha="right")
@@ -321,8 +326,7 @@ def plot_daily_combined_merchant(
 
 
 def plot_daily_soc(
-    res: pd.DataFrame, date_str: str, out_dir: Path, *,
-    e_cap_kwh: float | None = None,
+    res: pd.DataFrame, date_str: str, out_dir: Path,
 ) -> None:
     """SOC trajectory for one day — SOC (%) on left, SOC (kWh) on right."""
     day = pd.to_datetime(date_str).date()
@@ -345,9 +349,6 @@ def plot_daily_soc(
         max_pct = 0.0
     if max_pct > 1e-9:
         capacity_kwh = max_kwh / max_pct * 100.0
-    elif e_cap_kwh is not None and e_cap_kwh > 0.0:
-        capacity_kwh = float(e_cap_kwh)
-        soc_pct = soc_kwh / capacity_kwh * 100.0
     else:
         capacity_kwh = max_kwh
         soc_pct = soc_kwh / capacity_kwh * 100.0

@@ -170,11 +170,14 @@ def plot_dam_intraday_heatmap(
     hod = timestamps.dt.hour.to_numpy()
     dam = ts["dam_price_eur_per_mwh"].to_numpy(dtype=float)
 
-    # 24×365 grid; aggregate by mean within each (doy, hod) cell so
+    # 24 × N grid; N is 366 in leap years so Feb-29 (doy 366) is not
+    # silently dropped.  Aggregate by mean within each (doy, hod) cell so
     # 15-min DAM (constant per hour) collapses cleanly.
-    grid = np.full((24, 365), np.nan)
+    n_days = int(doy.max()) if doy.size else 365
+    n_days = max(n_days, 365)
+    grid = np.full((24, n_days), np.nan)
     for h, d, p in zip(hod, doy, dam, strict=False):
-        if 1 <= d <= 365:
+        if 1 <= d <= n_days:
             r, c = h, d - 1
             cur = grid[r, c]
             grid[r, c] = p if np.isnan(cur) else 0.5 * (cur + p)
