@@ -1354,6 +1354,34 @@ def write_dispatch_artifacts(
     return {"hourly_xlsx": out}
 
 
+def _flatten_kpis_for_sheet(kpis: dict[str, Any]) -> dict[str, Any]:
+    """Flatten nested-dict KPI values into prefixed scalar rows.
+
+    The ``kpis_year1`` sheet is a flat ``metric``/``value`` table, so a
+    nested dict (e.g. ``bess_utilization_diagnostics``) would otherwise be
+    stringified into a single ``{...}`` cell.  Each sub-key is hoisted to
+    its own row instead; the in-memory KPI dict keeps the nested form for
+    API consumers.
+    """
+    flat: dict[str, Any] = {}
+    for key, value in kpis.items():
+        if isinstance(value, dict):
+            prefix = (
+                "bess_util"
+                if key == "bess_utilization_diagnostics"
+                else key
+            )
+            for sub_key, sub_value in value.items():
+                if key == "bess_utilization_diagnostics":
+                    name = f"bess_util_{sub_key.removeprefix('bess_')}"
+                else:
+                    name = f"{prefix}_{sub_key}"
+                flat[name] = sub_value
+        else:
+            flat[key] = value
+    return flat
+
+
 def write_results_workbook(
     out_path: Path,
     res_year1: pd.DataFrame,
@@ -1375,7 +1403,8 @@ def write_results_workbook(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         pd.DataFrame(
-            list(kpis_year1.items()), columns=["metric", "value"],
+            list(_flatten_kpis_for_sheet(kpis_year1).items()),
+            columns=["metric", "value"],
         ).to_excel(writer, sheet_name="kpis_year1", index=False)
         if kpis_monthly_year1 is not None and not kpis_monthly_year1.empty:
             kpis_monthly_year1.reset_index(names="month").to_excel(

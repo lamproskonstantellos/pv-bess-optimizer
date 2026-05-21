@@ -46,6 +46,7 @@ import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from .io import PROJECT_SHEET_DEFAULTS
+from .kpis import require_economic_columns
 
 # Columns scaled by the PV degradation curve.
 _PV_ORIGIN_COLUMNS: tuple[str, ...] = (
@@ -143,6 +144,10 @@ def build_lifetime_dispatch(
     ``build_yearly_cashflow`` which already reads the post-derate value
     from ``year1_kpis``.  Falls back to the in-frame sum for
     backward-compat callers that don't plumb KPIs through.
+
+    Requires ``compute_kpis`` to have been called first so the per-step
+    EUR columns are present on ``res_year1``; raises otherwise rather
+    than silently projecting zero revenue across the horizon.
     """
     if "timestamp" not in res_year1.columns:
         raise ValueError(
@@ -154,6 +159,7 @@ def build_lifetime_dispatch(
             "build_lifetime_dispatch requires res_year1['timestamp'] to "
             "be a datetime column."
         )
+    require_economic_columns(res_year1, context="build_lifetime_dispatch")
 
     raw_n_years = econ.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
     if raw_n_years is None:
@@ -262,7 +268,12 @@ def build_lifetime_dispatch(
 
 
 def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
-    """Sum lifetime hourly columns by calendar year for cross-checks."""
+    """Sum lifetime hourly columns by calendar year for cross-checks.
+
+    Requires the per-step EUR columns produced by ``compute_kpis`` /
+    ``build_lifetime_dispatch`` to be present; raises rather than
+    silently aggregating zero revenue.
+    """
     if lifetime_df.empty:
         return pd.DataFrame(
             columns=[
@@ -273,6 +284,7 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
                 "revenue_eur_total",
             ],
         )
+    require_economic_columns(lifetime_df, context="aggregate_lifetime_to_yearly")
 
     df = lifetime_df.copy()
     grouped = df.groupby("calendar_year")

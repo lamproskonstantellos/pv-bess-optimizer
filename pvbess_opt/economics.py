@@ -67,6 +67,7 @@ import numpy as np
 import pandas as pd
 
 from .io import PROJECT_SHEET_DEFAULTS
+from .kpis import require_economic_columns
 from .lifetime import _bess_factor
 
 logger = logging.getLogger(__name__)
@@ -408,12 +409,18 @@ def derive_monthly_cashflow(
     yearly_cf: pd.DataFrame,
     econ: dict[str, Any],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Derive monthly and quarterly cash-flows from the yearly projection."""
+    """Derive monthly and quarterly cash-flows from the yearly projection.
+
+    Requires ``compute_kpis`` to have been called first so the per-step
+    EUR columns are present on ``res``; raises otherwise rather than
+    silently defaulting revenue to zero.
+    """
     if not pd.api.types.is_datetime64_any_dtype(res["timestamp"]):
         raise ValueError(
             "derive_monthly_cashflow requires res['timestamp'] to be a "
             "datetime column."
         )
+    require_economic_columns(res, context="derive_monthly_cashflow")
 
     discount_rate = float(econ["discount_rate_pct"]) / 100.0
 

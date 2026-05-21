@@ -20,6 +20,7 @@ from pvbess_opt.economics import (
     build_yearly_cashflow,
     compute_financial_kpis,
 )
+from pvbess_opt.kpis import add_economic_columns
 from pvbess_opt.lifetime import build_lifetime_dispatch
 from pvbess_opt.sensitivity import run_sensitivity_analysis
 
@@ -122,7 +123,7 @@ def test_financial_kpis_include_capex_year():
 def _make_year1_dispatch() -> pd.DataFrame:
     n = 8760
     timestamps = pd.date_range("2026-01-01", periods=n, freq="h")
-    return pd.DataFrame({
+    df = pd.DataFrame({
         "timestamp": timestamps,
         "pv_kwh": np.full(n, 1.0),
         "load_kwh": np.full(n, 1.0),
@@ -138,7 +139,10 @@ def _make_year1_dispatch() -> pd.DataFrame:
         "grid_export_cap_kwh": np.full(n, 5.0),
         "soc_kwh": np.full(n, 100.0),
         "soc_pct": np.full(n, 50.0),
+        "dam_price_eur_per_mwh": np.full(n, 80.0),
     })
+    # Mimic the post-compute_kpis state required by build_lifetime_dispatch.
+    return add_economic_columns(df, {"retail_tariff_eur_per_mwh": 120.0})
 
 
 def test_lifetime_first_calendar_year_is_project_start_year():

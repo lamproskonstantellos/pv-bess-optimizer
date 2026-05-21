@@ -231,6 +231,38 @@ def add_economic_columns(
     return res
 
 
+# Per-step EUR columns that :func:`add_economic_columns` (called inside
+# :func:`compute_kpis`) writes onto the dispatch frame.  The downstream
+# financial pipeline reads these; running it before ``compute_kpis`` would
+# otherwise silently default revenue to zero.
+ECONOMIC_COLUMNS: tuple[str, ...] = (
+    "profit_load_from_pv_eur",
+    "profit_load_from_bess_eur",
+    "profit_export_from_pv_eur",
+    "profit_export_from_bess_eur",
+    "expense_charge_bess_grid_eur",
+)
+
+
+def require_economic_columns(df: pd.DataFrame, *, context: str) -> None:
+    """Raise if none of the per-step EUR columns are present.
+
+    Enforces the ordering contract: :func:`compute_kpis` (or
+    :func:`add_economic_columns`) must run before the financial pipeline
+    so revenue is never silently defaulted to zero.  ``add_economic_columns``
+    always writes the full :data:`ECONOMIC_COLUMNS` set together, so the
+    absence of *all* of them means it was never called.
+    """
+    if not any(c in df.columns for c in ECONOMIC_COLUMNS):
+        raise ValueError(
+            f"{context}: no economic columns present (expected the "
+            f"compute_kpis outputs {ECONOMIC_COLUMNS}). compute_kpis() must "
+            "be called before the financial pipeline (derive_monthly_cashflow "
+            "/ build_lifetime_dispatch / aggregate_lifetime_to_yearly); "
+            "revenue must not default to zero."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Aggregate KPIs
 # ---------------------------------------------------------------------------

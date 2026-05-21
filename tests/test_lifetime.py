@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from pvbess_opt.economics import build_yearly_cashflow
+from pvbess_opt.kpis import add_economic_columns
 from pvbess_opt.lifetime import (
     _bess_factor,
     aggregate_lifetime_to_yearly,
@@ -32,7 +33,7 @@ def _econ() -> dict:
 
 def _make_year1_dispatch() -> pd.DataFrame:
     timestamps = pd.date_range("2026-01-01", periods=8760, freq="h")
-    return pd.DataFrame({
+    df = pd.DataFrame({
         "timestamp": timestamps,
         "pv_kwh": np.full(8760, 1.0),
         "load_kwh": np.full(8760, 1.0),
@@ -48,7 +49,11 @@ def _make_year1_dispatch() -> pd.DataFrame:
         "grid_export_cap_kwh": np.full(8760, 5.0),
         "soc_kwh": np.full(8760, 100.0),
         "soc_pct": np.full(8760, 50.0),
+        "dam_price_eur_per_mwh": np.full(8760, 80.0),
     })
+    # Mimic the post-compute_kpis state: the per-step EUR columns the
+    # financial pipeline now requires.
+    return add_economic_columns(df, {"retail_tariff_eur_per_mwh": 120.0})
 
 
 def test_lifetime_dispatch_pv_factor_invariant():
@@ -252,7 +257,9 @@ def test_feb29_lifetime_does_not_roll_over_in_non_leap_target_years():
         "bess_charge_grid_kwh": [0.0], "grid_to_load_kwh": [0.1],
         "grid_export_total_kwh": [0.5], "grid_export_cap_kwh": [5.0],
         "soc_kwh": [100.0], "soc_pct": [50.0],
+        "dam_price_eur_per_mwh": [80.0],
     })
+    res1 = add_economic_columns(res1, {"retail_tariff_eur_per_mwh": 120.0})
     capacities = {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
     econ = _econ()
     econ["project_start_year"] = 2024
