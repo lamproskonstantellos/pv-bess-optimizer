@@ -35,7 +35,7 @@ import numpy as np
 import pandas as pd
 
 from .kpis import add_economic_columns, compute_kpis
-from .optimization import run_scenario, verify_dispatch_invariants
+from .optimization import run_scenario
 
 logger = logging.getLogger(__name__)
 
@@ -433,17 +433,3 @@ def monte_carlo_rolling(
         for h in logger.handlers + logging.getLogger().handlers:
             h.flush()
     return pd.DataFrame(rows)
-
-
-# ---------------------------------------------------------------------------
-# Helper for callers wanting per-window invariants
-# ---------------------------------------------------------------------------
-
-
-def verify_window_invariants(
-    res: pd.DataFrame, params: dict[str, Any],
-) -> dict[str, float]:
-    """Run the 9 audit invariants on a single committed window."""
-    return verify_dispatch_invariants(
-        res, params, mode=str(params.get("mode", "vnb")).lower(),
-    )

@@ -214,22 +214,6 @@ def annotate_value_safe(
     )
 
 
-def expand_axes_for_annotations(ax, *, pad: float = 0.05) -> None:
-    """Enlarge the current xlim / ylim by ``pad`` so bbox annotations
-    placed near the data edges do not clip outside the frame.
-
-    Idempotent enough for normal use: re-running with a small pad
-    won't drift the axes.  Call at the END of a plotting function,
-    after every annotation has been placed.
-    """
-    xmin, xmax = ax.get_xlim()
-    ymin, ymax = ax.get_ylim()
-    dx = pad * (xmax - xmin) if xmax > xmin else pad
-    dy = pad * (ymax - ymin) if ymax > ymin else pad
-    ax.set_xlim(xmin - dx, xmax + dx)
-    ax.set_ylim(ymin - dy, ymax + dy)
-
-
 # ---------------------------------------------------------------------------
 # Universal axes-margin helper
 # ---------------------------------------------------------------------------

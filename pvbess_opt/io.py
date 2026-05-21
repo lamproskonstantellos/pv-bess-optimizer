@@ -73,7 +73,7 @@ from __future__ import annotations
 import logging
 import warnings
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -568,33 +568,6 @@ def _coerce(value: Any, cast: type, default: Any) -> Any:
         return cast(value)
     except (TypeError, ValueError):
         return _COERCE_FAILED
-
-
-def _get_param(
-    params: dict[str, Any],
-    keys: str | Iterable[str],
-    default: Any = None,
-    cast: type = float,
-) -> Any:
-    """Look up the first non-empty param under any of ``keys``, casting to ``cast``."""
-    if isinstance(keys, str):
-        keys = (keys,)
-    for key in keys:
-        if key in params:
-            value = params[key]
-            if isinstance(value, float) and np.isnan(value):
-                continue
-            if isinstance(value, str) and value.strip() == "":
-                continue
-            coerced = _coerce(value, cast, default)
-            if coerced is _COERCE_FAILED:
-                logger.warning(
-                    "Param %r could not be parsed as %s (got %r); using default %r.",
-                    key, getattr(cast, "__name__", str(cast)), value, default,
-                )
-                return default
-            return coerced
-    return default
 
 
 def _parse_bool(value: Any, default: bool) -> bool:
@@ -1225,6 +1198,9 @@ def _typed_to_flat(
         "pv_nameplate_kwp": pv_nameplate_kwp,
         # project
         "p_grid_export_max_kw": p_grid_export_cap_milp,
+        # Contract fields: not consumed by the internal dispatch but part of
+        # the published params schema (asserted by the test suite / available
+        # to API consumers), so they are retained intentionally.
         "grid_export_unlimited": grid_export_unlimited,
         "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
         "settlement_minutes": int(project["settlement_minutes"]),

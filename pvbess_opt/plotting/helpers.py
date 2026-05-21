@@ -179,7 +179,6 @@ def month_aggregate(res: pd.DataFrame, month: int) -> pd.DataFrame:
             "pv_to_bess_kwh": "sum",
             "bess_charge_grid_kwh": "sum",
             "pv_curtail_kwh": "sum",
-            "grid_export_cap_kwh": "sum",
         }
     ).reset_index().rename(columns={"timestamp": "date"})
     g["date"] = pd.to_datetime(g["date"])
@@ -203,7 +202,6 @@ def year_aggregate(res: pd.DataFrame, year: int) -> pd.DataFrame:
             "pv_to_bess_kwh": "sum",
             "bess_charge_grid_kwh": "sum",
             "pv_curtail_kwh": "sum",
-            "grid_export_cap_kwh": "sum",
         }
     ).reset_index()
     grouped["month_start"] = grouped["timestamp"].dt.to_timestamp()
