@@ -24,7 +24,6 @@ import pytest
 
 from pvbess_opt.io import (
     _rescale_pv_to_user_target,
-    _resolve_pv_column,
     read_workbook,
     write_workbook,
 )

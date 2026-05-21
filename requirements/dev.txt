@@ -9,6 +9,9 @@
 -r solvers.txt
 
 # Linters / formatters
+# ruff is the CI lint gate; pyflakes / pycodestyle are kept for legacy
+# editor configurations that invoke them directly.
+ruff>=0.15,<1
 pyflakes>=3.1
 pycodestyle>=2.11
 
