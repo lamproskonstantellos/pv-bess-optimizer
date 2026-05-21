@@ -30,10 +30,16 @@ Flag                                 Purpose
 ``--tee``                            Print solver output to stdout.
 ``--rolling-horizon``                Run a rolling-horizon dispatch with
                                      imperfect foresight.
-``--window-hours``                   Rolling-horizon window length in hours
-                                     (default 48).
-``--commit-hours``                   Rolling-horizon commit slice in hours
-                                     (default 24).
+``--window-hours``                   Rolling-horizon window length in hours.
+                                     Defaults to the workbook value
+                                     (``window_hours = 48`` in the shipped
+                                     ``inputs/input.xlsx``); the argparse
+                                     default is a sentinel (``None``).
+``--commit-hours``                   Rolling-horizon commit slice in hours.
+                                     Defaults to the workbook value
+                                     (``commit_hours = 24`` in the shipped
+                                     ``inputs/input.xlsx``); the argparse
+                                     default is a sentinel (``None``).
 ``--monte-carlo``                    Number of Monte Carlo seeds for the
                                      rolling-horizon ensemble (0 = single
                                      deterministic noiseless run).
@@ -61,6 +67,8 @@ A run writes to
                        rolling_horizon_distribution
     05_energy_plots/<calendar_year>/{daily,monthly,yearly}/...
                        lifetime_summary_<start>-<end>.pdf
+    06_uncertainty_plots/ input forecast band, seasonal boxplot,
+                       DAM heatmap, forecast-gap comparison
 
 The folder slug is ``<mode>[_grid_ch]`` (e.g.
 ``vnb`` or ``merchant_grid_ch``).

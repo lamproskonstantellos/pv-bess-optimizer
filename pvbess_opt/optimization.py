@@ -146,7 +146,24 @@ def configure_solver_options(
         solver.options[mapping["threads"]] = threads
 
 
-def _check_solver_status(result, solver_name: str) -> None:
+def _has_feasible_incumbent(model: pyo.ConcreteModel | None) -> bool:
+    """Return True when the model carries a loaded (feasible) solution.
+
+    Probes a representative decision variable; an unloaded model returns
+    ``None`` for ``var.value`` (or raises), which we treat as "no
+    incumbent".
+    """
+    if model is None:
+        return False
+    try:
+        for v in model.component_data_objects(pyo.Var, active=True):
+            return v.value is not None
+    except (AttributeError, ValueError):
+        return False
+    return False
+
+
+def _check_solver_status(result, solver_name: str, model=None) -> None:
     """Raise ``RuntimeError`` if the solver did not return an acceptable solution."""
     status = result.solver.status
     condition = result.solver.termination_condition
@@ -163,7 +180,15 @@ def _check_solver_status(result, solver_name: str) -> None:
     if status == SolverStatus.ok and condition in optimality_conditions:
         return
     if condition in soft_limit_conditions:
-        return
+        # A soft limit is only acceptable if the solver actually loaded a
+        # feasible incumbent; otherwise downstream pyo.value(...) calls
+        # would surface the failure opaquely.
+        if _has_feasible_incumbent(model):
+            return
+        raise RuntimeError(
+            f"Solver '{solver_name}' hit {condition} with no feasible "
+            "incumbent — increase --solver-time-limit or relax --mip-gap."
+        )
     raise RuntimeError(
         f"Solver '{solver_name}' did not produce an acceptable solution: "
         f"status={status}, termination_condition={condition}."
@@ -554,6 +579,10 @@ def build_model(
     )
 
     # --- vnb-only constraints --------------------------------------------
+    # Merchant mode intentionally omits the no-simultaneous-grid-IO
+    # constraint (the y_grid_io binary below): the audit verified that
+    # simultaneous import/export never occurs in practice for merchant
+    # dispatch, so the constraint would be economically non-binding.
     if mode == "vnb":
         # Section 5 of the VNB spec — surplus-only export.
         # Substituting PV_SPLIT (pv = pv_to_load + pv_to_bess + pv_to_grid +
@@ -665,7 +694,7 @@ def solve_model(
         mip_gap=mip_gap, time_limit_seconds=time_limit_seconds,
     )
     result = solver.solve(model, tee=tee)
-    _check_solver_status(result, resolved)
+    _check_solver_status(result, resolved, model)
     return model, resolved
 
 
@@ -673,8 +702,17 @@ def model_to_dataframe(
     model: pyo.ConcreteModel,
     ts: pd.DataFrame,
     params: dict[str, Any],
+    *,
+    round_output: bool = True,
 ) -> pd.DataFrame:
-    """Convert the solved model to a dispatch DataFrame."""
+    """Convert the solved model to a dispatch DataFrame.
+
+    ``round_output`` rounds the numeric columns to 4 dp for the
+    user-visible / persisted frame.  Pass ``False`` to keep full-precision
+    model values — used for the dispatch-invariant checks so the sum-based
+    invariant_4 is not polluted by round(4) accumulation across tens of
+    thousands of rows.
+    """
     n_steps = len(ts)
     time_index = range(n_steps)
     dt_h = params["dt_minutes"] / 60.0
@@ -685,13 +723,18 @@ def model_to_dataframe(
     )
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
+    pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
+
     res = pd.DataFrame(index=ts.index)
     res["timestamp"] = ts["timestamp"].values
     res["load_kwh"] = [
         float(ts.loc[t, "load_kwh"]) if "load_kwh" in ts.columns else 0.0
         for t in time_index
     ]
-    res["pv_kwh"] = [float(ts.loc[t, "pv_kwh"]) for t in time_index]
+    res["pv_kwh"] = [
+        float(ts.loc[t, "pv_kwh"]) if pv_present else 0.0
+        for t in time_index
+    ]
     res["pv_to_load_kwh"] = [pyo.value(model.pv_to_load[t]) for t in time_index]
     res["pv_to_bess_kwh"] = [pyo.value(model.pv_to_bess[t]) for t in time_index]
     res["bess_charge_grid_kwh"] = [pyo.value(model.grid_to_bess[t]) for t in time_index]
@@ -716,8 +759,9 @@ def model_to_dataframe(
     if "retail_price_eur_per_mwh" in ts.columns:
         res["retail_price_eur_per_mwh"] = ts["retail_price_eur_per_mwh"].values
 
-    numeric_cols = [c for c in res.columns if c != "timestamp"]
-    res[numeric_cols] = res[numeric_cols].astype(float).round(4)
+    if round_output:
+        numeric_cols = [c for c in res.columns if c != "timestamp"]
+        res[numeric_cols] = res[numeric_cols].astype(float).round(4)
     return res
 
 
@@ -731,13 +775,19 @@ def run_scenario(
     tee: bool = False,
     initial_soc_kwh: float | None = None,
     terminal_soc_free: bool | None = None,
-) -> tuple[pd.DataFrame, str]:
+    return_unrounded: bool = False,
+) -> tuple[pd.DataFrame, str] | tuple[pd.DataFrame, str, pd.DataFrame]:
     """Build, solve and extract dispatch for a single scenario.
 
     Returns ``(res, resolved_solver_name)``.  ``e_cap`` is a
     parameter pinned to ``params['bess_capacity_kwh']`` (industry
     standard for sizing-as-input projects), so it is no longer a
     decision variable and no longer returned.
+
+    When ``return_unrounded`` is True the tuple is extended with a
+    full-precision copy of the dispatch frame ``(res, resolved, res_full)``
+    so callers can run the dispatch-invariant checks without round(4)
+    accumulation polluting the sum-based invariant_4.
     """
     model = build_model(
         params, ts,
@@ -748,6 +798,12 @@ def run_scenario(
         model, solver_name,
         mip_gap=mip_gap, time_limit_seconds=time_limit_seconds, tee=tee,
     )
+    if return_unrounded:
+        res_full = model_to_dataframe(solved, ts, params, round_output=False)
+        numeric_cols = [c for c in res_full.columns if c != "timestamp"]
+        res = res_full.copy()
+        res[numeric_cols] = res[numeric_cols].astype(float).round(4)
+        return res, resolved, res_full
     res = model_to_dataframe(solved, ts, params)
     return res, resolved
 

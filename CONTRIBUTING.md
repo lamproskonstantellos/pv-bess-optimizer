@@ -7,7 +7,7 @@ modules).  This is a deliberate ceiling: re-evaluate subpackaging into
 `solve/` / `finance/` / `uncertainty/` / `plotting/` only when the module
 count crosses **12**.
 
-Current modules (10 + plotting subpackage):
+Current modules (11 + plotting subpackage):
 
 ```
 pvbess_opt/
@@ -69,4 +69,4 @@ form `efficiency_charge` / `efficiency_discharge`.
 
 All figures use the IEEE matplotlib preset (`apply_ieee_style`) and are
 exported as PDF.  Plot titles default to off; toggle with `show_titles`
-in the `economic` sheet.
+in the `project` sheet.

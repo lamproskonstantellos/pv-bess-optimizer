@@ -52,7 +52,11 @@ def verify_energy_balance(
     *,
     raise_on_failure: bool = False,
 ) -> dict[str, float]:
-    """Verify the per-step energy balances against the dispatch DataFrame."""
+    """Verify the per-step energy balances against the dispatch DataFrame.
+
+    Pass the full-precision frame from ``run_scenario(return_unrounded=True)``
+    to avoid round(4) accumulation in the per-step residuals.
+    """
     mode = str(params.get("mode", "vnb") or "vnb").lower()
 
     pv_residual = np.abs(
@@ -401,6 +405,10 @@ def compute_kpis(
             100.0 * actual_cycles_year1 / max_cycles_year
             if max_cycles_year > 1e-9 else 0.0
         )
+        # Note: this nested-dict diagnostic is NOT derated by
+        # unavailability (unlike the headline MWh keys that
+        # apply_unavailability_derate scales) — it reports the raw
+        # Year-1 dispatch utilisation.
         kpis["bess_utilization_diagnostics"] = {
             "bess_charge_pv_surplus_mwh": round(pv_to_bess, 4),
             "bess_charge_grid_mwh": round(bess_charge_grid, 4),

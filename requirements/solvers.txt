@@ -7,7 +7,7 @@
 
 # HiGHS — fast open-source LP/MIP solver, default for the project.
 # Wheels are published for Linux, macOS, Windows on PyPI.
-highspy>=1.7
+highspy>=1.7,<2
 
 # Optional commercial alternative — uncomment if you have a Gurobi licence.
 # gurobipy>=11.0

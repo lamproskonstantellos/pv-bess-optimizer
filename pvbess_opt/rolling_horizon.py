@@ -142,6 +142,8 @@ def add_forecast_noise(
     if "pv_kwh" in out.columns:
         pv = out["pv_kwh"].to_numpy(dtype=float).copy()
         mult = _lognormal_multiplier(rng, eff_sigma_pv, n_perturb)
+        # Clip to the per-window PV max as a proxy for nameplate — this
+        # function has no access to pv_nameplate_kwp.
         pv_max = float(pv.max()) if pv.size else 0.0
         pv[commit_steps:] = np.minimum(
             np.maximum(pv[commit_steps:] * mult, 0.0),
@@ -240,6 +242,13 @@ def rolling_horizon_dispatch(
     initial_soc_kwh: float | None = None
     committed_chunks: list[pd.DataFrame] = []
 
+    # Per-window progress: emit ~20 INFO lines per seed (not one per
+    # window — 365 lines/seed is too noisy at INFO).
+    n_windows = max(1, (n + commit_steps - 1) // commit_steps)
+    log_every = max(1, n_windows // 20)
+    t_rh_start = time.perf_counter()
+    win_idx = 0
+
     cursor = 0
     while cursor < n:
         win_end = min(cursor + window_steps, n)
@@ -295,6 +304,16 @@ def rolling_horizon_dispatch(
             )
 
         cursor = commit_end_global
+
+        win_idx += 1
+        if win_idx % log_every == 0 or win_idx == n_windows:
+            elapsed = time.perf_counter() - t_rh_start
+            eta_s = elapsed / win_idx * (n_windows - win_idx) if win_idx else 0.0
+            logger.info(
+                "rolling_horizon_dispatch: window %d/%d (elapsed %.1fs, "
+                "ETA %.1fs)",
+                win_idx, n_windows, elapsed, eta_s,
+            )
 
     full = pd.concat(committed_chunks, ignore_index=True)
 
@@ -361,7 +380,15 @@ def monte_carlo_rolling(
             ``bess_cycles_total``,
             ``foresight_gap_pct``.
     """
+    _MC_COLUMNS = [
+        "seed", "profit_total_eur", "grid_export_mwh", "grid_import_mwh",
+        "pv_curtailed_mwh", "bess_cycles_total", "foresight_gap_pct",
+    ]
     seeds = [int(base_seed) + i for i in range(int(n_seeds))]
+    if not seeds:
+        # n_seeds == 0 — return a column-shaped empty frame so downstream
+        # consumers (e.g. foresight_gap_pct readers) see a stable schema.
+        return pd.DataFrame(columns=_MC_COLUMNS)
     rows: list[dict[str, Any]] = []
     t_start = time.perf_counter()
     for seed in seeds:
@@ -417,4 +444,6 @@ def verify_window_invariants(
     res: pd.DataFrame, params: dict[str, Any],
 ) -> dict[str, float]:
     """Run the 9 audit invariants on a single committed window."""
-    return verify_dispatch_invariants(res, params, mode=str(params.get("mode", "vnb")))
+    return verify_dispatch_invariants(
+        res, params, mode=str(params.get("mode", "vnb")).lower(),
+    )

@@ -13,26 +13,26 @@ Per-step data (one row per timestep; the timestep is auto-detected).
 The case-study workbook ships at 15-minute cadence (35 040 rows for one
 year) per MD YPEN/DAPEEK/93976/2772/2024.
 
-==========================  =========  ====================================
-Column                      Required   Notes
-==========================  =========  ====================================
-``timestamp``               yes        Datetime; regular cadence required.
-``pv_kwh``                  yes        PV production per step.
-``load_kwh``                vnb only   Required when ``mode=vnb``.  In
-                                       ``mode=merchant`` the column is
-                                       ignored if present (an INFO log
-                                       message is emitted) and
-                                       ``pv_to_load`` / ``bess_dis_load`` /
-                                       ``grid_to_load`` are pinned to 0.
-``dam_price_eur_per_mwh``   no         Day-ahead price per step.  Negative
-                                       prices are accepted and preserved
-                                       sign-aware in the rolling-horizon
-                                       noise model.
-``retail_price_eur_per_mwh``  no       Time-varying retail tariff.  Falls
-                                       back to the scalar
-                                       ``retail_tariff_eur_per_mwh`` from
-                                       the ``project`` sheet.
-==========================  =========  ====================================
+==============================  =========  ====================================
+Column                          Required   Notes
+==============================  =========  ====================================
+``timestamp``                   yes        Datetime; regular cadence required.
+``pv_kwh``                      yes        PV production per step.
+``load_kwh``                    vnb only   Required when ``mode=vnb``.  In
+                                           ``mode=merchant`` the column is
+                                           ignored if present (an INFO log
+                                           message is emitted) and
+                                           ``pv_to_load`` / ``bess_dis_load`` /
+                                           ``grid_to_load`` are pinned to 0.
+``dam_price_eur_per_mwh``       no         Day-ahead price per step.  Negative
+                                           prices are accepted and preserved
+                                           sign-aware in the rolling-horizon
+                                           noise model.
+``retail_price_eur_per_mwh``    no         Time-varying retail tariff.  Falls
+                                           back to the scalar
+                                           ``retail_tariff_eur_per_mwh`` from
+                                           the ``project`` sheet.
+==============================  =========  ====================================
 
 Sheet ``project``
 -----------------
@@ -109,8 +109,8 @@ Sheet ``economics``
   escalation rates for the retail-indexed revenue stream (load / PPA)
   and the DAM-indexed export stream.  The legacy
   ``revenue_inflation_pct`` key is still accepted but is auto-mapped
-  to ``retail_inflation_pct`` with a ``DeprecationWarning`` (see
-  :data:`pvbess_opt.io.DEPRECATED_ECONOMICS_KEYS`); new workbooks
+  to ``retail_inflation_pct`` with a ``DeprecationWarning`` (the rename
+  table lives in ``pvbess_opt.io._LEGACY_RENAMED``); new workbooks
   should use the split keys directly.
 * ``aggregator_fee_pct_revenue`` (NEW in v0.8; default 10 %, Gridcog
   convention) — reduces gross revenue post-solve.  Surfaces as a
@@ -128,6 +128,11 @@ Sheet ``simulation``
   ``docs/technical.documentation/uncertainty_modelling.md``).
 * ``plot_daily_scope`` / ``plot_monthly_scope`` /
   ``plot_yearly_scope`` ∈ ``none | year1_only | all``.
+* ``uncertainty_diagnostics_enabled`` (default ``TRUE``) — render the
+  forecast-calibration diagnostic plots (coverage-by-horizon, PIT
+  histogram, CRPS timeline, residual Q-Q) into ``06_uncertainty_plots/``
+  alongside the input forecast band.  Set ``FALSE`` to emit only
+  ``inputs_forecast_band.pdf`` and the seasonal / heatmap figures.
 
 Sheet ``max_injection_profile``
 -------------------------------

@@ -38,7 +38,6 @@ from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
 from .style import (
-    annotate_value_safe,
     apply_fine_ticks,
     apply_universal_margins,
     save_figure,

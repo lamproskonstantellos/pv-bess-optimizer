@@ -2,7 +2,13 @@
 
 The cycle-fade term is additive (subtractive on the capacity factor) and
 layered on top of the unchanged multiplicative calendar fade.  With the
-cycle coefficient at 0 the pipeline output is byte-identical to v0.8.7.
+cycle coefficient at 0 the pipeline output matches the stored baseline,
+guarding the no-op property.
+
+The baseline fixture was regenerated for v0.8.10 to incorporate the F2
+per-stream BESS-revenue degradation fix: BESS-origin revenue now degrades
+on bess_factor rather than pv_factor, which shifts the multi-year revenue
+KPIs (NPV / IRR / lifetime revenue) on this hybrid scenario.
 """
 
 from __future__ import annotations

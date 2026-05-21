@@ -32,7 +32,7 @@ as in the input.
 
 ## Workbook configuration (the `# uncertainty` group)
 
-Eleven keys on the economic sheet drive the rolling-horizon engine:
+Eleven keys on the simulation sheet drive the rolling-horizon engine:
 
 | Key | Default | Notes |
 | --- | ------- | ----- |

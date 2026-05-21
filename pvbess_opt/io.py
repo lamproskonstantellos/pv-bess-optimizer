@@ -172,6 +172,7 @@ SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_sigma_dam": 0.20,
     "uncertainty_sigma_pv": 0.12,
     "uncertainty_sigma_load": 0.05,
+    "uncertainty_diagnostics_enabled": True,
     "plot_daily_scope": "year1_only",
     "plot_monthly_scope": "all",
     "plot_yearly_scope": "all",
@@ -241,6 +242,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "uncertainty_dam_enabled",
     "uncertainty_pv_enabled",
     "uncertainty_load_enabled",
+    "uncertainty_diagnostics_enabled",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -424,6 +426,9 @@ _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Log-normal sigma for PV. Default 0.12 (NREL day-ahead PV study)."),
     ("uncertainty_sigma_load", 0.05, "-",
      "Log-normal sigma for Load. Default 0.05 (predictable customer benchmark)."),
+    ("uncertainty_diagnostics_enabled", True, "bool",
+     "Render the forecast-calibration diagnostic plots (coverage, PIT, "
+     "CRPS, residual Q-Q) into 06_uncertainty_plots/. Default TRUE."),
     ("plot_daily_scope", "year1_only", "scope",
      "none | year1_only | all. 'all' produces ~365 * N_years * 3 daily PDFs."),
     ("plot_monthly_scope", "all", "scope",
@@ -906,7 +911,17 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
 
     for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh", "retail_price_eur_per_mwh"):
         if col in ts.columns:
-            ts[col] = ts[col].astype(float).ffill().bfill()
+            numeric = ts[col].astype(float)
+            nan_mask = numeric.isna()
+            nan_count = int(nan_mask.sum())
+            if nan_count > 0:
+                first_nan = ts.loc[nan_mask.idxmax(), "timestamp"]
+                logger.warning(
+                    "Column '%s' had %d NaN value(s) filled via ffill/bfill; "
+                    "first NaN at %s. Check the input timeseries for gaps.",
+                    col, nan_count, first_nan,
+                )
+            ts[col] = numeric.ffill().bfill()
     # pv_kwh_override deliberately stays out of the ffill/bfill loop so
     # partial NaN survives long enough for _resolve_pv_column to raise.
     return ts

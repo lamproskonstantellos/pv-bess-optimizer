@@ -9,12 +9,14 @@ Output layout — written to ``results/<input>_<scenario>_<timestamp>/``::
     04_financial_plots/ cumulative / waterfall / payback / tornados
     05_energy_plots/<calendar_year>/{daily,monthly,yearly}/...
                        lifetime_summary_<start>-<end>.pdf
+    06_uncertainty_plots/ input forecast band, seasonal boxplot,
+                       DAM heatmap, forecast-gap comparison
 
 All figures use the IEEE matplotlib preset and are exported as PDF.
 Plot titles default to off; toggle with ``show_titles`` in the
-``economic`` sheet.
+``project`` sheet.
 
-Plot-scope flags in ``economic`` control how many energy PDFs are
+Plot-scope flags in ``simulation`` control how many energy PDFs are
 produced.  All three share the same vocabulary:
 
 * ``plot_daily_scope``   — none / year1_only / all   (default ``year1_only``)
@@ -410,14 +412,30 @@ def _generate_all_energy_plots(
 def _generate_uncertainty_plots(
     ts: pd.DataFrame,
     out_dir: Path,
+    *,
+    diagnostics_enabled: bool = True,
+    sigma_dam: float = 0.20,
+    sigma_pv: float = 0.12,
+    sigma_load: float = 0.05,
+    commit_steps: int = 96,
 ) -> None:
-    """Render the three input-uncertainty PDFs into ``out_dir``."""
+    """Render the input-uncertainty PDFs into ``out_dir``.
+
+    Always writes the forecast band, seasonal boxplot and DAM heatmap.
+    When ``diagnostics_enabled`` is True (simulation-sheet flag
+    ``uncertainty_diagnostics_enabled``), also writes the four
+    forecast-calibration diagnostic plots.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     try:
         from pvbess_opt.plotting import (
             plot_dam_intraday_heatmap,
             plot_input_forecast_band,
             plot_input_seasonal_boxplot,
+            plot_uncertainty_coverage_by_horizon,
+            plot_uncertainty_crps_timeline,
+            plot_uncertainty_pit_histogram,
+            plot_uncertainty_residual_qq,
         )
         plot_input_forecast_band(
             ts, out_dir / "inputs_forecast_band.pdf",
@@ -429,6 +447,21 @@ def _generate_uncertainty_plots(
         plot_dam_intraday_heatmap(
             ts, out_dir / "dam_intraday_heatmap.pdf",
         )
+        if diagnostics_enabled:
+            sig = dict(sigma_dam=sigma_dam, sigma_pv=sigma_pv, sigma_load=sigma_load)
+            plot_uncertainty_coverage_by_horizon(
+                ts, out_dir / "coverage_by_horizon.pdf",
+                commit_steps=commit_steps, **sig,
+            )
+            plot_uncertainty_pit_histogram(
+                ts, out_dir / "pit_histogram.pdf", **sig,
+            )
+            plot_uncertainty_crps_timeline(
+                ts, out_dir / "crps_timeline.pdf", **sig,
+            )
+            plot_uncertainty_residual_qq(
+                ts, out_dir / "residual_qq.pdf", **sig,
+            )
     except Exception:
         logger.exception("Uncertainty plot generation failed")
 
@@ -772,6 +805,24 @@ def _run_one(
             approx_pdfs, n_years,
         )
 
+    # Upfront Monte-Carlo runtime estimate.  The default 30-seed ensemble
+    # takes ~1 h on a 4-vCPU machine; compare-sources (x4) ~4 h.  Warn
+    # before the solve so the user can interrupt.
+    if unc_cfg["enabled"] and unc_cfg["n_seeds"] > 0:
+        n_seeds = int(unc_cfg["n_seeds"])
+        n_sources = 4 if unc_cfg["compare_sources"] else 1
+        # ~126.5 s per full-year (35,040-step) seed; scale by the actual
+        # step count so coarser cadences / shorter horizons estimate lower.
+        per_seed_s = len(ts) / 35040.0 * 126.5
+        total_s = per_seed_s * n_seeds * n_sources
+        total_min = int(-(-total_s // 60))  # ceil to the nearest minute
+        logger.warning(
+            "[mc-runtime-estimate] rolling-horizon Monte-Carlo enabled: "
+            "%d seed(s) x %d source set(s) ~ %d min projected wall-clock "
+            "(~%.0f s/seed at %d steps).",
+            n_seeds, n_sources, total_min, per_seed_s, len(ts),
+        )
+
     with _tee_stdout_to_log(log_path):
         print(f"[run] mode={params.get('mode')}  "
               f"allow_bess_grid_charging={params.get('allow_bess_grid_charging')}  "
@@ -780,13 +831,15 @@ def _run_one(
 
         # Perfect-foresight base run (also serves as the rolling-horizon
         # benchmark when --rolling-horizon is on).
-        res, resolved_solver = run_scenario(
+        res, resolved_solver, res_full = run_scenario(
             params, ts, solver_name=args.solver,
             mip_gap=args.mip_gap, time_limit_seconds=args.time_limit,
-            tee=args.tee,
+            tee=args.tee, return_unrounded=True,
         )
+        # Verify on the full-precision frame so the sum-based invariant_4
+        # is not tripped by round(4) accumulation; KPIs / output use res.
         residuals = verify_energy_balance(
-            res, params, raise_on_failure=False,
+            res_full, params, raise_on_failure=False,
         )
         print(
             f"[verify] solver={resolved_solver}  residuals(kWh): "
@@ -794,7 +847,7 @@ def _run_one(
         )
 
         invariants = verify_dispatch_invariants(
-            res, params, mode=str(params.get("mode", "vnb")),
+            res_full, params, mode=str(params.get("mode", "vnb")).lower(),
         )
         print(
             "[invariants] "
@@ -967,7 +1020,20 @@ def _run_one(
             mode=str(params.get("mode", "vnb")).lower(),
         )
 
-        _generate_uncertainty_plots(ts, layout["uncertainty_plots"])
+        _dt_min = int(params.get("dt_minutes", 60) or 60)
+        _commit_steps = max(
+            1, int(round(int(unc_cfg["commit_hours"]) * 60 / _dt_min))
+        )
+        _generate_uncertainty_plots(
+            ts, layout["uncertainty_plots"],
+            diagnostics_enabled=bool(
+                econ_pre.get("uncertainty_diagnostics_enabled", True)
+            ),
+            sigma_dam=unc_cfg["sigma_dam"],
+            sigma_pv=unc_cfg["sigma_pv"],
+            sigma_load=unc_cfg["sigma_load"],
+            commit_steps=_commit_steps,
+        )
 
         print(f"=== KPIs ({slug}) ===")
         for key, value in kpis.items():

@@ -18,6 +18,7 @@ needed):
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -25,9 +26,25 @@ import numpy as np
 import pandas as pd
 
 from ..config import COLORS, FINANCIAL_COLORS
+from ._dates import apply_house_date_axis
 from .style import apply_universal_margins, save_figure, show_titles
 
 _Z90 = 1.2816  # Phi^{-1}(0.90)
+
+# House legend placement for the whole 06_uncertainty_plots/ family.
+LEGEND_LOC = "upper right"
+LEGEND_KWARGS = dict(loc=LEGEND_LOC, framealpha=0.85, fontsize=9)
+
+
+def _placeholder(out_path: Path, message: str) -> Path:
+    """Render a centered-message placeholder figure (empty-input guard)."""
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=10,
+            transform=ax.transAxes)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    return save_figure(out_path)
 
 
 def _lognormal_band(actual: np.ndarray, sigma: float) -> tuple[np.ndarray, np.ndarray]:
@@ -91,11 +108,11 @@ def plot_input_forecast_band(
                         label=f"P10–P90 (σ={sigma:.2f})")
         ax.plot(t, actual, color=color, linewidth=1.0, label="Actual")
         ax.set_ylabel(ylabel)
-        ax.legend(loc="best", fontsize=7, framealpha=0.9)
+        ax.legend(**LEGEND_KWARGS)
         ax.grid(True, linestyle="--", alpha=0.5)
+        apply_house_date_axis(ax)
 
     axes[-1].set_xlabel("Timestamp")
-    plt.setp(axes[-1].get_xticklabels(), rotation=30, ha="right")
     if show_titles():
         axes[0].set_title(
             f"Forecast envelope, week starting DOY {week_start_doy}"
@@ -185,4 +202,258 @@ def plot_dam_intraday_heatmap(
     if show_titles():
         ax.set_title("DAM intraday × seasonal heatmap (Year 1)")
     apply_universal_margins(ax, skip_x=True, skip_y=True)
+    return save_figure(out_path)
+
+
+# ---------------------------------------------------------------------------
+# Forecast-calibration diagnostics
+# ---------------------------------------------------------------------------
+#
+# These compare a synthetic forecast (median = the input signal, per-step
+# Gaussian width sigma_step = |signal| * sigma) against a seeded realised
+# draw from the same log-normal noise model used by add_forecast_noise.
+# They diagnose whether the band width is well-calibrated; well-calibrated
+# forecasts give a flat PIT histogram, a diagonal residual Q-Q, ~0.80
+# P10-P90 coverage, and a low, stable CRPS.
+
+_SQRT2 = float(np.sqrt(2.0))
+_INV_SQRT_PI = float(1.0 / np.sqrt(np.pi))
+_erf_vec = np.vectorize(math.erf)
+
+
+def _norm_cdf(x: np.ndarray) -> np.ndarray:
+    return 0.5 * (1.0 + _erf_vec(np.asarray(x, dtype=float) / _SQRT2))
+
+
+def _norm_pdf(x: np.ndarray) -> np.ndarray:
+    x = np.asarray(x, dtype=float)
+    return np.exp(-0.5 * x * x) / np.sqrt(2.0 * np.pi)
+
+
+def _norm_ppf(p: np.ndarray) -> np.ndarray:
+    """Inverse standard-normal CDF (Acklam's rational approximation)."""
+    p = np.clip(np.asarray(p, dtype=float), 1e-12, 1.0 - 1e-12)
+    a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
+         1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00]
+    b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02,
+         6.680131188771972e+01, -1.328068155288572e+01]
+    c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00,
+         -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00]
+    d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00,
+         3.754408661907416e+00]
+    plow, phigh = 0.02425, 1.0 - 0.02425
+    out = np.zeros_like(p)
+    lo = p < plow
+    hi = p > phigh
+    mid = ~(lo | hi)
+    if lo.any():
+        q = np.sqrt(-2.0 * np.log(p[lo]))
+        out[lo] = (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / \
+                  ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1.0)
+    if hi.any():
+        q = np.sqrt(-2.0 * np.log(1.0 - p[hi]))
+        out[hi] = -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / \
+                   ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1.0)
+    if mid.any():
+        q = p[mid] - 0.5
+        r = q * q
+        out[mid] = (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q / \
+                   (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1.0)
+    return out
+
+
+def _diagnostic_panels(ts: pd.DataFrame, sigmas: dict[str, float]):
+    """Return ``[(col, label, sigma, color)]`` for the present sources."""
+    panels = [
+        ("dam_price_eur_per_mwh", "DAM", sigmas["dam"], FINANCIAL_COLORS["net"]),
+        ("pv_kwh", "PV", sigmas["pv"], COLORS["PV→Load"]),
+    ]
+    if "load_kwh" in ts.columns:
+        panels.append(("load_kwh", "Load", sigmas["load"], FINANCIAL_COLORS["revenue"]))
+    return [p for p in panels if p[0] in ts.columns]
+
+
+def _forecast_vs_realised(actual: np.ndarray, sigma: float, rng):
+    """Synthetic (median, sigma_step, realised, valid-mask) for a source."""
+    median = np.asarray(actual, dtype=float)
+    sigma_step = np.abs(median) * float(sigma)
+    if sigma > 0.0:
+        mult = np.exp(sigma * rng.standard_normal(median.shape) - 0.5 * sigma * sigma)
+    else:
+        mult = np.ones_like(median)
+    realised = median * mult
+    valid = sigma_step > 1e-9
+    return median, sigma_step, realised, valid
+
+
+def plot_uncertainty_coverage_by_horizon(
+    ts: pd.DataFrame,
+    out_path: Path,
+    *,
+    sigma_dam: float = 0.20,
+    sigma_pv: float = 0.12,
+    sigma_load: float = 0.05,
+    commit_steps: int = 96,
+    base_seed: int = 42,
+) -> Path:
+    """Empirical P10–P90 coverage vs horizon hour, one line per source."""
+    out_path = Path(out_path)
+    sigmas = {"dam": sigma_dam, "pv": sigma_pv, "load": sigma_load}
+    panels = _diagnostic_panels(ts, sigmas)
+    if not panels or commit_steps < 1:
+        return _placeholder(out_path, "Coverage-by-horizon: no data.")
+
+    dt_h = 24.0 / commit_steps
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    rng = np.random.default_rng(base_seed)
+    for col, label, sigma, color in panels:
+        actual = ts[col].to_numpy(dtype=float)
+        median, _sig, realised, valid = _forecast_vs_realised(actual, sigma, rng)
+        low, high = _lognormal_band(median, sigma)
+        inside = (realised >= low) & (realised <= high) & valid
+        horizon = (np.arange(len(actual)) % commit_steps)
+        hours, cover = [], []
+        for h in range(commit_steps):
+            sel = (horizon == h) & valid
+            if sel.any():
+                hours.append(h * dt_h)
+                cover.append(float(inside[sel].sum()) / float(sel.sum()))
+        if hours:
+            ax.plot(hours, cover, color=color, linewidth=1.2, label=label)
+    ax.axhline(0.80, color="grey", linestyle="--", linewidth=1.0,
+               label="Nominal P10–P90 = 0.80")
+    ax.set_xlabel("Horizon (hours ahead)")
+    ax.set_ylabel("Empirical coverage")
+    ax.set_ylim(0.0, 1.0)
+    if show_titles():
+        ax.set_title("P10–P90 coverage by forecast horizon")
+    ax.legend(**LEGEND_KWARGS)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    apply_universal_margins(ax)
+    return save_figure(out_path)
+
+
+def plot_uncertainty_pit_histogram(
+    ts: pd.DataFrame,
+    out_path: Path,
+    *,
+    sigma_dam: float = 0.20,
+    sigma_pv: float = 0.12,
+    sigma_load: float = 0.05,
+    base_seed: int = 42,
+) -> Path:
+    """Probability-integral-transform histogram per source (flat = calibrated)."""
+    out_path = Path(out_path)
+    sigmas = {"dam": sigma_dam, "pv": sigma_pv, "load": sigma_load}
+    panels = _diagnostic_panels(ts, sigmas)
+    if not panels:
+        return _placeholder(out_path, "PIT histogram: no data.")
+
+    fig, axes = plt.subplots(len(panels), 1, figsize=(7, 2.2 * len(panels)))
+    if len(panels) == 1:
+        axes = [axes]
+    rng = np.random.default_rng(base_seed)
+    for ax, (col, label, sigma, color) in zip(axes, panels):
+        actual = ts[col].to_numpy(dtype=float)
+        median, sigma_step, realised, valid = _forecast_vs_realised(actual, sigma, rng)
+        z = (realised[valid] - median[valid]) / sigma_step[valid]
+        pit = _norm_cdf(z)  # PIT = F_forecast(actual); uniform when calibrated
+        ax.hist(pit, bins=20, range=(0.0, 1.0), color=color, alpha=0.6,
+                edgecolor="black", linewidth=0.4,
+                label=f"{label} (n={pit.size})")
+        ideal = pit.size / 20.0 if pit.size else 0.0
+        ax.axhline(ideal, color="grey", linestyle="--", linewidth=1.0)
+        ax.set_ylabel(label)
+        ax.legend(**LEGEND_KWARGS)
+        ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+    axes[-1].set_xlabel("PIT value")
+    if show_titles():
+        axes[0].set_title("Probability integral transform (flat ⇒ calibrated)")
+    for ax in axes:
+        apply_universal_margins(ax, skip_x=True)
+    return save_figure(out_path)
+
+
+def plot_uncertainty_crps_timeline(
+    ts: pd.DataFrame,
+    out_path: Path,
+    *,
+    sigma_dam: float = 0.20,
+    sigma_pv: float = 0.12,
+    sigma_load: float = 0.05,
+    base_seed: int = 42,
+) -> Path:
+    """Step-wise CRPS timeline (Gaussian band approximation), one line per source."""
+    out_path = Path(out_path)
+    sigmas = {"dam": sigma_dam, "pv": sigma_pv, "load": sigma_load}
+    panels = _diagnostic_panels(ts, sigmas)
+    if not panels:
+        return _placeholder(out_path, "CRPS timeline: no data.")
+
+    t = pd.to_datetime(ts["timestamp"])
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    rng = np.random.default_rng(base_seed)
+    for col, label, sigma, color in panels:
+        actual = ts[col].to_numpy(dtype=float)
+        median, sigma_step, realised, valid = _forecast_vs_realised(actual, sigma, rng)
+        crps = np.zeros_like(median)
+        s = sigma_step[valid]
+        z = (realised[valid] - median[valid]) / s
+        crps[valid] = s * (
+            z * (2.0 * _norm_cdf(z) - 1.0) + 2.0 * _norm_pdf(z) - _INV_SQRT_PI
+        )
+        ax.plot(t, crps, color=color, linewidth=0.9, label=label)
+    ax.set_xlabel("Timestamp")
+    ax.set_ylabel("CRPS")
+    if show_titles():
+        ax.set_title("Step-wise CRPS over the forecast band")
+    ax.legend(**LEGEND_KWARGS)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    apply_house_date_axis(ax)
+    apply_universal_margins(ax)
+    return save_figure(out_path)
+
+
+def plot_uncertainty_residual_qq(
+    ts: pd.DataFrame,
+    out_path: Path,
+    *,
+    sigma_dam: float = 0.20,
+    sigma_pv: float = 0.12,
+    sigma_load: float = 0.05,
+    base_seed: int = 42,
+) -> Path:
+    """Q-Q plot of normalised residuals vs standard normal, per source."""
+    out_path = Path(out_path)
+    sigmas = {"dam": sigma_dam, "pv": sigma_pv, "load": sigma_load}
+    panels = _diagnostic_panels(ts, sigmas)
+    if not panels:
+        return _placeholder(out_path, "Residual Q-Q: no data.")
+
+    fig, axes = plt.subplots(len(panels), 1, figsize=(7, 2.4 * len(panels)))
+    if len(panels) == 1:
+        axes = [axes]
+    rng = np.random.default_rng(base_seed)
+    for ax, (col, label, sigma, color) in zip(axes, panels):
+        actual = ts[col].to_numpy(dtype=float)
+        median, sigma_step, realised, valid = _forecast_vs_realised(actual, sigma, rng)
+        resid = np.sort((realised[valid] - median[valid]) / sigma_step[valid])
+        n = resid.size
+        if n:
+            theoretical = _norm_ppf((np.arange(1, n + 1) - 0.5) / n)
+            ax.scatter(theoretical, resid, s=6, color=color, alpha=0.5,
+                       label=f"{label} (n={n})")
+            lim = float(max(abs(theoretical).max(), abs(resid).max(), 1.0))
+            ax.plot([-lim, lim], [-lim, lim], color="grey", linestyle="--",
+                    linewidth=1.0, label="Standard normal")
+        ax.set_ylabel(label)
+        ax.legend(**LEGEND_KWARGS)
+        ax.grid(True, linestyle="--", alpha=0.5)
+    axes[-1].set_xlabel("Theoretical normal quantile")
+    if show_titles():
+        axes[0].set_title("Normalised-residual Q-Q vs standard normal")
+    for ax in axes:
+        apply_universal_margins(ax)
     return save_figure(out_path)
