@@ -33,8 +33,9 @@ Reconciliation invariant
 
     sum(pv_kwh in lifetime[y]) / sum(pv_kwh in Year 1) ≈ pv_factor[y]
 
-within 0.1 % for every year.  See
-:doc:`technical.documentation/lifetime_scaling` for the derivation.
+within 0.1 % for every year.  See the lifetime-scaling note under
+``docs/source/technical.documentation/lifetime_scaling.rst`` for the
+derivation.
 """
 
 from __future__ import annotations
@@ -161,7 +162,10 @@ def build_lifetime_dispatch(
         raise ValueError(
             f"project_lifecycle_years must be >= 1, got {n_years!r}"
         )
-    project_start_year = int(econ.get("project_start_year", 2026) or 2026)
+    project_start_year = int(
+        econ.get("project_start_year", PROJECT_SHEET_DEFAULTS["project_start_year"])
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
     lid = float(econ.get("pv_degradation_year1_pct", 0.0)) / 100.0
     d_annual = float(econ.get("pv_degradation_annual_pct", 0.0)) / 100.0
     d_bess = float(econ.get("bess_degradation_annual_pct", 0.0)) / 100.0

@@ -16,7 +16,7 @@ See :doc:`outputs` for the full reference.  Quick summary::
     │   ├── cumulative_cashflow_*.pdf
     │   ├── yearly_cashflow_bars_*.pdf
     │   ├── npv_waterfall_*.pdf
-    │   ├── payback_visualization.pdf
+    │   ├── cumulative_cashflow_with_payback_{start}-{end}.pdf
     │   ├── sensitivity_npv_tornado.pdf
     │   ├── sensitivity_irr_tornado.pdf
     │   └── rolling_horizon_distribution.pdf

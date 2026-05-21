@@ -5,7 +5,9 @@ All financial plots are IEEE-styled PDFs.  Compact EUR formatter
 (``EUR 12.3M``, ``EUR 45k``) on every EUR axis via
 :func:`pvbess_opt.plotting._currency.euro_axis_formatter`.
 
-Eight plots are produced when the financial pipeline runs:
+A family of plots is produced when the financial pipeline runs
+(the exact count depends on which of sensitivity / lifecycle / LCOE
+/ LCOS are active for the run):
 
 1. ``cumulative_cashflow_<start>-<end>.pdf`` — cumulative undiscounted
    (solid) + discounted (dashed) cash-flow over the project horizon.
@@ -13,15 +15,16 @@ Eight plots are produced when the financial pipeline runs:
    revenue (+), OPEX (-), CAPEX (-), with the net line overlaid.
 3. ``npv_waterfall_<start>-<end>.pdf`` — yearly contribution to total
    NPV (waterfall stacked bar).
-4. ``payback_visualization.pdf`` — cumulative cash-flow with vertical
-   markers at the simple and discounted payback years.
+4. ``cumulative_cashflow_with_payback_{start}-{end}.pdf`` — cumulative
+   cash-flow with vertical markers at the simple and discounted
+   payback years.
 5. ``monthly_cashflow_<start>.pdf`` — Year-1 monthly stacked bars
    (seasonality of cash-flows).
 6. ``sensitivity_npv_tornado.pdf`` — sorted NPV tornado, four drivers.
-7. ``sensitivity_irr_tornado.pdf`` — sorted IRR tornado.  Drops the
-   ``Discount rate`` row (the IRR is by definition the rate that zeros
-   the NPV, so varying the discount rate does not move the IRR).  An
-   italic footer note flags the omission.
+7. ``sensitivity_irr_tornado.pdf`` — sorted IRR tornado.  The
+   ``Discount rate`` driver is filtered out of the IRR tornado (and
+   only the IRR tornado), because the discount rate is the divisor in
+   the IRR calculation — varying it would be a circular sensitivity.
 
    Both tornados annotate each bar end with the absolute driver value
    that produced it — CAPEX / OPEX / revenue in EUR, the discount rate

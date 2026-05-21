@@ -10,36 +10,41 @@ CLI entry point
 
 The CLI accepts:
 
-================================  ==========================================
-Flag                              Purpose
-================================  ==========================================
-``excel``                          Positional input workbook (default
-                                   ``inputs/input.xlsx``).
-``--solver``                       ``gurobi`` | ``highs`` | ``cbc``
-                                   (default ``highs``).
-``--outdir``                       Output base directory
-                                   (default ``results``).
-``--mode``                         Override regulatory mode at the CLI:
-                                   ``vnb`` | ``merchant``.  Default: read
-                                   from the workbook.
-``--strict``                       Turn dispatch-invariant violations from
-                                   warnings into errors.
-``--mip-gap``                      Solver MIP relative gap (default 0.001).
-``--time-limit``                   Solver wall-time limit in seconds
-                                   (default 1800).
-``--tee``                          Print solver output to stdout.
-``--rolling-horizon``              Run a rolling-horizon dispatch with
-                                   imperfect foresight.
-``--window-hours``                 Rolling-horizon window length in hours
-                                   (default 48).
-``--commit-hours``                 Rolling-horizon commit slice in hours
-                                   (default 24).
-``--monte-carlo``                  Number of Monte Carlo seeds for the
-                                   rolling-horizon ensemble (0 = single
-                                   deterministic noiseless run).
-``--seed``                         Base seed for the MC ensemble
-                                   (default 42).
-================================  ==========================================
+===================================  ==========================================
+Flag                                 Purpose
+===================================  ==========================================
+``excel``                            Positional input workbook (default
+                                     ``inputs/input.xlsx``).
+``--solver``                         ``gurobi`` | ``highs`` | ``cbc``
+                                     (default ``highs``).
+``--outdir``                         Output base directory
+                                     (default ``results``).
+``--mode``                           Override regulatory mode at the CLI:
+                                     ``vnb`` | ``merchant``.  Default: read
+                                     from the workbook.
+``--strict``                         Turn dispatch-invariant violations from
+                                     warnings into errors.
+``--mip-gap``                        Solver MIP relative gap (default 0.001).
+``--time-limit``                     Solver wall-time limit in seconds
+                                     (default 1800).
+``--tee``                            Print solver output to stdout.
+``--rolling-horizon``                Run a rolling-horizon dispatch with
+                                     imperfect foresight.
+``--window-hours``                   Rolling-horizon window length in hours
+                                     (default 48).
+``--commit-hours``                   Rolling-horizon commit slice in hours
+                                     (default 24).
+``--monte-carlo``                    Number of Monte Carlo seeds for the
+                                     rolling-horizon ensemble (0 = single
+                                     deterministic noiseless run).
+``--seed``                           Base seed for the MC ensemble
+                                     (default 42).
+``--compare-uncertainty-sources``    Run four MC ensembles (DAM-only,
+                                     PV-only, Load-only, All-combined)
+                                     and emit a comparison plot
+                                     (overrides workbook
+                                     ``uncertainty_compare_sources``).
+===================================  ==========================================
 
 Output layout
 -------------

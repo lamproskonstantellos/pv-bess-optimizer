@@ -354,7 +354,10 @@ def _generate_all_energy_plots(
     daily_scope = str(econ.get("plot_daily_scope", "year1_only"))
     monthly_scope = str(econ.get("plot_monthly_scope", "all"))
     yearly_scope = str(econ.get("plot_yearly_scope", "all"))
-    project_start_year = int(econ.get("project_start_year", 2026) or 2026)
+    project_start_year = int(
+        econ.get("project_start_year", PROJECT_SHEET_DEFAULTS["project_start_year"])
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
 
     if lifetime_df is None or lifetime_df.empty:
         if pd.api.types.is_datetime64_any_dtype(res_year1["timestamp"]):
@@ -447,7 +450,10 @@ def _generate_financial_plots(
     capacities: dict[str, float] | None = None,
 ) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
-    start = int(econ.get("project_start_year", 2026) or 2026)
+    start = int(
+        econ.get("project_start_year", PROJECT_SHEET_DEFAULTS["project_start_year"])
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
     end = start + int(econ.get("project_lifecycle_years", PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]) - 1
     try:
         plot_cumulative_cashflow(
@@ -915,7 +921,10 @@ def _run_one(
 
         write_dispatch_artifacts(
             layout["dispatch"], res, bundle.get("lifetime_df"),
-            project_start_year=int(econ.get("project_start_year", 2026) or 2026),
+            project_start_year=int(
+                econ.get("project_start_year", PROJECT_SHEET_DEFAULTS["project_start_year"])
+                or PROJECT_SHEET_DEFAULTS["project_start_year"]
+            ),
         )
 
         write_results_workbook(

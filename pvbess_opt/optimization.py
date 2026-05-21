@@ -753,7 +753,7 @@ def run_scenario(
 
 
 # ---------------------------------------------------------------------------
-# 8 audit invariants — verify_dispatch_invariants
+# 9 audit invariants — verify_dispatch_invariants
 # ---------------------------------------------------------------------------
 
 

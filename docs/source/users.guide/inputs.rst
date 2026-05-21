@@ -104,8 +104,14 @@ Sheet ``economics``
 -------------------
 
 * ``discount_rate_pct`` — WACC.
-* ``opex_inflation_pct`` / ``revenue_inflation_pct`` — annual
-  escalation rates.
+* ``opex_inflation_pct`` — annual OPEX escalation.
+* ``retail_inflation_pct`` / ``dam_inflation_pct`` — separate annual
+  escalation rates for the retail-indexed revenue stream (load / PPA)
+  and the DAM-indexed export stream.  The legacy
+  ``revenue_inflation_pct`` key is still accepted but is auto-mapped
+  to ``retail_inflation_pct`` with a ``DeprecationWarning`` (see
+  :data:`pvbess_opt.io.DEPRECATED_ECONOMICS_KEYS`); new workbooks
+  should use the split keys directly.
 * ``aggregator_fee_pct_revenue`` (NEW in v0.8; default 10 %, Gridcog
   convention) — reduces gross revenue post-solve.  Surfaces as a
   signed ``aggregator_fee_eur`` column on ``cashflow_yearly``.
@@ -153,7 +159,8 @@ The canonical defaults live in
 :data:`pvbess_opt.io.SIMULATION_SHEET_DEFAULTS`.
 
 The shipped ``inputs/input.xlsx`` is the single source of truth for
-the PV shape: 35 040 fifteen-minute rows scaled to 1 MW × 1500
-kWh/kWp/yr by default.  The loader rescales the workbook PV column
-to match the user's ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp``
-target at run time; every per-step ratio is preserved.
+the PV shape: 35 040 fifteen-minute rows.  The loader rescales the
+workbook PV column to match the user's ``pv_nameplate_kwp`` ×
+``specific_production_kwh_per_kwp`` target at run time; every
+per-step ratio is preserved.  See ``inputs/input.xlsx`` for the
+as-shipped nameplate and yield.

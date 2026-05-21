@@ -39,4 +39,4 @@ the formatted base value — and each y-axis label carries the ±
 sensitivity range applied to that driver.
 
 All plots are PDF-only (IEEE preset) and titles are off by default;
-toggle with ``show_titles`` in the ``economic`` sheet.
+toggle with ``show_titles`` in the ``project`` sheet.

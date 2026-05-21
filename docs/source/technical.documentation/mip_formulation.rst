@@ -12,9 +12,12 @@ Decision variables (per timestep, kWh)
 * ``bess_dis_load[t]``, ``bess_dis_grid[t]`` — BESS discharge.
 * ``grid_to_load[t]``, ``grid_to_bess[t]`` — grid-bound flows.
 * ``soc[t]`` — state-of-charge (kWh).
-* ``e_cap`` — BESS energy capacity (single decision variable).
 * ``y_charge[t]``, ``y_dis[t]``, ``y_grid_io[t]``, ``z_pv_active[t]``
   — binary indicators.
+
+The BESS energy capacity ``e_cap`` is a fixed parameter pinned to
+``bess_capacity_kwh`` from the workbook — no longer a decision
+variable.
 
 Constraints
 -----------
@@ -40,17 +43,25 @@ SOC dynamics:
        (p^{\text{bess←pv}}_t + p^{\text{grid→bess}}_t)
        - \frac{p^{\text{bess→load}}_t + p^{\text{bess→grid}}_t}{\eta_{\text{dis}}}
 
-Charge / discharge power limits:
+Charge / discharge power limits — a single symmetric per-step energy
+cap derived from ``bess_power_kw``:
 
 .. math::
 
+   \text{bess\_step\_lim} = p^{\text{bess}} \cdot \Delta t
+
    p^{\text{bess←pv}}_t + p^{\text{grid→bess}}_t
-   \le p^{\text{ch\_max}} \cdot \Delta t \cdot y^{\text{charge}}_t
+   \le \text{bess\_step\_lim} \cdot y^{\text{charge}}_t
 
    p^{\text{bess→load}}_t + p^{\text{bess→grid}}_t
-   \le p^{\text{dis\_max}} \cdot \Delta t \cdot y^{\text{dis}}_t
+   \le \text{bess\_step\_lim} \cdot y^{\text{dis}}_t
 
    y^{\text{charge}}_t + y^{\text{dis}}_t \le 1
+
+The two separate legacy charge / discharge power keys were
+explicitly removed in v0.8 (see ``REMOVED_BESS_KEYS`` in
+:mod:`pvbess_opt.io`); both charge and discharge power are now driven
+by the symmetric ``bess_power_kw``.
 
 Static max-injection cap (BOTH modes):
 
@@ -105,12 +116,12 @@ Big-M values are derived per-instance by
 
 .. math::
 
-   M^{\text{imp}} = (l^{\text{max}} + p^{\text{ch\_max}} \cdot \Delta t) \cdot 1.001
+   M^{\text{imp}} = (l^{\text{max}} + \text{bess\_step\_lim}) \cdot 1.001
 
    M^{\text{exp}} = p^{\text{export\_max}} \cdot \Delta t \cdot
                     \text{max\_injection\_frac} \cdot 1.001
 
-   M^{\text{ch}} = p^{\text{ch\_max}} \cdot \Delta t \cdot 1.001
+   M^{\text{ch}} = \text{bess\_step\_lim} \cdot 1.001
 
    M^{\text{pv}} = \max_t p^{\text{pv}}_t \cdot 1.001
 

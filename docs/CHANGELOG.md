@@ -5,7 +5,7 @@ longer carries internal version history — past migration notes and
 breaking-change diffs have been folded into the present-tense
 descriptions across the codebase and Sphinx docs.
 
-## Unreleased
+## 0.8.9 — 2026-05-20
 
 ### Breaking changes
 
@@ -54,6 +54,84 @@ descriptions across the codebase and Sphinx docs.
 
 - `params["curtailment_frac"]`: computed but never read in production
   (the loader always populates the per-step profile).
+
+### Added (v0.8.8 audit follow-up)
+
+- `python-dateutil` declared as a direct requirement in
+  `requirements/base.txt`.  Pandas drags it in transitively, but the
+  implicit dependency is fragile and would break the day pandas drops
+  or vendors `dateutil`.
+- Per-seed progress logging with running ETA in `monte_carlo_rolling`.
+  Long-running ensembles now show live progress instead of sitting
+  silent for ~44 min on the shipped workbook with the default 30
+  seeds.  Log handlers are flushed after every line so the output
+  shows up immediately on long-running runs.
+- Real-scale CI test `tests/test_rolling_horizon_realscale.py`
+  exercises the full 35 040-row default workbook through one seed of
+  `rolling_horizon_dispatch` with a wall-clock budget that catches
+  >3-5x per-window regressions.  Marked `@pytest.mark.slow` and gated
+  on the workbook existing.
+
+### Fixed (v0.8.8 audit follow-up)
+
+- `economics.build_yearly_cashflow` no longer falls back to
+  `retail_inflation_pct = 2.0` when the key is missing; the fallback
+  is now `0.0`, matching the canonical
+  `ECONOMICS_SHEET_DEFAULTS["retail_inflation_pct"]`.  The `or 0.0`
+  post-chain is reachable again as intended.
+- `add_forecast_noise` now clips noisy PV at the instantaneous
+  nameplate proxy (`pv.max()`).  Tail samples of the multiplicative
+  noise could previously exceed the panel's instantaneous capability;
+  the MILP was already curtailing the over-cap fraction, but
+  downstream consumers reading the noisy forecast from the workbook
+  saw implausible values.  Numerical impact on the MILP is zero by
+  construction.
+
+### Changed (v0.8.8 audit follow-up)
+
+- Five sites that duplicated the literal `2026` for `project_start_year`
+  (`pvbess_opt/economics.py`, `pvbess_opt/lifetime.py`, three sites in
+  `main.py`, and `pvbess_opt/io.py::write_dispatch_artifacts`) now
+  dereference `PROJECT_SHEET_DEFAULTS["project_start_year"]`.
+- `tests/conftest.py::_short_params` updated to canonical
+  `retail_tariff_eur_per_mwh = 120.0` (was a stale `132.0` from
+  pre-v0.8.8 fixtures).
+
+### Documentation (v0.8.8 audit follow-up)
+
+- Twenty doc-drift sites swept across `docs/source/`, three code
+  docstrings, and the `README.md`.  Highlights:
+  - `mip_formulation.rst`: `e_cap` correctly identified as a fixed
+    parameter pinned to `bess_capacity_kwh` rather than a decision
+    variable; charge / discharge power section rewritten to reflect
+    the single symmetric `bess_step_lim = bess_power_kw * dt`.
+  - `output_layout.rst` and `financial_plots.rst`: the payback PDF is
+    `cumulative_cashflow_with_payback_{start}-{end}.pdf`, not the
+    non-existent `payback_visualization.pdf`.
+  - `outputs.rst`: `show_titles` documented as a `project`-sheet key.
+  - `running.rst`: CLI flag table now lists
+    `--compare-uncertainty-sources`.
+  - `kpis.rst`: `e_cap_mwh` (was `e_cap_opt_mwh`).
+  - `economics.rst`: split-revenue model (retail + DAM streams) and
+    `devex_eur` included in the `net_cashflow_eur` formula.
+  - `inputs.rst`: drop the `1 MW x 1500 kWh/kWp/yr default` language
+    that predates the v0.8.8 shipped workbook; remove
+    `revenue_inflation_pct` from the current-keys list (deprecated
+    alias).
+  - `rolling_horizon.rst`: `e_cap` is pinned at workbook load, not
+    "after the first window".
+  - `pvbess_opt/__init__.py`: package docstring no longer claims a
+    "1 MW x 1500 kWh/kWp/yr default".
+  - `pvbess_opt/optimization.py`, `pvbess_opt/rolling_horizon.py`:
+    docstrings say "9 audit invariants" (the code returns 9, not 8).
+  - `pvbess_opt/lifetime.py`: unresolvable `:doc:` xref replaced with
+    a plain path reference.
+  - `pvbess_opt/kpis.py`: top docstring rewritten as bulleted literal
+    blocks, removing the `Block quote ends without a blank line` rST
+    warning.
+  - `README.md`: `infinity` token added to the unlimited-grid-export
+    enumeration so it matches the implementation set
+    `_GRID_EXPORT_UNLIMITED_TOKENS`.
 
 ## 0.8.8 — 2026-05-19
 

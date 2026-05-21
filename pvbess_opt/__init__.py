@@ -26,9 +26,9 @@ Highlights:
     * Seven-sheet input workbook (project / pv / bess / economics /
       simulation / max_injection_profile / timeseries) — one theme
       per sheet for human readability.  ``inputs/input.xlsx`` is the
-      single source of truth for the PV shape; the workbook ships
-      with a 1 MW x 1500 kWh/kWp/yr default that the loader rescales
-      to the user's nameplate and specific production at run time.
+      single source of truth for the PV shape; the loader rescales
+      the workbook PV column to the user's nameplate and specific
+      production at run time, preserving every per-step ratio.
     * Symmetric BESS power limit (bess_power_kw) and pinned energy
       capacity (bess_capacity_kwh).  e_cap is not a decision variable.
     * Hour-of-day max-injection cap profile (optional monthly axis).
@@ -39,4 +39,4 @@ Highlights:
       benchmark bands.
 """
 
-__version__ = "0.8.8"
+__version__ = "0.8.9"
