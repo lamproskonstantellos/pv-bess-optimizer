@@ -40,6 +40,15 @@ def test_repo_input_xlsx_has_35040_timeseries_rows():
     assert len(ts) == 35040
 
 
+def test_repo_input_xlsx_site_lump_sums_default_to_zero():
+    """The shipped workbook carries the site-wide lump-sum keys at 0.0,
+    so headline KPIs match the pre-feature baseline."""
+    from pvbess_opt.io import read_workbook
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    assert float(typed["project"]["site_capex_eur"]) == 0.0
+    assert float(typed["project"]["site_devex_eur"]) == 0.0
+
+
 def test_repo_input_xlsx_has_negative_dam_hours():
     """Spec: 4 negative-price hours seeded so the no-sim-IO logic and
     the sign-aware noise actually exercise.  At 15-minute cadence each

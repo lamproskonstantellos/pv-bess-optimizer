@@ -108,6 +108,8 @@ REQUIRED_TOKENS: tuple[str, ...] = (
     "aggregator_fee_pct_revenue",
     "devex_pv_eur_per_kw",
     "devex_bess_eur_per_kw",
+    "site_capex_eur",
+    "site_devex_eur",
     "curtailment_profile",
     "max_injection_profile",
     "DEFAULT_MAX_INJECTION_PCT_HOURLY",

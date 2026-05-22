@@ -597,6 +597,15 @@ def _build_financials(
     """Run the multi-year cash-flow + sensitivity + lifetime pipeline."""
     econ = read_economic_params(excel_path)
 
+    site_capex_eur = float(econ.get("site_capex_eur", 0.0) or 0.0)
+    site_devex_eur = float(econ.get("site_devex_eur", 0.0) or 0.0)
+    if site_capex_eur > 0.0 or site_devex_eur > 0.0:
+        logger.info(
+            "[financials] Site-wide lump-sum costs: site_capex_eur = "
+            "%.2f EUR, site_devex_eur = %.2f EUR (paid in Year 0).",
+            site_capex_eur, site_devex_eur,
+        )
+
     capacities = derive_asset_capacities(econ, params, ts)
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)

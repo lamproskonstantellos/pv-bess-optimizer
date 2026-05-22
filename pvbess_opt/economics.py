@@ -222,11 +222,16 @@ def build_yearly_cashflow(
 
     capex_pv_y0 = -float(econ["capex_pv_eur_per_kw"]) * pv_kwp
     capex_bess_y0 = -float(econ["capex_bess_eur_per_kw"]) * bess_kw
-    capex_total_y0 = capex_pv_y0 + capex_bess_y0
+    # Site-wide lump-sum CAPEX/DEVEX (substation, grid upgrades,
+    # interconnection, environmental studies, ...) are not per-asset, so
+    # they fold straight into the Year-0 outflow rows.
+    site_capex_y0 = -float(econ.get("site_capex_eur", 0.0) or 0.0)
+    site_devex_y0 = -float(econ.get("site_devex_eur", 0.0) or 0.0)
+    capex_total_y0 = capex_pv_y0 + capex_bess_y0 + site_capex_y0
 
     devex_pv_y0 = -float(econ.get("devex_pv_eur_per_kw", 0.0) or 0.0) * pv_kwp
     devex_bess_y0 = -float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
-    devex_total_y0 = devex_pv_y0 + devex_bess_y0
+    devex_total_y0 = devex_pv_y0 + devex_bess_y0 + site_devex_y0
 
     # Revenue is derated by the aggregator fee (Gridcog /
     # merchant-aggregator convention).  The unavailability factor is
@@ -580,6 +585,18 @@ def compute_financial_kpis(
     ``capacities``, ``lifetime_yearly``, and ``year1_kpis`` are provided.
 
     KPI keys are lowercase snake_case.
+
+    NPV / IRR / ROI / BCR / payback read ``net_cashflow_eur`` and
+    ``discounted_cf_eur`` directly, so any site-wide lump-sum CAPEX/DEVEX
+    folded into the Year-0 ``capex_eur`` / ``devex_eur`` rows by
+    :func:`build_yearly_cashflow` is reflected automatically.
+
+    LCOE is PV-only and LCOS is BESS-only (IEA / IRENA / NREL ATB /
+    Lazard convention): their numerators are built from the per-asset
+    CAPEX/DEVEX/OPEX directly, never from the cash-flow ``capex_eur``
+    column.  Site-wide lump-sum costs are neither PV-only nor BESS-only
+    and are therefore **excluded** from both LCOE and LCOS so the values
+    stay Lazard-comparable.
     """
     df = yearly_cf
 
@@ -918,6 +935,18 @@ def compute_financial_kpis(
         _fmt(lcos_val), lcos_bench_low, lcos_bench_high,
         "n/a" if np.isnan(cycles_val) else f"{cycles_val:.0f}",
     )
+
+    # ---- Site-wide lump-sum CAPEX/DEVEX audit -----------------------------
+    site_capex = float(econ.get("site_capex_eur", 0.0) or 0.0)
+    site_devex = float(econ.get("site_devex_eur", 0.0) or 0.0)
+    if site_capex > 0.0 or site_devex > 0.0:
+        logger.info(
+            "[site lump-sum] site_capex_eur = %.2f, site_devex_eur = %.2f "
+            "(folded into Year-0 CAPEX/DEVEX and the NPV/IRR/ROI/BCR/"
+            "payback metrics; NOT folded into LCOE/LCOS — Lazard "
+            "convention).",
+            site_capex, site_devex,
+        )
     return out
 
 

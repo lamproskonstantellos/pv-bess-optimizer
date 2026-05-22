@@ -43,7 +43,8 @@ def test_project_sheet_keys():
         "project_lifecycle_years", "project_start_year", "mode",
         "settlement_minutes", "p_grid_export_max_kw",
         "retail_tariff_eur_per_mwh", "allow_bess_grid_charging",
-        "unavailability_pct", "currency_format", "show_titles",
+        "unavailability_pct", "site_capex_eur", "site_devex_eur",
+        "currency_format", "show_titles",
     }
     assert set(PROJECT_SHEET_DEFAULTS) == expected
 
@@ -152,7 +153,7 @@ def _build_minimal_typed(year: int = 2026) -> dict:
         ),
         "economics": dict(ECONOMICS_SHEET_DEFAULTS),
         "simulation": dict(SIMULATION_SHEET_DEFAULTS),
-        # Post-refactor max-injection semantic: 73 % allowed ≡ 27 % curtailment.
+        # max-injection semantic: 73 % of the export cap allowed.
         "max_injection_profile": np.full(24, 73.0, dtype=float),
     }
 

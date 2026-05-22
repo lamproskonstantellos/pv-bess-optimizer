@@ -116,6 +116,8 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
     "unavailability_pct": 1.0,
+    "site_capex_eur": 0.0,
+    "site_devex_eur": 0.0,
     "currency_format": "auto",
     "show_titles": False,
 }
@@ -304,6 +306,16 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("unavailability_pct", 1.0, "%",
      "Annual unavailability (outages / scheduled maintenance) applied as "
      "a post-solve derate on PV generation, BESS discharge, and revenue."),
+    ("site_capex_eur", 0.0, "EUR",
+     "Site-wide lump-sum CAPEX in absolute EUR for items that are not "
+     "naturally per-kWp/per-kW (substation construction, MV/HV grid "
+     "upgrades, interconnection works, etc.). Paid in Year 0. Excluded "
+     "from LCOE/LCOS by the Lazard convention."),
+    ("site_devex_eur", 0.0, "EUR",
+     "Site-wide lump-sum DEVEX in absolute EUR (environmental impact "
+     "studies, land acquisition fees, permits not expressed per-kW, "
+     "etc.). Paid in Year 0. Excluded from LCOE/LCOS by the Lazard "
+     "convention."),
     ("currency_format", "auto", "enum",
      "auto | millions | raw — financial-axis label format."),
     ("show_titles", False, "bool",
@@ -1211,6 +1223,8 @@ def _typed_to_flat(
         "mode": str(project["mode"]),
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
         "unavailability_pct": float(project["unavailability_pct"]),
+        "site_capex_eur": float(project.get("site_capex_eur", 0.0) or 0.0),
+        "site_devex_eur": float(project.get("site_devex_eur", 0.0) or 0.0),
         "show_titles": bool(project["show_titles"]),
         # Max-injection cap profile (24,) or (24, 12), in percent of
         # p_grid_export_max_kw.  Expanded to a per-step array by the

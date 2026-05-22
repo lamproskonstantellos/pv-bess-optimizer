@@ -178,7 +178,13 @@ def run_sensitivity_analysis(
     capacities: dict[str, float],
     base_kpis: dict[str, float],
 ) -> pd.DataFrame:
-    """Run the four-driver tornado sensitivity around the base case."""
+    """Run the four-driver tornado sensitivity around the base case.
+
+    The CAPEX driver scales the whole Year-0 outlay — per-asset CAPEX,
+    per-asset DEVEX, and the site-wide lump sum (``site_capex_eur`` /
+    ``site_devex_eur``) all live inside the ``capex_eur`` / ``devex_eur``
+    columns — so a +/-X % CAPEX scenario moves the lump sum too.
+    """
     variables = variables_for_npv_sensitivity(econ)
     rows: list[dict[str, Any]] = []
 

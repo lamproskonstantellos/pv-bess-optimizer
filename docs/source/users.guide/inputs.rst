@@ -59,6 +59,16 @@ High-level run configuration:
 * ``unavailability_pct`` — annual outage / maintenance factor
   (default 1 %).  Applied as a post-solve derate on PV generation,
   BESS discharge, and revenue.
+* ``site_capex_eur`` (default 0) — site-wide lump-sum CAPEX in
+  absolute EUR for items that are not naturally per-kWp / per-kW
+  (substation construction, MV/HV grid upgrades, interconnection
+  works, …).  Paid in Year 0; folded into the Year-0 ``capex_eur``
+  cash-flow row and reflected in NPV / IRR / ROI / BCR / payback.
+  **Excluded** from LCOE / LCOS (Lazard convention — see below).
+* ``site_devex_eur`` (default 0) — site-wide lump-sum DEVEX in
+  absolute EUR (environmental impact studies, land acquisition fees,
+  permits not expressed per-kW, …).  Paid in Year 0; folded into the
+  Year-0 ``devex_eur`` row.  Also excluded from LCOE / LCOS.
 * ``currency_format`` — ``auto`` | ``millions`` | ``raw`` for
   financial-axis labels.
 * ``show_titles`` — TRUE → render plot titles.

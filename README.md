@@ -135,7 +135,10 @@ Seven themed sheets:
   export limit applied to the combined PV + BESS flow),
   `retail_tariff_eur_per_mwh`, `allow_bess_grid_charging`,
   `unavailability_pct` (user-configurable post-solve derate),
-  `currency_format`, `show_titles`.
+  `site_capex_eur` / `site_devex_eur` (site-wide lump-sum CAPEX / DEVEX
+  in absolute EUR for items not naturally per-kWp/per-kW — substation,
+  grid upgrades, interconnection, environmental studies; paid in
+  Year 0), `currency_format`, `show_titles`.
 * **`pv`** — `pv_nameplate_kwp`, `specific_production_kwh_per_kwp`,
   `pv_degradation_year1_pct`, `pv_degradation_annual_pct`,
   `capex_pv_eur_per_kw`, `devex_pv_eur_per_kw`, `opex_pv_eur_per_kwp`.
