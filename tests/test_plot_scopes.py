@@ -1,4 +1,4 @@
-"""Plot-scope unification tests (Phase 5).
+"""Plot-scope unification tests.
 
 The daily / monthly / yearly scope vocabulary is unified to
 ``none`` | ``year1_only`` | ``all``.  The Year-1-only daily branch

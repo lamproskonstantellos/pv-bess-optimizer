@@ -1,4 +1,4 @@
-"""Configurable rolling-horizon uncertainty tests (Phase 4).
+"""Configurable rolling-horizon uncertainty tests.
 
 Covers:
 * The 11 uncertainty keys default to a baseline behaviour

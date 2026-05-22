@@ -1,4 +1,4 @@
-"""Post-DEVEX economics tests.
+"""DEVEX / availability / aggregator-fee economics tests.
 
 Covers DEVEX, unavailability_pct, aggregator_fee_pct_revenue, plus the
 year-on-year revenue monotonicity invariant under the default

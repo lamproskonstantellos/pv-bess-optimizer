@@ -602,9 +602,9 @@ def _build_financials(
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
     # Symmetric cycle-count input: build_yearly_cashflow already
     # reads bess_total_discharge_mwh from the derated kpis dict, so
-    # feed the same number into build_lifetime_dispatch (Bug #3 fix).
-    # Without this both paths run separate cycle counters that drift
-    # by ``unavailability_pct`` over the lifecycle.
+    # feed the same number into build_lifetime_dispatch.  Without this
+    # the two paths run separate cycle counters that drift by
+    # ``unavailability_pct`` over the lifecycle.
     year1_discharge_for_cycles = float(
         kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
     )

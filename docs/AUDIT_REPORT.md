@@ -97,8 +97,8 @@ rewrite).
 | test_irr_tornado_redesign.py:1 (Phase 5) | ACTIVE | Rename file → test_irr_tornado_dumbbell.py; rewrite docstring. |
 | test_uncertainty_config.py:1 (Phase 4) | ACTIVE | Rewrite docstring; drop "Phase 4". |
 | test_merchant_plots.py:1,191 (Phase 6, Round-5) | ACTIVE | Rewrite docstrings; drop tags. |
-| test_plotting_sensitivity.py:1,91 (Phase 5, v0.8.8, v0.8.7-style) | ACTIVE/DUPLICATE | Overlaps test_tornado_labels.py on endpoint-label positioning. Canonical = test_plotting_sensitivity.py (covers render + format + range + base + overlap). Consolidate the unique overlap-only checks from test_tornado_labels.py here, delete the duplicate. |
-| test_tornado_labels.py | DUPLICATE | Endpoint-label positioning overlaps test_plotting_sensitivity.py ≥80 %. Merge the genuinely unique cases (axis-position match, y-axis-spine clip, short-range collide) into test_plotting_sensitivity.py; delete file. |
+| test_plotting_sensitivity.py:1,91 (Phase 5, v0.8.8, v0.8.7-style) | ACTIVE | Rewrite docstrings; covers render + format + range + base + geometry. |
+| test_tornado_labels.py | ACTIVE | Closer inspection: overlap with test_plotting_sensitivity.py is well under 80 %. This file uniquely covers the *semantic* correctness of which scenario's driver value maps to which endpoint (the inverted-ordering swap), plus y-axis-spine clipping. Retained and cleaned (rewrite docstrings, drop the "Round-4" comment) rather than deleted — deleting would lose the axis-position-matching coverage. |
 | test_economic_model_acceptance.py:1 (Phase 7) | ACTIVE | Rewrite docstring; add a `site_capex_eur=100_000` parametrized variant. |
 | test_plotting_uncertainty.py:1 (Phase 8) | ACTIVE | Rewrite docstring; drop "Phase 8". |
 | test_plot_scopes.py:1 (Phase 5) | ACTIVE | Rewrite docstring; drop "Phase 5". |
@@ -119,9 +119,14 @@ rewrite).
 
 No test exercises a surface that no longer exists, so there are **no
 strictly OBSOLETE tests** — the redesign/phase suites all still pin
-current behaviour and are reclassified ACTIVE-with-rename.  The only
-deletion is the DUPLICATE `test_tornado_labels.py`, whose unique
-assertions are consolidated into `test_plotting_sensitivity.py`.
+current behaviour and are reclassified ACTIVE-with-rename.  No test
+file is a true ≥80 % DUPLICATE either: the tornado-label suites
+(`test_tornado_labels.py` and `test_plotting_sensitivity.py`) were
+examined closely and found to cover complementary aspects (semantic
+which-value-where correctness vs. rendering geometry), so both are
+retained and cleaned rather than consolidated.  No test files are
+deleted; the cleanup is renames, docstring rewrites, and file renames
+for the phase/redesign-named modules.
 
 ---
 

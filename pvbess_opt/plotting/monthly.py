@@ -317,7 +317,7 @@ def plot_monthly_soc(
 
     # Aggregate soc_pct directly — single source of truth for the %.
     # Tests / fixtures that omit soc_pct fall back to the derivation
-    # below so legacy callers keep working.
+    # below so callers that omit the column still render.
     if "soc_pct" in df.columns and float(df["soc_pct"].max()) > 1e-9:
         soc_pct_series = df["soc_pct"].astype(float)
     else:

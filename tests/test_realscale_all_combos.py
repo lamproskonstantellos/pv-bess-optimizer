@@ -1,10 +1,9 @@
-"""F7 — parametrized energy-balance + 9-invariant coverage across all
+"""Parametrized energy-balance + 9-invariant coverage across all
 six mode x asset combinations.
 
-Real-scale (35,040-step) coverage previously existed for vnb hybrid only;
-merchant and pv_only / bess_only ran at 1-day scale and the BESS-only
-checks asserted only "PV flows are zero" — never verify_energy_balance or
-verify_dispatch_invariants.  That gap hid F1.  This module closes it.
+Every mode (vnb / merchant) crossed with every asset configuration
+(hybrid / pv_only / bess_only) runs through verify_energy_balance and
+verify_dispatch_invariants at real scale (35,040 steps).
 
 A fast-lane (1-day) variant runs in the default ``-m "not slow"`` lane;
 the full-year variant carries the ``slow`` marker.

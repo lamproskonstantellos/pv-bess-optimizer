@@ -1,6 +1,6 @@
-"""Phase-5 plot-polish tests.
+"""SOC and merchant-overlay plot-aggregation tests.
 
-Covers four independent correctness/cosmetic fixes:
+Covers four independent correctness/cosmetic properties:
 
 1. Merchant PV-generation overlay masks the flat-zero night segments
    (``line_masked_zeros`` helper) instead of drawing a horizontal line

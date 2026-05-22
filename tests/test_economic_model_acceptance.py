@@ -1,4 +1,4 @@
-"""v0.8 economic-model acceptance tests (Phase 7).
+"""Economic-model acceptance tests.
 
 The five invariants we want explicit confidence in:
 

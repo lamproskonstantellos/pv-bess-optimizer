@@ -1,9 +1,8 @@
-"""LCOE / LCOS benchmark-comparison redesign tests.
+"""LCOE / LCOS benchmark-comparison summary tests.
 
-Round-5 split: ``plot_lcoe_lcos_summary`` is gone; the two summaries
-now render as separate PDFs via ``plot_lcoe_summary`` and
-``plot_lcos_summary``.  The rotated y-axis label is dropped — the
-panel context is implicit from the filename and legend entries.
+LCOE and LCOS render as separate PDFs via ``plot_lcoe_summary`` and
+``plot_lcos_summary``.  No rotated y-axis label is drawn — the panel
+context is implicit from the filename and legend entries.
 """
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ def test_lcoe_lcos_summary_function_is_gone():
 
 
 # ---------------------------------------------------------------------------
-# No rotated y-axis label — Round-5 strips it
+# No rotated y-axis label is drawn
 # ---------------------------------------------------------------------------
 
 

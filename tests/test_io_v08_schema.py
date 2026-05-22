@@ -157,9 +157,9 @@ def _build_minimal_typed(year: int = 2026) -> dict:
     }
 
 
-def test_round_trip_v08(tmp_path):
+def test_round_trip(tmp_path):
     typed = _build_minimal_typed()
-    dst = tmp_path / "v08.xlsx"
+    dst = tmp_path / "roundtrip.xlsx"
     write_workbook(typed, dst)
     out = read_workbook(dst)
     for section in ("project", "pv", "bess", "economics", "simulation"):
@@ -169,9 +169,9 @@ def test_round_trip_v08(tmp_path):
             )
 
 
-def test_round_trip_v08_emits_no_warnings(tmp_path, caplog):
+def test_round_trip_emits_no_warnings(tmp_path, caplog):
     typed = _build_minimal_typed()
-    dst = tmp_path / "v08_clean.xlsx"
+    dst = tmp_path / "roundtrip_clean.xlsx"
     write_workbook(typed, dst)
     with caplog.at_level("WARNING", logger="pvbess_opt.io"):
         read_workbook(dst)

@@ -1,11 +1,11 @@
-"""Sensitivity tornado annotation tests (Phase 5, v0.8.8).
+"""Sensitivity tornado annotation tests.
 
 The IRR / NPV tornado plots annotate each bar end with the absolute
 driver value that produced it and fold the +/- range into the y-axis
 tick labels.  The base value is shown once, as a dashed vertical line
-whose legend entry carries the formatted base value.  Old callers
-that pass a frame without the driver-value metadata fall back to the
-annotation-free layout (dots + x-axis only).
+whose legend entry carries the formatted base value.  A frame without
+the driver-value metadata falls back to the annotation-free layout
+(dots + x-axis only).
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def _npv_sens_df() -> pd.DataFrame:
 
 
 def _legacy_sens_df() -> pd.DataFrame:
-    """v0.8.7-style frame: no ``value`` / ``delta_value`` metadata."""
+    """Frame without ``value`` / ``delta_value`` metadata."""
     rows = []
     for label, low, high in (
         ("Total CAPEX", 13.0, 18.0),

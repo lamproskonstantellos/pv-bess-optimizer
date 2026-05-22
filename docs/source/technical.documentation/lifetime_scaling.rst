@@ -51,9 +51,9 @@ Scaling rules (per year :math:`y`)
   resets to 0 at ``bess_replacement_year``.
 
   When :math:`d_{\text{per\_cycle}} = 0` the second term vanishes and
-  ``bess_factor`` reduces to the pre-v0.8.8 calendar-only formula
-  exactly; older workbooks without ``bess_degradation_pct_per_cycle``
-  load unchanged and behave identically.
+  ``bess_factor`` is the calendar-only formula; workbooks that omit
+  ``bess_degradation_pct_per_cycle`` load unchanged and behave
+  identically.
 
   The replacement CAPEX line is added separately by
   :func:`pvbess_opt.economics.build_yearly_cashflow` at year

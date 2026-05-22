@@ -40,8 +40,8 @@ range 0.005–0.010; NMC chemistries sit higher, ~0.010–0.020).  A more
 heavily cycled battery therefore degrades faster than an idle one.
 
 Setting ``bess_degradation_pct_per_cycle = 0`` removes the cycle term
-entirely and recovers the pre-v0.8.8 calendar-only behaviour exactly.
-Workbooks that predate the key load unchanged and default it to 0.
+entirely, leaving the calendar-only fade.  Workbooks that omit the key
+load unchanged and default it to 0.
 
 ``compute_financial_kpis`` reports the year-N decomposition as
 ``bess_calendar_fade_pct_y_final``, ``bess_cycle_fade_pct_y_final`` and

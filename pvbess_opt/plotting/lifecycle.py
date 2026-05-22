@@ -211,7 +211,7 @@ def plot_revenue_stack_yearly(
             label="Aggregator fee",
         )
     net = (op["revenue_eur"].astype(float)).to_numpy()
-    # IEEE-friendly emphasis line: near-black solid markers.  Round-3
+    # IEEE-friendly emphasis line: near-black solid markers.  The
     # universality rule forbids markeredgecolor="white" rings; line
     # contrast comes from the charcoal colour itself.
     ax.plot(
@@ -446,14 +446,13 @@ def _draw_benchmark_row(
 ) -> None:
     """Single LCOE/LCOS row: benchmark band + project bar + base line.
 
-    Round-3 redesign: every numeric value (benchmark band, project
-    range, base) is reported in the legend; the plot face holds no
-    bbox annotations, no italic captions, and no diamond markers.
-    Each row uses its own x-axis scaled to the union of the benchmark
-    band and the project sensitivity range with a 12 % margin.  No
-    rotated y-axis label is drawn — Round-5 splits LCOE and LCOS into
-    separate PDFs so the panel context is implicit from the filename
-    and legend entries.
+    Every numeric value (benchmark band, project range, base) is
+    reported in the legend; the plot face holds no bbox annotations, no
+    italic captions, and no diamond markers.  Each row uses its own
+    x-axis scaled to the union of the benchmark band and the project
+    sensitivity range with a 12 % margin.  No rotated y-axis label is
+    drawn — LCOE and LCOS are rendered as separate PDFs, so the panel
+    context is implicit from the filename and legend entries.
     """
     if not asset_present or np.isnan(base):
         ax.text(

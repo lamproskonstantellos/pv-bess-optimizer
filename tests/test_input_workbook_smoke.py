@@ -118,11 +118,9 @@ def test_main_merchant_short_horizon(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_repo_input_xlsx_headline_kpis_pinned():
-    """End-to-end pin of headline year-1 KPIs against the pre-refactor
+    """End-to-end pin of headline year-1 KPIs against the stored
     baseline on inputs/input.xlsx (perfect-foresight, vnb mode, full
-    year).  These numbers were captured at the Phase-0 baseline and
-    must hold across the curtailment-to-max-injection refactor since
-    the constraint is mathematically equivalent.
+    year).
 
     Tight tolerances pick up any sign error or fixture drift.
     """

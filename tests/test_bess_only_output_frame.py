@@ -1,12 +1,11 @@
-"""F1 regression — BESS-only output frame must not carry phantom PV.
+"""BESS-only output frame must not carry phantom PV.
 
-When ``pv_nameplate_kwp == 0`` the model pins every PV flow to zero, but
-``model_to_dataframe`` used to copy the raw input ``pv_kwh`` column into
-the output frame regardless.  On a workbook that still ships a populated
-``pv_kwh`` timeseries (the default ``inputs/input.xlsx`` does), this
-produced an ~800-3200 kWh per-step energy-balance residual, breached
-``invariant_1`` and ``invariant_9``, and surfaced phantom
-``pv_generation_mwh`` KPIs.
+When ``pv_nameplate_kwp == 0`` the model pins every PV flow to zero, so
+``model_to_dataframe`` must zero the PV columns in the output frame even
+when the workbook ships a populated ``pv_kwh`` timeseries (the default
+``inputs/input.xlsx`` does).  Otherwise a per-step energy-balance
+residual would breach ``invariant_1`` / ``invariant_9`` and surface
+phantom ``pv_generation_mwh`` KPIs.
 
 These tests build a BESS-only solve from a non-zero ``pv_kwh`` column and
 assert balance / invariants / KPIs are all clean.

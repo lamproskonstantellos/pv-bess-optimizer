@@ -399,7 +399,7 @@ def build_model(
             m.T, rule=lambda m, t: m.grid_to_load[t] == 0,
         )
 
-    # PV-only / BESS-only / hybrid asset support — see Phase 3 of the
+    # PV-only / BESS-only / hybrid asset support.
     # Pin all flows for an absent asset to zero.
     if not pv_present:
         m.NOPV_TO_LOAD = pyo.Constraint(
@@ -783,8 +783,8 @@ def run_scenario(
 
     Returns ``(res, resolved_solver_name)``.  ``e_cap`` is a
     parameter pinned to ``params['bess_capacity_kwh']`` (industry
-    standard for sizing-as-input projects), so it is no longer a
-    decision variable and no longer returned.
+    standard for sizing-as-input projects); it is not a decision
+    variable and is not returned.
 
     When ``return_unrounded`` is True the tuple is extended with a
     full-precision copy of the dispatch frame ``(res, resolved, res_full)``

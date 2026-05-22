@@ -82,7 +82,7 @@ def test_calendar_year_alignment():
 
 def _bess_only_econ() -> dict:
     """20-year BESS-only economics; inflation off so revenue ratios are
-    pure bess_factor (F2 reconciliation)."""
+    pure bess_factor."""
     return {
         "project_lifecycle_years": 20,
         "project_start_year": 2026,
@@ -106,7 +106,7 @@ def _bess_only_econ() -> dict:
     }
 
 
-def test_f2_cashflow_lifetime_bess_revenue_ratio_reconcile():
+def test_cashflow_and_lifetime_bess_revenue_reconcile():
     """BESS-only: cashflow_yearly and lifetime_dispatch_yearly must agree
     on the BESS-revenue degradation ratio, both equal to bess_factor[y]."""
     econ = _bess_only_econ()
@@ -244,8 +244,8 @@ def test_lifetime_dispatch_bess_replacement():
 
 
 def test_feb29_lifetime_does_not_roll_over_in_non_leap_target_years():
-    """Bug #6c regression: a Year-1 timestamp on Feb 29 must shift to
-    Feb 28 in non-leap target years rather than to Mar 1."""
+    """A Year-1 timestamp on Feb 29 must shift to Feb 28 in non-leap
+    target years rather than to Mar 1."""
     # Tiny dispatch containing exactly one Feb-29 timestamp.
     feb29 = pd.Timestamp("2024-02-29 12:00")
     res1 = pd.DataFrame({
@@ -278,10 +278,10 @@ def test_feb29_lifetime_does_not_roll_over_in_non_leap_target_years():
 
 
 def test_build_lifetime_dispatch_accepts_year1_discharge_override():
-    """Bug #3 fix: when the caller supplies year1_discharge_mwh, the
-    cycle-counter uses it instead of recomputing from res_year1.  This
-    keeps the cycle bookkeeping symmetric with build_yearly_cashflow
-    (which reads bess_total_discharge_mwh from the derated kpis dict)."""
+    """When the caller supplies year1_discharge_mwh, the cycle-counter
+    uses it instead of recomputing from res_year1.  This keeps the cycle
+    bookkeeping symmetric with build_yearly_cashflow (which reads
+    bess_total_discharge_mwh from the derated kpis dict)."""
     res1 = _make_year1_dispatch()
     capacities = {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
     econ = _econ()
@@ -323,11 +323,11 @@ def test_build_lifetime_dispatch_accepts_year1_discharge_override():
 
 
 def test_unavailability_derate_is_symmetric_between_cashflow_and_lifetime():
-    """Bug #3 acceptance: with unavailability_pct=0 the year-1 cycle
-    counters of build_yearly_cashflow and build_lifetime_dispatch must
-    be identical.  With unavailability_pct=1 the values must STILL
-    match within float precision because main.py feeds the same
-    derated year1_discharge_mwh into both."""
+    """With unavailability_pct=0 the year-1 cycle counters of
+    build_yearly_cashflow and build_lifetime_dispatch must be
+    identical.  With unavailability_pct=1 the values must STILL match
+    within float precision because main.py feeds the same derated
+    year1_discharge_mwh into both."""
     from pvbess_opt.availability import apply_unavailability_derate
     from pvbess_opt.economics import build_yearly_cashflow
 

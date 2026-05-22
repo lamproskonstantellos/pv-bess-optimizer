@@ -115,9 +115,8 @@ def _bess_factor(
     calendar factor resets to 1.0 at year ``replacement_year`` and
     degrades fresh from there (linear at ``d_bess_annual`` per year).
 
-    Backward compatible: when called with the legacy 3-argument
-    signature the new keyword-only parameters default to 0 and the
-    result equals the pre-v0.8.8 calendar-only behaviour exactly.
+    With the cycle keyword-only parameters left at 0 the result is the
+    multiplicative calendar fade alone.
     """
     if y < 1:
         return 1.0

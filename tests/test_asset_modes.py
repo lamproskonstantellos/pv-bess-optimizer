@@ -1,4 +1,4 @@
-"""PV-only / BESS-only / hybrid asset-mode tests (Phase 3).
+"""PV-only / BESS-only / hybrid asset-mode tests.
 
 Asset-mode semantics:
 

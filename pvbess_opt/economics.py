@@ -275,19 +275,18 @@ def build_yearly_cashflow(
                     profit_total, revenue_1_gross,
                 )
     else:
-        # Fallback for fixtures / unit tests that supply only
-        # profit_total_eur with no breakdown — index the whole revenue
-        # as retail (CPI-linked) so legacy single-rate behaviour is
-        # preserved when retail_inflation_pct = dam_inflation_pct.
+        # When year1_kpis carries only profit_total_eur with no
+        # per-stream breakdown, index the whole revenue as retail
+        # (CPI-linked); this coincides with the per-stream result
+        # whenever retail_inflation_pct == dam_inflation_pct.
         revenue_1_gross = float(year1_kpis.get("profit_total_eur", 0.0) or 0.0)
         revenue_1_retail = revenue_1_gross
         revenue_1_dam = 0.0
-        # No per-stream breakdown — degrade the whole revenue base on
-        # pv_factor (legacy single-curve behaviour) by routing it all to
-        # the PV-origin retail component.
+        # With no per-stream breakdown the whole revenue base is degraded
+        # on pv_factor by routing it all to the PV-origin retail component.
         logger.debug(
             "build_yearly_cashflow: year1_kpis lacks per-stream breakdown; "
-            "degrading all revenue on pv_factor (legacy fallback)."
+            "degrading all revenue on pv_factor."
         )
         rev1_retail_pv = revenue_1_gross
         rev1_retail_bess = 0.0
@@ -802,7 +801,7 @@ def compute_financial_kpis(
         if max_y1 > 1e-9:
             extras["pv_capacity_factor"] = float(round(pv_gen_y1 / max_y1, 4))
 
-    # ---- BESS capacity-fade decomposition at the final year (v0.8.8) ------
+    # ---- BESS capacity-fade decomposition at the final year ---------------
     # Splits the year-N fade into its unchanged multiplicative calendar
     # component and the new additive cycle component.  By construction
     # calendar_fade + cycle_fade == total_fade whenever the max(0, ...)

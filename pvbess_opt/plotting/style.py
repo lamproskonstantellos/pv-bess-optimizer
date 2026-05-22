@@ -166,7 +166,7 @@ def apply_legend(
 
 
 # ---------------------------------------------------------------------------
-# Universal value-annotation helper (round-3)
+# Universal value-annotation helper
 # ---------------------------------------------------------------------------
 
 

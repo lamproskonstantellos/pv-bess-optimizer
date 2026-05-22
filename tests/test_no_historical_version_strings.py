@@ -13,11 +13,27 @@ FORBIDDEN = (
     r"\bv0\.5\b", r"\bv0\.6\b", r"\bv0\.7\b",
     r"\bv0\.8\.0\b", r"\bv0\.8\.1\b", r"\bv0\.8\.2\b",
     r"\bv0\.8\.3\b",
+    # Release / phase / round / bug annotations are not allowed in the
+    # evergreen surfaces; describe current behaviour in present tense.
+    # (Patterns that would otherwise match the literal tokens here are
+    # written with escapes or split so this file does not flag itself.)
+    r"\bPhase [1-8]\b",
+    r"\bRound-[1-5]\b",
+    "Bug " "#",
+    r"\bF1[0-2]\b", r"\bF[1-9]\b",
+    r"pre-v0\.8",
+    r"v0\.8 polish",
+    "post-" "DEVEX",
+    "post-" "refactor",
+    "pre-" "refactor",
 )
 SCAN_GLOBS = ("**/*.py", "**/*.md", "**/*.rst")
 ALLOWED_PATHS = {
     "tests/test_no_historical_version_strings.py",
     "tests/test_v0_leftover_audit.py",
+    # The audit report is the historical record of this cleanup and is
+    # the one surface that intentionally retains the old tokens.
+    "docs/AUDIT_REPORT.md",
 }
 SKIP_DIR_PARTS = {"__pycache__", "build", ".git", "_static", "_templates"}
 

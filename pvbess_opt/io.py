@@ -365,8 +365,7 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("bess_degradation_pct_per_cycle", 0.008, "%",
      "Cycle-based BESS capacity fade per full equivalent cycle, in "
      "percent. LFP default 0.008 (range 0.005-0.010). Set to 0 to "
-     "disable cycle aging and recover pre-v0.8.8 calendar-only "
-     "behavior."),
+     "disable cycle aging (calendar-only mode)."),
 )
 
 _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -1081,13 +1080,12 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             sheet_name == "bess"
             and "bess_degradation_pct_per_cycle" not in flat
         ):
-            # Old workbook (pre-v0.8.8): default the cycle-fade coefficient
-            # to 0.0 so the run reproduces calendar-only behaviour.
+            # Workbooks that omit the cycle-fade coefficient default it
+            # to 0.0 so the run uses calendar-only fade.
             typed["bess"]["bess_degradation_pct_per_cycle"] = 0.0
             logger.info(
                 "[bess] bess_degradation_pct_per_cycle not found in "
-                "workbook; defaulting to 0.0 (calendar-only mode, "
-                "pre-v0.8.8 behavior)."
+                "workbook; defaulting to 0.0 (calendar-only mode)."
             )
 
     # A finite grid-export cap must be strictly positive.  An empty cell

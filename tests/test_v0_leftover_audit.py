@@ -46,7 +46,28 @@ FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
         "tests/test_economics_v08.py",
         "tests/test_bess_spec.py",
         "tests/test_asset_modes.py",
+        # The audit report is the historical record of this cleanup and
+        # is the one surface that intentionally retains the old tokens.
+        "docs/AUDIT_REPORT.md",
     )
+)
+
+# Release / phase / round / bug annotations are banned from every
+# evergreen surface.  The tokens are assembled at runtime so this source
+# file does not contain (and therefore does not flag) the literal
+# strings.  Finding-number tags are covered by the word-boundary regexes
+# in test_no_historical_version_strings.py; bare letter-plus-digit
+# substrings would clash with hex colour literals such as ``#F57C00``.
+_V08 = "v0.8"
+_RELEASE_ANNOTATION_TOKENS: tuple[str, ...] = (
+    *(f"Phase {n}" for n in range(1, 9)),
+    *(f"Round-{n}" for n in range(1, 6)),
+    "Bug #",
+    f"pre-{_V08}",
+    f"{_V08} polish",
+    "post-" "DEVEX",
+    "post-" "refactor",
+    "pre-" "refactor",
 )
 
 FORBIDDEN_TOKENS: tuple[str, ...] = (
@@ -69,6 +90,7 @@ FORBIDDEN_TOKENS: tuple[str, ...] = (
     "battery_hours",
     "p_charge_max_kw",
     "p_dis_max_kw",
+    *_RELEASE_ANNOTATION_TOKENS,
 )
 
 REQUIRED_TOKENS: tuple[str, ...] = (
@@ -110,7 +132,7 @@ REQUIRED_FILES: tuple[str, ...] = (
     "tests/test_uncertainty_config.py",
     "tests/test_plot_scopes.py",
     "tests/test_merchant_plots.py",
-    "tests/test_financial_kpis_v06.py",
+    "tests/test_financial_kpis.py",
 )
 
 

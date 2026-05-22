@@ -1,4 +1,4 @@
-"""Annual unavailability derate helpers (v0.8 Phase 4).
+"""Annual unavailability derate helpers.
 
 The optimizer assumes the asset is online for every step of the year.
 In practice utility-scale PV+BESS plants spend a small fraction of the

@@ -39,8 +39,7 @@ def _minimal_typed(year: int = 2026) -> dict:
         ),
         "economics": dict(ECONOMICS_SHEET_DEFAULTS),
         "simulation": dict(SIMULATION_SHEET_DEFAULTS),
-        # Values flipped to the post-refactor max-injection semantic:
-        # 73 % allowed to inject equals the historical 27 % curtailment.
+        # max-injection semantic: 73 % allowed to inject.
         "max_injection_profile": np.full(24, 73.0, dtype=float),
     }
 
@@ -273,5 +272,5 @@ def test_loader_new_schema_takes_precedence_over_legacy(tmp_path):
 
 
 def test_project_lifecycle_years_default_is_twenty():
-    """Bug #4: default project_lifecycle_years aligned with docs (was 25)."""
+    """Default project_lifecycle_years is 20, matching the docs."""
     assert PROJECT_SHEET_DEFAULTS["project_lifecycle_years"] == 20
