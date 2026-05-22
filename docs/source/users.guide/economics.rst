@@ -40,8 +40,8 @@ range 0.005–0.010; NMC chemistries sit higher, ~0.010–0.020).  A more
 heavily cycled battery therefore degrades faster than an idle one.
 
 Setting ``bess_degradation_pct_per_cycle = 0`` removes the cycle term
-entirely and recovers the pre-v0.8.8 calendar-only behaviour exactly.
-Workbooks that predate the key load unchanged and default it to 0.
+entirely, leaving the calendar-only fade.  Workbooks that omit the key
+load unchanged and default it to 0.
 
 ``compute_financial_kpis`` reports the year-N decomposition as
 ``bess_calendar_fade_pct_y_final``, ``bess_cycle_fade_pct_y_final`` and
@@ -66,6 +66,31 @@ Sign convention
 * OPEX rows are stored as **negative** numbers (cash outflow).
 * Revenue rows are stored as **positive** numbers (cash inflow).
 * ``net_cashflow_eur = revenue_eur + opex_eur + capex_eur + devex_eur``.
+
+Site-wide lump-sum CAPEX / DEVEX
+--------------------------------
+
+Two ``project``-sheet keys capture costs that are not naturally
+per-kWp or per-kW:
+
+* ``site_capex_eur`` — substation construction, MV/HV grid upgrades,
+  interconnection works, and similar absolute-EUR items.
+* ``site_devex_eur`` — environmental impact studies, land acquisition
+  fees, and permits not expressed per-kW.
+
+Both default to 0, are paid in Year 0, and fold straight into the
+Year-0 ``capex_eur`` / ``devex_eur`` cash-flow rows.  Because the
+headline metrics read ``net_cashflow_eur`` / ``discounted_cf_eur``,
+they flow through to NPV, IRR, ROI, BCR and payback with no special
+handling.  The CAPEX tornado driver scales them too (it represents the
+full Year-0 outlay).
+
+**LCOE / LCOS exclude the site lump sum.**  Per the IEA / IRENA /
+NREL ATB / Lazard convention, LCOE is PV-only and LCOS is BESS-only;
+their numerators are built from the per-asset CAPEX / DEVEX / OPEX
+directly, never from the cash-flow ``capex_eur`` column.  A site-wide
+lump sum is neither PV-only nor BESS-only, so it is omitted from both
+to keep the values Lazard-comparable.
 
 Default values
 --------------

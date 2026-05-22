@@ -1,4 +1,4 @@
-"""IRR tornado dumbbell-layout tests (Phase 5)."""
+"""IRR tornado dumbbell-layout tests."""
 
 from __future__ import annotations
 

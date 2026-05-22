@@ -126,7 +126,12 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _scale_capex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
-    """Scale CAPEX *and* DEVEX by the same factor (v0.8 folds DEVEX in)."""
+    """Scale CAPEX and DEVEX by the same factor.
+
+    The CAPEX driver represents the full Year-0 outlay — per-asset CAPEX
+    plus per-asset DEVEX plus the site-wide lump sum — so a single factor
+    scales the whole ``capex_eur`` / ``devex_eur`` Year-0 rows together.
+    """
     df = yearly_cf.copy()
     df["capex_eur"] = df["capex_eur"].astype(float) * float(factor)
     if "devex_eur" in df.columns:
@@ -173,12 +178,19 @@ def run_sensitivity_analysis(
     capacities: dict[str, float],
     base_kpis: dict[str, float],
 ) -> pd.DataFrame:
-    """Run the four-driver tornado sensitivity around the base case."""
+    """Run the four-driver tornado sensitivity around the base case.
+
+    The CAPEX driver scales the whole Year-0 outlay — per-asset CAPEX,
+    per-asset DEVEX, and the site-wide lump sum (``site_capex_eur`` /
+    ``site_devex_eur``) all live inside the ``capex_eur`` / ``devex_eur``
+    columns — so a +/-X % CAPEX scenario moves the lump sum too.
+    """
     variables = variables_for_npv_sensitivity(econ)
     rows: list[dict[str, Any]] = []
 
     base_yearly_cf = build_yearly_cashflow(year1_kpis, econ, capacities)
-    # v0.8: CAPEX driver folds in DEVEX (single-asset Year-0 outlay).
+    # The CAPEX driver is the full Year-0 outlay: CAPEX + DEVEX + site
+    # lump sum.
     base_capex_total = float(base_yearly_cf["capex_eur"].sum())
     if "devex_eur" in base_yearly_cf.columns:
         base_capex_total += float(base_yearly_cf["devex_eur"].sum())

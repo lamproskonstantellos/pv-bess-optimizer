@@ -222,11 +222,16 @@ def build_yearly_cashflow(
 
     capex_pv_y0 = -float(econ["capex_pv_eur_per_kw"]) * pv_kwp
     capex_bess_y0 = -float(econ["capex_bess_eur_per_kw"]) * bess_kw
-    capex_total_y0 = capex_pv_y0 + capex_bess_y0
+    # Site-wide lump-sum CAPEX/DEVEX (substation, grid upgrades,
+    # interconnection, environmental studies, ...) are not per-asset, so
+    # they fold straight into the Year-0 outflow rows.
+    site_capex_y0 = -float(econ.get("site_capex_eur", 0.0) or 0.0)
+    site_devex_y0 = -float(econ.get("site_devex_eur", 0.0) or 0.0)
+    capex_total_y0 = capex_pv_y0 + capex_bess_y0 + site_capex_y0
 
     devex_pv_y0 = -float(econ.get("devex_pv_eur_per_kw", 0.0) or 0.0) * pv_kwp
     devex_bess_y0 = -float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
-    devex_total_y0 = devex_pv_y0 + devex_bess_y0
+    devex_total_y0 = devex_pv_y0 + devex_bess_y0 + site_devex_y0
 
     # Revenue is derated by the aggregator fee (Gridcog /
     # merchant-aggregator convention).  The unavailability factor is
@@ -275,19 +280,18 @@ def build_yearly_cashflow(
                     profit_total, revenue_1_gross,
                 )
     else:
-        # Fallback for fixtures / unit tests that supply only
-        # profit_total_eur with no breakdown — index the whole revenue
-        # as retail (CPI-linked) so legacy single-rate behaviour is
-        # preserved when retail_inflation_pct = dam_inflation_pct.
+        # When year1_kpis carries only profit_total_eur with no
+        # per-stream breakdown, index the whole revenue as retail
+        # (CPI-linked); this coincides with the per-stream result
+        # whenever retail_inflation_pct == dam_inflation_pct.
         revenue_1_gross = float(year1_kpis.get("profit_total_eur", 0.0) or 0.0)
         revenue_1_retail = revenue_1_gross
         revenue_1_dam = 0.0
-        # No per-stream breakdown — degrade the whole revenue base on
-        # pv_factor (legacy single-curve behaviour) by routing it all to
-        # the PV-origin retail component.
+        # With no per-stream breakdown the whole revenue base is degraded
+        # on pv_factor by routing it all to the PV-origin retail component.
         logger.debug(
             "build_yearly_cashflow: year1_kpis lacks per-stream breakdown; "
-            "degrading all revenue on pv_factor (legacy fallback)."
+            "degrading all revenue on pv_factor."
         )
         rev1_retail_pv = revenue_1_gross
         rev1_retail_bess = 0.0
@@ -581,6 +585,18 @@ def compute_financial_kpis(
     ``capacities``, ``lifetime_yearly``, and ``year1_kpis`` are provided.
 
     KPI keys are lowercase snake_case.
+
+    NPV / IRR / ROI / BCR / payback read ``net_cashflow_eur`` and
+    ``discounted_cf_eur`` directly, so any site-wide lump-sum CAPEX/DEVEX
+    folded into the Year-0 ``capex_eur`` / ``devex_eur`` rows by
+    :func:`build_yearly_cashflow` is reflected automatically.
+
+    LCOE is PV-only and LCOS is BESS-only (IEA / IRENA / NREL ATB /
+    Lazard convention): their numerators are built from the per-asset
+    CAPEX/DEVEX/OPEX directly, never from the cash-flow ``capex_eur``
+    column.  Site-wide lump-sum costs are neither PV-only nor BESS-only
+    and are therefore **excluded** from both LCOE and LCOS so the values
+    stay Lazard-comparable.
     """
     df = yearly_cf
 
@@ -802,7 +818,7 @@ def compute_financial_kpis(
         if max_y1 > 1e-9:
             extras["pv_capacity_factor"] = float(round(pv_gen_y1 / max_y1, 4))
 
-    # ---- BESS capacity-fade decomposition at the final year (v0.8.8) ------
+    # ---- BESS capacity-fade decomposition at the final year ---------------
     # Splits the year-N fade into its unchanged multiplicative calendar
     # component and the new additive cycle component.  By construction
     # calendar_fade + cycle_fade == total_fade whenever the max(0, ...)
@@ -919,6 +935,18 @@ def compute_financial_kpis(
         _fmt(lcos_val), lcos_bench_low, lcos_bench_high,
         "n/a" if np.isnan(cycles_val) else f"{cycles_val:.0f}",
     )
+
+    # ---- Site-wide lump-sum CAPEX/DEVEX audit -----------------------------
+    site_capex = float(econ.get("site_capex_eur", 0.0) or 0.0)
+    site_devex = float(econ.get("site_devex_eur", 0.0) or 0.0)
+    if site_capex > 0.0 or site_devex > 0.0:
+        logger.info(
+            "[site lump-sum] site_capex_eur = %.2f, site_devex_eur = %.2f "
+            "(folded into Year-0 CAPEX/DEVEX and the NPV/IRR/ROI/BCR/"
+            "payback metrics; NOT folded into LCOE/LCOS — Lazard "
+            "convention).",
+            site_capex, site_devex,
+        )
     return out
 
 

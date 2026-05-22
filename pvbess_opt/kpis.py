@@ -288,8 +288,8 @@ def compute_kpis(
 ) -> dict[str, Any]:
     """Compute the headline KPI dictionary for a solved scenario.
 
-    In v0.8 ``e_cap`` is no longer a decision variable — the BESS
-    energy capacity is pinned to ``params['bess_capacity_kwh']``.
+    ``e_cap`` is not a decision variable — the BESS energy capacity is
+    pinned to ``params['bess_capacity_kwh']``.
     """
     if verify_balance:
         verify_energy_balance(res, params, raise_on_failure=False)

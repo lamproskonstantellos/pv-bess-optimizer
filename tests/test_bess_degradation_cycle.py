@@ -1,14 +1,14 @@
-"""Cycle-based BESS degradation tests (Phase 3, v0.8.8).
+"""Cycle-based BESS degradation tests.
 
 The cycle-fade term is additive (subtractive on the capacity factor) and
-layered on top of the unchanged multiplicative calendar fade.  With the
-cycle coefficient at 0 the pipeline output matches the stored baseline,
-guarding the no-op property.
+layered on top of the multiplicative calendar fade.  With the cycle
+coefficient at 0 the pipeline output matches the stored calendar-only
+baseline, guarding the no-op property.
 
-The baseline fixture was regenerated for v0.8.10 to incorporate the F2
-per-stream BESS-revenue degradation fix: BESS-origin revenue now degrades
-on bess_factor rather than pv_factor, which shifts the multi-year revenue
-KPIs (NPV / IRR / lifetime revenue) on this hybrid scenario.
+The baseline fixture reflects per-stream BESS-revenue degradation:
+BESS-origin revenue degrades on bess_factor rather than pv_factor, which
+sets the multi-year revenue KPIs (NPV / IRR / lifetime revenue) on this
+hybrid scenario.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ FIXTURE = ROOT / "tests" / "fixtures" / "kpi_v087_baseline.json"
 
 
 # ---------------------------------------------------------------------------
-# Fixed baseline scenario — kept deterministic so the v0.8.7 KPI fixture
+# Fixed baseline scenario — kept deterministic so the KPI fixture
 # can be regenerated and re-compared.
 # ---------------------------------------------------------------------------
 
@@ -123,11 +123,11 @@ def _compute_baseline_kpis(d_cycle: float | None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_zero_cycle_pct_matches_v087():
+def test_zero_cycle_pct_matches_calendar_only_baseline():
     """With bess_degradation_pct_per_cycle = 0 the financial KPIs must
-    match the stored v0.8.7 baseline within 1e-9."""
+    match the stored calendar-only baseline within 1e-9."""
     assert FIXTURE.exists(), (
-        f"missing v0.8.7 KPI baseline fixture {FIXTURE}"
+        f"missing KPI baseline fixture {FIXTURE}"
     )
     baseline = json.loads(FIXTURE.read_text())
     kpis = _compute_baseline_kpis(d_cycle=0.0)
@@ -142,7 +142,7 @@ def test_zero_cycle_pct_matches_v087():
             assert actual == expected, key
 
 
-def test_missing_key_matches_v087():
+def test_missing_key_matches_calendar_only_baseline():
     """A scenario with no bess_degradation_pct_per_cycle key behaves the
     same as one with the key explicitly 0."""
     baseline = json.loads(FIXTURE.read_text())

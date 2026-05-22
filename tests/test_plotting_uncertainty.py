@@ -1,4 +1,4 @@
-"""Phase 8 — uncertainty-plot consistency + diagnostic regressions.
+"""Uncertainty-plot consistency + diagnostic regressions.
 
 Asserts the house date format (DD-MM-YYYY), the pinned ``upper right``
 legend placement, and that the four new diagnostic plots render

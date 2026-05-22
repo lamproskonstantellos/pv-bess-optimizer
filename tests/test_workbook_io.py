@@ -39,6 +39,8 @@ _PROJECT_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {
     "retail_tariff_eur_per_mwh": (float, 0.0, None),
     "allow_bess_grid_charging": (bool, None, None),
     "unavailability_pct": (float, 0.0, 100.0),
+    "site_capex_eur": (float, 0.0, None),
+    "site_devex_eur": (float, 0.0, None),
     "currency_format": (str, None, None),
     "show_titles": (bool, None, None),
 }

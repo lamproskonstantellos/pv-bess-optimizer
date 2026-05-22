@@ -132,9 +132,9 @@ def _yearly_cf_post_fee() -> pd.DataFrame:
 
 
 def test_revenue_stack_sums_to_net_line(tmp_path: Path):
-    """Bug #2 regression: the stack components (positive bars + negative
-    Grid-charging + negative Aggregator-fee) must sum to the Net-revenue
-    line at every operating year."""
+    """The stack components (positive bars + negative Grid-charging +
+    negative Aggregator-fee) must sum to the Net-revenue line at every
+    operating year."""
     plt.close("all")
 
     import pvbess_opt.plotting.lifecycle as life_mod

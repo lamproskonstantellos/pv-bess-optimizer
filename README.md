@@ -1,7 +1,7 @@
 # PV & BESS Optimizer
 
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.8.10-blue)](pvbess_opt/__init__.py)
+[![version](https://img.shields.io/badge/version-0.8.11-blue)](pvbess_opt/__init__.py)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
@@ -30,31 +30,38 @@ for a PV-only project, both > 0 for a hybrid PV+BESS project.
 The codebase is pure Python and runs on **Linux, macOS, and Windows** with
 Python ≥ 3.11.  All plots are exported as IEEE-styled PDFs.
 
-## What's new in v0.8.10
+## Capabilities
 
-The v0.8.9 full-codebase audit remediation (findings F1–F12) plus a
-consistency pass on the uncertainty-plot family:
-
-* **F1 (P0)** — BESS-only runs no longer carry a phantom `pv_kwh`
-  column in the output frame; energy balance, invariants and KPIs are
-  clean and `--strict` no longer crashes on the BESS-only mode.
-* **F2** — `build_yearly_cashflow` degrades BESS-origin revenue on the
-  BESS capacity factor (not the PV factor), reconciling the cashflow
-  and lifetime sheets in `03_results.xlsx`.
-* **F3 + F8** — dependency upper bounds pinned to the tested majors and
-  a `ruff` lint gate added to CI ahead of the test job.
-* **F5 + F6 + F9** — dispatch invariants computed on unrounded model
-  values; NaN gaps in the input timeseries now warn; the solver-status
-  guard requires a feasible incumbent before accepting a time limit.
-* **F7** — parametrized real-scale 9-invariant coverage across all six
-  mode × asset combinations.
-* **F4** — upfront Monte-Carlo runtime estimate and per-window
-  rolling-horizon progress logging.
-* **F10 + F11 + F12** — sheet-name / cross-reference / layout-listing
-  documentation fixes and a bundle of P3 nits.
-* **Plots** — the `06_uncertainty_plots/` family uses `DD-MM-YYYY`
-  date ticks and `upper right` legends, with four new diagnostic plots
-  (coverage-by-horizon, PIT histogram, CRPS timeline, residual Q-Q).
+* **Three asset modes** — hybrid PV+BESS, PV-only (`bess_power_kw = 0`),
+  and BESS-only (`pv_nameplate_kwp = 0`), read literally from the
+  workbook.  Energy balance, dispatch invariants and KPIs are exact in
+  every mode.
+* **Two regulatory regimes** — `vnb` (co-located load with
+  self-consumption priority) and `merchant` (utility-scale DAM
+  dispatch, no load).
+* **Split-revenue project finance** — retail (load-coverage / PPA) and
+  DAM (wholesale export) streams are degraded on their own
+  PV / BESS capacity factors and indexed by separate inflation rates;
+  the aggregator fee is an explicit negative component.
+* **Costs** — per-kWp PV and per-kW BESS CAPEX/DEVEX, a site-wide
+  lump-sum CAPEX and DEVEX figure for items that are not naturally
+  per-asset (substation, grid upgrades, interconnection,
+  environmental studies), OPEX with escalation, and BESS replacement.
+* **Cycle-aware degradation** — multiplicative calendar fade plus an
+  optional linear cycle-fade term; `compute_financial_kpis` reports the
+  year-N calendar / cycle / total split.
+* **Financial KPIs** — NPV, IRR, ROI, BCR, simple and discounted
+  payback, plus LCOE (PV-only) and LCOS (BESS-only) against the Lazard
+  2024 benchmark bands.
+* **Sensitivity** — one-at-a-time tornado over CAPEX, OPEX, revenue and
+  discount rate, with the IRR tornado rendered as a dumbbell and the
+  LCOE / LCOS summaries as separate PDFs.
+* **Uncertainty** — rolling-horizon dispatch with imperfect foresight
+  and Monte Carlo over forecast scenarios, with P10 / P50 / P90
+  distribution and forecast-calibration diagnostics.
+* **Outputs** — IEEE-styled PDF plots and a multi-sheet results
+  workbook; the `06_uncertainty_plots/` family uses `DD-MM-YYYY` date
+  ticks and `upper right` legends.
 
 ## Repository layout
 
@@ -128,7 +135,10 @@ Seven themed sheets:
   export limit applied to the combined PV + BESS flow),
   `retail_tariff_eur_per_mwh`, `allow_bess_grid_charging`,
   `unavailability_pct` (user-configurable post-solve derate),
-  `currency_format`, `show_titles`.
+  `site_capex_eur` / `site_devex_eur` (site-wide lump-sum CAPEX / DEVEX
+  in absolute EUR for items not naturally per-kWp/per-kW — substation,
+  grid upgrades, interconnection, environmental studies; paid in
+  Year 0), `currency_format`, `show_titles`.
 * **`pv`** — `pv_nameplate_kwp`, `specific_production_kwh_per_kwp`,
   `pv_degradation_year1_pct`, `pv_degradation_annual_pct`,
   `capex_pv_eur_per_kw`, `devex_pv_eur_per_kw`, `opex_pv_eur_per_kwp`.

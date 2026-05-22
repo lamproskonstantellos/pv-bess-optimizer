@@ -1,5 +1,5 @@
 """Enumeration tests — verify every plotting function obeys the
-round-3 universality rules.  These tests iterate over the full list
+universality rules.  These tests iterate over the full list
 of public plotting functions and apply the same assertions to each
 one.
 

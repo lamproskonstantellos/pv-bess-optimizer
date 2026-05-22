@@ -145,8 +145,8 @@ def test_missing_sheet_falls_back_to_default(tmp_path, caplog):
 
 
 # ---------------------------------------------------------------------------
-# Optimizer regression: constant 73% max-injection reproduces the
-# historical legacy export cap exactly.
+# Optimizer: a constant 73% max-injection profile applies the export
+# cap as 73% of p_grid_export_max_kw in every hour.
 # ---------------------------------------------------------------------------
 
 
@@ -296,8 +296,8 @@ def test_loader_parses_legacy_integer_hour_of_day(tmp_path):
     assert np.allclose(profile, 73.0)
 
 
-def test_loader_parses_v08_interval_string_hour_of_day(tmp_path):
-    """The v0.8 string format ``HH:00-HH:00`` round-trips through the loader."""
+def test_loader_parses_interval_string_hour_of_day(tmp_path):
+    """The ``HH:00-HH:00`` interval string round-trips through the loader."""
     typed = _minimal_typed(np.linspace(15.0, 35.0, 24))
     dst = tmp_path / "wb_intervals.xlsx"
     write_workbook(typed, dst)

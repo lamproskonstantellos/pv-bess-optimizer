@@ -1,4 +1,4 @@
-"""Phase 3 hardening regressions (F5, F6, F9)."""
+"""Dispatch-invariant and solver-status hardening tests."""
 
 from __future__ import annotations
 
@@ -28,17 +28,18 @@ def _highs_available() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# F5 — invariants computed on unrounded model values
+# Invariants computed on unrounded model values
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
-def test_f5_invariant4_unrounded_full_year_bess_only():
+def test_invariant4_unrounded_full_year_bess_only():
     """Full-year vnb BESS-only: invariant_4 must stay below 1e-4.
 
-    Before F5 the sum-based invariant_4 accumulated round(4) error to
-    ~0.00217 kWh on multi-GWh discharge, tripping --strict at 1e-3.
+    The sum-based invariant_4 is computed on unrounded model values so it
+    does not accumulate round(4) error across 35,040 rows and trip
+    --strict at 1e-3.
     """
     from pvbess_opt.io import read_inputs
 
@@ -57,11 +58,11 @@ def test_f5_invariant4_unrounded_full_year_bess_only():
 
 
 # ---------------------------------------------------------------------------
-# F6 — NaN-fill warning on the timeseries
+# NaN-fill warning on the timeseries
 # ---------------------------------------------------------------------------
 
 
-def test_f6_nan_fill_emits_warning(caplog):
+def test_nan_fill_emits_warning_with_location(caplog):
     ts = pd.DataFrame({
         "timestamp": pd.date_range("2027-04-02 00:00", periods=8, freq="h"),
         "pv_kwh": [1.0] * 8,
@@ -78,7 +79,7 @@ def test_f6_nan_fill_emits_warning(caplog):
     assert not out["dam_price_eur_per_mwh"].isna().any()
 
 
-def test_f6_no_warning_when_clean(caplog):
+def test_no_warning_when_timeseries_clean(caplog):
     ts = pd.DataFrame({
         "timestamp": pd.date_range("2027-04-02 00:00", periods=4, freq="h"),
         "pv_kwh": [1.0] * 4,
@@ -91,7 +92,7 @@ def test_f6_no_warning_when_clean(caplog):
 
 
 # ---------------------------------------------------------------------------
-# F9 — solver soft limit without a feasible incumbent must raise
+# Solver soft limit without a feasible incumbent must raise
 # ---------------------------------------------------------------------------
 
 
@@ -106,14 +107,14 @@ class _FakeResult:
         self.solver = _FakeSolverInfo(status, condition)
 
 
-def test_f9_time_limit_no_incumbent_raises():
+def test_time_limit_no_incumbent_raises():
     result = _FakeResult(SolverStatus.aborted, TerminationCondition.maxTimeLimit)
     with pytest.raises(RuntimeError, match="no feasible incumbent"):
         _check_solver_status(result, "highs", model=None)
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
-def test_f9_time_limit_with_incumbent_accepted():
+def test_time_limit_with_incumbent_accepted():
     """A model carrying a loaded solution under maxTimeLimit is accepted."""
     from pvbess_opt.optimization import build_model, solve_model
 

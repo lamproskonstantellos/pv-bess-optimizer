@@ -1,7 +1,7 @@
-"""Regression tests: tornado endpoint driver-value labels must match
-the scenario that produced the metric at that x position.
+"""Tornado endpoint driver-value labels must match the scenario that
+produced the metric at that x position.
 
-Issue: when the "low" scenario yields a HIGHER metric than the "high"
+When the "low" scenario yields a HIGHER metric than the "high"
 scenario (e.g. low CAPEX → higher IRR), the leftmost dot corresponds
 to the HIGH driver value and the rightmost dot to the LOW driver
 value.  The endpoint label on each side must therefore carry the
@@ -30,9 +30,8 @@ def _econ() -> dict:
 
 def _inverted_sens_df() -> pd.DataFrame:
     """Sensitivity frame where the 'low' scenario yields a HIGHER IRR
-    than the 'high' scenario — the swap territory that broke the
-    previous implementation.  Carries the full driver-value metadata
-    so the endpoint labels render with the v0.8.8+ layout."""
+    than the 'high' scenario — the swap territory.  Carries the full
+    driver-value metadata so the endpoint labels render."""
     rows = []
     # (variable, label, base_v, low_v, high_v, delta, low_irr, high_irr)
     drivers = (
@@ -131,7 +130,7 @@ def test_endpoint_labels_match_axis_position(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Round-4: endpoint labels live OUTSIDE the dots
+# Endpoint labels live OUTSIDE the dots
 # ---------------------------------------------------------------------------
 
 

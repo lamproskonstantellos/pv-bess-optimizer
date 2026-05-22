@@ -116,6 +116,8 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
     "unavailability_pct": 1.0,
+    "site_capex_eur": 0.0,
+    "site_devex_eur": 0.0,
     "currency_format": "auto",
     "show_titles": False,
 }
@@ -304,6 +306,16 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("unavailability_pct", 1.0, "%",
      "Annual unavailability (outages / scheduled maintenance) applied as "
      "a post-solve derate on PV generation, BESS discharge, and revenue."),
+    ("site_capex_eur", 0.0, "EUR",
+     "Site-wide lump-sum CAPEX in absolute EUR for items that are not "
+     "naturally per-kWp/per-kW (substation construction, MV/HV grid "
+     "upgrades, interconnection works, etc.). Paid in Year 0. Excluded "
+     "from LCOE/LCOS by the Lazard convention."),
+    ("site_devex_eur", 0.0, "EUR",
+     "Site-wide lump-sum DEVEX in absolute EUR (environmental impact "
+     "studies, land acquisition fees, permits not expressed per-kW, "
+     "etc.). Paid in Year 0. Excluded from LCOE/LCOS by the Lazard "
+     "convention."),
     ("currency_format", "auto", "enum",
      "auto | millions | raw — financial-axis label format."),
     ("show_titles", False, "bool",
@@ -365,8 +377,7 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("bess_degradation_pct_per_cycle", 0.008, "%",
      "Cycle-based BESS capacity fade per full equivalent cycle, in "
      "percent. LFP default 0.008 (range 0.005-0.010). Set to 0 to "
-     "disable cycle aging and recover pre-v0.8.8 calendar-only "
-     "behavior."),
+     "disable cycle aging (calendar-only mode)."),
 )
 
 _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -1081,13 +1092,12 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             sheet_name == "bess"
             and "bess_degradation_pct_per_cycle" not in flat
         ):
-            # Old workbook (pre-v0.8.8): default the cycle-fade coefficient
-            # to 0.0 so the run reproduces calendar-only behaviour.
+            # Workbooks that omit the cycle-fade coefficient default it
+            # to 0.0 so the run uses calendar-only fade.
             typed["bess"]["bess_degradation_pct_per_cycle"] = 0.0
             logger.info(
                 "[bess] bess_degradation_pct_per_cycle not found in "
-                "workbook; defaulting to 0.0 (calendar-only mode, "
-                "pre-v0.8.8 behavior)."
+                "workbook; defaulting to 0.0 (calendar-only mode)."
             )
 
     # A finite grid-export cap must be strictly positive.  An empty cell
@@ -1213,6 +1223,8 @@ def _typed_to_flat(
         "mode": str(project["mode"]),
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
         "unavailability_pct": float(project["unavailability_pct"]),
+        "site_capex_eur": float(project.get("site_capex_eur", 0.0) or 0.0),
+        "site_devex_eur": float(project.get("site_devex_eur", 0.0) or 0.0),
         "show_titles": bool(project["show_titles"]),
         # Max-injection cap profile (24,) or (24, 12), in percent of
         # p_grid_export_max_kw.  Expanded to a per-step array by the

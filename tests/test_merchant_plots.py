@@ -1,4 +1,4 @@
-"""Merchant-mode plot tests (Phase 6).
+"""Merchant-mode plot tests.
 
 Each merchant-mode resolution (daily / monthly / yearly) gets a
 new plot trio: dispatch, SOC, revenue.  The dispatcher in main.py
@@ -188,7 +188,7 @@ def test_dispatcher_renders_merchant_trio(tmp_path):
 
 
 def test_dispatcher_renders_merchant_combined(tmp_path):
-    """Round-5: the merchant branch also produces the combined trio."""
+    """The merchant branch also produces the combined trio."""
     from main import _generate_energy_plots_for_year
     df = _make_dispatch()
     _generate_energy_plots_for_year(

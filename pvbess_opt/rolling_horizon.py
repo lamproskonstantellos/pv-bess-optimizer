@@ -236,7 +236,7 @@ def rolling_horizon_dispatch(
         if forecast_seed is not None else None
     )
 
-    # v0.8: BESS energy capacity is pinned to params['bess_capacity_kwh']
+    # BESS energy capacity is pinned to params['bess_capacity_kwh']
     # in build_model, so every window automatically uses the same asset
     # — no need to plumb a fixed_e_cap_kwh through.
     initial_soc_kwh: float | None = None

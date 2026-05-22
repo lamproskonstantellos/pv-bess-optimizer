@@ -1,4 +1,4 @@
-"""Tests for the optional / unlimited grid-export cap (Phase 2, v0.8.8).
+"""Tests for the optional / unlimited grid-export cap.
 
 The workbook value ``p_grid_export_max_kw`` may be left empty or set to
 one of the disable tokens (``inf`` / ``unlimited`` / ``disabled`` …) to
@@ -8,6 +8,7 @@ the MILP topology stays identical and the behaviour is solver-agnostic.
 
 from __future__ import annotations
 
+import importlib.util
 import shutil
 from pathlib import Path
 
@@ -23,11 +24,7 @@ REPO_INPUT_XLSX = ROOT / "inputs" / "input.xlsx"
 
 
 def _highs_available() -> bool:
-    try:
-        import highspy  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    return importlib.util.find_spec("highspy") is not None
 
 
 def _workbook_with_grid_cap(tmp_path: Path, value: object, name: str) -> Path:
@@ -132,7 +129,7 @@ def test_finite_cap_kpis_identical_to_legacy_path(
     base = dict(short_params if mode == "vnb" else short_params_merchant)
     base["p_grid_export_max_kw"] = 5000.0
 
-    legacy = dict(base)  # no grid_export_unlimited key — pre-v0.8.8 shape
+    legacy = dict(base)  # params without the grid_export_unlimited key
     new = dict(base)
     new["grid_export_unlimited"] = False
 

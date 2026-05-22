@@ -1,7 +1,7 @@
-"""Grep audits 1–7 from the round-3 universality addendum.
+"""Grep audits enforcing the plot universality rules.
 
-These tests treat the addendum's command-line grep audits as
-regression checks.  Each test runs the same regex over every public
+These tests run command-line-style grep audits as automated
+checks.  Each test runs the same regex over every public
 plotting module and fails if a forbidden pattern reappears.  Module
 state is not introspected — we look directly at the source so the
 audits survive even when a function is unused at runtime.
@@ -71,7 +71,7 @@ def test_audit_3_no_white_marker_edge():
         if pattern.search(_strip_comments(src)):
             offenders.append(path.name)
     assert not offenders, (
-        f"markeredgecolor='white' found in: {offenders}.  Round-3 "
+        f"markeredgecolor='white' found in: {offenders}.  The "
         "universality rule forbids white marker-edge rings."
     )
 
@@ -89,7 +89,7 @@ def test_audit_4_no_italic_prose_captions():
             offenders.append(path.name)
     assert not offenders, (
         f"fontstyle='italic' found in: {offenders}.  Free-floating "
-        "italic prose is not allowed in round-3 plots."
+        "italic prose is not allowed in the plots."
     )
 
 

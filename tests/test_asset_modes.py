@@ -1,4 +1,4 @@
-"""PV-only / BESS-only / hybrid asset-mode tests (Phase 3).
+"""PV-only / BESS-only / hybrid asset-mode tests.
 
 Asset-mode semantics:
 
@@ -96,7 +96,7 @@ def test_read_inputs_raises_when_both_assets_zero(tmp_path):
         ),
         "economics": dict(ECONOMICS_SHEET_DEFAULTS),
         "simulation": dict(SIMULATION_SHEET_DEFAULTS),
-        # Post-refactor max-injection semantic: 73 % allowed ≡ 27 % curtailment.
+        # max-injection semantic: 73 % of the export cap allowed.
         "max_injection_profile": np.full(24, 73.0, dtype=float),
     }
     dst = tmp_path / "no_assets.xlsx"

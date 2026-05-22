@@ -163,7 +163,7 @@ def assert_unique_colors() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Financial-plot colour palette (v0.8 polish)
+# Financial-plot colour palette
 # ---------------------------------------------------------------------------
 
 # All hex values are picked from the Material Design palette (Google

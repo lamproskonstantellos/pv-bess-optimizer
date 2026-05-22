@@ -87,7 +87,7 @@ def test_noise_skips_load_when_absent():
 
 
 # ---------------------------------------------------------------------------
-# Bug #1 regression: window_hours / commit_hours are real hours
+# window_hours / commit_hours are real hours on sub-hourly cadences
 # ---------------------------------------------------------------------------
 
 

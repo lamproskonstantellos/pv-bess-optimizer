@@ -1,9 +1,9 @@
-"""v0.8 economic-model acceptance tests (Phase 7).
+"""Economic-model acceptance tests.
 
 The five invariants we want explicit confidence in:
 
 1. Inflation × degradation: Year-N revenue (after fee, before tax) >
-   Year-1 revenue for every N >= 2 under the v0.8 default constants.
+   Year-1 revenue for every N >= 2 under the default constants.
 2. Discounted payback is finite and lands between 5 and 20 years
    under the default constants.
 3. NPV is monotonic in total CAPEX (× 0.5 → larger NPV; × 1.5 → smaller).
@@ -48,7 +48,7 @@ def _highs_available() -> bool:
 
 
 def _default_econ() -> dict:
-    """v0.8 defaults sourced from the canonical sheet defaults."""
+    """Defaults sourced from the canonical sheet defaults."""
     out = {}
     out.update(PROJECT_SHEET_DEFAULTS)
     out.update(PV_SHEET_DEFAULTS)
@@ -90,9 +90,12 @@ def test_revenue_strictly_increasing_year2_onwards():
 # ---------------------------------------------------------------------------
 
 
-def test_discounted_payback_between_5_and_20_under_defaults():
-    df = build_yearly_cashflow(_kpis(profit=900_000.0), _default_econ(), _caps())
-    fin = compute_financial_kpis(df, _default_econ())
+@pytest.mark.parametrize("site_capex_eur", [0.0, 100_000.0])
+def test_discounted_payback_between_5_and_20_under_defaults(site_capex_eur):
+    econ = _default_econ()
+    econ["site_capex_eur"] = site_capex_eur
+    df = build_yearly_cashflow(_kpis(profit=900_000.0), econ, _caps())
+    fin = compute_financial_kpis(df, econ)
     pb = float(fin["discounted_payback_years"])
     assert pb > 0.0
     assert 5.0 <= pb <= 20.0

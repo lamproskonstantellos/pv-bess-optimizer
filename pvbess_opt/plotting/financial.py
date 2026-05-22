@@ -659,7 +659,7 @@ def _annotate_dumbbell_endpoints(
     centerline.  The metric outcome itself is read off the x-axis, so
     only the absolute driver value is printed at each endpoint.
 
-    When ``*_driver_text`` is ``None`` (legacy frames without driver
+    When ``*_driver_text`` is ``None`` (frames without driver
     metadata) the function is a no-op for that side — the dot plus
     x-axis position carry all the information.  ``left`` / ``right``
     remain in the signature so callers can keep their existing call

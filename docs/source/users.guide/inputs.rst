@@ -1,8 +1,8 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook with **seven sheets**
-(v0.8): ``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
+The optimiser consumes a single Excel workbook with **seven sheets**:
+``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
 ``simulation``, ``max_injection_profile``.  All keys use lowercase
 snake_case.
 
@@ -56,9 +56,19 @@ High-level run configuration:
 * ``retail_tariff_eur_per_mwh`` — retail tariff used in vnb mode.
 * ``allow_bess_grid_charging`` — TRUE → BESS may charge from grid in
   PV-zero periods.
-* ``unavailability_pct`` (NEW in v0.8) — annual outage / maintenance
-  factor (default 1 %).  Applied as a post-solve derate on PV
-  generation, BESS discharge, and revenue.
+* ``unavailability_pct`` — annual outage / maintenance factor
+  (default 1 %).  Applied as a post-solve derate on PV generation,
+  BESS discharge, and revenue.
+* ``site_capex_eur`` (default 0) — site-wide lump-sum CAPEX in
+  absolute EUR for items that are not naturally per-kWp / per-kW
+  (substation construction, MV/HV grid upgrades, interconnection
+  works, …).  Paid in Year 0; folded into the Year-0 ``capex_eur``
+  cash-flow row and reflected in NPV / IRR / ROI / BCR / payback.
+  **Excluded** from LCOE / LCOS (Lazard convention — see below).
+* ``site_devex_eur`` (default 0) — site-wide lump-sum DEVEX in
+  absolute EUR (environmental impact studies, land acquisition fees,
+  permits not expressed per-kW, …).  Paid in Year 0; folded into the
+  Year-0 ``devex_eur`` row.  Also excluded from LCOE / LCOS.
 * ``currency_format`` — ``auto`` | ``millions`` | ``raw`` for
   financial-axis labels.
 * ``show_titles`` — TRUE → render plot titles.
@@ -73,7 +83,7 @@ Sheet ``pv``
   (LID) applied at start of Year 2.
 * ``pv_degradation_annual_pct`` — linear PV degradation after Year 1.
 * ``capex_pv_eur_per_kw`` — per-kWp PV CAPEX.
-* ``devex_pv_eur_per_kw`` (NEW in v0.8) — per-kWp PV DEVEX
+* ``devex_pv_eur_per_kw`` — per-kWp PV DEVEX
   (development / permitting).  Paid in Year 0 alongside CAPEX.
 * ``opex_pv_eur_per_kwp`` — annual O&M for PV.
 
@@ -89,16 +99,15 @@ Sheet ``bess``
 * ``soc_min_frac`` / ``soc_max_frac`` / ``initial_soc_frac`` /
   ``terminal_soc_equal`` / ``max_cycles_per_day`` — operating
   envelope.
-* ``capex_bess_eur_per_kw`` / ``devex_bess_eur_per_kw`` (NEW in v0.8;
-  default 30 EUR/kW) / ``opex_bess_eur_per_kw``.
+* ``capex_bess_eur_per_kw`` / ``devex_bess_eur_per_kw``
+  (default 30 EUR/kW) / ``opex_bess_eur_per_kw``.
 * ``bess_replacement_year`` / ``bess_replacement_cost_pct`` —
   Year-N replacement (0 disables).
 * ``bess_degradation_annual_pct`` — linear calendar BESS capacity fade.
 * ``bess_degradation_pct_per_cycle`` — cycle-based capacity fade per
   full equivalent cycle, in percent (LFP default 0.008, range
   0.005–0.010; NMC ~0.010–0.020).  Layered additively on the calendar
-  fade.  Set to 0 — or omit the row entirely on an older workbook — to
-  recover pre-v0.8.8 calendar-only behaviour.
+  fade.  Set to 0 — or omit the row — to use calendar-only fade.
 
 Sheet ``economics``
 -------------------
@@ -112,7 +121,7 @@ Sheet ``economics``
   to ``retail_inflation_pct`` with a ``DeprecationWarning`` (the rename
   table lives in ``pvbess_opt.io._LEGACY_RENAMED``); new workbooks
   should use the split keys directly.
-* ``aggregator_fee_pct_revenue`` (NEW in v0.8; default 10 %, Gridcog
+* ``aggregator_fee_pct_revenue`` (default 10 %, Gridcog
   convention) — reduces gross revenue post-solve.  Surfaces as a
   signed ``aggregator_fee_eur`` column on ``cashflow_yearly``.
 * ``sensitivity_enabled`` / ``sensitivity_capex_delta_pct`` /
