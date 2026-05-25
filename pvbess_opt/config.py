@@ -4,6 +4,31 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import Any
+
+__all__ = [
+    "ALL_LABELS",
+    "ALPHA_STACK_AREAS",
+    "ALPHA_STACK_BARS",
+    "BM_COLOURS",
+    "COLORS",
+    "DEFAULT_MAX_INJECTION_PCT_HOURLY",
+    "FINANCIAL_COLORS",
+    "FINANCIAL_LABELS",
+    "FINANCIAL_LABEL_TO_COLOR_KEY",
+    "FINANCIAL_LEGEND_ORDER",
+    "IEEE_RCPARAMS",
+    "LEGEND_ORDER",
+    "MERCHANT_COLORS",
+    "UNCERTAINTY_SOURCE_COLORS",
+    "XTICK_ROT",
+    "apply_financial_legend",
+    "assert_financial_label_color_coverage",
+    "assert_unique_colors",
+    "assert_unique_financial_colors",
+    "financial_color",
+    "label_color",
+]
 
 # ---------------------------------------------------------------------------
 # Project-level defaults
@@ -414,7 +439,7 @@ def _canonical_match_key(label: str) -> str | None:
     return None
 
 
-def apply_financial_legend(ax, *, max_rows: int = 2, loc: str = "best") -> None:
+def apply_financial_legend(ax: Any, *, max_rows: int = 2, loc: str = "best") -> None:
     """Reorder the legend on ``ax`` to match :data:`FINANCIAL_LEGEND_ORDER`.
 
     Handles whose label is not in the canonical order (and does not

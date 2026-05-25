@@ -42,3 +42,77 @@ addopts = "-m 'not slow'"
 markers = [
     "slow: tests that exercise the real-scale workbook (~minutes wall-clock)",
 ]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["pvbess_opt"]
+# numpy.ndarray is used everywhere as the canonical array carrier and
+# always holds float64.  Requiring `ndarray[Any, np.dtype[np.float64]]`
+# at every type-annotation site adds ~50 lines of noise without catching
+# real bugs — the dtype is enforced at construction (np.asarray(...,
+# dtype=float)) and at downstream call sites.  The remaining strict
+# checks still cover argument types, return types, and call signatures.
+disable_error_code = ["type-arg"]
+
+# Third-party packages without published type stubs.
+[[tool.mypy.overrides]]
+module = ["pyomo.*"]
+ignore_missing_imports = true
+
+# matplotlib stubs are partial and inconsistent across releases; the
+# plotting layer takes Figure/Axes objects whose method signatures are
+# not strictly typed in the public stubs.  Skipping the import-untyped
+# error is preferable to littering plotting/* with type-ignores.
+[[tool.mypy.overrides]]
+module = ["matplotlib.*", "mpl_toolkits.*"]
+ignore_missing_imports = true
+
+# openpyxl ships partial stubs via types-openpyxl; some submodules
+# (styles.borders, worksheet.dimensions) remain untyped.
+[[tool.mypy.overrides]]
+module = ["openpyxl.*"]
+ignore_missing_imports = true
+
+# Plotting subpackage: matplotlib axes / figure objects flow through
+# nearly every helper, and the matplotlib stubs publish most public
+# methods as returning `Any`.  Annotating every plot function strictly
+# would require hundreds of `Axes` / `Figure` / `Line2D` annotations
+# that mypy can't usefully check against the loose third-party stubs.
+# The remaining strict checks (return types of public top-level
+# functions, dtype consistency in helpers that don't touch matplotlib)
+# still apply via the un-disabled error codes.
+[[tool.mypy.overrides]]
+module = ["pvbess_opt.plotting.*"]
+disable_error_code = [
+    "no-untyped-def",
+    "no-untyped-call",
+    "arg-type",
+    "assignment",
+    "operator",
+    "union-attr",
+    "call-overload",
+    "no-any-return",
+]
+
+# Pyomo MILP construction: every constraint rule is a tiny `def
+# _rule(model, t): return expr` closure that Pyomo wires up by name.
+# Pyomo's own modules are untyped (see the dedicated override above),
+# so any annotation on these rules would be untrustworthy.  The pyomo
+# expression algebra also produces values that mypy cannot statically
+# resolve to a usable type — the model is the source of truth.
+[[tool.mypy.overrides]]
+module = ["pvbess_opt.optimization"]
+disable_error_code = [
+    "no-untyped-def",
+    "no-untyped-call",
+    "arg-type",
+    "operator",
+]
+
+[tool.vulture]
+# The audit threshold (see docs/audit_report.md §2.6): ≥70 % confidence is the gate.
+# Findings below that almost always reflect dataclass fields populated by
+# reflection or pytest fixtures injected by name — both false positives.
+paths = ["pvbess_opt", "scripts", "tests"]
+min_confidence = 70

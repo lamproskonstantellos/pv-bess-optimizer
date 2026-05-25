@@ -32,6 +32,8 @@ from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["build_per_step_max_injection_frac"]
+
 
 def _normalise_max_injection_profile(
     profile: np.ndarray | None,
@@ -92,4 +94,5 @@ def build_per_step_max_injection_frac(
     else:
         months = ts.month.to_numpy(dtype=int) - 1
         per_step_pct = arr[hours, months]
-    return np.clip(per_step_pct.astype(float) / 100.0, 0.0, 1.0)
+    clipped: np.ndarray = np.clip(per_step_pct.astype(float) / 100.0, 0.0, 1.0)
+    return clipped

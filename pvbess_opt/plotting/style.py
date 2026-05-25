@@ -21,7 +21,28 @@ from ..config import BM_COLOURS, IEEE_RCPARAMS, LEGEND_ORDER, assert_unique_colo
 
 # Re-export the balancing colour palette so plot modules can import it
 # from the central style module.
-__all__ = ["BM_COLOURS"]
+__all__ = [
+    "BM_COLOURS",
+    "PROJECT_MODE_LABEL",
+    "SCENARIO_LABEL",
+    "SHOW_TITLES",
+    "UNIVERSAL_MARGIN_X_FRAC",
+    "UNIVERSAL_MARGIN_Y_FRAC",
+    "annotate_value_safe",
+    "apply_fine_ticks",
+    "apply_ieee_style",
+    "apply_legend",
+    "apply_universal_margins",
+    "empty_placeholder",
+    "get_project_mode_label",
+    "get_scenario_label",
+    "save_figure",
+    "save_figure_daily",
+    "set_project_mode_label",
+    "set_scenario_label",
+    "set_show_titles",
+    "show_titles",
+]
 
 # ---------------------------------------------------------------------------
 # Module-level state

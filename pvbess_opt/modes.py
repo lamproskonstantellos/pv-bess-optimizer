@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+__all__ = ["DEFAULT_MODE", "VALID_MODES", "resolve_mode"]
+
 VALID_MODES: tuple[str, ...] = ("self_consumption", "merchant")
 DEFAULT_MODE: str = "self_consumption"
 

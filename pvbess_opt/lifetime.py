@@ -48,6 +48,11 @@ from dateutil.relativedelta import relativedelta
 from .io import PROJECT_SHEET_DEFAULTS
 from .kpis import require_economic_columns
 
+__all__ = [
+    "aggregate_lifetime_to_yearly",
+    "build_lifetime_dispatch",
+]
+
 # Columns scaled by the PV degradation curve.
 _PV_ORIGIN_COLUMNS: tuple[str, ...] = (
     "pv_kwh",

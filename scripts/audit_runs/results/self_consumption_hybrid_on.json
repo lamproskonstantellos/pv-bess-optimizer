@@ -1,0 +1,130 @@
+{
+  "balancing_off_zero_guards": {
+    "bm_keys_nonzero": [],
+    "revenue_bess_balancing_keys_nonzero": []
+  },
+  "combination": {
+    "asset_config": "hybrid",
+    "balancing_enabled": true,
+    "mode": "self_consumption"
+  },
+  "energy_balance_within_tolerance": true,
+  "invariants": {
+    "invariant_1_pv_balance_kwh": {
+      "residual": 0.0,
+      "within_tolerance": true
+    },
+    "invariant_2_load_balance_kwh": {
+      "residual": 0.0,
+      "within_tolerance": true
+    },
+    "invariant_3_soc_dynamics_kwh": {
+      "residual": 3.9958258923888934e-11,
+      "within_tolerance": true
+    },
+    "invariant_4_rte_bound_excess_kwh": {
+      "residual": 1.4551915228366852e-11,
+      "within_tolerance": true
+    },
+    "invariant_5_no_sim_grid_io_max_product_kwh2": {
+      "residual": 5.587792088590486e-09,
+      "within_tolerance": true
+    },
+    "invariant_6_load_priority_violations": {
+      "residual": 0.0,
+      "within_tolerance": true
+    },
+    "invariant_7_curtail_behavior_kwh": {
+      "residual": 0.0,
+      "within_tolerance": true
+    },
+    "invariant_8_soc_closed_cycle_kwh": {
+      "residual": 0.0,
+      "within_tolerance": true
+    },
+    "invariant_9_pv_load_priority_kwh": {
+      "residual": 0.0,
+      "within_tolerance": true
+    }
+  },
+  "kpis": {
+    "bess_charge_grid_mwh": 0.0,
+    "bess_equivalent_cycles_per_day": 0.1888,
+    "bess_equivalent_cycles_total": 1.3218,
+    "bess_from_pv_self_consumption_frac": 0.0802,
+    "bess_green_to_load_mwh": 18.9085,
+    "bess_net_soc_change_mwh": 0.007,
+    "bess_roundtrip_eff_est": 0.8914,
+    "bess_roundtrip_eff_theoretical": 0.9409,
+    "bess_to_load_mwh": 18.9085,
+    "bess_total_charge_mwh": 88.9675,
+    "bess_total_discharge_mwh": 79.3087,
+    "bm_afrr_dn_activation_revenue_eur": 214.58,
+    "bm_afrr_dn_capacity_revenue_eur": 1467.57,
+    "bm_afrr_up_activation_revenue_eur": 2846.54,
+    "bm_afrr_up_capacity_revenue_eur": 1981.7,
+    "bm_expected_activation_energy_dn_kwh": 8310.96,
+    "bm_expected_activation_energy_up_kwh": 12847.8412,
+    "bm_fcr_capacity_revenue_eur": 2091.77,
+    "bm_mfrr_dn_activation_revenue_eur": 17.54,
+    "bm_mfrr_dn_capacity_revenue_eur": 101.61,
+    "bm_mfrr_up_activation_revenue_eur": 308.14,
+    "bm_mfrr_up_capacity_revenue_eur": 178.5,
+    "bm_reservation_avg_kw_afrr_dn": 1050.0,
+    "bm_reservation_avg_kw_afrr_up": 1191.0714,
+    "bm_reservation_avg_kw_fcr": 1484.488,
+    "bm_reservation_avg_kw_mfrr_dn": 300.0,
+    "bm_reservation_avg_kw_mfrr_up": 433.603,
+    "bm_revenue_share_pct": 23.7026,
+    "bm_total_activation_revenue_eur": 3386.8,
+    "bm_total_balancing_revenue_eur": 9207.96,
+    "bm_total_capacity_revenue_eur": 5821.15,
+    "e_cap_mwh": 60.0,
+    "expense_charge_bess_grid_eur": 0.0,
+    "load_coverage_from_bess_frac": 0.0306,
+    "load_coverage_from_bess_total_frac": 0.0306,
+    "load_coverage_from_pv_frac": 0.2376,
+    "load_energy_mwh": 617.8052,
+    "profit_export_from_bess_eur": 9754.94,
+    "profit_export_from_pv_eur": 0.0,
+    "profit_load_from_bess_eur": 2269.02,
+    "profit_load_from_pv_eur": 17615.9,
+    "profit_total_eur": 29639.87,
+    "pv_direct_self_consumption_frac": 0.6226,
+    "pv_direct_to_load_mwh": 146.7992,
+    "pv_energy_curtailed_mwh": 0.0,
+    "pv_generation_mwh": 235.7667,
+    "pv_to_bess_mwh": 88.9675,
+    "revenue_bess_afrr_dn_eur": 1682.15,
+    "revenue_bess_afrr_up_eur": 4828.24,
+    "revenue_bess_dam_eur": 9754.94,
+    "revenue_bess_fcr_eur": 2091.77,
+    "revenue_bess_mfrr_dn_eur": 119.15,
+    "revenue_bess_mfrr_up_eur": 486.64,
+    "revenue_pv_dam_eur": 0.0,
+    "revenue_self_consumption_eur": 19884.92,
+    "soc_avg_pct": 47.19,
+    "soc_initial_pct": 50.0,
+    "soc_max_pct": 73.9,
+    "soc_min_pct": 22.16,
+    "system_green_to_load_mwh": 165.7077,
+    "system_load_green_coverage_frac": 0.2682,
+    "system_pv_self_consumption_frac": 0.7028,
+    "system_total_export_mwh": 60.4002,
+    "system_total_import_mwh": 452.0975
+  },
+  "mc_scenarios": 25,
+  "monte_carlo": {
+    "bm_soc_constrained_scenarios_pct": 0.0,
+    "bm_total_balancing_revenue_p10_eur": 8486.71,
+    "bm_total_balancing_revenue_p50_eur": 9144.16,
+    "bm_total_balancing_revenue_p90_eur": 9839.57,
+    "n_scenarios": 25
+  },
+  "n_steps": 672,
+  "peak_rss_mb": 180.6,
+  "solve_runtime_s": 1.572,
+  "solve_status": "optimal",
+  "solver": "highs",
+  "subsample_steps_applied": 672
+}

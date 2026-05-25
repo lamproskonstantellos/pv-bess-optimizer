@@ -7,6 +7,15 @@ Single source of truth for values consumed by :mod:`pvbess_opt.io`,
 
 from __future__ import annotations
 
+__all__ = [
+    "BENCHMARK_LCOE_HIGH_EUR_PER_MWH",
+    "BENCHMARK_LCOE_LOW_EUR_PER_MWH",
+    "BENCHMARK_LCOS_HIGH_EUR_PER_MWH",
+    "BENCHMARK_LCOS_LOW_EUR_PER_MWH",
+    "DEFAULT_SENSITIVITY_DELTA_PCT",
+    "DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP",
+]
+
 # Lazard 2024 utility-scale benchmark bands (EUR/MWh, EUR-equivalent at
 # ~1.08 EUR/USD).  Workbook ``benchmark_lco{e,s}_*`` keys override these
 # per project.

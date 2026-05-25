@@ -6,6 +6,24 @@ import numpy as np
 import pandas as pd
 
 from ..config import ALPHA_STACK_AREAS, ALPHA_STACK_BARS, label_color
+from .style import get_project_mode_label
+
+__all__ = [
+    "ZERO_THRESHOLD",
+    "bar_stacked_bins",
+    "edges_and_widths_monthly",
+    "edges_and_widths_yearly",
+    "fill_stacked_above",
+    "line_if_nonzero",
+    "line_masked_zeros",
+    "month_aggregate",
+    "pad_line_to_bins_end",
+    "pad_right_to_end",
+    "plot_stack_filtered",
+    "pretty_date",
+    "title_prefix",
+    "year_aggregate",
+]
 
 ZERO_THRESHOLD: float = 1e-9
 
@@ -217,7 +235,6 @@ def title_prefix(scenario_label: str) -> str:
     value drops it from the prefix; the scenario label is shown alone
     in that case.
     """
-    from .style import get_project_mode_label
     project_mode = get_project_mode_label()
     if scenario_label and project_mode:
         return f" ({scenario_label}; {project_mode})"

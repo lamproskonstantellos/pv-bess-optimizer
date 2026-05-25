@@ -45,6 +45,16 @@ from .style import (
     show_titles,
 )
 
+__all__ = [
+    "plot_monthly_combined",
+    "plot_monthly_combined_merchant",
+    "plot_monthly_dispatch",
+    "plot_monthly_revenue",
+    "plot_monthly_soc",
+    "plot_monthly_supply",
+    "plot_monthly_surplus",
+]
+
 
 def _setup_day_axis(ax, left: pd.Series, width_days) -> None:
     ax.set_xlim(left.iloc[0],

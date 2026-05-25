@@ -53,6 +53,18 @@ from .style import (
     show_titles,
 )
 
+__all__ = [
+    "plot_daily_combined",
+    "plot_daily_combined_merchant",
+    "plot_daily_combined_merchant_with_soc",
+    "plot_daily_combined_with_soc",
+    "plot_daily_dispatch",
+    "plot_daily_revenue",
+    "plot_daily_soc",
+    "plot_daily_supply",
+    "plot_daily_surplus",
+]
+
 
 def _setup_day_axes(ax, start: pd.Timestamp, end: pd.Timestamp) -> None:
     ax.set_xlim(start, end)
