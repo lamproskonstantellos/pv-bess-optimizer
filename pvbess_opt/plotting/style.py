@@ -17,7 +17,11 @@ from matplotlib.patches import Rectangle
 from matplotlib.ticker import MaxNLocator
 from matplotlib.transforms import offset_copy
 
-from ..config import IEEE_RCPARAMS, LEGEND_ORDER, assert_unique_colors
+from ..config import BM_COLOURS, IEEE_RCPARAMS, LEGEND_ORDER, assert_unique_colors
+
+# Re-export the balancing colour palette so plot modules can import it
+# from the central style module.
+__all__ = ["BM_COLOURS"]
 
 # ---------------------------------------------------------------------------
 # Module-level state

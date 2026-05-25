@@ -312,6 +312,17 @@ def build_yearly_cashflow(
     dam_infl = float(econ.get("dam_inflation_pct", 0.0) or 0.0) / 100.0
     opex_infl = float(econ["opex_inflation_pct"]) / 100.0
     discount_rate = float(econ["discount_rate_pct"]) / 100.0
+    bm_infl = float(econ.get("bm_inflation_pct", 0.0) or 0.0) / 100.0
+    # Year-1 balancing revenue lines come from the KPI dict; they
+    # already carry the BESS degradation factor for Year 1 (which is
+    # 1.0) and degrade on the BESS capacity-fade curve via bess_factor
+    # in subsequent years, indexed by bm_inflation_pct.
+    bm_cap_y1 = float(
+        year1_kpis.get("bm_total_capacity_revenue_eur", 0.0) or 0.0
+    )
+    bm_act_y1 = float(
+        year1_kpis.get("bm_total_activation_revenue_eur", 0.0) or 0.0
+    )
 
     bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
     bess_repl_cost_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
@@ -338,6 +349,8 @@ def build_yearly_cashflow(
             capex_y = capex_total_y0
             devex_y = devex_total_y0
             aggregator_fee_y = 0.0
+            balancing_capacity_y = 0.0
+            balancing_activation_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -372,6 +385,12 @@ def build_yearly_cashflow(
             else:
                 capex_y = 0.0
             devex_y = 0.0
+            balancing_capacity_y = (
+                bm_cap_y1 * bess_factor * (1.0 + bm_infl) ** (y - 1)
+            )
+            balancing_activation_y = (
+                bm_act_y1 * bess_factor * (1.0 + bm_infl) ** (y - 1)
+            )
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -385,7 +404,16 @@ def build_yearly_cashflow(
         dam_fee_y = aggregator_fee_y - retail_fee_y
         revenue_retail_net_y = revenue_retail_y + retail_fee_y
         revenue_dam_net_y = revenue_dam_y + dam_fee_y
-        net_cf = revenue_net_y + opex_y + capex_y + devex_y
+        balancing_revenue_y = balancing_capacity_y + balancing_activation_y
+        # Balancing revenue is treated as an offset on the cash inflow
+        # side; the existing aggregator fee already covers DAM/retail
+        # streams, so we do not derate balancing revenue by it (industry
+        # convention: BSPs typically settle ancillary services directly
+        # with the TSO, not through the same aggregator).
+        net_cf = (
+            revenue_net_y + balancing_revenue_y
+            + opex_y + capex_y + devex_y
+        )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
         rows.append(
             {
@@ -397,6 +425,9 @@ def build_yearly_cashflow(
                 "revenue_retail_eur": float(revenue_retail_net_y),
                 "revenue_dam_eur": float(revenue_dam_net_y),
                 "aggregator_fee_eur": float(aggregator_fee_y),
+                "balancing_capacity_revenue_eur": float(balancing_capacity_y),
+                "balancing_activation_revenue_eur": float(balancing_activation_y),
+                "balancing_revenue_eur": float(balancing_revenue_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
                 "devex_eur": float(devex_y),
@@ -657,6 +688,18 @@ def compute_financial_kpis(
         float(df.loc[after_y0_mask, "aggregator_fee_eur"].sum())
         if "aggregator_fee_eur" in df.columns else 0.0
     )
+    total_balancing_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
+        if "balancing_revenue_eur" in df.columns else 0.0
+    )
+    total_balancing_capacity_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "balancing_capacity_revenue_eur"].sum())
+        if "balancing_capacity_revenue_eur" in df.columns else 0.0
+    )
+    total_balancing_activation_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "balancing_activation_revenue_eur"].sum())
+        if "balancing_activation_revenue_eur" in df.columns else 0.0
+    )
 
     if "calendar_year" in df.columns and (df["project_year"] >= 1).any():
         first_op_year_row = df.loc[df["project_year"] == 1].iloc[0]
@@ -901,6 +944,22 @@ def compute_financial_kpis(
         "total_revenue_eur_lifecycle": float(round(total_revenue_eur_lifecycle, 2)),
         "total_aggregator_fee_eur_lifecycle": float(round(
             total_aggregator_fee_eur_lifecycle, 2,
+        )),
+        "lifetime_bm_revenue_total_eur": float(round(
+            total_balancing_revenue_eur_lifecycle, 2,
+        )),
+        "lifetime_bm_revenue_eur_per_year": (
+            [
+                float(round(v, 2))
+                for v in df.loc[after_y0_mask, "balancing_revenue_eur"].tolist()
+            ]
+            if "balancing_revenue_eur" in df.columns else []
+        ),
+        "lifetime_bm_capacity_revenue_total_eur": float(round(
+            total_balancing_capacity_revenue_eur_lifecycle, 2,
+        )),
+        "lifetime_bm_activation_revenue_total_eur": float(round(
+            total_balancing_activation_revenue_eur_lifecycle, 2,
         )),
         "capex_year": int(capex_year),
         "project_start_year": int(project_start_year),

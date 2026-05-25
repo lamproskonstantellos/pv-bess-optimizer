@@ -155,13 +155,13 @@ def test_unknown_mode_falls_back_to_vnb(tmp_path):
     assert out["project"]["mode"] == "vnb"
 
 
-def test_write_workbook_emits_seven_sheets(tmp_path, repo_input_xlsx):
+def test_write_workbook_emits_all_sheets(tmp_path, repo_input_xlsx):
     typed = read_workbook(repo_input_xlsx)
     dst = tmp_path / "out.xlsx"
     write_workbook(typed, dst)
     assert set(pd.ExcelFile(dst).sheet_names) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "max_injection_profile",
+        "simulation", "balancing", "max_injection_profile",
     }
 
 

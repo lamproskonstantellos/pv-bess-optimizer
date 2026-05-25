@@ -15,6 +15,10 @@ Three families of plots:
   heatmap (``inputs_uncertainty.py``).
 """
 
+from .balancing import (
+    plot_balancing_mc_distribution,
+    plot_balancing_reservation_profile,
+)
 from .daily import (
     plot_daily_combined,
     plot_daily_combined_merchant,
@@ -82,6 +86,8 @@ from .yearly import (
 
 __all__ = [
     "apply_ieee_style",
+    "plot_balancing_mc_distribution",
+    "plot_balancing_reservation_profile",
     "plot_cumulative_cashflow",
     "plot_daily_combined",
     "plot_daily_combined_merchant",

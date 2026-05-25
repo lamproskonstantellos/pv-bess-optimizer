@@ -43,6 +43,52 @@ logger = logging.getLogger(__name__)
 ENERGY_TOLERANCE: float = 1.0e-3  # kWh per timestep
 
 
+def _balancing_soc_drift(
+    res: pd.DataFrame, params: dict[str, Any],
+) -> np.ndarray | None:
+    """Return the per-step expected-activation SOC drift, or None.
+
+    The drift is positive when downward activation (charging) dominates
+    and negative for upward activation (discharging). Returns ``None``
+    when the balancing block did not fire so callers can keep their
+    pre-feature numerical behaviour bit-identical.
+    """
+    from .balancing import (
+        PRODUCTS_DN,
+        PRODUCTS_UP,
+        acceptance_probability,
+        activation_probability,
+        resolve_balancing_config,
+    )
+
+    raw_cfg = params.get("balancing") or {}
+    cfg = resolve_balancing_config(raw_cfg)
+    if not cfg.balancing_enabled:
+        return None
+    if not all(f"bm_reservation_{p}_kw" in res.columns for p in PRODUCTS_UP + PRODUCTS_DN):
+        return None
+
+    dt_h = float(params.get("dt_minutes", 0) or 0) / 60.0
+    eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
+    eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
+    drift = np.zeros(len(res), dtype=float)
+    for product in PRODUCTS_DN:
+        r = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
+        alpha_beta = (
+            acceptance_probability(cfg, product)
+            * activation_probability(cfg, product)
+        )
+        drift = drift + eta_c * dt_h * alpha_beta * r
+    for product in PRODUCTS_UP:
+        r = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
+        alpha_beta = (
+            acceptance_probability(cfg, product)
+            * activation_probability(cfg, product)
+        )
+        drift = drift - (dt_h / eta_d) * alpha_beta * r
+    return drift
+
+
 # ---------------------------------------------------------------------------
 # Energy-flow verification
 # ---------------------------------------------------------------------------
@@ -96,6 +142,11 @@ def verify_energy_balance(
         eta_c * (res["pv_to_bess_kwh"] + res["bess_charge_grid_kwh"])
         - (res["bess_dis_load_kwh"] + res["bess_dis_grid_kwh"]) / eta_d
     ).to_numpy(dtype=float)
+    # Include the deterministic expected-activation drift when the
+    # balancing block fired (the MILP added it to the SOC recursion).
+    bm_drift = _balancing_soc_drift(res, params)
+    if bm_drift is not None:
+        expected_delta = expected_delta + bm_drift
     soc_residual = np.zeros_like(soc)
     if len(soc) >= 2:
         soc_residual[:-1] = np.abs(soc[1:] - soc[:-1] - expected_delta[:-1])
@@ -454,7 +505,132 @@ def compute_kpis(
             "bess_utilization_pct": round(utilisation_pct, 1),
         }
 
+    # ---------------------------------------------------------------------
+    # Balancing market KPIs (FCR / aFRR / mFRR).
+    # Always emitted, with zero values when the master switch is off so
+    # downstream code (plotting, lifetime, economics) can read the keys
+    # unconditionally.
+    # ---------------------------------------------------------------------
+    kpis.update(_compute_balancing_kpis(res, params))
+
     return kpis
+
+
+def _compute_balancing_kpis(
+    res: pd.DataFrame, params: dict[str, Any],
+) -> dict[str, Any]:
+    """Compute the per-product and aggregate balancing KPIs.
+
+    When the balancing block did not fire (sheet absent / switch off /
+    no BESS) every key is set to 0.0 so the dict shape stays stable.
+    """
+    from .balancing import (
+        PRODUCTS_ALL,
+        PRODUCTS_DN,
+        PRODUCTS_UP,
+        PRODUCTS_WITH_ACTIVATION,
+        acceptance_probability,
+        activation_probability,
+        resolve_balancing_config,
+    )
+
+    out: dict[str, Any] = {}
+    for product in PRODUCTS_ALL:
+        out[f"bm_{product}_capacity_revenue_eur"] = 0.0
+        out[f"bm_reservation_avg_kw_{product}"] = 0.0
+    for product in PRODUCTS_WITH_ACTIVATION:
+        out[f"bm_{product}_activation_revenue_eur"] = 0.0
+    out["bm_total_capacity_revenue_eur"] = 0.0
+    out["bm_total_activation_revenue_eur"] = 0.0
+    out["bm_total_balancing_revenue_eur"] = 0.0
+    out["bm_expected_activation_energy_up_kwh"] = 0.0
+    out["bm_expected_activation_energy_dn_kwh"] = 0.0
+    out["bm_revenue_share_pct"] = 0.0
+
+    raw_cfg = params.get("balancing") or {}
+    cfg = resolve_balancing_config(raw_cfg)
+    if not cfg.balancing_enabled:
+        return out
+
+    res_columns_have_reservations = all(
+        f"bm_reservation_{p}_kw" in res.columns for p in PRODUCTS_ALL
+    )
+    if not res_columns_have_reservations:
+        # Switch was on but the dispatch frame does not carry the
+        # reservation columns (e.g. a BESS-absent run). Leave zeros.
+        return out
+
+    dt_h = float(params.get("dt_minutes", 0) or 0) / 60.0
+    if dt_h <= 0.0:
+        return out
+
+    total_capacity = 0.0
+    total_activation = 0.0
+    for product in PRODUCTS_ALL:
+        r_kw = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
+        alpha = acceptance_probability(cfg, product)
+        cap_col = f"{product}_capacity_price_eur_per_mwh"
+        if cap_col in res.columns:
+            cap_price = res[cap_col].to_numpy(dtype=float)
+            cap_rev = float(
+                (alpha * dt_h / 1000.0) * float((cap_price * r_kw).sum())
+            )
+        else:
+            cap_rev = 0.0
+        out[f"bm_{product}_capacity_revenue_eur"] = round(cap_rev, 2)
+        out[f"bm_reservation_avg_kw_{product}"] = round(float(r_kw.mean()), 4)
+        total_capacity += cap_rev
+
+    for product in PRODUCTS_WITH_ACTIVATION:
+        r_kw = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
+        alpha = acceptance_probability(cfg, product)
+        beta = activation_probability(cfg, product)
+        act_col = f"{product}_activation_price_eur_per_mwh"
+        if act_col in res.columns:
+            act_price = res[act_col].to_numpy(dtype=float)
+            act_rev = float(
+                (alpha * beta * dt_h / 1000.0) * float((act_price * r_kw).sum())
+            )
+        else:
+            act_rev = 0.0
+        out[f"bm_{product}_activation_revenue_eur"] = round(act_rev, 2)
+        total_activation += act_rev
+
+    total = total_capacity + total_activation
+    out["bm_total_capacity_revenue_eur"] = round(total_capacity, 2)
+    out["bm_total_activation_revenue_eur"] = round(total_activation, 2)
+    out["bm_total_balancing_revenue_eur"] = round(total, 2)
+
+    # Expected activation energies (kWh) — the deterministic drift that
+    # the MILP added to the SOC recursion.
+    eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
+    eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
+    e_act_up = 0.0
+    e_act_dn = 0.0
+    for product in PRODUCTS_UP:
+        r_kw = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
+        alpha = acceptance_probability(cfg, product)
+        beta = activation_probability(cfg, product)
+        e_act_up += float(alpha * beta * dt_h / eta_d * r_kw.sum())
+    for product in PRODUCTS_DN:
+        r_kw = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
+        alpha = acceptance_probability(cfg, product)
+        beta = activation_probability(cfg, product)
+        e_act_dn += float(alpha * beta * dt_h * eta_c * r_kw.sum())
+    out["bm_expected_activation_energy_up_kwh"] = round(e_act_up, 4)
+    out["bm_expected_activation_energy_dn_kwh"] = round(e_act_dn, 4)
+
+    dam_revenue = (
+        float(res.get("profit_load_from_pv_eur", pd.Series(0.0)).sum())
+        + float(res.get("profit_load_from_bess_eur", pd.Series(0.0)).sum())
+        + float(res.get("profit_export_from_pv_eur", pd.Series(0.0)).sum())
+        + float(res.get("profit_export_from_bess_eur", pd.Series(0.0)).sum())
+        - float(res.get("expense_charge_bess_grid_eur", pd.Series(0.0)).sum())
+    )
+    denom = dam_revenue + total
+    if abs(denom) > 1e-9:
+        out["bm_revenue_share_pct"] = round(100.0 * total / denom, 4)
+    return out
 
 
 # ---------------------------------------------------------------------------
