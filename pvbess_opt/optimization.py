@@ -77,10 +77,22 @@ from .balancing import (
     resolve_balancing_timeseries,
 )
 from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
-from .kpis import ENERGY_TOLERANCE
+from .kpis import ENERGY_TOLERANCE, _balancing_soc_drift
+from .max_injection import build_per_step_max_injection_frac
 from .modes import resolve_mode
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "build_model",
+    "choose_solver",
+    "configure_solver_options",
+    "derive_tight_big_m",
+    "model_to_dataframe",
+    "run_scenario",
+    "solve_model",
+    "verify_dispatch_invariants",
+]
 
 
 # Tiny tie-breaker on ``pv_curtail`` for determinism under degeneracy.
@@ -138,7 +150,8 @@ def choose_solver(name: str | None):
             solver = pyo.SolverFactory(candidate)
             if solver is not None and solver.available():
                 return solver, candidate
-        except Exception:
+        except (RuntimeError, ImportError, OSError) as exc:
+            logger.debug("solver %s unavailable: %s", candidate, exc)
             continue
     raise RuntimeError("No LP/MIP solver found (install gurobi, highs, or cbc).")
 
@@ -232,8 +245,6 @@ def _resolve_max_injection_per_step(
     fraction) — matching the loader's default — rather than an
     inconsistent no-cap 1.0.
     """
-    from .max_injection import build_per_step_max_injection_frac
-
     profile = params.get("max_injection_profile")
     if profile is not None and "timestamp" in ts.columns:
         return build_per_step_max_injection_frac(ts["timestamp"], profile)
@@ -720,10 +731,9 @@ def build_model(
     # Applies in self_consumption AND merchant modes. Cap may vary by hour-of-day
     # (and optionally by month) via the ``max_injection_profile`` sheet.
     #
-    # Project-wide combined export:
-    #   grid_export_total[t] = pv_to_grid[t] + bess_dis_grid[t]
-    # The per-step cap is
-    #   p_grid_export_max_kw * dt_h * max_injection_per_step[t]
+    # Project-wide combined export: the total grid_export at step t is the
+    # sum of pv_to_grid[t] and bess_dis_grid[t]. The per-step cap is the
+    # product of p_grid_export_max_kw, dt_h, and max_injection_per_step[t]
     # and applies to that COMBINED flow — not separately to PV exports
     # or to BESS-discharge exports. ``p_grid_export_max_kw`` is the
     # nameplate grid-connection limit; ``max_injection_profile`` is the
@@ -1093,7 +1103,6 @@ def verify_dispatch_invariants(
         # Add the deterministic expected-activation drift when the
         # balancing block was active. The KPI helper computes the same
         # per-step drift; reuse it so the two checks stay aligned.
-        from .kpis import _balancing_soc_drift
         bm_drift = _balancing_soc_drift(res, params)
         if bm_drift is not None:
             expected_delta = expected_delta + bm_drift[:-1]
@@ -1107,7 +1116,6 @@ def verify_dispatch_invariants(
     soc0 = float(soc[0]) if len(soc) else 0.0
     # Reuse the balancing SOC drift helper so the rte-bound / closed-
     # cycle checks stay consistent with the per-step SOC dynamics check.
-    from .kpis import _balancing_soc_drift
     bm_drift = _balancing_soc_drift(res, params)
     if len(soc):
         final_state = (

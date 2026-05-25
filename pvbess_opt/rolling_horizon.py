@@ -49,6 +49,14 @@ from .optimization import run_scenario
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "add_forecast_noise",
+    "monte_carlo_balancing",
+    "monte_carlo_rolling",
+    "realise_balancing_scenario",
+    "rolling_horizon_dispatch",
+]
+
 
 # ---------------------------------------------------------------------------
 # Time-axis helper

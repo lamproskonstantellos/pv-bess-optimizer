@@ -42,6 +42,18 @@ _Z90 = 1.2816  # Phi^{-1}(0.90)
 LEGEND_LOC = "upper right"
 LEGEND_KWARGS = dict(loc=LEGEND_LOC, framealpha=0.85, fontsize=9)
 
+__all__ = [
+    "LEGEND_KWARGS",
+    "LEGEND_LOC",
+    "plot_dam_intraday_heatmap",
+    "plot_input_forecast_band",
+    "plot_input_seasonal_boxplot",
+    "plot_uncertainty_coverage_by_horizon",
+    "plot_uncertainty_crps_timeline",
+    "plot_uncertainty_pit_histogram",
+    "plot_uncertainty_residual_qq",
+]
+
 
 
 

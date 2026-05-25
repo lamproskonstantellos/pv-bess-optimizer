@@ -59,6 +59,15 @@ from .style import (
     empty_placeholder as _empty_placeholder,
 )
 
+__all__ = [
+    "BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH",
+    "BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH",
+    "plot_lcoe_summary",
+    "plot_lcos_summary",
+    "plot_lifetime_cycles",
+    "plot_revenue_stack_yearly",
+]
+
 # ---------------------------------------------------------------------------
 # Industry benchmark bands (Lazard 2024 — update annually)
 # ---------------------------------------------------------------------------

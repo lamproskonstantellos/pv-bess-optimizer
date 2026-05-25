@@ -26,6 +26,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+__all__ = [
+    "apply_unavailability_derate",
+    "availability_factor",
+]
+
 
 def availability_factor(unavailability_pct: float) -> float:
     """Return ``1 - unavailability_pct / 100`` clamped to [0, 1]."""

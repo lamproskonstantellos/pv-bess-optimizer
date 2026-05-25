@@ -32,6 +32,8 @@ from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["build_per_step_max_injection_frac"]
+
 
 def _normalise_max_injection_profile(
     profile: np.ndarray | None,

@@ -72,11 +72,20 @@ from .constants import (
     BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOS_LOW_EUR_PER_MWH,
 )
-from .io import PROJECT_SHEET_DEFAULTS
+from .io import PROJECT_SHEET_DEFAULTS, read_workbook
 from .kpis import require_economic_columns
 from .lifetime import _bess_factor
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "build_yearly_cashflow",
+    "calculate_irr",
+    "compute_financial_kpis",
+    "derive_asset_capacities",
+    "derive_monthly_cashflow",
+    "read_economic_params",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +150,6 @@ def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     mapping (e.g. ``econ['discount_rate_pct']``,
     ``econ['capex_pv_eur_per_kw']``).
     """
-    from .io import read_workbook
     typed = read_workbook(xlsx_path)
     merged: dict[str, Any] = {}
     for section in ("project", "pv", "bess", "economics", "simulation"):

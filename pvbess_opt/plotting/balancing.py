@@ -35,6 +35,11 @@ from .style import (
     show_titles,
 )
 
+__all__ = [
+    "plot_balancing_mc_distribution",
+    "plot_balancing_reservation_profile",
+]
+
 
 def _hour_of_day(ts_column: pd.Series) -> np.ndarray:
     """Return an integer hour-of-day array for a timestamp column."""

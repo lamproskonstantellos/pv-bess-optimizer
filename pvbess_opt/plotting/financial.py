@@ -47,6 +47,16 @@ from .style import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "plot_cumulative_cashflow",
+    "plot_irr_tornado",
+    "plot_monthly_cashflow_year1",
+    "plot_npv_tornado",
+    "plot_npv_waterfall",
+    "plot_payback",
+    "plot_yearly_cashflow_bars",
+]
+
 
 # ---------------------------------------------------------------------------
 # Helpers

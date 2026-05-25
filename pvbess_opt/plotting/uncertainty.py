@@ -19,6 +19,11 @@ from .style import (
     empty_placeholder as _empty_placeholder,
 )
 
+__all__ = [
+    "plot_foresight_gap_comparison",
+    "plot_rolling_horizon_distribution",
+]
+
 
 def plot_rolling_horizon_distribution(
     mc_df: pd.DataFrame,

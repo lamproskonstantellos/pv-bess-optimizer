@@ -390,7 +390,36 @@ _(Populated as Phase 1–5 progress.)_
 
 ## 2.6 Cleanup applied in Part 2
 
-_(One bullet per fix, with the commit SHA placeholder filled in after commit.)_
+### Phase 1 — Code-quality polish
+
+- P1-001: `_pick_solver` (`pvbess_opt/optimization.py:141`) — narrowed
+  `except Exception` to `(RuntimeError, ImportError, OSError)` and added
+  a `logger.debug` for the skipped candidate.
+- P1-002: lifted 7 imports out of function scope (Part 1 cited "6 sites";
+  ruff reported 7) — `pvbess_opt/economics.py:144` (`read_workbook`),
+  `pvbess_opt/kpis.py:56` and `:585` (balancing symbols),
+  `pvbess_opt/optimization.py:236` (`build_per_step_max_injection_frac`),
+  `pvbess_opt/optimization.py:1097` and `:1111` (`_balancing_soc_drift`),
+  `pvbess_opt/plotting/helpers.py:220` (`get_project_mode_label`).
+  No circular-import risk; the importing modules already pulled in the
+  same packages elsewhere. Targeted tests pass.
+- P2-001: reformatted the `EXPORT_CAP` docstring comment block at
+  `pvbess_opt/optimization.py:723-726` as prose — replaced the
+  `grid_export_total[t] = …` and `p_grid_export_max_kw * dt_h * …` lines
+  with verbal descriptions so ERA001 no longer fires. No `# noqa` needed.
+- P2-002: added `__all__` to every public module under `pvbess_opt/`:
+  `availability`, `balancing`, `config`, `constants`, `economics`,
+  `io`, `kpis`, `lifetime`, `max_injection`, `modes`, `optimization`,
+  `rolling_horizon`, `sensitivity`; and to every plotting submodule
+  that did not already declare one (`balancing`, `daily`, `financial`,
+  `helpers`, `inputs_uncertainty`, `lifecycle`, `monthly`,
+  `uncertainty`, `yearly`). The existing `__all__` in `plotting/style.py`
+  was extended to cover its full public surface; `plotting/__init__.py`
+  and `plotting/bess_revenue.py` were already complete and unchanged.
+  `pvbess_opt/__init__.py` gains `__all__ = ["__version__"]`. Each
+  `__all__` entry was verified to resolve to an attribute of its module.
+- Ruff (project rule set) re-applies isort-style sort to the
+  `balancing.py` `__all__` via `--fix`; remaining lists were hand-sorted.
 
 ## 2.7 Dynamic audit harness results
 

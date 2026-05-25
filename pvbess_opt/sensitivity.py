@@ -36,6 +36,14 @@ from .constants import (
 )
 from .economics import build_yearly_cashflow, compute_financial_kpis
 
+__all__ = [
+    "DriverSensitivity",
+    "build_driver_sensitivities",
+    "run_sensitivity_analysis",
+    "variables_for_irr_sensitivity",
+    "variables_for_npv_sensitivity",
+]
+
 
 @dataclass
 class DriverSensitivity:

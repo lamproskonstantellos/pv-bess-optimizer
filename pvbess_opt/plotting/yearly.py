@@ -46,6 +46,17 @@ from .style import (
     show_titles,
 )
 
+__all__ = [
+    "plot_lifetime_summary",
+    "plot_yearly_combined",
+    "plot_yearly_combined_merchant",
+    "plot_yearly_dispatch",
+    "plot_yearly_revenue",
+    "plot_yearly_soc",
+    "plot_yearly_supply",
+    "plot_yearly_surplus",
+]
+
 
 def _setup_month_axis(ax, left: pd.Series, width_days) -> None:
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))

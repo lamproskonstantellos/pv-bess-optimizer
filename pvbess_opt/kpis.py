@@ -36,9 +36,29 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .balancing import (
+    PRODUCTS_ALL,
+    PRODUCTS_DN,
+    PRODUCTS_UP,
+    PRODUCTS_WITH_ACTIVATION,
+    acceptance_probability,
+    activation_probability,
+    resolve_balancing_config,
+)
 from .modes import resolve_mode
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "ECONOMIC_COLUMNS",
+    "ENERGY_TOLERANCE",
+    "add_economic_columns",
+    "attribute_green_discharge",
+    "compute_kpis",
+    "compute_monthly_kpis",
+    "require_economic_columns",
+    "verify_energy_balance",
+]
 
 ENERGY_TOLERANCE: float = 1.0e-3  # kWh per timestep
 
@@ -53,14 +73,6 @@ def _balancing_soc_drift(
     when the balancing block did not fire so callers can keep their
     pre-feature numerical behaviour bit-identical.
     """
-    from .balancing import (
-        PRODUCTS_DN,
-        PRODUCTS_UP,
-        acceptance_probability,
-        activation_probability,
-        resolve_balancing_config,
-    )
-
     raw_cfg = params.get("balancing") or {}
     cfg = resolve_balancing_config(raw_cfg)
     if not cfg.balancing_enabled:
@@ -582,15 +594,6 @@ def _compute_balancing_kpis(
     When the balancing block did not fire (sheet absent / switch off /
     no BESS) every key is set to 0.0 so the dict shape stays stable.
     """
-    from .balancing import (
-        PRODUCTS_ALL,
-        PRODUCTS_DN,
-        PRODUCTS_UP,
-        PRODUCTS_WITH_ACTIVATION,
-        acceptance_probability,
-        activation_probability,
-        resolve_balancing_config,
-    )
 
     out: dict[str, Any] = {}
     for product in PRODUCTS_ALL:
