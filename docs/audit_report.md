@@ -135,6 +135,28 @@
 - Fix: applied in Phase 6.
 - Verification: file absent; new polish script is idempotent.
 
+### Phase-8 verification — dynamic findings
+
+The compressed dynamic surface (Phase 2: `test_realscale_all_combos.py`,
+the balancing invariant suites, and the canonical-workbook headline pin
+in `test_input_workbook_smoke.py`) was re-run after Phases 3-7 with **no
+new P0 findings beyond the pre-known mandates**:
+
+- Mode rename (P0-001) — verified: full `test_realscale_all_combos`
+  green; new test asserts `vnb` is rejected.
+- `max_injection_profile` default (P0-002) — verified: dedicated test
+  + headline-KPI pin updated to the no-curtailment baseline.
+- Financial plots (P0-003) — verified: new contract tests in
+  `test_plot_bess_revenue.py` (9 cases).
+- Workbook polish (P0-004) — verified: dedicated style tests across
+  every sheet.
+- Legacy shim deletion (P0-005, P0-007) — verified: leftover-token
+  audit clean; obsolete tests removed.
+
+The Phase-1 P1-004 carry-over (build a full 10-combination JSON
+harness) remains as documented; nothing in the compressed pass
+indicates a hidden dynamic P0.
+
 ## 4. P1 backlog (documented, NOT fixed)
 
 ### P1-001 — Solver discovery uses blind `except Exception`
