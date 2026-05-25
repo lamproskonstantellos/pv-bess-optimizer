@@ -48,7 +48,7 @@ def test_no_amber_fills_anywhere(workbook):
                     if rgb == FORBIDDEN_FILL_HEX:
                         hits.append((sn, c.coordinate))
                         break
-    assert not hits, f"Legacy amber fill remains in: {hits[:5]}..."
+    assert not hits, f"Prior amber fill remains in: {hits[:5]}..."
 
 
 @pytest.mark.parametrize("sheet_name", [

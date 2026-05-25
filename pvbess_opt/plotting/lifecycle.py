@@ -102,8 +102,8 @@ def plot_revenue_stack_yearly(
     ``yearly_cf['revenue_retail_eur']``; DAM-priced components
     (``Export from PV``, ``Export from BESS``, ``Grid-charging cost``)
     track ``yearly_cf['revenue_dam_eur']``.  The aggregator-fee bar is
-    read directly from ``yearly_cf['aggregator_fee_eur']``.  Legacy
-    fixtures lacking those columns fall back to a single
+    read directly from ``yearly_cf['aggregator_fee_eur']``.  Fixtures
+    lacking the per-stream columns fall back to a single
     ``revenue_eur``-based ratio applied uniformly.
     """
     out_path = Path(out_path)
