@@ -231,18 +231,59 @@ indicates a hidden dynamic P0.
 
 ## 6. What was cleaned
 
-- Files deleted: _to be filled_.
-- Functions/classes deleted: _to be filled_.
-- Tests deleted: _to be filled_.
-- Legacy comments/docstrings stripped: _to be filled_.
-- Legacy / version-history mentions removed: _to be filled_.
-- `self_consumption` identifiers/strings removed: _to be filled_.
+- Files deleted:
+    - `docs/AUDIT_REPORT.md` (legacy historical artefact superseded
+      by this report).
+    - `scripts/update_workbook_balancing.py` (one-off bootstrap script
+      superseded by `scripts/polish_input_workbook.py`).
+- Functions / constants deleted from `pvbess_opt/io.py`:
+    - `_LEGACY_RENAMED` map.
+    - `_LEGACY_REMOVED` map.
+    - `_parse_curtailment_profile_sheet` function.
+    - The auto-conversion branch in `_load_workbook` that accepted a
+      legacy curtailment-profile sheet.
+    - The `_parse_kv_sheet` branches that mapped the legacy keys.
+- Tests deleted:
+    - `test_loader_reads_legacy_schema_with_warning` (test_io.py).
+    - `test_loader_new_schema_takes_precedence_over_legacy` (test_io.py).
+    - `test_loader_parses_legacy_integer_hour_of_day`
+      (test_max_injection_profile.py).
+    - `test_legacy_removed_keys_warn` (test_io_v08_schema.py).
+    - `test_legacy_capex_licenses_warns` (test_economics_v08.py).
+    - `test_legacy_revenue_inflation_pct_emits_warning_and_maps_to_retail`
+      (test_economics_retail_dam_split.py).
+    - `test_loader_warns_on_legacy_bess_keys` (test_bess_spec.py).
+- Fixture renamed: `kpi_v087_baseline.json` → `kpi_baseline.json`.
+- Legacy / version-history mentions removed: every `vnb` token, every
+  `_LEGACY_*` reference, every `curtailment_profile` shim mention,
+  and the entire `pre-v0.8` / `v0.8 Phase N` framing in `docs/` and
+  the CHANGELOG (the latter is now a single current-state section).
+- Mode-token identifiers and strings removed: 142 hits across 43
+  files plus 3 prose cells in `inputs/input.xlsx`.
 
 ## 7. What was added
 
-- New tests: _to be filled_.
-- New plots: _to be filled_.
-- New documentation: _to be filled_.
+- New canonical KPI keys: 8 revenue aggregates (PV-DAM, BESS-DAM,
+  self-consumption, FCR, aFRR-up, aFRR-dn, mFRR-up, mFRR-dn).
+- New plots:
+    - `plot_bess_revenue_waterfall` — single waterfall stepping
+      through every BESS revenue stream to the total.
+    - `plot_bess_capacity_vs_activation_split` — grouped-bar
+      capacity vs activation per balancing product.
+    - `plot_bess_revenue_by_month` — 12 monthly stacks showing
+      BESS-DAM + 5 balancing products.
+- Yearly revenue stack (`plot_revenue_stack_yearly`) now also renders
+  the 5 balancing-product segments on top of the DAM / retail stack.
+- New tests:
+    - `tests/test_plot_bess_revenue.py` (9 cases).
+    - `tests/test_max_injection_default_is_no_curtailment.py`
+      (3 cases).
+    - `tests/test_input_workbook_style.py` (17 cases).
+- New scripts: `scripts/polish_input_workbook.py` (idempotent
+  workbook-styling pass).
+- New documentation: this report; refreshed `docs/source/...rst`
+  files; collapsed `docs/CHANGELOG.md`; rewritten `README.md`
+  (in Phase 11).
 
 ## 8. Final test suite snapshot
 

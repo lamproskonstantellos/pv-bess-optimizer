@@ -26,7 +26,7 @@ from pvbess_opt.kpis import add_economic_columns
 from pvbess_opt.lifetime import _bess_factor, build_lifetime_dispatch
 
 ROOT = Path(__file__).resolve().parent.parent
-FIXTURE = ROOT / "tests" / "fixtures" / "kpi_v087_baseline.json"
+FIXTURE = ROOT / "tests" / "fixtures" / "kpi_baseline.json"
 
 
 # ---------------------------------------------------------------------------
