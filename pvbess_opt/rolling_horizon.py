@@ -34,6 +34,16 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .balancing import (
+    PRODUCTS_ALL,
+    PRODUCTS_DN,
+    PRODUCTS_UP,
+    PRODUCTS_WITH_ACTIVATION,
+    BalancingConfig,
+    acceptance_probability,
+    activation_probability,
+    resolve_balancing_config,
+)
 from .kpis import add_economic_columns, compute_kpis
 from .optimization import run_scenario
 
@@ -433,3 +443,261 @@ def monte_carlo_rolling(
         for h in logger.handlers + logging.getLogger().handlers:
             h.flush()
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Balancing-market Monte Carlo realisation
+# ---------------------------------------------------------------------------
+
+
+def _lognormal_unit_mean(
+    rng: np.random.Generator, sigma: float, shape: tuple[int, ...],
+) -> np.ndarray:
+    """Sample log-normal multipliers with E[X] = 1 and the given sigma."""
+    if sigma <= 0.0:
+        return np.ones(shape, dtype=float)
+    mu = -0.5 * sigma * sigma
+    return rng.lognormal(mean=mu, sigma=sigma, size=shape)
+
+
+def realise_balancing_scenario(
+    reservations: dict[str, np.ndarray],
+    cfg: BalancingConfig,
+    prices: dict[str, np.ndarray],
+    *,
+    dt_hours: float,
+    rng: np.random.Generator,
+    soc_path_kwh: np.ndarray | None = None,
+    soc_min_kwh: float | None = None,
+    soc_max_kwh: float | None = None,
+    eta_charge: float = 1.0,
+    eta_discharge: float = 1.0,
+) -> dict[str, Any]:
+    """Realise one Monte Carlo scenario of balancing revenue.
+
+    Parameters
+    ----------
+    reservations
+        Per-product per-step kW reservation arrays from the MILP.
+    cfg
+        Parsed balancing configuration (probabilities and sigmas).
+    prices
+        Per-product per-step capacity and activation prices in EUR/MWh.
+        Capacity keys ``<product>_capacity_price_eur_per_mwh`` for every
+        product in :data:`PRODUCTS_ALL`; activation keys
+        ``<product>_activation_price_eur_per_mwh`` for the products in
+        :data:`PRODUCTS_WITH_ACTIVATION`.
+    dt_hours
+        Length of a settlement period (hours).
+    rng
+        Pre-seeded numpy random generator.
+    soc_path_kwh
+        Optional planned SOC trajectory from the MILP. When supplied,
+        the realisation tracks the realised SOC against the bounds and
+        flags ``soc_constrained`` when a step would violate them; the
+        revenue accrued before the violation is still reported.
+    soc_min_kwh, soc_max_kwh
+        SOC bounds in kWh. Required when ``soc_path_kwh`` is supplied.
+    eta_charge, eta_discharge
+        BESS efficiencies used to convert reserved kW into SOC drift.
+    """
+    sigma_cap = float(cfg.bm_price_sigma_capacity_pct) / 100.0
+    sigma_act = float(cfg.bm_price_sigma_activation_pct) / 100.0
+
+    per_product_capacity: dict[str, float] = {}
+    per_product_activation: dict[str, float] = {}
+    total_capacity = 0.0
+    total_activation = 0.0
+    soc_constrained = False
+
+    for product in PRODUCTS_ALL:
+        r = np.asarray(
+            reservations.get(product, np.zeros(0, dtype=float)),
+            dtype=float,
+        )
+        n = r.shape[0]
+        alpha = acceptance_probability(cfg, product)
+        cleared = rng.random(n) < alpha
+        cap_price_col = f"{product}_capacity_price_eur_per_mwh"
+        cap_price = np.asarray(prices[cap_price_col], dtype=float)
+        cap_noise = _lognormal_unit_mean(rng, sigma_cap, (n,))
+        cap_revenue = float(
+            (cleared.astype(float) * r * dt_hours * cap_price * cap_noise).sum()
+            / 1000.0
+        )
+        per_product_capacity[product] = cap_revenue
+        total_capacity += cap_revenue
+
+        # Activation realisation, conditional on being cleared.
+        if product not in PRODUCTS_WITH_ACTIVATION:
+            continue
+        beta = activation_probability(cfg, product)
+        activated = cleared & (rng.random(n) < beta)
+        act_price_col = f"{product}_activation_price_eur_per_mwh"
+        act_price = np.asarray(prices[act_price_col], dtype=float)
+        act_noise = _lognormal_unit_mean(rng, sigma_act, (n,))
+        act_revenue = float(
+            (
+                activated.astype(float) * r * dt_hours
+                * act_price * act_noise
+            ).sum() / 1000.0
+        )
+        per_product_activation[product] = act_revenue
+        total_activation += act_revenue
+
+    # Optional SOC trajectory check.
+    if soc_path_kwh is not None:
+        if soc_min_kwh is None or soc_max_kwh is None:
+            raise ValueError(
+                "soc_min_kwh and soc_max_kwh must be provided alongside "
+                "soc_path_kwh."
+            )
+        # Reconstruct the realised SOC trajectory by summing the per-step
+        # activation drifts on top of the planned trajectory. Because we
+        # already sampled cleared/activated outcomes above we need a
+        # second pass to walk through SOC; resample independently using
+        # a fresh sub-generator so the soc-check is reproducible.
+        sub_rng = np.random.default_rng(rng.integers(0, 2**31 - 1))
+        n = len(soc_path_kwh)
+        realised_soc = np.array(soc_path_kwh, dtype=float)
+        for product in PRODUCTS_UP + PRODUCTS_DN:
+            r = np.asarray(reservations.get(product, np.zeros(n)), dtype=float)
+            alpha = acceptance_probability(cfg, product)
+            beta = activation_probability(cfg, product)
+            sample = (sub_rng.random(n) < alpha) & (sub_rng.random(n) < beta)
+            if product in PRODUCTS_UP:
+                realised_soc -= sample.astype(float) * r * dt_hours / eta_discharge
+            else:
+                realised_soc += sample.astype(float) * r * dt_hours * eta_charge
+        if np.any(realised_soc < soc_min_kwh - 1e-6) or np.any(
+            realised_soc > soc_max_kwh + 1e-6,
+        ):
+            soc_constrained = True
+
+    return {
+        "per_product_capacity_revenue_eur": per_product_capacity,
+        "per_product_activation_revenue_eur": per_product_activation,
+        "total_capacity_revenue_eur": total_capacity,
+        "total_activation_revenue_eur": total_activation,
+        "total_balancing_revenue_eur": total_capacity + total_activation,
+        "soc_constrained": soc_constrained,
+    }
+
+
+def monte_carlo_balancing(
+    res: pd.DataFrame,
+    params: dict[str, Any],
+    *,
+    n_scenarios: int = 200,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """Run the balancing-market Monte Carlo realisation across scenarios.
+
+    Pulls the per-product reservation columns and per-step price columns
+    from ``res`` (populated by :func:`pvbess_opt.optimization.run_scenario`
+    when the balancing block fired). Returns aggregated P10/P50/P90 of
+    total balancing revenue plus per-product breakdowns and the fraction
+    of scenarios that hit a realised SOC bound.
+
+    When ``balancing_enabled`` is FALSE the function short-circuits and
+    returns an empty dict so the rolling-horizon path stays unchanged.
+    """
+    raw_cfg = params.get("balancing") or {}
+    cfg = resolve_balancing_config(raw_cfg)
+    if not cfg.balancing_enabled:
+        return {}
+
+    missing = [
+        f"bm_reservation_{p}_kw" for p in PRODUCTS_ALL
+        if f"bm_reservation_{p}_kw" not in res.columns
+    ]
+    if missing:
+        logger.warning(
+            "monte_carlo_balancing: dispatch frame is missing %s; "
+            "Monte Carlo skipped.", missing,
+        )
+        return {}
+
+    dt_h = float(params.get("dt_minutes", 0) or 0) / 60.0
+    if dt_h <= 0.0:
+        return {}
+
+    reservations = {
+        p: res[f"bm_reservation_{p}_kw"].to_numpy(dtype=float)
+        for p in PRODUCTS_ALL
+    }
+    price_cols = [
+        f"{p}_capacity_price_eur_per_mwh" for p in PRODUCTS_ALL
+    ] + [
+        f"{p}_activation_price_eur_per_mwh" for p in PRODUCTS_WITH_ACTIVATION
+    ]
+    prices = {
+        c: res[c].to_numpy(dtype=float)
+        for c in price_cols if c in res.columns
+    }
+
+    bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
+    soc_path = (
+        res["soc_kwh"].to_numpy(dtype=float)
+        if "soc_kwh" in res.columns else None
+    )
+    soc_min = (
+        float(params.get("soc_min_frac", 0.0) or 0.0) * bess_capacity_kwh
+    )
+    soc_max = (
+        float(params.get("soc_max_frac", 1.0) or 1.0) * bess_capacity_kwh
+    )
+    eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
+    eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
+
+    seed_base = (
+        int(cfg.bm_random_seed) if seed is None else int(seed)
+    )
+    totals = np.zeros(int(n_scenarios), dtype=float)
+    per_product_totals: dict[str, np.ndarray] = {
+        p: np.zeros(int(n_scenarios), dtype=float) for p in PRODUCTS_ALL
+    }
+    per_product_activation_totals: dict[str, np.ndarray] = {
+        p: np.zeros(int(n_scenarios), dtype=float)
+        for p in PRODUCTS_WITH_ACTIVATION
+    }
+    constrained_count = 0
+    for s in range(int(n_scenarios)):
+        rng = np.random.default_rng(seed_base + s)
+        outcome = realise_balancing_scenario(
+            reservations, cfg, prices,
+            dt_hours=dt_h, rng=rng,
+            soc_path_kwh=soc_path,
+            soc_min_kwh=soc_min if bess_capacity_kwh > 0.0 else None,
+            soc_max_kwh=soc_max if bess_capacity_kwh > 0.0 else None,
+            eta_charge=eta_c, eta_discharge=eta_d,
+        )
+        totals[s] = outcome["total_balancing_revenue_eur"]
+        for p, val in outcome["per_product_capacity_revenue_eur"].items():
+            per_product_totals[p][s] = val
+        for p, val in outcome["per_product_activation_revenue_eur"].items():
+            per_product_activation_totals[p][s] = val
+        if outcome["soc_constrained"]:
+            constrained_count += 1
+
+    quantiles = np.quantile(totals, [0.10, 0.50, 0.90])
+    aggregated: dict[str, Any] = {
+        "bm_total_balancing_revenue_p10_eur": float(round(quantiles[0], 2)),
+        "bm_total_balancing_revenue_p50_eur": float(round(quantiles[1], 2)),
+        "bm_total_balancing_revenue_p90_eur": float(round(quantiles[2], 2)),
+        "bm_soc_constrained_scenarios_pct": float(round(
+            100.0 * constrained_count / max(1, int(n_scenarios)), 4,
+        )),
+        "bm_mc_total_realised_eur": [float(v) for v in totals],
+    }
+    for product, arr in per_product_totals.items():
+        q = np.quantile(arr, [0.10, 0.50, 0.90])
+        aggregated[f"bm_{product}_capacity_revenue_p10_eur"] = float(round(q[0], 2))
+        aggregated[f"bm_{product}_capacity_revenue_p50_eur"] = float(round(q[1], 2))
+        aggregated[f"bm_{product}_capacity_revenue_p90_eur"] = float(round(q[2], 2))
+    for product, arr in per_product_activation_totals.items():
+        q = np.quantile(arr, [0.10, 0.50, 0.90])
+        aggregated[f"bm_{product}_activation_revenue_p10_eur"] = float(round(q[0], 2))
+        aggregated[f"bm_{product}_activation_revenue_p50_eur"] = float(round(q[1], 2))
+        aggregated[f"bm_{product}_activation_revenue_p90_eur"] = float(round(q[2], 2))
+    return aggregated
