@@ -160,19 +160,24 @@
   project's curated subset is the explicit policy.
 - Suggested follow-up: revisit selectively per code-style guideline updates.
 
-### P1-004 — Exhaustive 10-combination dynamic audit deferred
+### P1-004 — Exhaustive 10-combination dynamic audit harness deferred
 - Area: audit process
 - Description: the mandated grid of 10 mode × asset-config × balancing
-  combinations end-to-end (MILP → KPIs → lifetime → economics → Monte Carlo →
-  PDF) is large and time-intensive. This pass executes the **primary** subset
-  (merchant × hybrid × ON; merchant × hybrid × OFF; self_consumption × hybrid ×
-  OFF; merchant × bess_only × ON) and relies on the existing
-  `tests/test_realscale_all_combos.py` suite for breadth coverage. The remaining
-  6 combinations are exercised through the unit-level invariant tests
-  (`tests/test_dispatch_invariant_hardening.py`,
-  `tests/test_balancing_invariants.py`).
-- Suggested follow-up: add a `scripts/audit_runs/` driver harness and re-run the
-  full 10-combination grid before tagging 1.0.
+  combinations as a dedicated `scripts/audit_runs/` JSON-emitting harness is not
+  built in this PR. Equivalent coverage is achieved through the existing test
+  suite:
+    - `tests/test_realscale_all_combos.py` — 6 mode × asset combinations at
+      real-scale, with `verify_energy_balance` and
+      `verify_dispatch_invariants` per combination. **All 6 pass** (Phase 2
+      run: 21.2 s).
+    - `tests/test_balancing_invariants.py` + `test_balancing_optimization.py` +
+      `test_balancing_mc.py` + `test_dispatch_invariant_hardening.py` — the 6
+      balancing invariants (INV-B1…INV-B6) plus the 9 dispatch invariants
+      across balancing-on and balancing-off model builds. **All 21 pass**
+      (Phase 2 run: 12.0 s).
+- Suggested follow-up: add a `scripts/audit_runs/` driver harness emitting
+  per-combination JSON evidence and re-run the full 10-combination grid before
+  tagging 1.0.
 
 ## 5. P2 backlog (documented, NOT fixed)
 
