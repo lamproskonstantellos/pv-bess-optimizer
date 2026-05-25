@@ -108,6 +108,73 @@ P10 / P50 / P90 of balancing revenue and a per-product breakdown.
 * **INV-B6** `balancing_enabled = FALSE` ⇒ all `r[k, t] = 0` and the model is
   bit-identical to the previous release.
 
+## Workbook schema
+
+The optional `balancing` sheet uses the same key/value structure as the existing
+parameter sheets. The 33 keys cover the master switch, six capacity shares
+(DAM + five products), ten probabilities (five acceptance × five activation),
+nine default prices (five capacity + four activation; FCR has no activation
+price), the FCR sustained-duration requirement, the balancing settlement
+period, an SOC safety buffer, a balancing-revenue inflation rate, two Monte
+Carlo price sigmas and a default seed. The reference workbook keeps the master
+switch off by default so a fresh checkout behaves identically to the previous
+release.
+
+Nine optional per-step timeseries columns sit on the existing `timeseries`
+sheet alongside `pv_kwh`, `load_kwh`, and `dam_price_eur_per_mwh`. Each
+per-product price column is read verbatim when present, or filled with the
+scalar default from the balancing sheet otherwise.
+
+## KPI reference
+
+Every balancing run emits the following keys on the headline KPI dict (zero
+when the gate is off): `bm_<product>_capacity_revenue_eur` for the five
+products, `bm_<product>_activation_revenue_eur` for the four
+activation-paying products, `bm_total_capacity_revenue_eur`,
+`bm_total_activation_revenue_eur`, `bm_total_balancing_revenue_eur`,
+`bm_revenue_share_pct`, the two expected activation energies
+(`bm_expected_activation_energy_up_kwh` and `..._dn_kwh`), and per-product
+average reservation `bm_reservation_avg_kw_<product>`.
+
+The Monte Carlo helper extends the dict with the P10 / P50 / P90 quantiles
+of total balancing revenue, the per-product capacity and activation
+quantiles, the share of scenarios that hit a SOC bound, and the raw realised
+totals for the histogram plot.
+
+The yearly cashflow gains three columns: `balancing_capacity_revenue_eur`,
+`balancing_activation_revenue_eur`, and their sum `balancing_revenue_eur`.
+The financial KPIs include the lifecycle totals
+(`lifetime_bm_revenue_total_eur`, the capacity and activation totals) and a
+per-year list (`lifetime_bm_revenue_eur_per_year`).
+
+## Plotting reference
+
+Two dedicated balancing plots ship in `pvbess_opt/plotting/balancing.py`:
+
+* `plot_balancing_reservation_profile` — 24-hour average reservation by
+  product, rendered as a stacked area chart.
+* `plot_balancing_mc_distribution` — histogram of realised balancing
+  revenue across the Monte Carlo scenarios with P10 / P50 / P90 lines.
+
+Both helpers return `None` when the dispatch frame does not carry the
+balancing columns so the main pipeline can skip the page write without
+conditionals.
+
+## Worked numerical example
+
+Project: 1 MW / 4 MWh BESS, hourly cadence, one settlement period of dispatch.
+Configuration: `fcr_capacity_share_pct = 10`, `fcr_required_duration_hours = 0.5`,
+`fcr_bid_acceptance_pct = 70`, `fcr_default_capacity_price_eur_per_mwh = 12`,
+`bm_soc_headroom_pct = 10`, `eta_charge = eta_discharge = 0.97`,
+`soc_min = 800 kWh`, `soc_max = 3 800 kWh`.
+
+* Reservation cap: `r_max[fcr] = 0.10 · 1 000 kW = 100 kW`.
+* SOC headroom (up): `(1 + 0.10) · 0.5 · 100 / 0.97 ≈ 56.7 kWh`. The MILP
+  must keep `soc(t) − 800 ≥ 56.7` kWh at every step where `r[fcr, t] = 100`.
+* Expected capacity revenue per step: `0.70 · 1 · 12 · 100 / 1000 = 0.84 EUR`.
+* Over one year of hourly steps that is `0.84 · 8 760 = 7 358 EUR` at the
+  default share and FCR price.
+
 ## Build sequence
 
 The work is structured as eleven self-contained increments, each landing as one

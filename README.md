@@ -1,7 +1,7 @@
 # PV & BESS Optimizer
 
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.8.11-blue)](pvbess_opt/__init__.py)
+[![version](https://img.shields.io/badge/version-0.9.0-blue)](pvbess_opt/__init__.py)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
@@ -254,6 +254,29 @@ Forecast-noise sigmas (defensible from literature):
 | Load          | 0.05 (MAPE)  | Predictable-customer benchmark               |
 
 See `docs/source/users.guide/rolling_horizon.rst` for the full guide.
+
+## Balancing market participation (FCR / aFRR / mFRR)
+
+Optional stochastic co-optimisation against the European balancing markets
+sits alongside the existing DAM dispatch. Five products are modelled with
+the ENTSO-E naming: `fcr` (symmetric, capacity-only), `afrr_up` / `afrr_dn`
+(capacity + activation), and `mfrr_up` / `mfrr_dn` (capacity + activation).
+The MILP picks a per-product per-step reservation under expected revenue;
+a Monte Carlo realisation step adds Bernoulli acceptance and activation
+draws plus log-normal price noise to report P10 / P50 / P90 of realised
+balancing income.
+
+The feature is opt-in via the new `balancing` workbook sheet. Set
+`balancing_enabled = TRUE` and adjust the per-product shares of
+`bess_power_kw`, the acceptance and activation probabilities, the FCR
+sustained-duration requirement, the SOC safety buffer, and the Monte Carlo
+sigmas to your market context. Nine optional per-step price columns on the
+`timeseries` sheet let you supply real ENTSO-E price curves; missing columns
+fall back to the scalar defaults from the balancing sheet.
+
+See `docs/balancing_market_design.md` for the full formulation, the worked
+numerical example, the KPI / cashflow reference, and the six new dispatch
+invariants the test suite enforces.
 
 ## Documentation
 
