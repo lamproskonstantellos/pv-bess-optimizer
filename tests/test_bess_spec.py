@@ -112,7 +112,7 @@ def test_bess_only_run_still_works():
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_hybrid_run_still_works():
     params = _params(
-        pv_kwp=4500.0, bess_kw=5000.0, bess_kwh=20000.0, mode="vnb",
+        pv_kwp=4500.0, bess_kw=5000.0, bess_kwh=20000.0, mode="self_consumption",
     )
     ts = _ts()
     res, _solver = run_scenario(
@@ -132,7 +132,7 @@ def test_hybrid_run_still_works():
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_kpi_e_cap_mwh_matches_workbook_capacity():
     params = _params(
-        pv_kwp=4500.0, bess_kw=5000.0, bess_kwh=20000.0, mode="vnb",
+        pv_kwp=4500.0, bess_kw=5000.0, bess_kwh=20000.0, mode="self_consumption",
     )
     ts = _ts()
     res, _ = run_scenario(
@@ -154,7 +154,7 @@ def test_kpi_e_cap_mwh_matches_workbook_capacity():
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_run_scenario_returns_two_tuple():
     params = _params(
-        pv_kwp=4500.0, bess_kw=5000.0, bess_kwh=20000.0, mode="vnb",
+        pv_kwp=4500.0, bess_kw=5000.0, bess_kwh=20000.0, mode="self_consumption",
     )
     ts = _ts()
     out = run_scenario(

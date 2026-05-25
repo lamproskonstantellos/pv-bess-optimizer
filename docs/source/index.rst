@@ -10,7 +10,7 @@ analysis.
 
 Two regulatory regimes are supported:
 
-* ``vnb`` — Greek Virtual Net Billing with co-located load.
+* ``self_consumption`` — Greek Self-consumption with co-located load.
 * ``merchant`` — pure utility-scale dispatch with no co-located load.
 
 The hard static max-injection cap on grid-bound flows is enforced in

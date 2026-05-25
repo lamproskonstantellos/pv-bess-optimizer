@@ -254,7 +254,7 @@ def test_loader_parses_legacy_integer_hour_of_day(tmp_path):
     })
     project_kv = pd.DataFrame({
         "key": ["mode", "p_grid_export_max_kw"],
-        "value": ["vnb", 5000.0],
+        "value": ["self_consumption", 5000.0],
         "unit": ["", ""],
         "notes": ["", ""],
     })

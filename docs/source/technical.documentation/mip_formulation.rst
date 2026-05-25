@@ -29,7 +29,7 @@ PV split (always active):
    p^{\text{pv}}_t = p^{\text{pv→load}}_t + p^{\text{bess←pv}}_t
                   + p^{\text{pv→grid}}_t + p^{\text{curtail}}_t
 
-Load balance (vnb only):
+Load balance (self_consumption only):
 
 .. math::
 
@@ -70,7 +70,7 @@ Static max-injection cap (BOTH modes):
    \le p^{\text{export\_max}} \cdot \Delta t \cdot
        \text{max\_injection\_frac}
 
-In ``vnb`` mode additionally:
+In ``self_consumption`` mode additionally:
 
 * **PV→Load priority (Section 2, hard)** — pinned exactly:
 
@@ -131,20 +131,20 @@ After every solve :func:`pvbess_opt.optimization.verify_dispatch_invariants`
 checks nine invariants:
 
 1. **PV balance** — ``pv = pv_to_load + pv_to_bess + pv_to_grid + pv_curtail``.
-2. **Load balance** — vnb only; 0 in merchant.
+2. **Load balance** — self_consumption only; 0 in merchant.
 3. **SOC dynamics** — per-step continuity of ``soc[t+1] - soc[t]``
    against the charge/discharge expression.
 4. **RTE bound** — ``Σ discharge ≤ η_ch × η_dis × Σ charge + η_dis ×
    (soc[0] - final_state)``.
-5. **No-sim grid I/O** — vnb only; max product of grid-import × grid-
+5. **No-sim grid I/O** — self_consumption only; max product of grid-import × grid-
    export across all timesteps.
-6. **Load priority (Section 5)** — vnb only; count of timesteps with
+6. **Load priority (Section 5)** — self_consumption only; count of timesteps with
    simultaneous export > 0 and grid_to_load > 0.
 7. **Curtail behavior** — cap not binding ⇒ curtail = 0.  Checked in
    **both** modes.
 8. **Closed-cycle SOC** — when ``terminal_soc_equal=True``, ``final_state
    = soc[0]``.
-9. **PV→Load priority (Section 2)** — vnb only; max absolute deviation
+9. **PV→Load priority (Section 2)** — self_consumption only; max absolute deviation
    of ``pv_to_load[t]`` from ``min(pv[t], load[t])``.
 
 The ``--strict`` CLI flag turns invariant violations into errors.

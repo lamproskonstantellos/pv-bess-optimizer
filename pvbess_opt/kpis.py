@@ -7,7 +7,7 @@ Energy-flow conventions (all per timestep, kWh):
     pv_kwh = pv_to_load_kwh + pv_to_bess_kwh
            + pv_to_grid_kwh + pv_curtail_kwh
 
-* Load balance (vnb only)::
+* Load balance (self_consumption only)::
 
     load_kwh = pv_to_load_kwh + bess_dis_load_kwh + grid_to_load_kwh
 
@@ -116,7 +116,7 @@ def verify_energy_balance(
             + res["pv_curtail_kwh"].to_numpy(dtype=float)
         )
     )
-    if mode == "vnb":
+    if mode == "self_consumption":
         load_residual = np.abs(
             res["load_kwh"].to_numpy(dtype=float)
             - (
@@ -351,9 +351,9 @@ def compute_kpis(
     e_cap_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
     pv_gen = _sum_mwh(res, "pv_kwh")
-    load_en = _sum_mwh(res, "load_kwh") if mode == "vnb" else 0.0
-    pv_direct = _sum_mwh(res, "pv_to_load_kwh") if mode == "vnb" else 0.0
-    bess_to_load = _sum_mwh(res, "bess_dis_load_kwh") if mode == "vnb" else 0.0
+    load_en = _sum_mwh(res, "load_kwh") if mode == "self_consumption" else 0.0
+    pv_direct = _sum_mwh(res, "pv_to_load_kwh") if mode == "self_consumption" else 0.0
+    bess_to_load = _sum_mwh(res, "bess_dis_load_kwh") if mode == "self_consumption" else 0.0
     curtailed = _sum_mwh(res, "pv_curtail_kwh")
 
     pv_to_bess = _sum_mwh(res, "pv_to_bess_kwh")
@@ -377,7 +377,7 @@ def compute_kpis(
     bess_from_pv_self_consumption = _safe_div(bess_green_to_load, pv_gen)
     system_pv_self_consumption = _safe_div(system_green, pv_gen)
 
-    if mode == "vnb":
+    if mode == "self_consumption":
         pv_load_cov = _safe_div(pv_direct, load_en)
         load_coverage_bess = _safe_div(bess_green_to_load, load_en)
         system_load_green_coverage = _safe_div(system_green, load_en)

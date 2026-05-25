@@ -1,6 +1,6 @@
 """Daily dispatch plots.
 
-Four vnb-mode figures per calendar day, all written into the
+Four self_consumption-mode figures per calendar day, all written into the
 ``out_dir/<YYYY>-<MM>/`` subdirectory of the daily plot folder:
 
 * ``daily_supply_<YYYY-MM-DD>.pdf`` — stacked load supply
@@ -446,7 +446,7 @@ def _apply_combined_with_soc_legend(ax, ax2) -> None:
 def plot_daily_combined_with_soc(
     res: pd.DataFrame, date_str: str, out_dir: Path,
 ) -> None:
-    """VNB combined energy stacks with SOC (%) overlaid on the right axis.
+    """Self-consumption combined energy stacks with SOC (%) overlaid on the right axis.
 
     Energy stacks (PV/BESS/Import → Load + the surplus / charge / export /
     curtailment block above the load line) sit on the left axis exactly

@@ -2,7 +2,7 @@
 
 Two regulatory regimes are supported via the ``mode`` parameter:
 
-* ``vnb`` — Greek Virtual Net Billing.  Strictly enforced rules:
+* ``self_consumption`` — Greek Self-consumption.  Strictly enforced rules:
   load balance, hard PV→load priority (Section 2 of the spec), no
   simultaneous grid I/O (tight big-M), retail tariff for self-
   consumption, DAM for export.  A binary-free slack additionally
@@ -15,7 +15,7 @@ Two regulatory regimes are supported via the ``mode`` parameter:
 
 The single objective is **profit** maximisation.  When the user's
 retail tariff exceeds the DAM price in the majority of hours (the
-typical case for vnb projects with a co-located load), the profit
+typical case for self_consumption projects with a co-located load), the profit
 objective produces the same dispatch as a "green" objective —
 self-consumption emerges from economics rather than being a hard
 constraint.  The hard ``LOAD_PV_PRIORITY`` constraint still pins
@@ -290,7 +290,7 @@ def derive_tight_big_m(
         float(per_step_max_inj.max()) if len(per_step_max_inj) else 1.0
     )
 
-    if mode == "vnb" and "load_kwh" in ts.columns:
+    if mode == "self_consumption" and "load_kwh" in ts.columns:
         load_max = float(ts["load_kwh"].max())
     else:
         load_max = 0.0
@@ -320,7 +320,7 @@ def build_model(
 
     Variable & constraint structure adapts to ``params['mode']``:
 
-    * ``vnb``     — full set of variables, hard ``LOAD_PV_PRIORITY``
+    * ``self_consumption``     — full set of variables, hard ``LOAD_PV_PRIORITY``
                     (Section 2 of the spec) plus a binary-free slack for
                     surplus-only export (Section 5), tight-big-M no-sim
                     grid I/O, retail-driven objective.
@@ -467,7 +467,7 @@ def build_model(
     m.y_charge = pyo.Var(m.T, domain=pyo.Binary)
     m.y_dis = pyo.Var(m.T, domain=pyo.Binary)
     if bess_present:
-        # Section 4 of the VNB spec — no charge + discharge simultaneously.
+        # Section 4 of the Self-consumption spec — no charge + discharge simultaneously.
         m.MODE_LINK = pyo.Constraint(
             m.T, rule=lambda m, t: m.y_charge[t] + m.y_dis[t] <= 1,
         )
@@ -515,8 +515,8 @@ def build_model(
         ),
     )
 
-    # --- Load balance (vnb only) -----------------------------------------
-    if mode == "vnb":
+    # --- Load balance (self_consumption only) -----------------------------------------
+    if mode == "self_consumption":
         m.LOAD_BAL = pyo.Constraint(
             m.T,
             rule=lambda m, t: (
@@ -524,7 +524,7 @@ def build_model(
             ),
         )
 
-        # Section 2 of the VNB spec — strict load-coverage priority.
+        # Section 2 of the Self-consumption spec — strict load-coverage priority.
         # All available PV (up to the load) must be consumed by the load.
         # Combined with PV_SPLIT and LOAD_BAL this forces
         # pv_to_load[t] == min(pv[t], load[t]) exactly.  BESS-before-Grid
@@ -716,8 +716,8 @@ def build_model(
         m.BM_SOC_DN = pyo.Constraint(m.T, rule=_bm_soc_dn)
 
     # --- Hourly max-injection cap (HARD constraint, BOTH modes) ----------
-    # Section 8 of the VNB spec — regulatory grid-connection limit.
-    # Applies in vnb AND merchant modes. Cap may vary by hour-of-day
+    # Section 8 of the Self-consumption spec — regulatory grid-connection limit.
+    # Applies in self_consumption AND merchant modes. Cap may vary by hour-of-day
     # (and optionally by month) via the ``max_injection_profile`` sheet.
     #
     # Project-wide combined export:
@@ -733,13 +733,13 @@ def build_model(
         rule=lambda m, t: m.grid_export_total[t] <= export_cap_kwh_per_step[t],
     )
 
-    # --- vnb-only constraints --------------------------------------------
+    # --- self_consumption-only constraints --------------------------------------------
     # Merchant mode intentionally omits the no-simultaneous-grid-IO
     # constraint (the y_grid_io binary below): the audit verified that
     # simultaneous import/export never occurs in practice for merchant
     # dispatch, so the constraint would be economically non-binding.
-    if mode == "vnb":
-        # Section 5 of the VNB spec — surplus-only export.
+    if mode == "self_consumption":
+        # Section 5 of the Self-consumption spec — surplus-only export.
         # Substituting PV_SPLIT (pv = pv_to_load + pv_to_bess + pv_to_grid +
         # pv_curtail) and LOAD_BAL (load = pv_to_load + bess_dis_load +
         # grid_to_load) into the slack RHS, the constraint reduces to
@@ -777,7 +777,7 @@ def build_model(
         )
 
     if allow_grid_charge:
-        # Section 6 of the VNB spec — BESS may charge from grid only in
+        # Section 6 of the Self-consumption spec — BESS may charge from grid only in
         # periods with pv ~ 0.  z_pv_active[t] is forced to 1 whenever
         # pv[t] > 0 by GRID_CHG_PV_GATE; GRID_CHARGE_GATE then drives
         # grid_to_bess[t] to 0 in those steps.
@@ -798,7 +798,7 @@ def build_model(
         m.pv_curtail[t] for t in time_index
     )
 
-    if mode == "vnb":
+    if mode == "self_consumption":
         avoided_cost = sum(
             retail_price[t] * (m.pv_to_load[t] + m.bess_dis_load[t]) / 1000.0
             for t in time_index
@@ -1049,14 +1049,14 @@ def verify_dispatch_invariants(
     dict[str, float]
         Keys:
             ``invariant_1_pv_balance_kwh``
-            ``invariant_2_load_balance_kwh``      (vnb only; 0.0 in merchant)
+            ``invariant_2_load_balance_kwh``      (self_consumption only; 0.0 in merchant)
             ``invariant_3_soc_dynamics_kwh``
             ``invariant_4_rte_bound_excess_kwh``
-            ``invariant_5_no_sim_grid_io_max_product_kwh2``  (vnb only)
-            ``invariant_6_load_priority_violations``         (vnb only)
+            ``invariant_5_no_sim_grid_io_max_product_kwh2``  (self_consumption only)
+            ``invariant_6_load_priority_violations``         (self_consumption only)
             ``invariant_7_curtail_behavior_kwh``  (BOTH modes)
             ``invariant_8_soc_closed_cycle_kwh``  (when terminal_soc_equal)
-            ``invariant_9_pv_load_priority_kwh``  (vnb only; Section 2)
+            ``invariant_9_pv_load_priority_kwh``  (self_consumption only; Section 2)
     """
     if mode is None:
         mode = resolve_mode(params)
@@ -1080,7 +1080,7 @@ def verify_dispatch_invariants(
     else:
         inv_1 = 0.0
 
-    if mode == "vnb":
+    if mode == "self_consumption":
         inv_2 = float(abs(load - pv_to_load - bess_dis_load - grid_to_load).max())
     else:
         inv_2 = 0.0
@@ -1129,14 +1129,14 @@ def verify_dispatch_invariants(
     )
     inv_4 = float(max(0.0, total_discharge - rte_bound))
 
-    if mode == "vnb":
+    if mode == "self_consumption":
         grid_imp = grid_to_load + grid_to_bess
         grid_exp = pv_to_grid + bess_dis_grid
         inv_5 = float((grid_imp * grid_exp).max() if len(grid_imp) else 0.0)
     else:
         inv_5 = 0.0
 
-    if mode == "vnb":
+    if mode == "self_consumption":
         export = pv_to_grid + bess_dis_grid
         violations = int(((export > tol_kwh) & (grid_to_load > tol_kwh)).sum())
         inv_6 = float(violations)
@@ -1172,7 +1172,7 @@ def verify_dispatch_invariants(
         inv_8 = 0.0
 
     # Invariant 9 — Section 2 of the spec: pv_to_load == min(pv, load).
-    if mode == "vnb" and len(pv):
+    if mode == "self_consumption" and len(pv):
         pv_load_priority = np.minimum(pv, load)
         inv_9 = float(abs(pv_to_load - pv_load_priority).max())
     else:

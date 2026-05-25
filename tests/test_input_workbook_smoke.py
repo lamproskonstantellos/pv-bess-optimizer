@@ -2,7 +2,7 @@
 
 These tests guard the acceptance criterion that a fresh clone can run
 ``python main.py inputs/input.xlsx --solver highs`` end-to-end, in both
-``vnb`` and ``merchant`` modes.
+``self_consumption`` and ``merchant`` modes.
 """
 
 from __future__ import annotations
@@ -76,14 +76,14 @@ def test_read_workbook_round_trip_after_build_script():
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     assert typed["dt_minutes"] == 15
-    assert typed["project"]["mode"] == "vnb"
+    assert typed["project"]["mode"] == "self_consumption"
     assert typed["project"]["project_lifecycle_years"] == 20
     assert "load_kwh" in typed["ts"].columns
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
-def test_main_vnb_short_horizon(tmp_path, monkeypatch):
-    """End-to-end smoke: main.py on a short window, vnb mode."""
+def test_main_self_consumption_short_horizon(tmp_path, monkeypatch):
+    """End-to-end smoke: main.py on a short window, self_consumption mode."""
     from pvbess_opt.io import read_workbook, write_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)  # 1 day @ 15 min
@@ -128,7 +128,7 @@ def test_main_merchant_short_horizon(tmp_path, monkeypatch):
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_repo_input_xlsx_headline_kpis_pinned():
     """End-to-end pin of headline year-1 KPIs against the stored
-    baseline on inputs/input.xlsx (perfect-foresight, vnb mode, full
+    baseline on inputs/input.xlsx (perfect-foresight, self_consumption mode, full
     year).
 
     Tight tolerances pick up any sign error or fixture drift.

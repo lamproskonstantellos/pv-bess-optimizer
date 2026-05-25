@@ -12,7 +12,7 @@ pipeline and rolling-horizon Monte Carlo for uncertainty analysis.
 ### Capabilities
 
 - Three asset modes (hybrid PV+BESS, PV-only, BESS-only) and two
-  regulatory regimes (`vnb`, `merchant`), read literally from the
+  regulatory regimes (`self_consumption`, `merchant`), read literally from the
   seven-sheet workbook.
 - Mixed-integer linear dispatch with nine audit invariants, exact in
   every mode; `--strict` turns invariant violations into errors.

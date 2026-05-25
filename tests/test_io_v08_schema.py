@@ -121,7 +121,7 @@ def test_repo_workbook_loads_typed_dict(repo_input_xlsx):
     typed = read_workbook(repo_input_xlsx)
     for section in ("project", "pv", "bess", "economics", "simulation"):
         assert section in typed and isinstance(typed[section], dict)
-    assert typed["project"]["mode"] == "vnb"
+    assert typed["project"]["mode"] == "self_consumption"
     # The case-study workbook ships with the canonical 8 MW shape
     # rescaled to the 15 MW default scenario.
     assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(15000.0)

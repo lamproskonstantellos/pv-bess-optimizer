@@ -97,4 +97,4 @@ def test_warning_when_plot_daily_scope_is_all(caplog):
     }
     # The WARNING is emitted in _run_one; assert the helper call works
     # without crashing for a representative config.
-    _resolve_uncertainty_config(args, econ, mode="vnb")
+    _resolve_uncertainty_config(args, econ, mode="self_consumption")

@@ -125,7 +125,7 @@ def _make_ts(n: int = 48, *, with_load: bool = True) -> pd.DataFrame:
     return pd.DataFrame(df)
 
 
-def _params(pv_kwp: float, bess_kw: float, *, mode: str = "vnb") -> dict:
+def _params(pv_kwp: float, bess_kw: float, *, mode: str = "self_consumption") -> dict:
     return {
         "dt_minutes": 60,
         "efficiency_charge": 0.97,
@@ -150,7 +150,7 @@ def _params(pv_kwp: float, bess_kw: float, *, mode: str = "vnb") -> dict:
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_pv_only_run_pins_bess_to_zero():
     """PV-only: bess_power_kw = 0 → all BESS variables zero."""
-    params = _params(pv_kwp=4500.0, bess_kw=0.0, mode="vnb")
+    params = _params(pv_kwp=4500.0, bess_kw=0.0, mode="self_consumption")
     ts = _make_ts()
     res, _solver = run_scenario(
         params, ts, solver_name="highs",
@@ -165,7 +165,7 @@ def test_pv_only_run_pins_bess_to_zero():
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_bess_only_run_pins_pv_to_zero():
     """BESS-only: pv_nameplate_kwp = 0 → all PV variables zero."""
-    params = _params(pv_kwp=0.0, bess_kw=5000.0, mode="vnb")
+    params = _params(pv_kwp=0.0, bess_kw=5000.0, mode="self_consumption")
     params["allow_bess_grid_charging"] = True
     ts = _make_ts()
     res, _ = run_scenario(
@@ -181,7 +181,7 @@ def test_bess_only_run_pins_pv_to_zero():
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_hybrid_run_unaffected():
     """Hybrid: both > 0 → behaves identically to the baseline case."""
-    params = _params(pv_kwp=4500.0, bess_kw=5000.0, mode="vnb")
+    params = _params(pv_kwp=4500.0, bess_kw=5000.0, mode="self_consumption")
     ts = _make_ts()
     res, _ = run_scenario(
         params, ts, solver_name="highs",
@@ -236,8 +236,8 @@ def test_title_prefix_includes_project_mode():
     from pvbess_opt.plotting.style import set_project_mode_label
     set_project_mode_label("BESS-only")
     try:
-        out = title_prefix("vnb")
-        assert "vnb" in out
+        out = title_prefix("self_consumption")
+        assert "self_consumption" in out
         assert "BESS-only" in out
     finally:
         set_project_mode_label("")

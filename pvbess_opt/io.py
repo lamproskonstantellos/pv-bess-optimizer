@@ -51,7 +51,7 @@ Public loader API
 Mode-specific timeseries semantics
 ----------------------------------
 
-* In ``vnb`` mode the ``load_kwh`` column is required; missing → ValueError.
+* In ``self_consumption`` mode the ``load_kwh`` column is required; missing → ValueError.
 * In ``merchant`` mode ``load_kwh`` is optional — if present, the loader
   logs an INFO message and the optimizer pins all load-coverage flows to 0.
 
@@ -110,7 +110,7 @@ _COERCE_FAILED = object()
 PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "project_lifecycle_years": 20,
     "project_start_year": 2026,
-    "mode": "vnb",
+    "mode": "self_consumption",
     "settlement_minutes": 15,
     "p_grid_export_max_kw": 5000.0,
     "retail_tariff_eur_per_mwh": 120.0,
@@ -334,7 +334,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_yearly_scope",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
-    "mode": frozenset({"vnb", "merchant"}),
+    "mode": frozenset({"self_consumption", "merchant"}),
     "currency_format": frozenset({"auto", "millions", "raw"}),
     "plot_daily_scope": frozenset({"none", "year1_only", "all"}),
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
@@ -352,18 +352,18 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("project_start_year", 2026, "year",
      "Calendar year of Year 1 (first operating year). CAPEX is paid in "
      "Year 0 (calendar = project_start_year - 1)."),
-    ("mode", "vnb", "enum",
-     "vnb | merchant. vnb requires a co-located load and enforces load "
+    ("mode", "self_consumption", "enum",
+     "self_consumption | merchant. self_consumption requires a co-located load and enforces load "
      "priority + no simultaneous grid I/O. merchant has no load; PV/BESS "
      "dispatch entirely to DAM."),
     ("settlement_minutes", 15, "int",
-     "Greek VNB settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
+     "Greek Self-consumption settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
      "Currently informational; the MILP timestep is auto-detected."),
     ("p_grid_export_max_kw", 5000, "kW",
      "Max grid export (kW). Leave empty or use 'inf' / 'unlimited' / "
      "'disabled' to remove cap; no injection limit is applied."),
     ("retail_tariff_eur_per_mwh", 120, "EUR/MWh",
-     "Retail tariff used in vnb mode for load coverage."),
+     "Retail tariff used in self_consumption mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",
      "If TRUE the BESS may charge from the grid in periods with pv_kwh ~ 0."),
     ("unavailability_pct", 1.0, "%",
@@ -765,6 +765,11 @@ def _parse_string_enum(
     if token == "":
         return default
     if token not in allowed:
+        if key == "mode":
+            raise ValueError(
+                f"unknown mode {token!r}; valid modes are "
+                f"{sorted(allowed)!r}"
+            )
         logger.warning(
             "Workbook value for %r is %r which is not in %s; using default %r.",
             key, value, sorted(allowed), default,
@@ -1038,9 +1043,9 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
     if "pv_kwh" not in ts.columns:
         raise ValueError("timeseries sheet must contain a 'pv_kwh' column.")
 
-    if mode == "vnb" and "load_kwh" not in ts.columns:
+    if mode == "self_consumption" and "load_kwh" not in ts.columns:
         raise ValueError(
-            "timeseries sheet must contain a 'load_kwh' column when mode='vnb'."
+            "timeseries sheet must contain a 'load_kwh' column when mode='self_consumption'."
         )
     if mode == "merchant" and "load_kwh" in ts.columns:
         logger.info("merchant mode: load_kwh column ignored")

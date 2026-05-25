@@ -18,7 +18,7 @@ Column                          Required   Notes
 ==============================  =========  ====================================
 ``timestamp``                   yes        Datetime; regular cadence required.
 ``pv_kwh``                      yes        PV production per step.
-``load_kwh``                    vnb only   Required when ``mode=vnb``.  In
+``load_kwh``                    self_consumption only   Required when ``mode=self_consumption``.  In
                                            ``mode=merchant`` the column is
                                            ignored if present (an INFO log
                                            message is emitted) and
@@ -42,7 +42,7 @@ High-level run configuration:
 * ``project_lifecycle_years`` — total project horizon (years).
 * ``project_start_year`` — calendar year of Year 1 (first operating
   year).  CAPEX is paid in Year 0 (``project_start_year - 1``).
-* ``mode`` — ``vnb`` | ``merchant``.
+* ``mode`` — ``self_consumption`` | ``merchant``.
 * ``settlement_minutes`` — informational; the MILP timestep is
   auto-detected from the timeseries.
 * ``p_grid_export_max_kw`` — grid-connection export limit (kW).  A
@@ -53,7 +53,7 @@ High-level run configuration:
   Big-M is substituted for the disabled cap so the MILP stays
   solver-agnostic (HiGHS, Gurobi, CBC) — the constraint itself is never
   removed.  A negative number or ``0`` remains a validation error.
-* ``retail_tariff_eur_per_mwh`` — retail tariff used in vnb mode.
+* ``retail_tariff_eur_per_mwh`` — retail tariff used in self_consumption mode.
 * ``allow_bess_grid_charging`` — TRUE → BESS may charge from grid in
   PV-zero periods.
 * ``unavailability_pct`` — annual outage / maintenance factor

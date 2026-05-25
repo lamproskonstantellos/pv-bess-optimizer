@@ -89,9 +89,9 @@ def test_negative_and_zero_still_invalid(tmp_path, bad):
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
-@pytest.mark.parametrize("mode", ["vnb", "merchant"])
+@pytest.mark.parametrize("mode", ["self_consumption", "merchant"])
 def test_unlimited_zero_curtailment(short_ts, short_params, short_params_merchant, mode):
-    params = dict(short_params if mode == "vnb" else short_params_merchant)
+    params = dict(short_params if mode == "self_consumption" else short_params_merchant)
     # Disabled cap → finite Big-M substituted.
     params["p_grid_export_max_kw"] = 1.0e6
     params["grid_export_unlimited"] = True
@@ -120,13 +120,13 @@ def test_finite_cap_unchanged(tmp_path):
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
-@pytest.mark.parametrize("mode", ["vnb", "merchant"])
+@pytest.mark.parametrize("mode", ["self_consumption", "merchant"])
 def test_finite_cap_kpis_identical_to_legacy_path(
     short_ts, short_params, short_params_merchant, mode,
 ):
     """A finite cap must produce the exact same dispatch whether or not
     the ``grid_export_unlimited`` flag is present in ``params``."""
-    base = dict(short_params if mode == "vnb" else short_params_merchant)
+    base = dict(short_params if mode == "self_consumption" else short_params_merchant)
     base["p_grid_export_max_kw"] = 5000.0
 
     legacy = dict(base)  # params without the grid_export_unlimited key

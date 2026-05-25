@@ -14,7 +14,7 @@ from pvbess_opt.optimization import (
 
 
 @pytest.fixture(scope="module")
-def _solved_vnb(short_params, short_ts):
+def _solved_self_consumption(short_params, short_ts):
     res, _solver = run_scenario(
         short_params, short_ts, solver_name="highs",
         mip_gap=0.001, time_limit_seconds=60,
@@ -43,7 +43,7 @@ def test_big_m_values_are_tight(short_params, short_ts):
     params = dict(short_params)
     params["max_injection_profile"] = np.full(24, 73.0, dtype=float)
     big_m = derive_tight_big_m(
-        params, short_ts, dt_h=1.0, mode="vnb",
+        params, short_ts, dt_h=1.0, mode="self_consumption",
     )
     # Tight Ms: M_imp ~ load_max + bess_power ~ 4500 + 5000 = 9500 << 1e6
     assert big_m["M_imp"] < 20000
@@ -64,7 +64,7 @@ def test_big_m_merchant_skips_load(short_params_merchant, short_ts):
 # ---------------------------------------------------------------------------
 
 
-def test_vnb_solve_returns_dataframe(short_params, short_ts):
+def test_self_consumption_solve_returns_dataframe(short_params, short_ts):
     res, _solver = run_scenario(
         short_params, short_ts, solver_name="highs",
         mip_gap=0.01, time_limit_seconds=30,
@@ -75,8 +75,8 @@ def test_vnb_solve_returns_dataframe(short_params, short_ts):
     assert len(res) == len(short_ts)
 
 
-def test_invariants_vnb(short_params, _solved_vnb):
-    inv = verify_dispatch_invariants(_solved_vnb, short_params, mode="vnb")
+def test_invariants_self_consumption(short_params, _solved_self_consumption):
+    inv = verify_dispatch_invariants(_solved_self_consumption, short_params, mode="self_consumption")
     tol = 1.0e-3
     assert inv["invariant_1_pv_balance_kwh"] < tol
     assert inv["invariant_2_load_balance_kwh"] < tol
@@ -89,7 +89,7 @@ def test_invariants_vnb(short_params, _solved_vnb):
     assert inv["invariant_9_pv_load_priority_kwh"] < tol
 
 
-def test_invariants_merchant_zero_for_vnb_only(short_params_merchant, _solved_merchant):
+def test_invariants_merchant_zero_for_self_consumption_only(short_params_merchant, _solved_merchant):
     inv = verify_dispatch_invariants(
         _solved_merchant, short_params_merchant, mode="merchant",
     )
@@ -108,10 +108,10 @@ def test_merchant_pins_load_flows_to_zero(_solved_merchant):
     assert res["grid_to_load_kwh"].max() == 0.0
 
 
-def test_curtailment_cap_holds_in_both_modes(_solved_vnb, _solved_merchant):
+def test_curtailment_cap_holds_in_both_modes(_solved_self_consumption, _solved_merchant):
     """Curtailment cap is a regulatory grid-connection limit that applies
-    in BOTH vnb and merchant modes per MD YPEN/DAPEEK/53563/1556/2023."""
-    for res in (_solved_vnb, _solved_merchant):
+    in BOTH self_consumption and merchant modes per MD YPEN/DAPEEK/53563/1556/2023."""
+    for res in (_solved_self_consumption, _solved_merchant):
         cap = float(res["grid_export_cap_kwh"].iloc[0])
         max_export = float(res["grid_export_total_kwh"].max())
         assert max_export <= cap + 1e-3
@@ -184,9 +184,9 @@ def test_pv_priority_over_bess_for_load(short_params):
     assert float(res["bess_dis_load_kwh"].iloc[:12].sum()) < 1e-3
 
 
-def test_no_charge_discharge_simultaneity(_solved_vnb):
+def test_no_charge_discharge_simultaneity(_solved_self_consumption):
     """Section 4: y_charge[t] + y_dis[t] <= 1 ⇒ products zero."""
-    res = _solved_vnb
+    res = _solved_self_consumption
     pv_to_bess = res["pv_to_bess_kwh"].to_numpy()
     grid_to_bess = res["bess_charge_grid_kwh"].to_numpy()
     bess_dis_load = res["bess_dis_load_kwh"].to_numpy()

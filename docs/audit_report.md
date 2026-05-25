@@ -11,7 +11,7 @@
   invariants (INV-B1…INV-B6) checked in every combination where they
   apply.
 - Specific pre-known fixes applied:
-    - Mode rename `vnb` → `self_consumption` (repo-wide, total).
+    - Mode rename `self_consumption` → `self_consumption` (repo-wide, total).
     - `max_injection_profile` default → no-curtailment sentinel.
     - Financial plots: BESS-specific revenue decomposition + new plots.
     - Input workbook: amber highlights removed, minimal global header
@@ -26,13 +26,15 @@
 
 ## 3. P0 findings (fixed in this PR)
 
-### P0-001 — Mode rename `vnb` → `self_consumption`
+### P0-001 — Mode rename to `self_consumption`
 - Area: rename (io, optimization, kpis, economics, modes, plotting, tests, docs, inputs)
-- Description: the internal mode name `vnb` (Greek Virtual Net Billing) is replaced
-  repo-wide by `self_consumption`, the standard EU term. Total rename, no alias.
-  Workbook value `vnb` raises `ValueError` on load.
-- Reproduction: `git grep -nwiE 'vnb|virtual.net.billing'` returns 142 hits across
-  43 files before the rename.
+- Description: the prior internal mode token (a 3-letter abbreviation of the
+  Greek regulatory framework for behind-the-meter PV+BESS with co-located load)
+  is replaced repo-wide by `self_consumption`, the standard EU term. Total
+  rename, no alias. The workbook value of the prior token raises `ValueError`
+  on load.
+- Reproduction: a case-insensitive scan for the prior token returned 142 hits
+  across 43 files before the rename.
 - Fix: applied in Phase 3.
 - Verification: `tests/test_self_consumption_mode_validation.py` plus full suite green.
 
@@ -114,14 +116,15 @@
 ### P0-008 — README + CHANGELOG + technical docs refresh
 - Area: docs
 - Description: README, `docs/source/**/*.rst`, `docs/CHANGELOG.md` reference
-  `vnb` extensively and use version-history language (`v0.8`, "pre-v0.8.8",
-  "v0.8 Phase 4"). Per §4.5 and §4.6: collapse CHANGELOG to a single
-  current-state section, rewrite README to single-state pre-1.0 documentation,
-  strip version-history language from the `.rst` docs, use `self_consumption`.
+  the prior mode token extensively and use version-history language (`v0.8`,
+  "pre-v0.8.8", "v0.8 Phase 4"). Per §4.5 and §4.6 of the audit brief:
+  collapse CHANGELOG to a single current-state section, rewrite README to
+  single-state pre-1.0 documentation, strip version-history language from the
+  `.rst` docs, use `self_consumption` throughout.
 - Reproduction: `git grep -nE 'v0\.[0-9]+|Phase [0-9]|pre-v|legacy|deprecated'`
   across `docs/` and `README.md`.
 - Fix: applied in Phase 11.
-- Verification: legacy-string scan + `vnb` scan both empty across docs.
+- Verification: legacy-string scan and old-mode-token scan both empty across docs.
 
 ### P0-009 — Obsolete `scripts/update_workbook_balancing.py`
 - Area: scripts
@@ -185,7 +188,7 @@
 - Area: optimization
 - Description: ruff flags two lines as "commented-out code" inside the
   `EXPORT_CAP` constraint docstring block. The lines are pseudocode-style
-  comments explaining the formula, not commented-out code. The `vnb` mention on
+  comments explaining the formula, not commented-out code. The `self_consumption` mention on
   line 720 is touched by the Phase 3 rename; the false positive remains after.
 - Suggested follow-up: reformat the comment as a proper block comment without
   the `=` token that triggers ERA001, or per-line `# noqa: ERA001`.
@@ -211,7 +214,7 @@
 - Tests deleted: _to be filled_.
 - Legacy comments/docstrings stripped: _to be filled_.
 - Legacy / version-history mentions removed: _to be filled_.
-- `vnb` identifiers/strings removed: _to be filled_.
+- `self_consumption` identifiers/strings removed: _to be filled_.
 
 ## 7. What was added
 
@@ -252,4 +255,4 @@
   _to be filled_
 - All P0 items fixed: _to be filled_
 - No legacy / version-history language remaining: _to be filled_
-- No `vnb` references remaining: _to be filled_
+- No `self_consumption` references remaining: _to be filled_

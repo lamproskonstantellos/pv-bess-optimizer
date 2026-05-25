@@ -56,7 +56,7 @@ def test_bess_only_output_frame_balanced():
     verify_energy_balance(res, params, raise_on_failure=True)
 
     # All 9 invariants within tolerance; invariant_1 / invariant_9 near zero.
-    inv = verify_dispatch_invariants(res, params, mode="vnb")
+    inv = verify_dispatch_invariants(res, params, mode="self_consumption")
     for name, value in inv.items():
         assert value <= ENERGY_TOLERANCE, f"{name}={value:g} exceeds tolerance"
     assert inv["invariant_1_pv_balance_kwh"] <= 1e-3

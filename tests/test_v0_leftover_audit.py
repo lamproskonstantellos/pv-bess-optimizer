@@ -46,9 +46,9 @@ FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
         "tests/test_economics_v08.py",
         "tests/test_bess_spec.py",
         "tests/test_asset_modes.py",
-        # The audit report is the historical record of this cleanup and
-        # is the one surface that intentionally retains the old tokens.
-        "docs/AUDIT_REPORT.md",
+        # The audit report documents the audit findings and is the one
+        # surface that names the prior tokens it removed.
+        "docs/audit_report.md",
     )
 )
 

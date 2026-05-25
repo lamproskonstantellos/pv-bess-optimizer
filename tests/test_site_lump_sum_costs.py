@@ -308,7 +308,7 @@ def test_sensitivity_capex_includes_lump_sum():
 def test_assumptions_summary_lists_site_costs(tmp_path):
     from pvbess_opt.io import write_assumptions_summary
 
-    params = {"mode": "vnb", "site_capex_eur": 500_000.0,
+    params = {"mode": "self_consumption", "site_capex_eur": 500_000.0,
               "site_devex_eur": 250_000.0}
     econ = _econ(site_capex_eur=500_000.0, site_devex_eur=250_000.0)
     out = tmp_path / "assumptions.txt"

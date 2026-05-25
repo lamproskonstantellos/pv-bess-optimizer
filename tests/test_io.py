@@ -100,13 +100,13 @@ def test_read_workbook_repo_default(repo_input_xlsx):
     for section in ("project", "pv", "bess", "economics", "simulation"):
         assert section in typed
     assert typed["dt_minutes"] == 15
-    assert typed["project"]["mode"] == "vnb"
+    assert typed["project"]["mode"] == "self_consumption"
 
 
 def test_read_inputs_returns_flat_params(repo_input_xlsx):
     params, ts = read_inputs(repo_input_xlsx)
     assert "efficiency_charge" in params and "bess_power_kw" in params
-    assert params["mode"] == "vnb"
+    assert params["mode"] == "self_consumption"
     assert "load_kwh" in ts.columns
     assert len(ts) == 35040
 
@@ -126,8 +126,8 @@ def test_workbook_round_trip(tmp_path, repo_input_xlsx):
     assert len(typed["ts"]) == len(typed2["ts"])
 
 
-def test_vnb_requires_load_column(tmp_path, repo_input_xlsx):
-    """vnb mode requires load_kwh in timeseries."""
+def test_self_consumption_requires_load_column(tmp_path, repo_input_xlsx):
+    """self_consumption mode requires load_kwh in timeseries."""
     typed = read_workbook(repo_input_xlsx)
     typed["ts"] = typed["ts"].drop(columns=["load_kwh"])
     dst = tmp_path / "no_load.xlsx"
@@ -146,13 +146,14 @@ def test_merchant_mode_load_optional(tmp_path, repo_input_xlsx):
     assert typed2["project"]["mode"] == "merchant"
 
 
-def test_unknown_mode_falls_back_to_vnb(tmp_path):
+def test_unknown_mode_raises(tmp_path):
+    """An unrecognized mode value raises ValueError; no silent fallback."""
     typed = _minimal_typed()
     typed["project"]["mode"] = "vnb"
     dst = tmp_path / "test.xlsx"
     write_workbook(typed, dst)
-    out = read_workbook(dst)
-    assert out["project"]["mode"] == "vnb"
+    with pytest.raises(ValueError, match="unknown mode"):
+        read_workbook(dst)
 
 
 def test_write_workbook_emits_all_sheets(tmp_path, repo_input_xlsx):

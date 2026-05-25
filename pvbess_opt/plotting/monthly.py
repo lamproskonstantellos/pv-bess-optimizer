@@ -1,6 +1,6 @@
 """Monthly aggregate plots.
 
-Three vnb-mode figures per month, written directly into ``out_dir``:
+Three self_consumption-mode figures per month, written directly into ``out_dir``:
 
 * ``monthly_supply_<MM>.pdf``
 * ``monthly_surplus_<MM>.pdf``

@@ -134,7 +134,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--outdir", default="results",
                         help="output base directory")
     parser.add_argument(
-        "--mode", default=None, choices=("vnb", "merchant"),
+        "--mode", default=None, choices=("self_consumption", "merchant"),
         help="Override regulatory mode (default: read from workbook).",
     )
     parser.add_argument(
@@ -254,11 +254,11 @@ def _generate_energy_plots_for_year(
     daily: bool,
     monthly: bool,
     yearly: bool,
-    mode: str = "vnb",
+    mode: str = "self_consumption",
 ) -> None:
     """Render daily / monthly / yearly plots for a single calendar year.
 
-    In ``vnb`` mode this drives the supply / surplus / combined views.
+    In ``self_consumption`` mode this drives the supply / surplus / combined views.
     In ``merchant`` mode the load is pinned to zero so those plots
     collapse — render the dispatch / SOC / revenue trio instead.
     """
@@ -357,7 +357,7 @@ def _generate_all_energy_plots(
     econ: dict[str, Any],
     energy_plots_dir: Path,
     *,
-    mode: str = "vnb",
+    mode: str = "self_consumption",
 ) -> None:
     """Drive the energy-plot fan-out across the project lifetime."""
     daily_scope = str(econ.get("plot_daily_scope", "year1_only"))

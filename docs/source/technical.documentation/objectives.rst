@@ -7,7 +7,7 @@ Why not "max-green" or a blended objective?
 -------------------------------------------
 
 When the user's retail tariff exceeds the DAM price in the majority
-of hours (the typical case for ``vnb`` projects with a co-located
+of hours (the typical case for ``self_consumption`` projects with a co-located
 load) the ``profit`` objective maximises self-consumption
 emergently via the load-priority slack and produces the same
 dispatch a green objective would.  Self-consumption falls out of
@@ -23,7 +23,7 @@ choice.  The optimiser ships with one objective.
 Profit-maximisation expression
 ------------------------------
 
-In ``vnb`` mode the objective is:
+In ``self_consumption`` mode the objective is:
 
 .. math::
 

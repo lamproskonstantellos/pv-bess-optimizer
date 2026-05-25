@@ -11,7 +11,7 @@ Monte Carlo for uncertainty analysis.
 
 Two regulatory regimes and three asset modes are supported:
 
-* `vnb` — co-located load with self-consumption priority.  Load
+* `self_consumption` — co-located load with self-consumption priority.  Load
   balance enforces a hard PV→load priority, surplus-only export
   through a binary-free slack, and no simultaneous grid I/O via a
   tight big-M.  Self-consumption is settled at the retail tariff;
@@ -36,7 +36,7 @@ Python ≥ 3.11.  All plots are exported as IEEE-styled PDFs.
   and BESS-only (`pv_nameplate_kwp = 0`), read literally from the
   workbook.  Energy balance, dispatch invariants and KPIs are exact in
   every mode.
-* **Two regulatory regimes** — `vnb` (co-located load with
+* **Two regulatory regimes** — `self_consumption` (co-located load with
   self-consumption priority) and `merchant` (utility-scale DAM
   dispatch, no load).
 * **Split-revenue project finance** — retail (load-coverage / PPA) and
@@ -125,7 +125,7 @@ A run produces, under `results/<input>_<scenario>_<timestamp>/`:
 Seven themed sheets:
 
 * **`timeseries`** — per-step data: `timestamp`, `load_kwh` (required
-  for `vnb`, optional for `merchant`), `pv_kwh`,
+  for `self_consumption`, optional for `merchant`), `pv_kwh`,
   `dam_price_eur_per_mwh`, optional `retail_price_eur_per_mwh`.
   Case-study fixture is 35 040 rows at 15-minute cadence (one full
   year); the MILP timestep is auto-detected.
@@ -179,7 +179,7 @@ separately to PV exports or BESS-discharge exports.
 `max_injection_profile` is the per-hour share of that limit
 actually available for export.  Curtailed energy appears in the
 outputs (`pv_curtail_kwh`, `pv_energy_curtailed_mwh`).  The same
-cap applies in both `vnb` and `merchant` modes.
+cap applies in both `self_consumption` and `merchant` modes.
 
 Setting `pv_nameplate_kwp = 0` makes the project BESS-only;
 `bess_power_kw = 0` makes it PV-only; both > 0 ⇒ hybrid.  Setting both
@@ -196,7 +196,7 @@ notes.
 # Single perfect-foresight solve
 python main.py inputs/input.xlsx --solver highs
 
-# Override mode (workbook says vnb; force merchant)
+# Override mode (workbook says self_consumption; force merchant)
 python main.py inputs/input.xlsx --mode merchant --solver highs
 
 # Rolling-horizon with Monte Carlo (imperfect foresight + 30 seeds)
@@ -220,7 +220,7 @@ the invariant set.
 
 Single objective: **profit maximisation**.  When the user's retail
 tariff exceeds the DAM price in the majority of hours (the typical
-case for `vnb` projects with a co-located load), the profit
+case for `self_consumption` projects with a co-located load), the profit
 objective produces the same dispatch as a "green" objective —
 self-consumption emerges from the economics rather than being a
 hard constraint.  The hard `LOAD_PV_PRIORITY` constraint still pins

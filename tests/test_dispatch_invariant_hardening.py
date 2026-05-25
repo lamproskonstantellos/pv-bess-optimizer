@@ -35,7 +35,7 @@ def _highs_available() -> bool:
 @pytest.mark.slow
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_invariant4_unrounded_full_year_bess_only():
-    """Full-year vnb BESS-only: invariant_4 must stay below 1e-4.
+    """Full-year self_consumption BESS-only: invariant_4 must stay below 1e-4.
 
     The sum-based invariant_4 is computed on unrounded model values so it
     does not accumulate round(4) error across 35,040 rows and trip
@@ -47,13 +47,13 @@ def test_invariant4_unrounded_full_year_bess_only():
     params = dict(params)
     params["pv_nameplate_kwp"] = 0.0
     params["allow_bess_grid_charging"] = True
-    params["mode"] = "vnb"
+    params["mode"] = "self_consumption"
 
     _res, _, res_full = run_scenario(
         params, ts, solver_name="highs", mip_gap=0.01, time_limit_seconds=1800,
         return_unrounded=True,
     )
-    inv = verify_dispatch_invariants(res_full, params, mode="vnb")
+    inv = verify_dispatch_invariants(res_full, params, mode="self_consumption")
     assert inv["invariant_4_rte_bound_excess_kwh"] < 1e-4, inv
 
 
@@ -70,7 +70,7 @@ def test_nan_fill_emits_warning_with_location(caplog):
         "dam_price_eur_per_mwh": [50.0, 51.0, np.nan, np.nan, np.nan, 55.0, 56.0, 57.0],
     })
     with caplog.at_level(logging.WARNING):
-        out = _normalise_timeseries(ts, mode="vnb")
+        out = _normalise_timeseries(ts, mode="self_consumption")
 
     msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert any("dam_price_eur_per_mwh" in m and "3 NaN" in m for m in msgs), msgs
@@ -87,7 +87,7 @@ def test_no_warning_when_timeseries_clean(caplog):
         "dam_price_eur_per_mwh": [50.0, 51.0, 52.0, 53.0],
     })
     with caplog.at_level(logging.WARNING):
-        _normalise_timeseries(ts, mode="vnb")
+        _normalise_timeseries(ts, mode="self_consumption")
     assert not [r for r in caplog.records if "NaN" in r.getMessage()]
 
 
@@ -125,7 +125,7 @@ def test_time_limit_with_incumbent_accepted():
         "p_grid_export_max_kw": 5000.0, "pv_nameplate_kwp": 4500.0,
         "bess_power_kw": 5000.0, "bess_capacity_kwh": 20000.0,
         "retail_tariff_eur_per_mwh": 120.0, "settlement_minutes": 15,
-        "mode": "vnb", "allow_bess_grid_charging": False, "show_titles": False,
+        "mode": "self_consumption", "allow_bess_grid_charging": False, "show_titles": False,
     }
     ts = pd.DataFrame({
         "timestamp": pd.date_range("2027-04-02 00:00", periods=24, freq="h"),
