@@ -958,19 +958,26 @@ def model_to_dataframe(
             res[f"bm_reservation_{product}_kw"] = [
                 pyo.value(model.r_balancing[product, t]) for t in time_index
             ]
-        for col in (
-            "fcr_capacity_price_eur_per_mwh",
-            "afrr_up_capacity_price_eur_per_mwh",
-            "afrr_dn_capacity_price_eur_per_mwh",
-            "mfrr_up_capacity_price_eur_per_mwh",
-            "mfrr_dn_capacity_price_eur_per_mwh",
-            "afrr_up_activation_price_eur_per_mwh",
-            "afrr_dn_activation_price_eur_per_mwh",
-            "mfrr_up_activation_price_eur_per_mwh",
-            "mfrr_dn_activation_price_eur_per_mwh",
-        ):
-            if col in ts.columns:
-                res[col] = ts[col].values
+        # Re-resolve the balancing-price columns from the workbook
+        # configuration so the dispatch frame carries them even when
+        # the timeseries DataFrame omits the optional columns.
+        _, balancing_ts_view, _ = _resolve_balancing_inputs(
+            params, ts, n_steps=n_steps,
+            bess_present=float(params.get("bess_power_kw", 0.0) or 0.0) > 0.0,
+        )
+        if balancing_ts_view is not None:
+            for col in (
+                "fcr_capacity_price_eur_per_mwh",
+                "afrr_up_capacity_price_eur_per_mwh",
+                "afrr_dn_capacity_price_eur_per_mwh",
+                "mfrr_up_capacity_price_eur_per_mwh",
+                "mfrr_dn_capacity_price_eur_per_mwh",
+                "afrr_up_activation_price_eur_per_mwh",
+                "afrr_dn_activation_price_eur_per_mwh",
+                "mfrr_up_activation_price_eur_per_mwh",
+                "mfrr_dn_activation_price_eur_per_mwh",
+            ):
+                res[col] = getattr(balancing_ts_view, col)
 
     if round_output:
         numeric_cols = [c for c in res.columns if c != "timestamp"]
