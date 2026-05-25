@@ -510,9 +510,11 @@ def derive_monthly_cashflow(
         grouped_pv_kwh = pd.Series(dtype=float)
 
     for m, val in grouped_revenue.items():
-        monthly_revenue_y1.loc[int(m)] = float(val)
+        # pandas types the index value as Hashable; the groupby was by
+        # integer month so int() is always valid.
+        monthly_revenue_y1.loc[int(m)] = float(val)  # type: ignore[call-overload]
     for m, val in grouped_pv_kwh.items():
-        monthly_pv_kwh_y1.loc[int(m)] = float(val)
+        monthly_pv_kwh_y1.loc[int(m)] = float(val)  # type: ignore[call-overload]
 
     yearly_y1_revenue = float(
         yearly_cf.loc[yearly_cf["project_year"] == 1, "revenue_eur"].iloc[0]
@@ -786,8 +788,10 @@ def compute_financial_kpis(
                 )
                 disc_pv_opex += disc_y * opex_pv_y
                 if ly is not None and yi in ly.index:
+                    # pandas .loc returns a broad Scalar type; the column
+                    # is numeric by construction (verified upstream).
                     disc_pv_mwh += disc_y * float(
-                        ly.loc[yi, "pv_generation_mwh"],
+                        ly.loc[yi, "pv_generation_mwh"],  # type: ignore[arg-type]
                     )
 
             disc_pv_total = disc_pv_capex + disc_pv_opex
@@ -841,8 +845,10 @@ def compute_financial_kpis(
                 )
                 disc_bess_opex += disc_y * opex_bess_y
                 if ly is not None and yi in ly.index:
+                    # pandas .loc returns a broad Scalar type; the column
+                    # is numeric by construction (verified upstream).
                     disc_bess_mwh += disc_y * float(
-                        ly.loc[yi, "bess_discharge_mwh"],
+                        ly.loc[yi, "bess_discharge_mwh"],  # type: ignore[arg-type]
                     )
 
             disc_bess_total = disc_bess_capex + disc_bess_opex
@@ -935,7 +941,7 @@ def compute_financial_kpis(
             ),
         }
 
-    out: dict[str, float] = {
+    out: dict[str, Any] = {
         "npv_eur": float(round(npv, 2)),
         "irr_pct": float("nan") if np.isnan(irr_pct) else float(round(irr_pct, 4)),
         "roi_pct": float("nan") if np.isnan(roi_pct) else float(round(roi_pct, 4)),

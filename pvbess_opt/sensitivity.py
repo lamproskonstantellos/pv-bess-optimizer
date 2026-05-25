@@ -101,7 +101,7 @@ def variables_for_npv_sensitivity(
         {"name": "DiscountRate", "kind": "absolute", "delta": rate_d,
          "label": "Discount rate"},
     ]
-    return [v for v in raw if v["delta"] > 0.0]
+    return [v for v in raw if float(v["delta"]) > 0.0]  # type: ignore[arg-type]
 
 
 def variables_for_irr_sensitivity(
@@ -333,7 +333,7 @@ def run_sensitivity_analysis(
                     low_cf, {**econ, "discount_rate_pct": low_value},
                 )
             except (ValueError, ArithmeticError, KeyError, TypeError):
-                low_kpis = None
+                low_kpis = None  # type: ignore[assignment]
             try:
                 high_cf = _rebuild_with_discount_rate(
                     year1_kpis, econ, capacities, high_value,
@@ -342,7 +342,7 @@ def run_sensitivity_analysis(
                     high_cf, {**econ, "discount_rate_pct": high_value},
                 )
             except (ValueError, ArithmeticError, KeyError, TypeError):
-                high_kpis = None
+                high_kpis = None  # type: ignore[assignment]
             _record(name, label, "base", 0.0, base_value, base_kpis)
             _record(name, label, "low", -delta, low_value, low_kpis)
             _record(name, label, "high", +delta, high_value, high_kpis)
@@ -376,17 +376,19 @@ def build_driver_sensitivities(
         driver_type = _DRIVER_TYPE_BY_VARIABLE.get(variable, variable.lower())
         # Relative drivers store delta_value as a fraction (0.20); the
         # discount-rate driver stores it directly in percentage points.
-        delta = abs(float(by_scen.loc["low", "delta_value"]))
+        # pandas .loc returns a broad Scalar type; the columns are
+        # numeric by construction (built by run_sensitivity_analysis).
+        delta = abs(float(by_scen.loc["low", "delta_value"]))  # type: ignore[arg-type]
         sens_pct = delta if driver_type == "discount_rate" else delta * 100.0
         try:
             record = DriverSensitivity(
                 name=variable,
                 driver_type=driver_type,
-                base_value=float(by_scen.loc["base", "value"]),
-                low_value=float(by_scen.loc["low", "value"]),
-                high_value=float(by_scen.loc["high", "value"]),
-                low_outcome=float(by_scen.loc["low", metric]),
-                high_outcome=float(by_scen.loc["high", metric]),
+                base_value=float(by_scen.loc["base", "value"]),  # type: ignore[arg-type]
+                low_value=float(by_scen.loc["low", "value"]),  # type: ignore[arg-type]
+                high_value=float(by_scen.loc["high", "value"]),  # type: ignore[arg-type]
+                low_outcome=float(by_scen.loc["low", metric]),  # type: ignore[arg-type]
+                high_outcome=float(by_scen.loc["high", metric]),  # type: ignore[arg-type]
                 sensitivity_pct=float(sens_pct),
             )
         except (TypeError, ValueError):

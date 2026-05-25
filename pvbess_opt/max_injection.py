@@ -94,4 +94,5 @@ def build_per_step_max_injection_frac(
     else:
         months = ts.month.to_numpy(dtype=int) - 1
         per_step_pct = arr[hours, months]
-    return np.clip(per_step_pct.astype(float) / 100.0, 0.0, 1.0)
+    clipped: np.ndarray = np.clip(per_step_pct.astype(float) / 100.0, 0.0, 1.0)
+    return clipped

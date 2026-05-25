@@ -421,6 +421,71 @@ _(Populated as Phase 1–5 progress.)_
 - Ruff (project rule set) re-applies isort-style sort to the
   `balancing.py` `__all__` via `--fix`; remaining lists were hand-sorted.
 
+### Phase 2 — `mypy --strict` baseline
+
+`mypy --strict pvbess_opt` (mypy 2.1.0, with `pandas-stubs`,
+`types-openpyxl`, `types-python-dateutil` installed locally as dev
+tooling — **not** added to `pyproject.toml` deps) starts at **170
+errors** across 21 files. After config + targeted fixes the baseline is
+`Success: no issues found in 28 source files`.
+
+Configuration added to `pyproject.toml` (`[tool.mypy]` block):
+
+- Global `strict = true`, `files = ["pvbess_opt"]`, `python_version
+  = "3.11"`.
+- Global `disable_error_code = ["type-arg"]` — every `np.ndarray` in
+  this codebase carries `float64` by construction (`np.asarray(...,
+  dtype=float)`) and the type-arg rule would require ~50 lines of
+  `ndarray[Any, np.dtype[np.float64]]` noise without catching any real
+  bug.
+- `[[tool.mypy.overrides]]` for `pyomo.*`, `matplotlib.*`,
+  `mpl_toolkits.*`, `openpyxl.*` with `ignore_missing_imports = true`
+  — none of these publish reliable stubs.
+- `[[tool.mypy.overrides]]` for `pvbess_opt.plotting.*` disabling
+  `no-untyped-def`, `no-untyped-call`, `arg-type`, `assignment`,
+  `operator`, `union-attr`, `call-overload`, `no-any-return` — the
+  plotting layer carries `Axes` / `Figure` / `Line2D` objects through
+  every helper, and matplotlib's public stubs return `Any` for most
+  methods, so strict annotation would add hundreds of unhelpful
+  annotations.
+- `[[tool.mypy.overrides]]` for `pvbess_opt.optimization` disabling
+  `no-untyped-def`, `no-untyped-call`, `arg-type`, `operator` — every
+  Pyomo constraint rule is `def _rule(model, t): return expr` and
+  Pyomo's expression algebra is untyped at the package level.
+
+Targeted source fixes (non-plotting, non-optimization modules):
+
+- `pvbess_opt/optimization.py` — added `@overload` decorators on
+  `run_scenario` so the `return_unrounded: Literal[False]` path is
+  statically a 2-tuple and the `Literal[True]` path is a 3-tuple,
+  fixing the `[misc]` "too many values to unpack" at
+  `rolling_horizon.py:294`.
+- `pvbess_opt/config.py` — added `ax: Any` annotation on
+  `apply_financial_legend` (matplotlib Axes is unannotated at the
+  config layer).
+- `pvbess_opt/max_injection.py` — narrowed the
+  `build_per_step_max_injection_frac` return through an explicit
+  `clipped: np.ndarray = …` binding so mypy stops flagging
+  `[no-any-return]`.
+- `pvbess_opt/economics.py` — widened the `compute_financial_kpis`
+  return-dict annotation from `dict[str, float]` to `dict[str, Any]`
+  (it carries one `list[float]` key,
+  `lifetime_bm_revenue_eur_per_year`).
+- `pvbess_opt/economics.py` — added `# type: ignore[call-overload]`
+  on two `int(m)` calls inside a `Series.items()` loop (pandas types
+  the index as `Hashable`) and `# type: ignore[arg-type]` on two
+  `float(ly.loc[...])` calls where pandas widens the scalar return to
+  `str | bytes | …`.
+- `pvbess_opt/sensitivity.py` — `# type: ignore[assignment]` on the
+  two `low_kpis = None` / `high_kpis = None` rebindings in the
+  DiscountRate branch (the variable is `dict[str, Any]` everywhere
+  else); `# type: ignore[arg-type]` on six `float(by_scen.loc[…])`
+  calls (same pandas widening as in economics).
+
+Every `# type: ignore[…]` carries an inline comment explaining the
+pandas widening or assignment narrowing pattern; every override in
+`pyproject.toml` carries an inline comment explaining the rationale.
+
 ## 2.7 Dynamic audit harness results
 
 _(Populated by Phase 3.)_

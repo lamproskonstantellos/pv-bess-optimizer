@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import Any
 
 __all__ = [
     "ALL_LABELS",
@@ -438,7 +439,7 @@ def _canonical_match_key(label: str) -> str | None:
     return None
 
 
-def apply_financial_legend(ax, *, max_rows: int = 2, loc: str = "best") -> None:
+def apply_financial_legend(ax: Any, *, max_rows: int = 2, loc: str = "best") -> None:
     """Reorder the legend on ``ax`` to match :data:`FINANCIAL_LEGEND_ORDER`.
 
     Handles whose label is not in the canonical order (and does not

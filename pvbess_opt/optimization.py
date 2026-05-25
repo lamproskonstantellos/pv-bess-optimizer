@@ -55,7 +55,7 @@ keep the user-facing surface small.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal, overload
 
 import numpy as np
 import pandas as pd
@@ -995,6 +995,32 @@ def model_to_dataframe(
     return res
 
 
+@overload
+def run_scenario(
+    params: dict[str, Any],
+    ts: pd.DataFrame,
+    solver_name: str = ...,
+    *,
+    mip_gap: float = ...,
+    time_limit_seconds: int = ...,
+    tee: bool = ...,
+    initial_soc_kwh: float | None = ...,
+    terminal_soc_free: bool | None = ...,
+    return_unrounded: Literal[False] = ...,
+) -> tuple[pd.DataFrame, str]: ...
+@overload
+def run_scenario(
+    params: dict[str, Any],
+    ts: pd.DataFrame,
+    solver_name: str = ...,
+    *,
+    mip_gap: float = ...,
+    time_limit_seconds: int = ...,
+    tee: bool = ...,
+    initial_soc_kwh: float | None = ...,
+    terminal_soc_free: bool | None = ...,
+    return_unrounded: Literal[True],
+) -> tuple[pd.DataFrame, str, pd.DataFrame]: ...
 def run_scenario(
     params: dict[str, Any],
     ts: pd.DataFrame,
