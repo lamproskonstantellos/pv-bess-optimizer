@@ -574,13 +574,13 @@ def realise_balancing_scenario(
         realised_soc = np.array(soc_path_kwh, dtype=float)
         for product in PRODUCTS_UP + PRODUCTS_DN:
             r = np.asarray(reservations.get(product, np.zeros(n)), dtype=float)
-            activated = activated_by_product.get(product)
-            if activated is None or activated.shape[0] != n:
+            activated_mask = activated_by_product.get(product)
+            if activated_mask is None or activated_mask.shape[0] != n:
                 continue
             if product in PRODUCTS_UP:
-                realised_soc -= activated.astype(float) * r * dt_hours / eta_discharge
+                realised_soc -= activated_mask.astype(float) * r * dt_hours / eta_discharge
             else:
-                realised_soc += activated.astype(float) * r * dt_hours * eta_charge
+                realised_soc += activated_mask.astype(float) * r * dt_hours * eta_charge
         if np.any(realised_soc < soc_min_kwh - 1e-6) or np.any(
             realised_soc > soc_max_kwh + 1e-6,
         ):

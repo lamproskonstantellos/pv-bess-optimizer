@@ -39,6 +39,11 @@ def test_compute_kpis_contains_canonical_lowercase_keys(
         "profit_total_eur", "system_total_export_mwh", "bess_total_charge_mwh",
         "soc_min_pct", "pv_energy_curtailed_mwh", "e_cap_mwh",
         "load_coverage_from_pv_frac",
+        # v0.9 balancing surface: confirm at least one aggregate and one
+        # per-product key keep their canonical names so the dispatch + KPI
+        # pipeline does not silently lose the BM block.
+        "bm_total_balancing_revenue_eur",
+        "revenue_bess_fcr_eur",
     ):
         assert key in kpis, f"missing canonical KPI key {key!r}"
 
