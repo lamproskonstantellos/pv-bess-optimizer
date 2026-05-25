@@ -74,6 +74,29 @@ MERCHANT_COLORS: dict[str, str] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Balancing-market colour registry (FCR / aFRR / mFRR)
+# ---------------------------------------------------------------------------
+#
+# Kept apart from COLORS / MERCHANT_COLORS so the uniqueness check on
+# those registries is not disturbed; the balancing palette deliberately
+# uses light / dark pairs for up/down members of the same product so
+# the stacked plots stay legible. Histogram and helper colours that the
+# balancing plot module needs also live here so the plotting code does
+# not have to bake hex literals inline.
+
+BM_COLOURS: dict[str, str] = {
+    "fcr": "#1f77b4",
+    "afrr_up": "#ff7f0e",
+    "afrr_dn": "#ffbb78",
+    "mfrr_up": "#2ca02c",
+    "mfrr_dn": "#98df8a",
+    "mc_histogram": "#4a90d9",
+    "quantile_outer": "#888888",
+    "quantile_centre": "#222222",
+}
+
+
 def label_color(label: str) -> str | None:
     """Return the canonical hex colour for any plot label.
 

@@ -46,6 +46,8 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     # Uncertainty diagnostics
     "plot_uncertainty_coverage_by_horizon", "plot_uncertainty_pit_histogram",
     "plot_uncertainty_crps_timeline", "plot_uncertainty_residual_qq",
+    # Balancing market
+    "plot_balancing_reservation_profile", "plot_balancing_mc_distribution",
 )
 
 
