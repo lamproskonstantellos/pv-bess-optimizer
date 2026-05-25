@@ -122,8 +122,9 @@
     "n_scenarios": 25
   },
   "n_steps": 35040,
-  "peak_rss_mb": 4950.2,
-  "solve_runtime_s": 584.314,
+  "peak_rss_mb": 5038.6,
+  "solve_runtime_s": 565.768,
   "solve_status": "optimal",
-  "solver": "highs"
+  "solver": "highs",
+  "subsample_steps_applied": null
 }

@@ -31,9 +31,12 @@ SCAN_GLOBS = ("**/*.py", "**/*.md", "**/*.rst")
 ALLOWED_PATHS = {
     "tests/test_no_historical_version_strings.py",
     "tests/test_v0_leftover_audit.py",
-    # The audit report documents the audit findings and is the one surface
-    # that names the prior tokens it removed.
+    # The audit reports document the audit findings and are the surfaces
+    # that name the prior tokens they removed.
     "docs/audit_report.md",
+    "docs/audit_report_phase1.md",
+    "docs/audit_report_v0_9_0.md",
+    "docs/audit_test_index.md",
 }
 SKIP_DIR_PARTS = {"__pycache__", "build", ".git", "_static", "_templates"}
 

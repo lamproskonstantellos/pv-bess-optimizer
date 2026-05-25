@@ -1,12 +1,13 @@
 #!/usr/bin/env python
-"""Phase 2 visual sanity sweep.
+"""Visual sanity sweep for the balancing / BESS-revenue plot family.
 
 Renders every plot in :mod:`pvbess_opt.plotting.bess_revenue` and
 :mod:`pvbess_opt.plotting.balancing` for the canonical
 self_consumption x hybrid x balancing-ON case and bundles them into a
-single PDF under ``scripts/audit_runs/results/phase2_visual_check.pdf``.
+single PDF under
+``scripts/audit_runs/results/visual_check_balancing_plots.pdf``.
 
-Drives the conventions check in the Phase 2 audit:
+Drives the house-style conventions check:
 
 * Month axis reads ``MM-YYYY`` (not ``Jan`` … ``Dec``).
 * Currency axes route through ``euro_axis_formatter`` (no ``1e6`` ticks).
@@ -71,7 +72,8 @@ def main() -> int:
     br.save_figure = _capture     # type: ignore[attr-defined]
     try:
         scratch = (
-            Path(__file__).resolve().parent / "results" / "_phase2_scratch"
+            Path(__file__).resolve().parent / "results"
+            / "_visual_check_scratch"
         )
         scratch.mkdir(parents=True, exist_ok=True)
         econ = {"currency_format": "auto"}
@@ -97,13 +99,13 @@ def main() -> int:
 
     out_pdf = (
         Path(__file__).resolve().parent / "results"
-        / "phase2_visual_check.pdf"
+        / "visual_check_balancing_plots.pdf"
     )
     with PdfPages(out_pdf) as combined:
         for fig in captured:
             combined.savefig(fig, bbox_inches="tight")
             plt.close(fig)
-    print(f"Phase 2 visual check PDF: {out_pdf}  ({len(captured)} pages)")
+    print(f"Visual check PDF: {out_pdf}  ({len(captured)} pages)")
     return 0
 
 
