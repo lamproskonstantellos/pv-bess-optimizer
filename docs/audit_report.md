@@ -386,7 +386,37 @@ _(Populated as Phase 1–5 progress.)_
 
 ## 2.5 P2 additions (Part 2)
 
-_(Populated as Phase 1–5 progress.)_
+### P2-004 — Two combinations subsampled to 1-week for the audit harness
+
+`scripts/audit_runs/` exercises every combination at the production
+workbook scale (35 040 steps at 15-min cadence). Two specific
+combinations overrun the 5-minute per-driver wall budget at full year
+when run through `run_scenario` with `mip_gap=0.01`:
+
+- **all 4 balancing-ON combinations** — the additional per-product
+  reservation / activation / commitment variables make the MILP
+  large; the smallest balancing-on solve (merchant × bess_only) still
+  runs ~10 min at full year, and the heaviest (self_consumption ×
+  bess_only × balancing-ON) takes ~10 min and was recorded
+  end-to-end before the budget fallback was applied to the other
+  three (see §2.7).
+- **self_consumption × bess_only × balancing-OFF** — without PV the
+  load-balance constraint and the `grid_to_load` / `grid_to_bess`
+  exclusion produce a numerically pathological MILP whose simplex
+  pivots spiral; the solve exceeded 27 minutes when killed.
+
+Both groups now default to a 1-week (672-step) subsample inside the
+audit drivers, with the deviation logged in each JSON via
+`subsample_steps_applied = 672` and the `--subsample-steps`
+argparse flag. The full-year balancing-on path is still exercised
+in the test suite (`tests/test_balancing_invariants.py`,
+`tests/test_balancing_optimization.py`,
+`tests/test_balancing_mc.py`); the harness here is for JSON
+evidence, not coverage.
+
+Suggested follow-up: investigate solver-side tuning (presolve options,
+MIP focus, warm starts) before 1.0 so the full-year balancing-on case
+can be exercised in the audit harness within the wall budget.
 
 ## 2.6 Cleanup applied in Part 2
 
@@ -486,9 +516,71 @@ Every `# type: ignore[…]` carries an inline comment explaining the
 pandas widening or assignment narrowing pattern; every override in
 `pyproject.toml` carries an inline comment explaining the rationale.
 
+### Phase 3 — Dynamic audit harness
+
+- New package `scripts/audit_runs/` with `__init__.py`, shared
+  helpers in `_common.py`, 10 single-combination driver scripts, and
+  `run_all.sh`.
+- `_common.py` provides `load_canonical_workbook`, `override_config`,
+  `run_pipeline`, `write_result_json`, plus invariant and KPI
+  sanity-check helpers. `run_pipeline` accepts a `subsample_steps`
+  argument so individual drivers can fall back from the full year
+  when their wall budget would overrun.
+- Each driver writes `scripts/audit_runs/results/<combo>.json`
+  containing `solve_status`, `solver`, `solve_runtime_s`,
+  `peak_rss_mb`, `n_steps`, `subsample_steps_applied`, the 9
+  per-invariant residuals (with within-tolerance booleans), the full
+  numeric KPI dict, the Monte Carlo P10/P50/P90 (when balancing is
+  on), and the `balancing_off_zero_guards` evidence map for the OFF
+  cases.
+- `run_merchant_hybrid_on.py --with-pdf` additionally renders
+  `merchant_hybrid_on.pdf` by monkey-patching the project's
+  `save_figure` to intercept each plotting helper's figure and emit
+  them as pages into a single `PdfPages` bundle.
+- All 10 drivers completed clean (see §2.7).
+- No new P0 surfaced in this phase.
+
 ## 2.7 Dynamic audit harness results
 
-_(Populated by Phase 3.)_
+All 10 driver scripts under `scripts/audit_runs/` produce JSON
+evidence under `scripts/audit_runs/results/`. Every solve hit
+`optimal` with HiGHS; all 9 dispatch invariants (where applicable) and
+all 6 balancing invariants stay within `ENERGY_TOLERANCE = 1e-3 kWh`;
+no KPI is NaN/inf; with balancing OFF every `bm_*` and every
+balancing-derived `revenue_bess_*` KPI is exactly zero.
+
+| #  | Combination                                  | steps  | subsample | runtime_s | inv_ok | bm-off zero |
+|----|----------------------------------------------|--------|-----------|-----------|--------|-------------|
+| 1  | merchant × hybrid × ON                       |    672 |       672 |      1.25 | ✓      | n/a         |
+| 2  | merchant × hybrid × OFF                      | 35 040 |     none  |     59.18 | ✓      | ✓           |
+| 3  | merchant × bess_only × ON                    |    672 |       672 |      2.59 | ✓      | n/a         |
+| 4  | merchant × bess_only × OFF                   | 35 040 |     none  |     82.62 | ✓      | ✓           |
+| 5  | merchant × pv_only × OFF                     | 35 040 |     none  |     90.47 | ✓      | ✓           |
+| 6  | self_consumption × hybrid × OFF              | 35 040 |     none  |     61.89 | ✓      | ✓           |
+| 7  | self_consumption × bess_only × OFF           |    672 |       672 |      2.49 | ✓      | ✓           |
+| 8  | self_consumption × pv_only × OFF             | 35 040 |     none  |     90.83 | ✓      | ✓           |
+| 9  | self_consumption × hybrid × ON               |    672 |       672 |      1.57 | ✓      | n/a         |
+| 10 | self_consumption × bess_only × ON            | 35 040 |     none  |    584.31 | ✓      | n/a         |
+
+Notes:
+
+- Combination 10 ran end-to-end at full year (35 040 steps) before the
+  audit drivers were updated to subsample by default; the result file
+  records `subsample_steps_applied = null` and is kept as evidence
+  that the heaviest balancing-on configuration does converge — it just
+  costs ~10 min wall, hence the §2.5 P2 note.
+- The 4 ON drivers all default to `--subsample-steps 672` (one week
+  at 15-min cadence). The OFF driver for self_consumption × bess_only
+  also defaults to subsample for the reason logged in §2.5.
+- The Monte Carlo block ran with `n_scenarios = 25` for the
+  balancing-on cases (per §3 prompt budget). The Phase-5
+  performance baseline captures the one full `n_scenarios = 200`
+  run.
+- PDF evidence (merchant × hybrid × balancing-ON) is at
+  `scripts/audit_runs/results/merchant_hybrid_on.pdf` — 5 pages:
+  BESS revenue waterfall, BESS capacity vs activation split,
+  BESS revenue by month, balancing reservation profile, and the
+  Monte Carlo distribution histogram. File size 28 KB.
 
 ## 2.8 Performance baseline (real-world numbers)
 
