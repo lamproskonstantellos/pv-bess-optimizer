@@ -859,7 +859,7 @@ _HOUR_PARSE_RE = re.compile(r"^\s*(\d{1,2})")
 def _parse_hour_of_day(value: Any) -> int:
     """Coerce an ``hour_of_day`` cell into an integer 0..23.
 
-    Accepts the legacy integer format and the 24-hour interval
+    Accepts an integer 0..23 and the 24-hour interval
     string format (``"00:00-01:00"`` … ``"23:00-24:00"``).  The
     parser is forgiving: any leading 1-2 digit run is taken as the
     start hour.  Out-of-range values raise ``ValueError``.

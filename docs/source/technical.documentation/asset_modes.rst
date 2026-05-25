@@ -2,7 +2,7 @@ Asset modes — PV-only / BESS-only / hybrid
 ==========================================
 
 The loader reads zero literally — there is no inference from the
-timeseries or from legacy power keys.  The four cases are:
+timeseries or from a power-key fallback.  The four cases are:
 
 .. list-table::
    :header-rows: 1
@@ -57,7 +57,7 @@ Capacity helper
 ---------------
 
 ``pvbess_opt.economics.derive_asset_capacities`` does not infer
-capacities from the timeseries or from any legacy power key.
+capacities from the timeseries or from any power-key fallback.
 Declared values pass through exactly:
 
 .. code-block:: python

@@ -180,9 +180,9 @@ def _write_minimal_workbook_with_sheet(
     """Write a minimal valid workbook whose only profile sheet is
     ``sheet_name`` with column ``column_name`` and ``values``.
 
-    Used by the legacy-schema and default-fallback tests.  All other
-    sheets come from :func:`_minimal_typed` via :func:`write_workbook`,
-    then the profile sheet is replaced in-place via openpyxl.
+    Used by the schema and default-fallback tests.  All other sheets
+    come from :func:`_minimal_typed` via :func:`write_workbook`, then
+    the profile sheet is replaced in-place via openpyxl.
     """
     import openpyxl
 

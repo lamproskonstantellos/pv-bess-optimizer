@@ -3,7 +3,7 @@
 The shipped workbook carries exactly one global accent: row 1 of every
 sheet is bold + filled ``#F2F2F2`` + thin ``#BFBFBF`` bottom border.
 No other cells carry per-sheet styling.  In particular, no cell
-anywhere has the legacy amber bootstrap fill ``#FFF2CC``.
+anywhere has the prior amber bootstrap fill ``#FFF2CC``.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def workbook():
 
 
 def test_no_amber_fills_anywhere(workbook):
-    """No cell anywhere carries the legacy amber bootstrap fill."""
+    """No cell anywhere carries the prior amber bootstrap fill."""
     hits = []
     for sn in workbook.sheetnames:
         ws = workbook[sn]

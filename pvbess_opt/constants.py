@@ -1,8 +1,8 @@
 """Shared numeric constants for the financial / sensitivity model.
 
-Single source of truth for values that were previously duplicated as
-literals across :mod:`pvbess_opt.io`, :mod:`pvbess_opt.economics`,
-:mod:`pvbess_opt.sensitivity` and :mod:`pvbess_opt.plotting.lifecycle`.
+Single source of truth for values consumed by :mod:`pvbess_opt.io`,
+:mod:`pvbess_opt.economics`, :mod:`pvbess_opt.sensitivity` and
+:mod:`pvbess_opt.plotting.lifecycle`.
 """
 
 from __future__ import annotations

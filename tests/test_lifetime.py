@@ -184,16 +184,18 @@ def test_bess_replacement_resets_factor():
     assert _bess_factor(15, 0.02, replacement_year=10) == pytest.approx(0.98 ** 5)
 
 
-def test_bess_factor_with_zero_cycle_pct_matches_legacy():
-    """The new keyword-only signature with d_bess_per_cycle = 0 must equal
-    the legacy calendar-only formula (1 - d_annual)^years_since."""
+def test_bess_factor_with_zero_cycle_pct_matches_calendar_only():
+    """The keyword-only signature with d_bess_per_cycle = 0 must equal
+    the calendar-only formula (1 - d_annual)^years_since."""
     for y, repl in [(1, 0), (7, 0), (5, 10), (12, 10)]:
-        legacy = _bess_factor(y, 0.02, replacement_year=repl)
-        new = _bess_factor(
+        calendar_only = _bess_factor(y, 0.02, replacement_year=repl)
+        combined_with_zero_cycle = _bess_factor(
             y, 0.02, replacement_year=repl,
             d_bess_per_cycle=0.0, cumulative_cycles_through=9999.0,
         )
-        assert new == pytest.approx(legacy, rel=1e-12)
+        assert combined_with_zero_cycle == pytest.approx(
+            calendar_only, rel=1e-12,
+        )
 
 
 def test_bess_factor_combined():

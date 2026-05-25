@@ -121,7 +121,7 @@ def test_finite_cap_unchanged(tmp_path):
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 @pytest.mark.parametrize("mode", ["self_consumption", "merchant"])
-def test_finite_cap_kpis_identical_to_legacy_path(
+def test_finite_cap_kpis_identical_to_baseline_path(
     short_ts, short_params, short_params_merchant, mode,
 ):
     """A finite cap must produce the exact same dispatch whether or not
@@ -129,14 +129,14 @@ def test_finite_cap_kpis_identical_to_legacy_path(
     base = dict(short_params if mode == "self_consumption" else short_params_merchant)
     base["p_grid_export_max_kw"] = 5000.0
 
-    legacy = dict(base)  # params without the grid_export_unlimited key
+    baseline = dict(base)  # params without the grid_export_unlimited key
     new = dict(base)
     new["grid_export_unlimited"] = False
 
-    res_legacy, _ = run_scenario(legacy, short_ts, "highs")
+    res_baseline, _ = run_scenario(baseline, short_ts, "highs")
     res_new, _ = run_scenario(new, short_ts, "highs")
-    k_legacy = compute_kpis(res_legacy, legacy, verify_balance=False)
+    k_baseline = compute_kpis(res_baseline, baseline, verify_balance=False)
     k_new = compute_kpis(res_new, new, verify_balance=False)
-    for key, value in k_legacy.items():
+    for key, value in k_baseline.items():
         if isinstance(value, (int, float)):
             assert k_new[key] == pytest.approx(value, rel=1e-9, abs=1e-9), key

@@ -162,7 +162,7 @@ def test_monthly_cashflow_legend_uses_net_cash_flow(tmp_path):
         f"'Net cash-flow' (got {labels})"
     )
     assert "Net" not in labels, (
-        f"legacy 'Net' label still present in monthly cashflow legend "
+        f"unexpected bare 'Net' label in monthly cashflow legend "
         f"(got {labels})"
     )
 

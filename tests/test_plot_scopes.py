@@ -56,8 +56,8 @@ def test_econ_defaults_use_unified_vocabulary():
     assert _ALLOWED_VALUES["plot_yearly_scope"] == expected
 
 
-def test_main_dispatcher_drops_legacy_token():
-    """main.py must not contain plot_daily_year1 outside the legacy path."""
+def test_main_dispatcher_drops_obsolete_token():
+    """main.py must not contain the obsolete plot_daily_year1 token."""
     import inspect
 
     import main

@@ -6,7 +6,7 @@ metadata).
 
 Two operations:
 
-1. Sweep every cell in every sheet for the legacy amber highlight
+1. Sweep every cell in every sheet for the prior amber highlight
    (``FFF2CC``) used by the balancing-feature bootstrap script and
    reset its fill to *no fill*.
 2. Apply a single global header accent to row 1 of every sheet:
@@ -23,7 +23,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.styles import Border, Font, PatternFill, Side
 
-LEGACY_AMBER_HEXES: frozenset[str] = frozenset({
+AMBER_FILL_HEXES: frozenset[str] = frozenset({
     "FFF2CC", "00FFF2CC",
 })
 HEADER_FILL_HEX: str = "F2F2F2"
@@ -32,7 +32,7 @@ HEADER_BORDER_HEX: str = "BFBFBF"
 logger = logging.getLogger(__name__)
 
 
-def _is_legacy_amber(fill: PatternFill) -> bool:
+def _is_amber_fill(fill: PatternFill) -> bool:
     for attr in ("fgColor", "start_color"):
         colour = getattr(fill, attr, None)
         if colour is None:
@@ -40,7 +40,7 @@ def _is_legacy_amber(fill: PatternFill) -> bool:
         rgb = getattr(colour, "rgb", None)
         if not isinstance(rgb, str):
             continue
-        if rgb.upper() in LEGACY_AMBER_HEXES:
+        if rgb.upper() in AMBER_FILL_HEXES:
             return True
     return False
 
@@ -53,7 +53,7 @@ def _clear_amber_fills(ws) -> int:
             fill = cell.fill
             if fill is None or fill.fill_type is None:
                 continue
-            if _is_legacy_amber(fill):
+            if _is_amber_fill(fill):
                 cell.fill = blank
                 cleared += 1
     return cleared

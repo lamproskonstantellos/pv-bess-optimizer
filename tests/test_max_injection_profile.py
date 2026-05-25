@@ -121,8 +121,8 @@ def test_monthly_format_loads(tmp_path):
 
 
 def test_missing_sheet_falls_back_to_default(tmp_path, caplog):
-    """When neither max_injection_profile nor the legacy sheet is
-    present, the loader logs INFO and uses the constant default."""
+    """When the max_injection_profile sheet is absent, the loader
+    logs INFO and uses the no-curtailment default."""
     typed = _minimal_typed(np.full(24, 73.0, dtype=float))
     dst = tmp_path / "wb_dropped.xlsx"
     write_workbook(typed, dst)
@@ -145,17 +145,16 @@ def test_missing_sheet_falls_back_to_default(tmp_path, caplog):
 
 
 # ---------------------------------------------------------------------------
-# Optimizer: a constant 73% max-injection profile applies the export
-# cap as 73% of p_grid_export_max_kw in every hour.
+# Optimizer: a constant 73 % max-injection profile applies the export
+# cap as 73 % of p_grid_export_max_kw in every hour.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
-def test_constant_73_matches_v07_export_caps(short_params, short_ts):
-    """A constant 73 % max-injection profile (= the inverse of the
-    historical 27 % curtailment) produces a flat 0.73 per-step
-    fraction, equivalent to the legacy scalar path's
-    p_grid_export_max_kw * (1 - 0.27)."""
+def test_constant_73_pct_caps_export(short_params, short_ts):
+    """A constant 73 % max-injection profile produces a flat 0.73
+    per-step fraction and caps every hour's export at
+    p_grid_export_max_kw * 0.73."""
     profile = np.full(24, 73.0, dtype=float)
     params = dict(short_params)
     params["max_injection_profile"] = profile
@@ -216,7 +215,7 @@ def test_zero_during_solar_window(short_params):
 
 
 # ---------------------------------------------------------------------------
-# v0.8 hour_of_day interval-string formatting + backward-compat parsing
+# hour_of_day interval-string formatting + parser
 # ---------------------------------------------------------------------------
 
 
