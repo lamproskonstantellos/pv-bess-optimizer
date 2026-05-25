@@ -109,11 +109,11 @@ def test_simulation_sheet_keys():
 # ---------------------------------------------------------------------------
 
 
-def test_seven_sheets_present(repo_input_xlsx):
+def test_all_sheets_present(repo_input_xlsx):
     sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "max_injection_profile",
+        "simulation", "balancing", "max_injection_profile",
     }
 
 

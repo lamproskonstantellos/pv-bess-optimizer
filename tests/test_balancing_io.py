@@ -100,10 +100,17 @@ def test_missing_timeseries_column_falls_back_to_default(
 ):
     typed = _load_typed(repo_input_xlsx)
     typed["balancing"]["balancing_enabled"] = True
+    # Drop the per-product price columns so the loader's fallback path
+    # has to fire. The reference workbook now ships with these columns,
+    # so this test exercises the absence path explicitly.
+    drop_cols = [
+        c for c in typed["ts"].columns
+        if c.endswith("_capacity_price_eur_per_mwh")
+        or c.endswith("_activation_price_eur_per_mwh")
+    ]
+    typed["ts"] = typed["ts"].drop(columns=drop_cols)
     dst = tmp_path / "missing_col.xlsx"
     write_workbook(typed, dst)
-    # Loader must add the missing column with the scalar default and
-    # emit a warning naming it.
     with caplog.at_level(logging.WARNING):
         loaded = read_workbook(dst)
     assert "fcr_capacity_price_eur_per_mwh" in loaded["ts"].columns
@@ -120,16 +127,22 @@ def test_missing_timeseries_column_falls_back_to_default(
 def test_no_warning_when_balancing_disabled(tmp_path, repo_input_xlsx, caplog):
     typed = _load_typed(repo_input_xlsx)
     typed["balancing"]["balancing_enabled"] = False
+    drop_cols = [
+        c for c in typed["ts"].columns
+        if c.endswith("_capacity_price_eur_per_mwh")
+        or c.endswith("_activation_price_eur_per_mwh")
+    ]
+    typed["ts"] = typed["ts"].drop(columns=drop_cols)
     dst = tmp_path / "disabled_no_warn.xlsx"
     write_workbook(typed, dst)
     with caplog.at_level(logging.WARNING):
         loaded = read_workbook(dst)
-    # No fallback warning when the gate is off.
+    # No fallback warning when the gate is off, even with the columns
+    # stripped from the workbook — the loader does not look at them.
     assert not any(
         "balancing timeseries column" in record.message
         for record in caplog.records
     )
-    # And no balancing price columns get injected when disabled.
     assert "fcr_capacity_price_eur_per_mwh" not in loaded["ts"].columns
 
 
