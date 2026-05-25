@@ -513,7 +513,65 @@ def compute_kpis(
     # ---------------------------------------------------------------------
     kpis.update(_compute_balancing_kpis(res, params))
 
+    # ---------------------------------------------------------------------
+    # Canonical revenue aggregates for the financial-plot stack.  These
+    # split DAM revenue between PV-direct exports and BESS-arbitrage
+    # exports, and aggregate each balancing product's capacity +
+    # activation streams into a single per-product key.  Always emitted.
+    # ---------------------------------------------------------------------
+    kpis.update(_compute_canonical_revenue_aggregates(kpis, mode))
+
     return kpis
+
+
+def _compute_canonical_revenue_aggregates(
+    kpis: dict[str, Any], mode: str,
+) -> dict[str, float]:
+    """Return the 8 canonical revenue aggregate keys used by the
+    financial-plot stack and the BESS-revenue waterfall / split plots.
+
+    * ``revenue_pv_dam_eur``        — PV → DAM exports.
+    * ``revenue_bess_dam_eur``      — BESS-DAM arbitrage net of the
+      grid-charging expense.
+    * ``revenue_self_consumption_eur`` — load coverage from PV-direct
+      and BESS-discharge; 0 in merchant mode.
+    * ``revenue_bess_fcr_eur``      — FCR capacity payment.
+    * ``revenue_bess_afrr_up_eur``  — aFRR-up capacity + activation.
+    * ``revenue_bess_afrr_dn_eur``  — aFRR-dn capacity + activation.
+    * ``revenue_bess_mfrr_up_eur``  — mFRR-up capacity + activation.
+    * ``revenue_bess_mfrr_dn_eur``  — mFRR-dn capacity + activation.
+    """
+    rev_pv_dam = float(kpis.get("profit_export_from_pv_eur", 0.0) or 0.0)
+    rev_bess_dam = (
+        float(kpis.get("profit_export_from_bess_eur", 0.0) or 0.0)
+        - float(kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
+    )
+    if mode == "self_consumption":
+        rev_self = (
+            float(kpis.get("profit_load_from_pv_eur", 0.0) or 0.0)
+            + float(kpis.get("profit_load_from_bess_eur", 0.0) or 0.0)
+        )
+    else:
+        rev_self = 0.0
+
+    def _bm(product: str, with_activation: bool) -> float:
+        cap = float(kpis.get(f"bm_{product}_capacity_revenue_eur", 0.0) or 0.0)
+        act = (
+            float(kpis.get(f"bm_{product}_activation_revenue_eur", 0.0) or 0.0)
+            if with_activation else 0.0
+        )
+        return cap + act
+
+    return {
+        "revenue_pv_dam_eur": round(rev_pv_dam, 2),
+        "revenue_bess_dam_eur": round(rev_bess_dam, 2),
+        "revenue_self_consumption_eur": round(rev_self, 2),
+        "revenue_bess_fcr_eur": round(_bm("fcr", False), 2),
+        "revenue_bess_afrr_up_eur": round(_bm("afrr_up", True), 2),
+        "revenue_bess_afrr_dn_eur": round(_bm("afrr_dn", True), 2),
+        "revenue_bess_mfrr_up_eur": round(_bm("mfrr_up", True), 2),
+        "revenue_bess_mfrr_dn_eur": round(_bm("mfrr_dn", True), 2),
+    }
 
 
 def _compute_balancing_kpis(
