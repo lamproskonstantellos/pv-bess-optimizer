@@ -743,6 +743,11 @@ def compute_financial_kpis(
     )
 
     # ---- LCOE / LCOS / capacity-factor / cycles --------------------------
+    # Balancing capacity and activation revenue do not enter either LCOE
+    # or LCOS — both metrics measure cost per delivered MWh, and the
+    # balancing streams are revenue (not cost) and do not produce DAM
+    # discharge MWh (the LCOS denominator).  They flow into NPV/IRR/payback
+    # via build_yearly_cashflow but are deliberately excluded here.
     extras: dict[str, float] = {
         "lcoe_eur_per_mwh": float("nan"),
         "lcos_eur_per_mwh": float("nan"),

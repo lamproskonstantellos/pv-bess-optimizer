@@ -518,6 +518,13 @@ def realise_balancing_scenario(
     total_activation = 0.0
     soc_constrained = False
 
+    # Capture per-product activation realisations so the optional SOC
+    # trajectory check below stays coupled to the revenue pass — a single
+    # Monte Carlo scenario must not report revenue from activation events
+    # that never happened in its SOC trace, nor "SOC OK" on a trace that
+    # never generated revenue.
+    activated_by_product: dict[str, np.ndarray] = {}
+
     for product in PRODUCTS_ALL:
         r = np.asarray(
             reservations.get(product, np.zeros(0, dtype=float)),
@@ -541,6 +548,7 @@ def realise_balancing_scenario(
             continue
         beta = activation_probability(cfg, product)
         activated = cleared & (rng.random(n) < beta)
+        activated_by_product[product] = activated
         act_price_col = f"{product}_activation_price_eur_per_mwh"
         act_price = np.asarray(prices[act_price_col], dtype=float)
         act_noise = _lognormal_unit_mean(rng, sigma_act, (n,))
@@ -553,30 +561,26 @@ def realise_balancing_scenario(
         per_product_activation[product] = act_revenue
         total_activation += act_revenue
 
-    # Optional SOC trajectory check.
+    # Optional SOC trajectory check — uses the activation arrays already
+    # sampled above so the SOC view of a scenario is bit-consistent with
+    # the revenue view of the same scenario.
     if soc_path_kwh is not None:
         if soc_min_kwh is None or soc_max_kwh is None:
             raise ValueError(
                 "soc_min_kwh and soc_max_kwh must be provided alongside "
                 "soc_path_kwh."
             )
-        # Reconstruct the realised SOC trajectory by summing the per-step
-        # activation drifts on top of the planned trajectory. Because we
-        # already sampled cleared/activated outcomes above we need a
-        # second pass to walk through SOC; resample independently using
-        # a fresh sub-generator so the soc-check is reproducible.
-        sub_rng = np.random.default_rng(rng.integers(0, 2**31 - 1))
         n = len(soc_path_kwh)
         realised_soc = np.array(soc_path_kwh, dtype=float)
         for product in PRODUCTS_UP + PRODUCTS_DN:
             r = np.asarray(reservations.get(product, np.zeros(n)), dtype=float)
-            alpha = acceptance_probability(cfg, product)
-            beta = activation_probability(cfg, product)
-            sample = (sub_rng.random(n) < alpha) & (sub_rng.random(n) < beta)
+            activated = activated_by_product.get(product)
+            if activated is None or activated.shape[0] != n:
+                continue
             if product in PRODUCTS_UP:
-                realised_soc -= sample.astype(float) * r * dt_hours / eta_discharge
+                realised_soc -= activated.astype(float) * r * dt_hours / eta_discharge
             else:
-                realised_soc += sample.astype(float) * r * dt_hours * eta_charge
+                realised_soc += activated.astype(float) * r * dt_hours * eta_charge
         if np.any(realised_soc < soc_min_kwh - 1e-6) or np.any(
             realised_soc > soc_max_kwh + 1e-6,
         ):

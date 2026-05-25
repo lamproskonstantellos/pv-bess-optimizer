@@ -160,6 +160,28 @@ Both helpers return `None` when the dispatch frame does not carry the
 balancing columns so the main pipeline can skip the page write without
 conditionals.
 
+## Modelling simplifications
+
+* **Settlement period.** All five products share a single settlement period
+  equal to `dt_minutes` from the dispatch timeseries; the validator in
+  `pvbess_opt.io._validate_balancing_config` rejects loads where
+  `bm_settlement_minutes != dt_minutes`. In the real European markets the
+  settlement cadences differ — FCR is sub-second, aFRR is typically 4–15 min,
+  mFRR is 15 min — and a higher-fidelity model would resolve each product on
+  its own cadence and re-aggregate to the DAM step. The audit decided to keep
+  the simplification because (a) the workbook cadence is the natural
+  reservation horizon for project-finance analysis, and (b) the worst-case
+  SOC headroom carried by `bm_soc_headroom_pct` already absorbs the within-
+  step variability the sub-cadence model would otherwise add.
+* **FCR symmetry in expectation.** FCR up- and down-activations are assumed
+  to cancel in expectation, so FCR contributes zero net SOC drift. The
+  `fcr_activation_probability_pct` field is retained for documentation and
+  is not consumed by the MILP, KPI, or Monte Carlo paths.
+* **DAM capacity share is declarative.** `dam_capacity_share_pct` is a
+  validator-only field used to ensure `sum(shares) <= 100 %`; DAM dispatch
+  is bounded indirectly by `BM_POWER_UP / BM_POWER_DN` consuming the residual
+  of `bess_power_kw` left over after the balancing reservations in each step.
+
 ## Worked numerical example
 
 Project: 1 MW / 4 MWh BESS, hourly cadence, one settlement period of dispatch.
