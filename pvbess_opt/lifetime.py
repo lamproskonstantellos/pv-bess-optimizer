@@ -84,6 +84,15 @@ _BESS_REVENUE_COLUMNS: tuple[str, ...] = (
     "expense_charge_bess_grid_eur",
 )
 
+# Balancing reservation columns scale with BESS capacity fade.
+_BALANCING_RESERVATION_COLUMNS: tuple[str, ...] = (
+    "bm_reservation_fcr_kw",
+    "bm_reservation_afrr_up_kw",
+    "bm_reservation_afrr_dn_kw",
+    "bm_reservation_mfrr_up_kw",
+    "bm_reservation_mfrr_dn_kw",
+)
+
 
 def _pv_factor(y: int, lid: float, d_annual: float) -> float:
     """Return the PV production factor for project year ``y``."""
@@ -205,6 +214,11 @@ def build_lifetime_dispatch(
     bess_cols = [c for c in _BESS_ORIGIN_COLUMNS if c in res_year1.columns]
     pv_rev_cols = [c for c in _PV_REVENUE_COLUMNS if c in res_year1.columns]
     bess_rev_cols = [c for c in _BESS_REVENUE_COLUMNS if c in res_year1.columns]
+    # Balancing reservations live on BESS capacity, so they degrade
+    # with the BESS capacity-fade curve.
+    balancing_cols = [
+        c for c in _BALANCING_RESERVATION_COLUMNS if c in res_year1.columns
+    ]
 
     # Anchor the timestamp shift to ``project_start_year`` so the
     # lifetime DataFrame's ``timestamp`` column is internally consistent
@@ -257,6 +271,8 @@ def build_lifetime_dispatch(
         for col in pv_rev_cols:
             chunk[col] = chunk[col].astype(float) * pv_f
         for col in bess_rev_cols:
+            chunk[col] = chunk[col].astype(float) * bess_f
+        for col in balancing_cols:
             chunk[col] = chunk[col].astype(float) * bess_f
         # soc_pct stays unchanged: SOC and E_cap both scale by bess_factor.
         chunks.append(chunk)
