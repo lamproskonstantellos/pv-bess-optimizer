@@ -34,7 +34,7 @@ def main() -> int:
             "672 = one week at 15-min steps. The full-year MILP for this "
             "particular combination (self_consumption + bess_only + no "
             "balancing) does not converge within the 5-min wall budget "
-            "(Phase 3 prompt fallback)."
+            "(audit-prompt budget fallback)."
         ),
     )
     args = parser.parse_args()

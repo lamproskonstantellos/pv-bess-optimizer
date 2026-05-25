@@ -96,7 +96,7 @@ def maybe_subsample(
     """Return ``(ts[:n_steps], subsample_used)`` or pass-through.
 
     Used by drivers whose full-year solve overruns the 5-min budget
-    (the fallback path documented in the Phase 3 prompt).
+    (the fallback path documented in the audit prompt).
     """
     if n_steps is None or n_steps <= 0 or n_steps >= len(ts):
         return ts, None

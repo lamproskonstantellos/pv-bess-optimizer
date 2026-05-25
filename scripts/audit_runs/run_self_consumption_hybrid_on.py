@@ -32,7 +32,7 @@ def main() -> int:
         "--subsample-steps", type=int, default=672,
         help=(
             "672 = one week at 15-min steps; full-year solve overruns "
-            "the 5-min budget (Phase 3 prompt fallback)."
+            "the 5-min budget (audit-prompt budget fallback)."
         ),
     )
     args = parser.parse_args()
