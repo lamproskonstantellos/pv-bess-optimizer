@@ -27,10 +27,13 @@ import pandas as pd
 
 from ..balancing import PRODUCTS_ALL
 from ..config import BM_COLOURS
+from ._currency import euro_axis_formatter, resolve_currency_format
+from .helpers import title_prefix
 from .style import (
     apply_fine_ticks,
     apply_universal_margins,
     empty_placeholder,
+    get_scenario_label,
     save_figure,
     show_titles,
 )
@@ -91,7 +94,10 @@ def plot_balancing_reservation_profile(
     ax.set_xticks(x)
     ax.set_xlim(0, 23)
     if show_titles():
-        ax.set_title("Balancing reservation profile (Year-1 average)")
+        ax.set_title(
+            f"Balancing reservation profile{title_prefix(get_scenario_label())} "
+            f"(Year-1 average)"
+        )
     ax.legend(loc="upper right", frameon=True, framealpha=0.9, fontsize=8)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
@@ -101,6 +107,8 @@ def plot_balancing_reservation_profile(
 
 def plot_balancing_mc_distribution(
     mc_results: dict[str, Any], out_path: Path,
+    *,
+    econ: dict[str, Any] | None = None,
 ) -> Path | None:
     """Render the realised balancing-revenue histogram with P10/P50/P90.
 
@@ -138,10 +146,15 @@ def plot_balancing_mc_distribution(
 
     ax.set_xlabel("Realised balancing revenue (EUR)")
     ax.set_ylabel("Scenario count")
+    fmt_mode = resolve_currency_format(econ)
+    ax.xaxis.set_major_formatter(euro_axis_formatter(fmt_mode))
     if show_titles():
-        ax.set_title("Balancing revenue — Monte Carlo distribution")
+        ax.set_title(
+            f"Balancing revenue — Monte Carlo distribution"
+            f"{title_prefix(get_scenario_label())}"
+        )
     ax.legend(loc="upper right", frameon=True, framealpha=0.9, fontsize=8)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
-    apply_fine_ticks(ax)
+    apply_fine_ticks(ax, axis="x")
     return save_figure(Path(out_path))

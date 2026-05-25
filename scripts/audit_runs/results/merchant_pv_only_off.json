@@ -116,8 +116,9 @@
   "mc_scenarios": 25,
   "monte_carlo": null,
   "n_steps": 35040,
-  "peak_rss_mb": 1359.7,
-  "solve_runtime_s": 90.475,
+  "peak_rss_mb": 1358.4,
+  "solve_runtime_s": 66.381,
   "solve_status": "optimal",
-  "solver": "highs"
+  "solver": "highs",
+  "subsample_steps_applied": null
 }

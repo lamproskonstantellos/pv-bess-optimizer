@@ -500,8 +500,11 @@ _BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "(FCR / aFRR / mFRR). When FALSE the MILP, KPIs and outputs are "
      "bit-identical to a run without the sheet."),
     ("dam_capacity_share_pct", 70.0, "%",
-     "Share of bess_power_kw reserved for DAM dispatch. Sum across all "
-     "share keys must be <= 100 %."),
+     "Declarative share used only by the validator to ensure the total "
+     "across DAM + every balancing product stays <= 100 % of bess_power_kw. "
+     "It does not actively cap DAM dispatch in the MILP — DAM consumes the "
+     "residual of bess_power_kw not reserved for balancing, implicitly "
+     "bounded each step by BM_POWER_UP / BM_POWER_DN."),
     ("fcr_capacity_share_pct", 10.0, "%",
      "Share of bess_power_kw available for FCR reservation (symmetric)."),
     ("afrr_up_capacity_share_pct", 8.0, "%",
@@ -523,8 +526,11 @@ _BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("mfrr_dn_bid_acceptance_pct", 40.0, "%",
      "Probability that a submitted mFRR-down bid clears the auction."),
     ("fcr_activation_probability_pct", 15.0, "%",
-     "FCR duty-cycle proxy — probability a cleared FCR reservation is "
-     "activated within a settlement period."),
+     "Informational only. FCR is modelled as capacity-only (no activation "
+     "payment) and as symmetric in expectation (no SOC drift), so the MILP, "
+     "KPIs and Monte Carlo realisation do not consume this value. Retained "
+     "for documentation and future use should an FCR activation revenue "
+     "stream be added."),
     ("afrr_up_activation_probability_pct", 10.0, "%",
      "Probability a cleared aFRR-up reservation is activated within a "
      "settlement period."),
@@ -1166,6 +1172,10 @@ def _resolve_pv_column(
 # Keys whose value is read as the share of bess_power_kw allocated to a
 # specific market product. The DAM line is included so the sum across
 # every consumer of the BESS power budget is bounded by 100 %.
+# Note: only the *sum* is enforced. The individual ``dam_capacity_share_pct``
+# value is declarative — DAM dispatch is bounded indirectly by
+# ``BM_POWER_UP`` / ``BM_POWER_DN`` consuming the residual of bess_power_kw
+# left over after the balancing reservations in each step.
 _BALANCING_SHARE_KEYS: tuple[str, ...] = (
     "dam_capacity_share_pct",
     "fcr_capacity_share_pct",
