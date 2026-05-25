@@ -84,11 +84,11 @@ def test_build_per_step_max_injection_frac_24x12_picks_month():
 
 
 def test_build_per_step_max_injection_frac_none_falls_back_to_default():
-    """``profile=None`` falls back to the project default
-    (DEFAULT_MAX_INJECTION_PCT_HOURLY = 73 %)."""
+    """``profile=None`` falls back to the no-curtailment default
+    (``DEFAULT_MAX_INJECTION_PCT_HOURLY = 100``)."""
     timestamps = pd.date_range("2026-06-01", periods=4, freq="h")
     out = build_per_step_max_injection_frac(timestamps, profile=None)
-    assert np.allclose(out, 0.73)
+    assert np.allclose(out, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ def test_missing_sheet_falls_back_to_default(tmp_path, caplog):
             df.to_excel(writer, sheet_name=name, index=False)
     with caplog.at_level("INFO", logger="pvbess_opt.io"):
         out = read_workbook(dst)
-    assert np.allclose(np.asarray(out["max_injection_profile"]), 73.0)
+    assert np.allclose(np.asarray(out["max_injection_profile"]), 100.0)
     assert any(
         "max_injection_profile" in rec.getMessage().lower()
         for rec in caplog.records

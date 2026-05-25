@@ -60,16 +60,16 @@ def test_repo_input_xlsx_has_negative_dam_hours():
     assert 12 <= n_neg <= 20
 
 
-def test_max_injection_pct_is_constant_73_in_production_workbook():
-    # I.1: every row of the canonical max_injection_pct column in the
-    # production workbook is 73 (the documented headline default that
-    # the constant-default fallback also emits).  Pins the user-facing
-    # contract that headline-KPI tests only enforce indirectly.
+def test_max_injection_pct_is_no_curtailment_in_production_workbook():
+    # Every row of the canonical max_injection_pct column in the
+    # production workbook is 100 — the no-curtailment default.  Users
+    # opt in to curtailment by editing the sheet; the shipped workbook
+    # imposes no per-hour export cap beyond the regulatory nameplate.
     profile = pd.read_excel(
         ROOT / "inputs" / "input.xlsx",
         sheet_name="max_injection_profile",
     )["max_injection_pct"]
-    assert (profile == 73.0).all()
+    assert (profile == 100.0).all()
 
 
 def test_read_workbook_round_trip_after_build_script():

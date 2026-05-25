@@ -234,9 +234,10 @@ def test_loader_reads_legacy_schema_with_warning(tmp_path):
 
 
 def test_loader_falls_back_to_default_when_sheet_missing(tmp_path):
-    """No profile sheet at all → flat default at 73.0."""
+    """No profile sheet at all → flat no-curtailment default at 100.0."""
     from pvbess_opt.config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 
+    assert DEFAULT_MAX_INJECTION_PCT_HOURLY == 100.0
     dst = _write_minimal_workbook_with_sheet(tmp_path, "", None, np.array([]))
     typed = read_workbook(dst)
     expected = np.full(24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float)

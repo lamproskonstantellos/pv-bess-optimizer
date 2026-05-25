@@ -249,8 +249,8 @@ def test_max_injection_profile_missing_logs_info(tmp_path, caplog):
             df.to_excel(writer, sheet_name=name, index=False)
     with caplog.at_level("INFO", logger="pvbess_opt.io"):
         out = read_workbook(dst)
-    # Constant 73 % default applied.
-    assert np.allclose(np.asarray(out["max_injection_profile"]), 73.0)
+    # No-curtailment default (100 %) applied.
+    assert np.allclose(np.asarray(out["max_injection_profile"]), 100.0)
     assert any(
         "max_injection_profile" in rec.getMessage().lower()
         for rec in caplog.records

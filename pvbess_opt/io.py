@@ -23,9 +23,9 @@ The schema is **seven sheets**, one logical theme per sheet:
 * ``max_injection_profile`` — hour-of-day cap profile (24 rows),
   optionally with one column per calendar month, expressing the share
   of ``p_grid_export_max_kw`` available for export.  Missing → fall
-  back to a constant 73 % and log INFO.  The legacy schema
-  (``curtailment_profile`` sheet with ``curtailment_pct`` column) is
-  still read and converted via ``100 - x`` with a ``DeprecationWarning``.
+  back to the no-curtailment default (a flat 100 %) and log INFO.  The
+  legacy ``curtailment_profile`` sheet is also read and converted via
+  ``100 - x`` with a ``DeprecationWarning`` (removed in a later phase).
 
 Public loader API
 -----------------

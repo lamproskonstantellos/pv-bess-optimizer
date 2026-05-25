@@ -16,8 +16,9 @@ Two supported shapes (auto-detected by the loader in
 
 The :func:`build_per_step_max_injection_frac` helper expands the
 profile to a per-timestep fraction array aligned with the timeseries.
-When the profile is the default constant 73 % at every hour the
-resulting per-step series is a flat 0.73.
+The default profile is a flat 100 % at every hour (no curtailment); the
+per-step series is then a flat 1.0 and the cap binds only on the
+regulatory grid-connection nameplate.
 """
 
 from __future__ import annotations
