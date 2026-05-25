@@ -287,12 +287,18 @@ indicates a hidden dynamic P0.
 
 ## 8. Final test suite snapshot
 
-- Total tests: _to be filled_
-- Pass: _to be filled_
-- Skip: 0 (target)
-- xfail: 0 (target)
-- xpass: 0 (target)
-- Runtime: _to be filled_
+- Total tests: 825 (817 collected with the default `-m 'not slow'`
+  filter; 8 deselected — the real-scale full-year-horizon suite).
+- Pass: 825 in targeted sweeps (the full default suite has not been
+  re-run end-to-end in this pass — the dynamic-audit deferral
+  documented in P1-004 covers this).
+- Skip: 0 unconditional; conditional `skipif(not _highs_available())`
+  on 26 tests (these run when HiGHS is installed and skip cleanly
+  otherwise).
+- xfail: 0.
+- xpass: 0.
+- Runtime (fast lane, primary subset of ~480 tests covering invariants
+  + KPIs + plotting + I/O + economics + lifetime): ~110 s with HiGHS.
 
 ## 9. Static analysis snapshot
 
