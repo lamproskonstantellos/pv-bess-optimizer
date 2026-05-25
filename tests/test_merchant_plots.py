@@ -2,7 +2,7 @@
 
 Each merchant-mode resolution (daily / monthly / yearly) gets a
 new plot trio: dispatch, SOC, revenue.  The dispatcher in main.py
-branches on ``params['mode']`` so vnb runs keep the existing
+branches on ``params['mode']`` so self_consumption runs keep the existing
 supply / surplus / combined trio while merchant runs use the new
 one.
 """
@@ -179,7 +179,7 @@ def test_dispatcher_renders_merchant_trio(tmp_path):
         daily=True, monthly=True, yearly=True,
         mode="merchant",
     )
-    # Should NOT have produced any vnb supply/surplus plots.
+    # Should NOT have produced any self_consumption supply/surplus plots.
     assert not list(tmp_path.rglob("daily_supply_*.pdf"))
     # Should HAVE produced merchant dispatch / soc / revenue plots.
     assert list(tmp_path.rglob("daily_dispatch_*.pdf"))
@@ -201,19 +201,19 @@ def test_dispatcher_renders_merchant_combined(tmp_path):
     assert list(tmp_path.rglob("yearly_combined.pdf"))
 
 
-def test_dispatcher_renders_vnb_trio(tmp_path):
+def test_dispatcher_renders_self_consumption_trio(tmp_path):
     from main import _generate_energy_plots_for_year
     df = _make_dispatch()
-    df["load_kwh"] = 200.0  # add load for vnb
+    df["load_kwh"] = 200.0  # add load for self_consumption
     df["pv_to_load_kwh"] = np.minimum(df["pv_kwh"], 200.0)
     df["grid_to_load_kwh"] = np.maximum(200.0 - df["pv_to_load_kwh"], 0.0)
     _generate_energy_plots_for_year(
         df, 2026, tmp_path,
         daily=True, monthly=False, yearly=False,
-        mode="vnb",
+        mode="self_consumption",
     )
     assert list(tmp_path.rglob("daily_supply_*.pdf"))
     assert list(tmp_path.rglob("daily_surplus_*.pdf"))
     assert list(tmp_path.rglob("daily_combined_*.pdf"))
-    # Merchant trio NOT produced in vnb mode.
+    # Merchant trio NOT produced in self_consumption mode.
     assert not list(tmp_path.rglob("daily_dispatch_*.pdf"))

@@ -84,11 +84,11 @@ def test_build_per_step_max_injection_frac_24x12_picks_month():
 
 
 def test_build_per_step_max_injection_frac_none_falls_back_to_default():
-    """``profile=None`` falls back to the project default
-    (DEFAULT_MAX_INJECTION_PCT_HOURLY = 73 %)."""
+    """``profile=None`` falls back to the no-curtailment default
+    (``DEFAULT_MAX_INJECTION_PCT_HOURLY = 100``)."""
     timestamps = pd.date_range("2026-06-01", periods=4, freq="h")
     out = build_per_step_max_injection_frac(timestamps, profile=None)
-    assert np.allclose(out, 0.73)
+    assert np.allclose(out, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -121,8 +121,8 @@ def test_monthly_format_loads(tmp_path):
 
 
 def test_missing_sheet_falls_back_to_default(tmp_path, caplog):
-    """When neither max_injection_profile nor the legacy sheet is
-    present, the loader logs INFO and uses the constant default."""
+    """When the max_injection_profile sheet is absent, the loader
+    logs INFO and uses the no-curtailment default."""
     typed = _minimal_typed(np.full(24, 73.0, dtype=float))
     dst = tmp_path / "wb_dropped.xlsx"
     write_workbook(typed, dst)
@@ -137,7 +137,7 @@ def test_missing_sheet_falls_back_to_default(tmp_path, caplog):
             df.to_excel(writer, sheet_name=name, index=False)
     with caplog.at_level("INFO", logger="pvbess_opt.io"):
         out = read_workbook(dst)
-    assert np.allclose(np.asarray(out["max_injection_profile"]), 73.0)
+    assert np.allclose(np.asarray(out["max_injection_profile"]), 100.0)
     assert any(
         "max_injection_profile" in rec.getMessage().lower()
         for rec in caplog.records
@@ -145,17 +145,16 @@ def test_missing_sheet_falls_back_to_default(tmp_path, caplog):
 
 
 # ---------------------------------------------------------------------------
-# Optimizer: a constant 73% max-injection profile applies the export
-# cap as 73% of p_grid_export_max_kw in every hour.
+# Optimizer: a constant 73 % max-injection profile applies the export
+# cap as 73 % of p_grid_export_max_kw in every hour.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
-def test_constant_73_matches_v07_export_caps(short_params, short_ts):
-    """A constant 73 % max-injection profile (= the inverse of the
-    historical 27 % curtailment) produces a flat 0.73 per-step
-    fraction, equivalent to the legacy scalar path's
-    p_grid_export_max_kw * (1 - 0.27)."""
+def test_constant_73_pct_caps_export(short_params, short_ts):
+    """A constant 73 % max-injection profile produces a flat 0.73
+    per-step fraction and caps every hour's export at
+    p_grid_export_max_kw * 0.73."""
     profile = np.full(24, 73.0, dtype=float)
     params = dict(short_params)
     params["max_injection_profile"] = profile
@@ -216,7 +215,7 @@ def test_zero_during_solar_window(short_params):
 
 
 # ---------------------------------------------------------------------------
-# v0.8 hour_of_day interval-string formatting + backward-compat parsing
+# hour_of_day interval-string formatting + parser
 # ---------------------------------------------------------------------------
 
 
@@ -238,62 +237,6 @@ def test_repo_input_xlsx_hour_of_day_uses_interval_strings():
     assert raw["hour_of_day"].astype(str).tolist() == expected
     assert raw["hour_of_day"].iloc[0] == "00:00-01:00"
     assert raw["hour_of_day"].iloc[23] == "23:00-24:00"
-
-
-def test_loader_parses_legacy_integer_hour_of_day(tmp_path):
-    """Legacy workbooks with the old ``curtailment_profile`` sheet AND
-    an integer 0..23 ``hour_of_day`` column still load via the
-    backward-compat shim, with a DeprecationWarning.  Kept on purpose to
-    pin the one-release migration contract."""
-    timestamps = pd.date_range("2026-06-01", periods=24, freq="h")
-    ts = pd.DataFrame({
-        "timestamp": timestamps,
-        "pv_kwh": np.zeros(24),
-        "load_kwh": np.full(24, 100.0),
-        "dam_price_eur_per_mwh": np.full(24, 80.0),
-    })
-    project_kv = pd.DataFrame({
-        "key": ["mode", "p_grid_export_max_kw"],
-        "value": ["vnb", 5000.0],
-        "unit": ["", ""],
-        "notes": ["", ""],
-    })
-    pv_kv = pd.DataFrame({
-        "key": ["pv_nameplate_kwp"],
-        "value": [1000.0],
-        "unit": [""],
-        "notes": [""],
-    })
-    bess_kv = pd.DataFrame({
-        "key": ["bess_power_kw", "bess_capacity_kwh"],
-        "value": [500.0, 2000.0],
-        "unit": ["", ""],
-        "notes": ["", ""],
-    })
-    economics_kv = pd.DataFrame({"key": [], "value": [], "unit": [], "notes": []})
-    simulation_kv = pd.DataFrame({"key": [], "value": [], "unit": [], "notes": []})
-    # legacy schema — keeps the old name on purpose
-    legacy_curt = pd.DataFrame({
-        "hour_of_day": np.arange(24, dtype=int),
-        "curtailment_pct": np.full(24, 27.0, dtype=float),
-    })
-    dst = tmp_path / "legacy_hours.xlsx"
-    with pd.ExcelWriter(dst, engine="openpyxl") as writer:
-        ts.to_excel(writer, sheet_name="timeseries", index=False)
-        project_kv.to_excel(writer, sheet_name="project", index=False)
-        pv_kv.to_excel(writer, sheet_name="pv", index=False)
-        bess_kv.to_excel(writer, sheet_name="bess", index=False)
-        economics_kv.to_excel(writer, sheet_name="economics", index=False)
-        simulation_kv.to_excel(writer, sheet_name="simulation", index=False)
-        legacy_curt.to_excel(
-            writer, sheet_name="curtailment_profile", index=False,
-        )
-    with pytest.warns(DeprecationWarning, match="legacy sheet"):
-        out = read_workbook(dst)
-    profile = np.asarray(out["max_injection_profile"], dtype=float)
-    assert profile.shape == (24,)
-    # 27 % curtailment ⇒ 73 % allowed to inject after the 100-x flip.
-    assert np.allclose(profile, 73.0)
 
 
 def test_loader_parses_interval_string_hour_of_day(tmp_path):

@@ -100,13 +100,13 @@ def test_read_workbook_repo_default(repo_input_xlsx):
     for section in ("project", "pv", "bess", "economics", "simulation"):
         assert section in typed
     assert typed["dt_minutes"] == 15
-    assert typed["project"]["mode"] == "vnb"
+    assert typed["project"]["mode"] == "self_consumption"
 
 
 def test_read_inputs_returns_flat_params(repo_input_xlsx):
     params, ts = read_inputs(repo_input_xlsx)
     assert "efficiency_charge" in params and "bess_power_kw" in params
-    assert params["mode"] == "vnb"
+    assert params["mode"] == "self_consumption"
     assert "load_kwh" in ts.columns
     assert len(ts) == 35040
 
@@ -126,8 +126,8 @@ def test_workbook_round_trip(tmp_path, repo_input_xlsx):
     assert len(typed["ts"]) == len(typed2["ts"])
 
 
-def test_vnb_requires_load_column(tmp_path, repo_input_xlsx):
-    """vnb mode requires load_kwh in timeseries."""
+def test_self_consumption_requires_load_column(tmp_path, repo_input_xlsx):
+    """self_consumption mode requires load_kwh in timeseries."""
     typed = read_workbook(repo_input_xlsx)
     typed["ts"] = typed["ts"].drop(columns=["load_kwh"])
     dst = tmp_path / "no_load.xlsx"
@@ -146,13 +146,14 @@ def test_merchant_mode_load_optional(tmp_path, repo_input_xlsx):
     assert typed2["project"]["mode"] == "merchant"
 
 
-def test_unknown_mode_falls_back_to_vnb(tmp_path):
+def test_unknown_mode_raises(tmp_path):
+    """An unrecognized mode value raises ValueError; no silent fallback."""
     typed = _minimal_typed()
     typed["project"]["mode"] = "vnb"
     dst = tmp_path / "test.xlsx"
     write_workbook(typed, dst)
-    out = read_workbook(dst)
-    assert out["project"]["mode"] == "vnb"
+    with pytest.raises(ValueError, match="unknown mode"):
+        read_workbook(dst)
 
 
 def test_write_workbook_emits_all_sheets(tmp_path, repo_input_xlsx):
@@ -166,8 +167,7 @@ def test_write_workbook_emits_all_sheets(tmp_path, repo_input_xlsx):
 
 
 # ---------------------------------------------------------------------------
-# Phase-3 schema shim: max_injection_profile (new) + curtailment_profile
-# (legacy, with DeprecationWarning) + default fallback.
+# max_injection_profile schema: typed round-trip and default fallback.
 # ---------------------------------------------------------------------------
 
 
@@ -180,9 +180,9 @@ def _write_minimal_workbook_with_sheet(
     """Write a minimal valid workbook whose only profile sheet is
     ``sheet_name`` with column ``column_name`` and ``values``.
 
-    Used by the legacy-schema and default-fallback tests.  All other
-    sheets come from :func:`_minimal_typed` via :func:`write_workbook`,
-    then the profile sheet is replaced in-place via openpyxl.
+    Used by the schema and default-fallback tests.  All other sheets
+    come from :func:`_minimal_typed` via :func:`write_workbook`, then
+    the profile sheet is replaced in-place via openpyxl.
     """
     import openpyxl
 
@@ -217,58 +217,15 @@ def test_loader_reads_new_schema(tmp_path):
     np.testing.assert_array_equal(typed["max_injection_profile"], vals)
 
 
-def test_loader_reads_legacy_schema_with_warning(tmp_path):
-    """Legacy curtailment_profile sheet → values flipped (100 - x) +
-    DeprecationWarning."""
-    legacy = np.full(24, 27.0, dtype=float)
-    legacy[6:8] = 60.0
-    dst = _write_minimal_workbook_with_sheet(
-        tmp_path, "curtailment_profile", "curtailment_pct", legacy,
-    )
-    with pytest.warns(DeprecationWarning, match="legacy sheet"):
-        typed = read_workbook(dst)
-    np.testing.assert_array_equal(
-        typed["max_injection_profile"], 100.0 - legacy,
-    )
-
-
 def test_loader_falls_back_to_default_when_sheet_missing(tmp_path):
-    """No profile sheet at all → flat default at 73.0."""
+    """No profile sheet at all → flat no-curtailment default at 100.0."""
     from pvbess_opt.config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 
+    assert DEFAULT_MAX_INJECTION_PCT_HOURLY == 100.0
     dst = _write_minimal_workbook_with_sheet(tmp_path, "", None, np.array([]))
     typed = read_workbook(dst)
     expected = np.full(24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float)
     np.testing.assert_array_equal(typed["max_injection_profile"], expected)
-
-
-def test_loader_new_schema_takes_precedence_over_legacy(tmp_path):
-    """Both sheets present → loader prefers the new schema and does NOT
-    emit the legacy DeprecationWarning."""
-    import warnings as _w
-
-    import openpyxl
-
-    typed_in = _minimal_typed()
-    dst = tmp_path / "both.xlsx"
-    write_workbook(typed_in, dst)  # writes max_injection_profile with 73s
-
-    wb = openpyxl.load_workbook(dst)
-    ws = wb.create_sheet("curtailment_profile")
-    ws.cell(1, 1, "hour_of_day")
-    ws.cell(1, 2, "curtailment_pct")
-    for h in range(24):
-        ws.cell(h + 2, 1, h)
-        ws.cell(h + 2, 2, 99.0)  # sentinel — should NOT be read
-    wb.save(dst)
-
-    with _w.catch_warnings():
-        _w.simplefilter("error", DeprecationWarning)
-        typed = read_workbook(dst)
-    # New-schema values (from _minimal_typed: flat 73) come through.
-    np.testing.assert_array_equal(
-        typed["max_injection_profile"], np.full(24, 73.0),
-    )
 
 
 def test_project_lifecycle_years_default_is_twenty():

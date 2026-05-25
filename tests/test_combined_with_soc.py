@@ -1,4 +1,4 @@
-"""Render-time checks for ``plot_daily_combined_with_soc`` (VNB) and
+"""Render-time checks for ``plot_daily_combined_with_soc`` (Self-consumption) and
 ``plot_daily_combined_merchant_with_soc`` (merchant).
 
 The combined-with-SOC plots add a SOC (%) overlay on the right axis to
@@ -12,7 +12,7 @@ LEFT, SOC (%) on the RIGHT.  These tests guard:
 * the plot collapses to a single Axes (no ``twinx``) when the BESS is
   absent (every SOC value is zero);
 * the ``Import→BESS (charge)`` label appears in the legend when
-  grid-charging is active in VNB mode.
+  grid-charging is active in Self-consumption mode.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ import pytest
 import pvbess_opt.plotting.daily as daily_mod
 
 
-def _make_dispatch_vnb(n_hours: int = 48) -> pd.DataFrame:
-    """48-h VNB-flavoured dispatch with non-zero SOC and load."""
+def _make_dispatch_self_consumption(n_hours: int = 48) -> pd.DataFrame:
+    """48-h Self-consumption-flavoured dispatch with non-zero SOC and load."""
     n = n_hours
     timestamps = pd.date_range("2026-06-01 00:00", periods=n, freq="h")
     h = np.arange(n) % 24
@@ -60,7 +60,7 @@ def _make_dispatch_vnb(n_hours: int = 48) -> pd.DataFrame:
 
 def _make_dispatch_merchant(n_hours: int = 48) -> pd.DataFrame:
     """48-h merchant dispatch with zero load and non-zero SOC."""
-    df = _make_dispatch_vnb(n_hours)
+    df = _make_dispatch_self_consumption(n_hours)
     df["load_kwh"] = 0.0
     df["pv_to_load_kwh"] = 0.0
     df["grid_to_load_kwh"] = 0.0
@@ -100,8 +100,8 @@ def _close_figures():
 # ---------------------------------------------------------------------------
 
 
-def test_vnb_combined_with_soc_writes_pdf(tmp_path):
-    df = _make_dispatch_vnb()
+def test_self_consumption_combined_with_soc_writes_pdf(tmp_path):
+    df = _make_dispatch_self_consumption()
     daily_mod.plot_daily_combined_with_soc(df, "2026-06-01", tmp_path)
     files = list(tmp_path.rglob("daily_combined_with_soc_2026-06-01.pdf"))
     assert files
@@ -121,8 +121,8 @@ def test_merchant_combined_with_soc_writes_pdf(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_vnb_combined_with_soc_skips_overlay_when_no_bess():
-    df = _make_dispatch_vnb()
+def test_self_consumption_combined_with_soc_skips_overlay_when_no_bess():
+    df = _make_dispatch_self_consumption()
     df["soc_kwh"] = 0.0
     df["soc_pct"] = 0.0
     fig = _capture_daily_combined(
@@ -155,7 +155,7 @@ def test_merchant_combined_with_soc_skips_overlay_when_no_bess():
 def test_soc_overlay_axis_layout(fn_name):
     fn = getattr(daily_mod, fn_name)
     df = (
-        _make_dispatch_vnb()
+        _make_dispatch_self_consumption()
         if fn_name == "plot_daily_combined_with_soc"
         else _make_dispatch_merchant()
     )
@@ -171,12 +171,12 @@ def test_soc_overlay_axis_layout(fn_name):
 
 
 # ---------------------------------------------------------------------------
-# 5. Grid-charging visibility — VNB
+# 5. Grid-charging visibility — Self-consumption
 # ---------------------------------------------------------------------------
 
 
-def test_vnb_combined_with_soc_legend_shows_grid_charge():
-    df = _make_dispatch_vnb()
+def test_self_consumption_combined_with_soc_legend_shows_grid_charge():
+    df = _make_dispatch_self_consumption()
     # Force grid-charging at night (zero PV) for the first six hours.
     df.loc[:5, "bess_charge_grid_kwh"] = 150.0
     fig = _capture_daily_combined(
@@ -193,14 +193,14 @@ def test_vnb_combined_with_soc_legend_shows_grid_charge():
 # ---------------------------------------------------------------------------
 
 
-def test_dispatcher_renders_vnb_combined_with_soc(tmp_path):
+def test_dispatcher_renders_self_consumption_combined_with_soc(tmp_path):
     from main import _generate_energy_plots_for_year
 
-    df = _make_dispatch_vnb()
+    df = _make_dispatch_self_consumption()
     _generate_energy_plots_for_year(
         df, 2026, tmp_path,
         daily=True, monthly=False, yearly=False,
-        mode="vnb",
+        mode="self_consumption",
     )
     assert list(tmp_path.rglob("daily_combined_with_soc_*.pdf"))
 

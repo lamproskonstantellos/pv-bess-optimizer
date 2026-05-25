@@ -31,9 +31,9 @@ SCAN_GLOBS = ("**/*.py", "**/*.md", "**/*.rst")
 ALLOWED_PATHS = {
     "tests/test_no_historical_version_strings.py",
     "tests/test_v0_leftover_audit.py",
-    # The audit report is the historical record of this cleanup and is
-    # the one surface that intentionally retains the old tokens.
-    "docs/AUDIT_REPORT.md",
+    # The audit report documents the audit findings and is the one surface
+    # that names the prior tokens it removed.
+    "docs/audit_report.md",
 }
 SKIP_DIR_PARTS = {"__pycache__", "build", ".git", "_static", "_templates"}
 

@@ -50,7 +50,7 @@ def _make_short_ts(n_hours: int = 48, *, with_load: bool = True, seed: int = 0) 
     return pd.DataFrame(df)
 
 
-def _short_params(mode: str = "vnb") -> dict:
+def _short_params(mode: str = "self_consumption") -> dict:
     """Minimal valid param dict for a 48-hour test (v0.8 schema)."""
     return {
         "dt_minutes": 60,
@@ -117,14 +117,14 @@ def short_ts_15min() -> pd.DataFrame:
 @pytest.fixture(scope="module")
 def short_params_15min() -> dict:
     """Hourly :func:`_short_params` with ``dt_minutes`` flipped to 15."""
-    p = _short_params("vnb")
+    p = _short_params("self_consumption")
     p["dt_minutes"] = 15
     return p
 
 
 @pytest.fixture(scope="module")
 def short_params() -> dict:
-    return _short_params("vnb")
+    return _short_params("self_consumption")
 
 
 @pytest.fixture(scope="module")

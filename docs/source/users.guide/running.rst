@@ -20,7 +20,7 @@ Flag                                 Purpose
 ``--outdir``                         Output base directory
                                      (default ``results``).
 ``--mode``                           Override regulatory mode at the CLI:
-                                     ``vnb`` | ``merchant``.  Default: read
+                                     ``self_consumption`` | ``merchant``.  Default: read
                                      from the workbook.
 ``--strict``                         Turn dispatch-invariant violations from
                                      warnings into errors.
@@ -71,4 +71,4 @@ A run writes to
                        DAM heatmap, forecast-gap comparison
 
 The folder slug is ``<mode>[_grid_ch]`` (e.g.
-``vnb`` or ``merchant_grid_ch``).
+``self_consumption`` or ``merchant_grid_ch``).

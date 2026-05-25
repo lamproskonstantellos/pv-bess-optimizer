@@ -2,7 +2,7 @@ Asset modes — PV-only / BESS-only / hybrid
 ==========================================
 
 The loader reads zero literally — there is no inference from the
-timeseries or from legacy power keys.  The four cases are:
+timeseries or from a power-key fallback.  The four cases are:
 
 .. list-table::
    :header-rows: 1
@@ -49,7 +49,7 @@ zeros out ``soc``, ``pv_to_bess``, ``grid_to_bess``, ``bess_dis_load``,
 ``bess_dis_grid``, ``y_charge``, ``y_dis`` for all ``t``, and skips the
 BESS-only constraints (``EP``, ``CYC``, ``SOC_INIT``, ``SOC_TERM*``,
 ``MODE_LINK``, ``CH_LIM``, ``DIS_LIM``, ``GRID_CHARGE_GATE``,
-``GRID_CHG_PV_GATE``).  The vnb-mode ``LOAD_BAL`` constraint stays
+``GRID_CHG_PV_GATE``).  The self_consumption-mode ``LOAD_BAL`` constraint stays
 active — the load is still served by some combination of PV and grid
 even when the BESS is absent.
 
@@ -57,7 +57,7 @@ Capacity helper
 ---------------
 
 ``pvbess_opt.economics.derive_asset_capacities`` does not infer
-capacities from the timeseries or from any legacy power key.
+capacities from the timeseries or from any power-key fallback.
 Declared values pass through exactly:
 
 .. code-block:: python
@@ -76,10 +76,10 @@ Plot behaviour
 --------------
 
 * The existing ``plot_stack_filtered`` helper drops zero series, so the
-  vnb-mode supply / surplus / combined plots naturally hide the
+  self_consumption-mode supply / surplus / combined plots naturally hide the
   missing asset's stacks.
 * Every energy-plot title carries a project-mode suffix —
-  ``(vnb; PV-only)``, ``(merchant; BESS-only)``, etc — driven by the
+  ``(self_consumption; PV-only)``, ``(merchant; BESS-only)``, etc — driven by the
   ``set_project_mode_label`` setter that ``main.py`` calls before
   the plot fan-out.
 * The merchant-mode ``plot_*_soc`` helpers skip rendering when the BESS

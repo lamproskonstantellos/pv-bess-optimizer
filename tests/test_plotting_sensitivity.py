@@ -87,8 +87,8 @@ def _npv_sens_df() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _legacy_sens_df() -> pd.DataFrame:
-    """Frame without ``value`` / ``delta_value`` metadata."""
+def _minimal_sens_df() -> pd.DataFrame:
+    """Sensitivity frame without the optional driver-value metadata."""
     rows = []
     for label, low, high in (
         ("Total CAPEX", 13.0, 18.0),
@@ -314,19 +314,19 @@ def test_tornado_labels_outside_bar(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Backward compatibility — legacy frame, no metadata
+# Minimal frame (no optional driver-value metadata) still renders
 # ---------------------------------------------------------------------------
 
 
-def test_tornado_backward_compat(tmp_path, monkeypatch):
+def test_tornado_minimal_frame(tmp_path, monkeypatch):
     """A frame without driver-value metadata renders zero endpoint
     labels: no driver-value labels (no metadata to draw from) and no
     metric labels either (the metric is read from the x-axis).  The
     ``Base = ...`` legend entry from the dashed axvline is still
     present; the y-axis ticks omit the ``±range`` suffix."""
     captured = _capture(monkeypatch)
-    out = plot_irr_tornado(_legacy_sens_df(), {"irr_pct": 15.0}, _econ(),
-                           tmp_path / "irr_legacy.pdf")
+    out = plot_irr_tornado(_minimal_sens_df(), {"irr_pct": 15.0}, _econ(),
+                           tmp_path / "irr_minimal.pdf")
     assert out.exists() or out is not None
     ax = captured["fig"].axes[0]
     ylabels = [t.get_text() for t in ax.get_yticklabels()]

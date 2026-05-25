@@ -7,11 +7,6 @@ Covers:
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
-* Legacy two-sheet (project + economic) workbooks load with a
-  single migration WARNING.
-* The four legacy ``# optimization`` keys still warn.
-* The "removed legacy key" warnings for ``capex_licenses_eur_per_kw``,
-  ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw``.
 """
 
 from __future__ import annotations
@@ -121,7 +116,7 @@ def test_repo_workbook_loads_typed_dict(repo_input_xlsx):
     typed = read_workbook(repo_input_xlsx)
     for section in ("project", "pv", "bess", "economics", "simulation"):
         assert section in typed and isinstance(typed[section], dict)
-    assert typed["project"]["mode"] == "vnb"
+    assert typed["project"]["mode"] == "self_consumption"
     # The case-study workbook ships with the canonical 8 MW shape
     # rescaled to the 15 MW default scenario.
     assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(15000.0)
@@ -210,26 +205,6 @@ def test_misplaced_key_routes_warning_to_correct_sheet(caplog):
 
 
 # ---------------------------------------------------------------------------
-# Removed legacy keys still warn
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("removed_key", [
-    "capex_licenses_eur_per_kw",
-    "battery_hours",
-    "p_charge_max_kw",
-    "p_dis_max_kw",
-])
-def test_legacy_removed_keys_warn(removed_key, caplog):
-    flat = {removed_key: 42.0}
-    with caplog.at_level("WARNING"):
-        _parse_kv_sheet("bess", flat)
-    msgs = " ".join(r.getMessage() for r in caplog.records)
-    assert removed_key in msgs
-    assert "no longer supported" in msgs
-
-
-# ---------------------------------------------------------------------------
 # Max-injection-profile loader
 # ---------------------------------------------------------------------------
 
@@ -249,8 +224,8 @@ def test_max_injection_profile_missing_logs_info(tmp_path, caplog):
             df.to_excel(writer, sheet_name=name, index=False)
     with caplog.at_level("INFO", logger="pvbess_opt.io"):
         out = read_workbook(dst)
-    # Constant 73 % default applied.
-    assert np.allclose(np.asarray(out["max_injection_profile"]), 73.0)
+    # No-curtailment default (100 %) applied.
+    assert np.allclose(np.asarray(out["max_injection_profile"]), 100.0)
     assert any(
         "max_injection_profile" in rec.getMessage().lower()
         for rec in caplog.records

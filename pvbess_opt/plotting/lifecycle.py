@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
+from ..config import BM_COLOURS, FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ..constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOE_LOW_EUR_PER_MWH,
@@ -102,8 +102,8 @@ def plot_revenue_stack_yearly(
     ``yearly_cf['revenue_retail_eur']``; DAM-priced components
     (``Export from PV``, ``Export from BESS``, ``Grid-charging cost``)
     track ``yearly_cf['revenue_dam_eur']``.  The aggregator-fee bar is
-    read directly from ``yearly_cf['aggregator_fee_eur']``.  Legacy
-    fixtures lacking those columns fall back to a single
+    read directly from ``yearly_cf['aggregator_fee_eur']``.  Fixtures
+    lacking the per-stream columns fall back to a single
     ``revenue_eur``-based ratio applied uniformly.
     """
     out_path = Path(out_path)
@@ -210,7 +210,38 @@ def plot_revenue_stack_yearly(
             edgecolor="black", linewidth=0.4,
             label="Aggregator fee",
         )
+
+    # Balancing-revenue segments — one stacked bar per product on top of
+    # the DAM/retail revenue stack.  Year-1 values come from the
+    # canonical revenue aggregates in ``year1_kpis``; subsequent years
+    # scale by the DAM ratio (balancing settles with the TSO at DAM-
+    # indexed prices in the model).  Zero in projects without
+    # balancing — the bars then collapse to nothing.
+    bm_segments = [
+        ("revenue_bess_fcr_eur", "FCR", "fcr"),
+        ("revenue_bess_afrr_up_eur", "aFRR-up", "afrr_up"),
+        ("revenue_bess_afrr_dn_eur", "aFRR-dn", "afrr_dn"),
+        ("revenue_bess_mfrr_up_eur", "mFRR-up", "mfrr_up"),
+        ("revenue_bess_mfrr_dn_eur", "mFRR-dn", "mfrr_dn"),
+    ]
+    bm_arrays: list[tuple[str, str, np.ndarray]] = []
+    for kpi_key, label, colour_key in bm_segments:
+        y1_val = float(year1_kpis.get(kpi_key, 0.0) or 0.0)
+        if abs(y1_val) <= 1e-9:
+            continue
+        seg = (y1_val * dam_ratio).to_numpy()
+        bm_arrays.append((label, colour_key, seg))
+        ax.bar(
+            years, seg, bottom=bottoms,
+            color=BM_COLOURS[colour_key],
+            edgecolor="black", linewidth=0.4,
+            label=label,
+        )
+        bottoms = bottoms + seg
+
     net = (op["revenue_eur"].astype(float)).to_numpy()
+    if "balancing_revenue_eur" in op.columns:
+        net = net + op["balancing_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The
     # universality rule forbids markeredgecolor="white" rings; line
     # contrast comes from the charcoal colour itself.

@@ -23,9 +23,7 @@ The schema is **seven sheets**, one logical theme per sheet:
 * ``max_injection_profile`` — hour-of-day cap profile (24 rows),
   optionally with one column per calendar month, expressing the share
   of ``p_grid_export_max_kw`` available for export.  Missing → fall
-  back to a constant 73 % and log INFO.  The legacy schema
-  (``curtailment_profile`` sheet with ``curtailment_pct`` column) is
-  still read and converted via ``100 - x`` with a ``DeprecationWarning``.
+  back to the no-curtailment default (a flat 100 %) and log INFO.
 
 Public loader API
 -----------------
@@ -51,28 +49,19 @@ Public loader API
 Mode-specific timeseries semantics
 ----------------------------------
 
-* In ``vnb`` mode the ``load_kwh`` column is required; missing → ValueError.
+* In ``self_consumption`` mode the ``load_kwh`` column is required; missing → ValueError.
 * In ``merchant`` mode ``load_kwh`` is optional — if present, the loader
   logs an INFO message and the optimizer pins all load-coverage flows to 0.
 
 Removed keys
 --------------------
 
-A handful of keys from earlier schemas trigger a friendly WARNING and
-are ignored:
-
-* ``capex_licenses_eur_per_kw`` — replaced by per-asset DEVEX
-  (``devex_pv_eur_per_kw`` / ``devex_bess_eur_per_kw``).
-* ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw`` — replaced
-  by the symmetric ``bess_power_kw`` and ``bess_capacity_kwh`` pair
-  (industry standard).
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -110,7 +99,7 @@ _COERCE_FAILED = object()
 PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "project_lifecycle_years": 20,
     "project_start_year": 2026,
-    "mode": "vnb",
+    "mode": "self_consumption",
     "settlement_minutes": 15,
     "p_grid_export_max_kw": 5000.0,
     "retail_tariff_eur_per_mwh": 120.0,
@@ -263,41 +252,6 @@ for _sheet_name, _sheet_defaults in _SHEET_DEFAULTS.items():
         _KEY_TO_SHEET[_key] = _sheet_name
 
 
-# Legacy keys remapped to current keys.  A workbook that still carries
-# a legacy key gets a WARNING and the value is mapped to ``new_key`` so
-# existing projects keep working.
-_LEGACY_RENAMED: dict[str, tuple[str, str]] = {
-    "revenue_inflation_pct": (
-        "retail_inflation_pct",
-        "Revenue inflation is split into retail_inflation_pct "
-        "(load / PPA) and dam_inflation_pct (wholesale exports). "
-        "Value mapped to retail_inflation_pct.",
-    ),
-}
-
-
-# Keys no longer supported.  Each maps to a one-line user-facing hint.
-_LEGACY_REMOVED: dict[str, str] = {
-    "capex_licenses_eur_per_kw": (
-        "This key is no longer supported — use devex_pv_eur_per_kw / "
-        "devex_bess_eur_per_kw instead"
-    ),
-    "battery_hours": (
-        "This key is no longer supported — set bess_power_kw / "
-        "bess_capacity_kwh instead (capacity is pinned to the "
-        "workbook value)"
-    ),
-    "p_charge_max_kw": (
-        "This key is no longer supported — set bess_power_kw instead "
-        "(symmetric charge / discharge limit)"
-    ),
-    "p_dis_max_kw": (
-        "This key is no longer supported — set bess_power_kw instead "
-        "(symmetric charge / discharge limit)"
-    ),
-}
-
-
 # ---------------------------------------------------------------------------
 # Per-key parsing metadata
 # ---------------------------------------------------------------------------
@@ -334,7 +288,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_yearly_scope",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
-    "mode": frozenset({"vnb", "merchant"}),
+    "mode": frozenset({"self_consumption", "merchant"}),
     "currency_format": frozenset({"auto", "millions", "raw"}),
     "plot_daily_scope": frozenset({"none", "year1_only", "all"}),
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
@@ -352,18 +306,18 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("project_start_year", 2026, "year",
      "Calendar year of Year 1 (first operating year). CAPEX is paid in "
      "Year 0 (calendar = project_start_year - 1)."),
-    ("mode", "vnb", "enum",
-     "vnb | merchant. vnb requires a co-located load and enforces load "
+    ("mode", "self_consumption", "enum",
+     "self_consumption | merchant. self_consumption requires a co-located load and enforces load "
      "priority + no simultaneous grid I/O. merchant has no load; PV/BESS "
      "dispatch entirely to DAM."),
     ("settlement_minutes", 15, "int",
-     "Greek VNB settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
+     "Greek Self-consumption settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
      "Currently informational; the MILP timestep is auto-detected."),
     ("p_grid_export_max_kw", 5000, "kW",
      "Max grid export (kW). Leave empty or use 'inf' / 'unlimited' / "
      "'disabled' to remove cap; no injection limit is applied."),
     ("retail_tariff_eur_per_mwh", 120, "EUR/MWh",
-     "Retail tariff used in vnb mode for load coverage."),
+     "Retail tariff used in self_consumption mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",
      "If TRUE the BESS may charge from the grid in periods with pv_kwh ~ 0."),
     ("unavailability_pct", 1.0, "%",
@@ -765,6 +719,11 @@ def _parse_string_enum(
     if token == "":
         return default
     if token not in allowed:
+        if key == "mode":
+            raise ValueError(
+                f"unknown mode {token!r}; valid modes are "
+                f"{sorted(allowed)!r}"
+            )
         logger.warning(
             "Workbook value for %r is %r which is not in %s; using default %r.",
             key, value, sorted(allowed), default,
@@ -876,28 +835,6 @@ def _parse_kv_sheet(
             else:
                 out[key] = _parse_value(key, raw, defaults[key])
             continue
-        if key in _LEGACY_RENAMED:
-            new_key, hint = _LEGACY_RENAMED[key]
-            if new_key in flat:
-                logger.warning(
-                    "%s sheet key %r is the legacy name of %r; both keys "
-                    "are present so the legacy value %r is ignored. %s",
-                    sheet_name, key, new_key, raw, hint,
-                )
-                continue
-            if new_key in defaults:
-                logger.warning(
-                    "%s sheet key %r is the legacy name of %r. %s",
-                    sheet_name, key, new_key, hint,
-                )
-                out[new_key] = _parse_value(new_key, raw, defaults[new_key])
-                continue
-        if key in _LEGACY_REMOVED:
-            logger.warning(
-                "%s sheet key %r is no longer supported: %s. Value %r ignored.",
-                sheet_name, key, _LEGACY_REMOVED[key], raw,
-            )
-            continue
         # Unknown key for this sheet — but maybe it belongs to another sheet?
         if key in _KEY_TO_SHEET:
             logger.warning(
@@ -912,7 +849,7 @@ def _parse_kv_sheet(
 
 
 # ---------------------------------------------------------------------------
-# Max-injection profile parser (with legacy curtailment_profile shim)
+# Max-injection profile parser
 # ---------------------------------------------------------------------------
 
 
@@ -922,7 +859,7 @@ _HOUR_PARSE_RE = re.compile(r"^\s*(\d{1,2})")
 def _parse_hour_of_day(value: Any) -> int:
     """Coerce an ``hour_of_day`` cell into an integer 0..23.
 
-    Accepts the legacy integer format and the 24-hour interval
+    Accepts an integer 0..23 and the 24-hour interval
     string format (``"00:00-01:00"`` … ``"23:00-24:00"``).  The
     parser is forgiving: any leading 1-2 digit run is taken as the
     start hour.  Out-of-range values raise ``ValueError``.
@@ -1011,21 +948,6 @@ def _parse_max_injection_profile_sheet(df: pd.DataFrame) -> np.ndarray:
     )
 
 
-def _parse_curtailment_profile_sheet(df: pd.DataFrame) -> np.ndarray:
-    """Parse the legacy ``curtailment_profile`` sheet.
-
-    The returned array is in the **curtailment-share** units of the old
-    schema (e.g. 27 ⇒ 27 % to curtail).  Callers are responsible for
-    converting to the new max-injection semantic via ``100 - x``.
-    """
-    df_norm = _normalise_hourly_profile_frame(df, sheet_name="curtailment_profile")
-    return _extract_profile(
-        df_norm,
-        scalar_col="curtailment_pct",
-        monthly_prefix="curtailment_pct",
-    )
-
-
 # ---------------------------------------------------------------------------
 # Timeseries normalisation + dt auto-detection
 # ---------------------------------------------------------------------------
@@ -1038,9 +960,9 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
     if "pv_kwh" not in ts.columns:
         raise ValueError("timeseries sheet must contain a 'pv_kwh' column.")
 
-    if mode == "vnb" and "load_kwh" not in ts.columns:
+    if mode == "self_consumption" and "load_kwh" not in ts.columns:
         raise ValueError(
-            "timeseries sheet must contain a 'load_kwh' column when mode='vnb'."
+            "timeseries sheet must contain a 'load_kwh' column when mode='self_consumption'."
         )
     if mode == "merchant" and "load_kwh" in ts.columns:
         logger.info("merchant mode: load_kwh column ignored")
@@ -1441,23 +1363,6 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             )
         except ValueError as exc:
             raise ValueError(f"max_injection_profile: {exc}") from exc
-    elif "curtailment_profile" in sheets:
-        warnings.warn(
-            "Workbook uses legacy sheet 'curtailment_profile' with column "
-            "'curtailment_pct'. Migrate to 'max_injection_profile' + "
-            "'max_injection_pct' with values inverted as (100 - x). "
-            "Auto-converting for this run; the legacy schema will be "
-            "removed in a future release.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        try:
-            legacy = _parse_curtailment_profile_sheet(
-                pd.read_excel(xlsx_path, sheet_name="curtailment_profile"),
-            )
-        except ValueError as exc:
-            raise ValueError(f"curtailment_profile: {exc}") from exc
-        profile = 100.0 - legacy
     else:
         logger.info(
             "max_injection_profile sheet not found in %s; falling back "

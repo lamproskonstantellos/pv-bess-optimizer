@@ -1,6 +1,6 @@
 """Yearly aggregate plots.
 
-Three vnb-mode figures per calendar year, written directly into
+Three self_consumption-mode figures per calendar year, written directly into
 ``out_dir``:
 
 * ``yearly_supply.pdf``

@@ -8,7 +8,7 @@ analysis.
 
 Two regulatory regimes are supported:
 
-* ``vnb`` — Greek Virtual Net Billing with co-located load.  Load
+* ``self_consumption`` — Greek Self-consumption with co-located load.  Load
   balance, load priority (binary-free slack formulation), no
   simultaneous grid I/O (tight big-M), retail tariff for self-
   consumption, DAM for export.

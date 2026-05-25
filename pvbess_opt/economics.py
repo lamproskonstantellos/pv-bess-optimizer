@@ -242,7 +242,7 @@ def build_yearly_cashflow(
 
     # Split the Year-1 revenue base into retail (load-coverage)
     # and DAM (wholesale export) streams.  Retail revenue is indexed by
-    # retail_inflation_pct (CPI-linked PPAs / VNB tariffs).  DAM revenue
+    # retail_inflation_pct (CPI-linked PPAs / Self-consumption tariffs).  DAM revenue
     # is indexed by dam_inflation_pct (default 0 — Lazard / Aurora /
     # Gridcog use exogenous price curves, not CPI).  Grid-charging cost
     # (a negative on the revenue side) tracks the DAM index.

@@ -6,11 +6,8 @@ Python so it works offline and on Windows without external tools.
 
 Allowed locations for forbidden tokens:
 
-* The legacy-warning paths inside :func:`pvbess_opt.io._parse_kv_sheet`
-  (and the module-level ``_LEGACY_RENAMED`` / ``_LEGACY_REMOVED``
-  constants + their docstrings).
-* Tests that exercise the legacy-warning paths.
 * This audit file itself.
+* The audit report (``docs/audit_report.md``).
 """
 
 from __future__ import annotations
@@ -38,17 +35,11 @@ SCAN_FILES: tuple[Path, ...] = (
 # relative to ROOT for portability.
 FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
     Path(p) for p in (
-        "pvbess_opt/io.py",
-        "tests/test_io.py",
-        "tests/test_io_v08_schema.py",
         "tests/test_plot_scopes.py",
         "tests/test_v0_leftover_audit.py",
-        "tests/test_economics_v08.py",
-        "tests/test_bess_spec.py",
-        "tests/test_asset_modes.py",
-        # The audit report is the historical record of this cleanup and
-        # is the one surface that intentionally retains the old tokens.
-        "docs/AUDIT_REPORT.md",
+        # The audit report documents the audit findings and is the one
+        # surface that names the prior tokens it removed.
+        "docs/audit_report.md",
     )
 )
 
@@ -110,7 +101,6 @@ REQUIRED_TOKENS: tuple[str, ...] = (
     "devex_bess_eur_per_kw",
     "site_capex_eur",
     "site_devex_eur",
-    "curtailment_profile",
     "max_injection_profile",
     "DEFAULT_MAX_INJECTION_PCT_HOURLY",
     "retail_inflation_pct",

@@ -19,6 +19,11 @@ from .balancing import (
     plot_balancing_mc_distribution,
     plot_balancing_reservation_profile,
 )
+from .bess_revenue import (
+    plot_bess_capacity_vs_activation_split,
+    plot_bess_revenue_by_month,
+    plot_bess_revenue_waterfall,
+)
 from .daily import (
     plot_daily_combined,
     plot_daily_combined_merchant,
@@ -88,6 +93,9 @@ __all__ = [
     "apply_ieee_style",
     "plot_balancing_mc_distribution",
     "plot_balancing_reservation_profile",
+    "plot_bess_capacity_vs_activation_split",
+    "plot_bess_revenue_by_month",
+    "plot_bess_revenue_waterfall",
     "plot_cumulative_cashflow",
     "plot_daily_combined",
     "plot_daily_combined_merchant",

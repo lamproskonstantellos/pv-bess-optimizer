@@ -5,300 +5,213 @@
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
-Mixed-integer linear programming model for PV + BESS sizing and 15-minute
-dispatch, with a multi-year project-finance pipeline and rolling-horizon
-Monte Carlo for uncertainty analysis.
+## What it does
 
-Two regulatory regimes and three asset modes are supported:
+Mixed-integer linear programming model for co-located PV + BESS dispatch
+at 15-minute resolution, with a multi-year project-finance pipeline,
+stochastic balancing-market participation, and rolling-horizon Monte
+Carlo for uncertainty analysis.
 
-* `vnb` — co-located load with self-consumption priority.  Load
-  balance enforces a hard PV→load priority, surplus-only export
-  through a binary-free slack, and no simultaneous grid I/O via a
-  tight big-M.  Self-consumption is settled at the retail tariff;
-  surplus is settled per applicable settlement rules at the
-  day-ahead market price.
-* `merchant` — pure utility-scale dispatch with **no co-located load**.
-  PV and BESS dispatch entirely to the day-ahead market.  The hourly
-  static max-injection cap on grid-bound flows still applies and is
-  supplied by the user through the `max_injection_profile` sheet, in
-  line with the applicable grid-connection regulations.
+Two regulatory regimes are supported:
 
-The asset mode is read literally from the workbook — set
-`pv_nameplate_kwp = 0` for a BESS-only project, `bess_power_kw = 0`
-for a PV-only project, both > 0 for a hybrid PV+BESS project.
+* `self_consumption` — co-located load with self-consumption priority.
+  Load balance enforces a hard PV→load priority, surplus-only export
+  through a binary-free slack, and no simultaneous grid I/O via a tight
+  big-M.  Self-consumption is settled at the retail tariff; surplus is
+  settled at the day-ahead market price.
+* `merchant` — utility-scale dispatch with **no co-located load**.  PV
+  and BESS dispatch entirely to the DAM, optionally augmented with
+  stochastic balancing-market participation (FCR / aFRR / mFRR).
 
-The codebase is pure Python and runs on **Linux, macOS, and Windows** with
-Python ≥ 3.11.  All plots are exported as IEEE-styled PDFs.
+Three asset configurations are supported in both regimes: `hybrid`
+(PV + BESS), `pv_only`, and `bess_only`.
 
-## Capabilities
-
-* **Three asset modes** — hybrid PV+BESS, PV-only (`bess_power_kw = 0`),
-  and BESS-only (`pv_nameplate_kwp = 0`), read literally from the
-  workbook.  Energy balance, dispatch invariants and KPIs are exact in
-  every mode.
-* **Two regulatory regimes** — `vnb` (co-located load with
-  self-consumption priority) and `merchant` (utility-scale DAM
-  dispatch, no load).
-* **Split-revenue project finance** — retail (load-coverage / PPA) and
-  DAM (wholesale export) streams are degraded on their own
-  PV / BESS capacity factors and indexed by separate inflation rates;
-  the aggregator fee is an explicit negative component.
-* **Costs** — per-kWp PV and per-kW BESS CAPEX/DEVEX, a site-wide
-  lump-sum CAPEX and DEVEX figure for items that are not naturally
-  per-asset (substation, grid upgrades, interconnection,
-  environmental studies), OPEX with escalation, and BESS replacement.
-* **Cycle-aware degradation** — multiplicative calendar fade plus an
-  optional linear cycle-fade term; `compute_financial_kpis` reports the
-  year-N calendar / cycle / total split.
-* **Financial KPIs** — NPV, IRR, ROI, BCR, simple and discounted
-  payback, plus LCOE (PV-only) and LCOS (BESS-only) against the Lazard
-  2024 benchmark bands.
-* **Sensitivity** — one-at-a-time tornado over CAPEX, OPEX, revenue and
-  discount rate, with the IRR tornado rendered as a dumbbell and the
-  LCOE / LCOS summaries as separate PDFs.
-* **Uncertainty** — rolling-horizon dispatch with imperfect foresight
-  and Monte Carlo over forecast scenarios, with P10 / P50 / P90
-  distribution and forecast-calibration diagnostics.
-* **Outputs** — IEEE-styled PDF plots and a multi-sheet results
-  workbook; the `06_uncertainty_plots/` family uses `DD-MM-YYYY` date
-  ticks and `upper right` legends.
-
-## Repository layout
-
-```
-pv-bess-optimizer/
-├── main.py                       # CLI entry point
-├── LICENSE                       # All Rights Reserved
-├── requirements.txt
-├── requirements/
-│   ├── base.txt                  # pandas, numpy, matplotlib, openpyxl, pyomo
-│   ├── solvers.txt               # HiGHS via highspy (Gurobi/CBC notes)
-│   ├── dev.txt                   # Linters + pytest + base + solvers
-│   └── docs.txt                  # Sphinx + RTD theme
-├── inputs/
-│   └── input.xlsx                # Seven-sheet workbook
-├── scripts/
-│   └── resample_timeseries.py    # Mixed-resolution timeseries harmoniser
-├── results/                      # Run outputs (gitignored)
-├── docs/                         # Sphinx documentation source
-├── tests/                        # pytest unit + smoke tests
-└── pvbess_opt/                   # Library code
-    ├── config.py                 # Plot labels, colours, IEEE rcParams
-    ├── io.py                     # Excel I/O, output workbook, layout
-    ├── optimization.py           # Pyomo MILP, solver dispatch, 9 audit invariants
-    ├── kpis.py                   # KPIs, green attribution, energy verification
-    ├── economics.py              # Cashflow + NPV/IRR/ROI/BCR + DEVEX + fee
-    ├── availability.py           # Post-solve unavailability derate
-    ├── max_injection.py          # Hour-of-day cap profile expander
-    ├── lifetime.py               # Multi-year analytical hourly dispatch projection
-    ├── sensitivity.py            # One-at-a-time tornado sensitivity
-    ├── rolling_horizon.py        # Rolling-horizon dispatch + Monte Carlo
-    └── plotting/                 # IEEE-styled PDFs (energy + financial + uncertainty)
-```
-
-The package keeps a flat module layout (≤ 12 top-level modules; see
-`CONTRIBUTING.md`).  Once the count crosses 12 we will subpackage by
-responsibility (`solve/`, `finance/`, `uncertainty/`, `plotting/`).
-
-## Quick start
+## Installation
 
 ```bash
-pip install -r requirements/dev.txt           # base + solvers + linters + pytest
-python main.py inputs/input.xlsx --solver highs
+git clone https://github.com/lamproskonstantellos/pv-bess-optimizer.git
+cd pv-bess-optimizer
+pip install -e .[dev]
 ```
 
-A run produces, under `results/<input>_<scenario>_<timestamp>/`:
+HiGHS is the default solver (`pip install highspy`).  Gurobi and CBC
+work too — the solver search order is set in
+`pvbess_opt.optimization._pick_solver`.
 
-```
-00_summary/        SUMMARY.md, run_log.txt
-01_inputs/         input_snapshot.xlsx, assumptions_summary.txt
-02_dispatch/       dispatch_hourly.xlsx (one sheet per calendar year)
-03_results.xlsx    KPIs, cashflows, financial KPIs, sensitivity, rolling-horizon MC
-04_financial_plots/ cumulative, waterfall, payback, tornados, rolling_horizon_distribution
-05_energy_plots/<calendar_year>/{daily,monthly,yearly}/...
-                   lifetime_summary_<start>-<end>.pdf
-06_uncertainty_plots/ inputs_forecast_band, inputs_seasonal_boxplot, dam_intraday_heatmap
-```
-
-## Workbook schema
-
-Seven themed sheets:
-
-* **`timeseries`** — per-step data: `timestamp`, `load_kwh` (required
-  for `vnb`, optional for `merchant`), `pv_kwh`,
-  `dam_price_eur_per_mwh`, optional `retail_price_eur_per_mwh`.
-  Case-study fixture is 35 040 rows at 15-minute cadence (one full
-  year); the MILP timestep is auto-detected.
-* **`project`** — high-level run config:
-  `project_lifecycle_years`, `project_start_year`, `mode`,
-  `settlement_minutes`, `p_grid_export_max_kw` (project-wide grid
-  export limit applied to the combined PV + BESS flow),
-  `retail_tariff_eur_per_mwh`, `allow_bess_grid_charging`,
-  `unavailability_pct` (user-configurable post-solve derate),
-  `site_capex_eur` / `site_devex_eur` (site-wide lump-sum CAPEX / DEVEX
-  in absolute EUR for items not naturally per-kWp/per-kW — substation,
-  grid upgrades, interconnection, environmental studies; paid in
-  Year 0), `currency_format`, `show_titles`.
-* **`pv`** — `pv_nameplate_kwp`, `specific_production_kwh_per_kwp`,
-  `pv_degradation_year1_pct`, `pv_degradation_annual_pct`,
-  `capex_pv_eur_per_kw`, `devex_pv_eur_per_kw`, `opex_pv_eur_per_kwp`.
-* **`bess`** — `bess_power_kw` (symmetric charge / discharge limit),
-  `bess_capacity_kwh` (pinned), efficiency / SOC bounds / cycle cap,
-  `capex_bess_eur_per_kw`, `devex_bess_eur_per_kw`,
-  `opex_bess_eur_per_kw`, `bess_replacement_year`,
-  `bess_replacement_cost_pct`, `bess_degradation_annual_pct`.
-* **`economics`** — `discount_rate_pct`, `opex_inflation_pct`,
-  `retail_inflation_pct` (user-set annual indexation of the retail
-  tariff / PPA revenue; default 0 = no indexation),
-  `dam_inflation_pct` (annual indexation of wholesale exports;
-  default 0), `aggregator_fee_pct_revenue` (user-configurable
-  fraction of gross revenue retained by the aggregator),
-  `sensitivity_*` (5 keys), four `benchmark_*` keys for the Lazard
-  LCOE / LCOS bands.
-* **`simulation`** — `uncertainty_*` (11 keys), `plot_daily_scope` /
-  `plot_monthly_scope` / `plot_yearly_scope` ∈
-  `none | year1_only | all`.
-* **`max_injection_profile`** — user-configurable hourly cap profile.
-  24 hourly rows × 1 col (`max_injection_pct`) for a constant-by-month
-  cap, or 24 rows × 12 cols (`max_injection_pct_jan` …
-  `max_injection_pct_dec`) for a per-month hour-of-day cap.  Values
-  express the share of `p_grid_export_max_kw` available for export
-  in that hour (e.g. 73 ⇒ 73 % allowed).  Missing sheet ⇒ the loader
-  falls back to a flat 73 %.  Workbooks using the legacy
-  `curtailment_profile` schema continue to load with a
-  `DeprecationWarning` and are auto-converted via `100 - x`.
-
-### How the export cap is enforced
-
-The per-step grid-export cap is computed as
-`p_grid_export_max_kw × dt_h × max_injection_fraction` and applied
-to the **combined** PV + BESS export flow
-(`grid_export_total[t] = pv_to_grid[t] + bess_dis_grid[t]`), not
-separately to PV exports or BESS-discharge exports.
-`p_grid_export_max_kw` is the nameplate grid-connection limit;
-`max_injection_profile` is the per-hour share of that limit
-actually available for export.  Curtailed energy appears in the
-outputs (`pv_curtail_kwh`, `pv_energy_curtailed_mwh`).  The same
-cap applies in both `vnb` and `merchant` modes.
-
-Setting `pv_nameplate_kwp = 0` makes the project BESS-only;
-`bess_power_kw = 0` makes it PV-only; both > 0 ⇒ hybrid.  Setting both
-to zero raises `ValueError` from `read_inputs`.
-
-See `docs/source/users.guide/inputs.rst` for the full reference and
-`docs/source/technical.documentation/uncertainty_modelling.rst` plus
-`docs/source/technical.documentation/asset_modes.rst` for the technical
-notes.
-
-## CLI
+## Quickstart
 
 ```bash
-# Single perfect-foresight solve
-python main.py inputs/input.xlsx --solver highs
-
-# Override mode (workbook says vnb; force merchant)
-python main.py inputs/input.xlsx --mode merchant --solver highs
-
-# Rolling-horizon with Monte Carlo (imperfect foresight + 30 seeds)
-python main.py inputs/input.xlsx \
-    --rolling-horizon \
-    --window-hours 48 \
-    --commit-hours 24 \
-    --monte-carlo 30 \
-    --seed 42 \
-    --solver highs
-
-# Strict mode: dispatch-invariant violations error out
-python main.py inputs/input.xlsx --strict --solver highs
+python main.py inputs/input.xlsx --output-dir out/
 ```
 
-The `--strict` flag turns the nine dispatch invariants from warnings into
-errors.  See `docs/source/technical.documentation/mip_formulation.rst` for
-the invariant set.
+The runner reads the workbook, solves the MILP, computes KPIs and the
+multi-year cashflow, runs the rolling-horizon Monte Carlo (when
+enabled in the `simulation` sheet), exercises the sensitivity tornado
+(when enabled in the `economics` sheet), and writes:
 
-## Objective
+* a multi-sheet results workbook,
+* the IEEE-styled PDF report under `out/03_financial_plots/`,
+* the energy plots under `out/02_energy_plots/`,
+* uncertainty diagnostics under `out/06_uncertainty_plots/`.
 
-Single objective: **profit maximisation**.  When the user's retail
-tariff exceeds the DAM price in the majority of hours (the typical
-case for `vnb` projects with a co-located load), the profit
-objective produces the same dispatch as a "green" objective —
-self-consumption emerges from the economics rather than being a
-hard constraint.  The hard `LOAD_PV_PRIORITY` constraint still pins
-`pv_to_load[t] == min(pv[t], load[t])` exactly (Section 2 of the
-spec) so the dispatch is correct for any retail / DAM ratio the user
-supplies.  In `merchant` mode there is no load to "be green about"
-in the first place.  See
-`docs/source/technical.documentation/objectives.rst` for the full
-reasoning.
-
-## Rolling horizon (uncertainty)
-
-A single annual MILP with full visibility into every hour's DAM price,
-PV output, and load is a **perfect-foresight** model — it produces an
-upper bound on achievable profit, not a realistic operating result.
-
-`pvbess_opt.rolling_horizon` adds:
-
-* sliding-window MILP with imperfect foresight beyond the commit horizon;
-* SOC carryover across windows (no closed-cycle constraint within a window);
-* KPI re-evaluation against the original (noise-free) timeseries;
-* Monte Carlo over forecast scenarios with reproducible seeds;
-* P10 / P50 / P90 distribution + foresight-gap reporting.
-
-Forecast-noise sigmas (defensible from literature):
-
-| Variable      | sigma        | Source                                       |
-| ------------- | ------------ | -------------------------------------------- |
-| DAM price     | 0.20 (MAPE)  | ENTSO-E D+1 benchmark                        |
-| PV generation | 0.12 (RMSE)  | NREL day-ahead PV forecast study             |
-| Load          | 0.05 (MAPE)  | Predictable-customer benchmark               |
-
-See `docs/source/users.guide/rolling_horizon.rst` for the full guide.
-
-## Balancing market participation (FCR / aFRR / mFRR)
-
-Optional stochastic co-optimisation against the European balancing markets
-sits alongside the existing DAM dispatch. Five products are modelled with
-the ENTSO-E naming: `fcr` (symmetric, capacity-only), `afrr_up` / `afrr_dn`
-(capacity + activation), and `mfrr_up` / `mfrr_dn` (capacity + activation).
-The MILP picks a per-product per-step reservation under expected revenue;
-a Monte Carlo realisation step adds Bernoulli acceptance and activation
-draws plus log-normal price noise to report P10 / P50 / P90 of realised
-balancing income.
-
-The feature is opt-in via the new `balancing` workbook sheet. Set
-`balancing_enabled = TRUE` and adjust the per-product shares of
-`bess_power_kw`, the acceptance and activation probabilities, the FCR
-sustained-duration requirement, the SOC safety buffer, and the Monte Carlo
-sigmas to your market context. Nine optional per-step price columns on the
-`timeseries` sheet let you supply real ENTSO-E price curves; missing columns
-fall back to the scalar defaults from the balancing sheet.
-
-See `docs/balancing_market_design.md` for the full formulation, the worked
-numerical example, the KPI / cashflow reference, and the six new dispatch
-invariants the test suite enforces.
-
-## Documentation
-
-The Sphinx site under `docs/` covers:
-
-* `users.guide/` — install, inputs, running, economics, financial plots,
-  sensitivity, rolling horizon
-* `technical.documentation/` — MILP formulation, regulatory framework
-  (per applicable grid-connection regulations), KPIs, energy balance,
-  lifetime scaling
-* `api/` — full API reference (autodoc)
-
-Build locally:
+Override the workbook value at the CLI:
 
 ```bash
-pip install -r requirements/docs.txt
-make -C docs html         # output: docs/build/html/index.html
+python main.py inputs/input.xlsx --mode merchant --output-dir out/merchant
 ```
 
-A short release log is maintained in `docs/CHANGELOG.md` covering the
-most recent release only.
+## Input workbook reference
 
-## License
+The canonical workbook is `inputs/input.xlsx`.  Every sheet's first
+row is the global header accent (bold + light grey fill + thin bottom
+border); no other styling is applied.
 
-All Rights Reserved — see [LICENSE](LICENSE).
+### `timeseries`
+
+15-minute series of `timestamp`, `pv_kwh`, optionally `load_kwh`
+(required for `self_consumption`, ignored for `merchant`),
+`dam_price_eur_per_mwh`, and the nine optional per-product balancing
+price columns (`fcr_capacity_price_eur_per_mwh`,
+`afrr_up_capacity_price_eur_per_mwh`,
+`afrr_up_activation_price_eur_per_mwh`, etc.).
+
+### `project`
+
+Project-level scalars including `mode`
+(`self_consumption` | `merchant`), `settlement_minutes`,
+`p_grid_export_max_kw`, `retail_tariff_eur_per_mwh`,
+`allow_bess_grid_charging`, `unavailability_pct`, and
+`balancing_enabled`.
+
+### `pv`
+
+`pv_nameplate_kwp`, `specific_production_kwh_per_kwp` (used for the
+PV column rescale), and the degradation coefficients.
+
+### `bess`
+
+`bess_power_kw` (symmetric charge / discharge limit),
+`bess_capacity_kwh`, round-trip efficiencies, SOC bounds,
+`max_cycles_per_day`, cycle-fade coefficient, replacement year.
+
+### `economics`
+
+Discount rate, OPEX / inflation rates per stream
+(`retail_inflation_pct`, `dam_inflation_pct`), CAPEX and DEVEX per
+asset and per site, sensitivity-tornado deltas, aggregator fee.
+
+### `simulation`
+
+Master uncertainty switch, per-source enable flags, log-normal noise
+parameters, plot-scope flags
+(`plot_daily_scope` / `plot_monthly_scope` / `plot_yearly_scope`
+∈ `none | year1_only | all`), uncertainty diagnostics flag.
+
+### `max_injection_profile`
+
+Hour-of-day cap profile (24 rows) optionally with one column per
+calendar month, expressing the share of `p_grid_export_max_kw`
+available for export.  **Default 100 %** — no curtailment; users opt
+in to curtailment by editing the sheet.  If the sheet is missing the
+loader falls back to a flat 100 % and logs INFO.
+
+### `balancing`
+
+33 keys covering the master switch (`balancing_enabled`), per-product
+capacity shares of `bess_power_kw` (`fcr_capacity_share_pct`,
+`afrr_up_capacity_share_pct`, `afrr_dn_capacity_share_pct`,
+`mfrr_up_capacity_share_pct`, `mfrr_dn_capacity_share_pct`),
+acceptance and activation probabilities, fallback capacity and
+activation prices, the FCR sustained-duration requirement, the SOC
+safety buffer, a balancing-revenue inflation rate, and the two Monte
+Carlo seeds.  See
+[`docs/balancing_market_design.md`](docs/balancing_market_design.md)
+for the design deep-dive.
+
+## Output reference
+
+### KPIs
+
+`compute_kpis` returns a flat dict with the headline year-1 figures
+plus per-product balancing breakdowns and eight canonical revenue
+aggregates used by the financial plots:
+
+* `revenue_pv_dam_eur`         — PV → DAM exports.
+* `revenue_bess_dam_eur`       — BESS-DAM arbitrage net of grid
+  charging.
+* `revenue_self_consumption_eur` — load coverage from PV-direct and
+  BESS-discharge; `0.0` in merchant mode.
+* `revenue_bess_fcr_eur`       — FCR capacity revenue.
+* `revenue_bess_afrr_up_eur`   — aFRR-up capacity + activation.
+* `revenue_bess_afrr_dn_eur`   — aFRR-dn capacity + activation.
+* `revenue_bess_mfrr_up_eur`   — mFRR-up capacity + activation.
+* `revenue_bess_mfrr_dn_eur`   — mFRR-dn capacity + activation.
+
+### Lifetime projection
+
+`build_lifetime_dispatch` and `aggregate_lifetime_to_yearly` produce
+the per-step / per-year frame consumed by `compute_financial_kpis`
+to derive NPV, IRR, ROI, BCR, LCOE, LCOS, and payback year.
+
+### Monte Carlo
+
+`pvbess_opt.rolling_horizon.run_rolling_horizon_mc` samples the
+log-normal forecast noise on DAM, PV, load, and balancing prices and
+re-optimises a rolling-window dispatch per sample.  Output is a
+distribution of headline KPIs (P10 / P50 / P90 of `profit_total_eur`,
+`npv_eur`, etc.) plus the per-scenario realised dispatch summary.
+
+### PDF report
+
+Generated under `out/03_financial_plots/`:
+
+* Yearly revenue stack (PV-load, BESS-load, PV-DAM, BESS-DAM, 5
+  balancing products, aggregator fee, grid-charging cost) with net
+  line.
+* BESS revenue waterfall — single chart stepping from BESS-DAM through
+  every balancing product to the total BESS revenue.
+* BESS revenue capacity-vs-activation split — grouped bar per
+  product.
+* BESS revenue by month — 12 stacked bars of BESS-DAM + 5 balancing
+  products per calendar month.
+* Lifetime cycles per operating year.
+* Cumulative cashflow + payback marker.
+* Monthly cashflow Year 1.
+* NPV / IRR tornado plots.
+* NPV waterfall.
+* LCOE / LCOS summary with Lazard 2024 benchmark band.
+* Rolling-horizon Monte Carlo distribution.
+* Balancing reservation profile + Monte Carlo distribution per
+  product.
+
+Energy plots under `out/02_energy_plots/`: daily / monthly / yearly
+supply, surplus, combined, dispatch, SOC, and revenue, plus the
+merchant trio when the mode is `merchant`.
+
+## Development
+
+### Solver
+
+HiGHS via `highspy` is the default.  Gurobi and CBC are picked up
+automatically if installed.
+
+### Running tests
+
+```bash
+pip install -e .[dev]
+pytest                       # default fast lane (~480 tests, ~2 min)
+pytest -m slow               # the real-scale full-year suite (~6 tests)
+```
+
+### Code style
+
+`ruff check pvbess_opt tests scripts` is the project lint pass.
+The project rule set is `F,E,I,B,UP,ARG,RUF` with `RUF001/002/003`
+ignored (the codebase uses Unicode intentionally: `→` in energy-flow
+labels, `€` in prices, Greek-letter docstring math).
+
+## Quality
+
+End-to-end audit findings, the P1 / P2 backlog, and per-fix
+verification tests are in
+[`docs/audit_report.md`](docs/audit_report.md).

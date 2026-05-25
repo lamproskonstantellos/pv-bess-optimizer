@@ -2,7 +2,7 @@
 
 These tests guard the acceptance criterion that a fresh clone can run
 ``python main.py inputs/input.xlsx --solver highs`` end-to-end, in both
-``vnb`` and ``merchant`` modes.
+``self_consumption`` and ``merchant`` modes.
 """
 
 from __future__ import annotations
@@ -60,30 +60,30 @@ def test_repo_input_xlsx_has_negative_dam_hours():
     assert 12 <= n_neg <= 20
 
 
-def test_max_injection_pct_is_constant_73_in_production_workbook():
-    # I.1: every row of the canonical max_injection_pct column in the
-    # production workbook is 73 (the documented headline default that
-    # the constant-default fallback also emits).  Pins the user-facing
-    # contract that headline-KPI tests only enforce indirectly.
+def test_max_injection_pct_is_no_curtailment_in_production_workbook():
+    # Every row of the canonical max_injection_pct column in the
+    # production workbook is 100 — the no-curtailment default.  Users
+    # opt in to curtailment by editing the sheet; the shipped workbook
+    # imposes no per-hour export cap beyond the regulatory nameplate.
     profile = pd.read_excel(
         ROOT / "inputs" / "input.xlsx",
         sheet_name="max_injection_profile",
     )["max_injection_pct"]
-    assert (profile == 73.0).all()
+    assert (profile == 100.0).all()
 
 
 def test_read_workbook_round_trip_after_build_script():
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     assert typed["dt_minutes"] == 15
-    assert typed["project"]["mode"] == "vnb"
+    assert typed["project"]["mode"] == "self_consumption"
     assert typed["project"]["project_lifecycle_years"] == 20
     assert "load_kwh" in typed["ts"].columns
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
-def test_main_vnb_short_horizon(tmp_path, monkeypatch):
-    """End-to-end smoke: main.py on a short window, vnb mode."""
+def test_main_self_consumption_short_horizon(tmp_path, monkeypatch):
+    """End-to-end smoke: main.py on a short window, self_consumption mode."""
     from pvbess_opt.io import read_workbook, write_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)  # 1 day @ 15 min
@@ -128,7 +128,7 @@ def test_main_merchant_short_horizon(tmp_path, monkeypatch):
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_repo_input_xlsx_headline_kpis_pinned():
     """End-to-end pin of headline year-1 KPIs against the stored
-    baseline on inputs/input.xlsx (perfect-foresight, vnb mode, full
+    baseline on inputs/input.xlsx (perfect-foresight, self_consumption mode, full
     year).
 
     Tight tolerances pick up any sign error or fixture drift.
@@ -188,11 +188,12 @@ def test_repo_input_xlsx_headline_kpis_pinned():
         year1_kpis=kpis,
     )
 
-    # Phase-0 baseline (perfect-foresight, MIP gap 0.01, HiGHS).
+    # Baseline (perfect-foresight, MIP gap 0.01, HiGHS, no-curtailment
+    # default).
     assert abs(float(kpis["pv_generation_mwh"]) - 22_275.0) < 1.0e-2
     assert abs(
-        float(kpis["bess_total_discharge_mwh"]) - 9_507.72
+        float(kpis["bess_total_discharge_mwh"]) - 9_512.872_875
     ) < 1.0e-2
-    assert abs(float(kpis["profit_total_eur"]) - 2_840_145.28) < 1.0
-    assert abs(float(fin_kpis["npv_eur"]) - 8_143_881.82) < 1.0
-    assert abs(float(fin_kpis["irr_pct"]) - 15.2628) < 1.0e-2
+    assert abs(float(kpis["profit_total_eur"]) - 2_824_793.2746) < 1.0
+    assert abs(float(fin_kpis["npv_eur"]) - 8_014_317.02) < 1.0
+    assert abs(float(fin_kpis["irr_pct"]) - 15.1402) < 1.0e-2

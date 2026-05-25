@@ -85,7 +85,7 @@ def _make_soc_fixture(month: int, *, mode: str) -> pd.DataFrame:
         "pv_kwh": np.zeros(n),
         "dam_price_eur_per_mwh": np.full(n, 80.0),
     })
-    if mode == "vnb":
+    if mode == "self_consumption":
         df["load_kwh"] = np.full(n, 100.0)
     else:
         df["load_kwh"] = np.zeros(n)
@@ -192,7 +192,7 @@ def test_merchant_pv_generation_skipped_when_all_zero():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["vnb", "merchant"])
+@pytest.mark.parametrize("mode", ["self_consumption", "merchant"])
 def test_monthly_soc_min_max_match_soc_pct_aggregation(mode):
     df = _make_soc_fixture(month=1, mode=mode)
     fig = _capture_save(
@@ -226,7 +226,7 @@ def test_monthly_soc_min_max_match_soc_pct_aggregation(mode):
     )
 
 
-@pytest.mark.parametrize("mode", ["vnb", "merchant"])
+@pytest.mark.parametrize("mode", ["self_consumption", "merchant"])
 def test_yearly_soc_min_max_match_soc_pct_aggregation(mode):
     df = _make_year_soc_fixture(mode=mode)
     fig = _capture_save(
@@ -260,7 +260,7 @@ def test_yearly_soc_min_max_match_soc_pct_aggregation(mode):
     )
 
 
-@pytest.mark.parametrize("mode", ["vnb", "merchant"])
+@pytest.mark.parametrize("mode", ["self_consumption", "merchant"])
 def test_monthly_soc_invariant_when_soc_pct_and_kwh_decouple(mode):
     df = _make_soc_fixture(month=1, mode=mode)
     df["soc_kwh"] = df["soc_kwh"] * 2.0

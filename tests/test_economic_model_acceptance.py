@@ -146,7 +146,7 @@ def test_aggregator_fee_and_devex_in_assumptions_snapshot(tmp_path: Path):
     from pvbess_opt.io import write_assumptions_summary
 
     params = {
-        "mode": "vnb",
+        "mode": "self_consumption",
         "unavailability_pct": 1.0,
         "bess_power_kw": 5000.0,
     }

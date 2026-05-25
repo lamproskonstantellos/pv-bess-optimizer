@@ -18,7 +18,7 @@ Column                          Required   Notes
 ==============================  =========  ====================================
 ``timestamp``                   yes        Datetime; regular cadence required.
 ``pv_kwh``                      yes        PV production per step.
-``load_kwh``                    vnb only   Required when ``mode=vnb``.  In
+``load_kwh``                    self_consumption only   Required when ``mode=self_consumption``.  In
                                            ``mode=merchant`` the column is
                                            ignored if present (an INFO log
                                            message is emitted) and
@@ -42,7 +42,7 @@ High-level run configuration:
 * ``project_lifecycle_years`` — total project horizon (years).
 * ``project_start_year`` — calendar year of Year 1 (first operating
   year).  CAPEX is paid in Year 0 (``project_start_year - 1``).
-* ``mode`` — ``vnb`` | ``merchant``.
+* ``mode`` — ``self_consumption`` | ``merchant``.
 * ``settlement_minutes`` — informational; the MILP timestep is
   auto-detected from the timeseries.
 * ``p_grid_export_max_kw`` — grid-connection export limit (kW).  A
@@ -53,7 +53,7 @@ High-level run configuration:
   Big-M is substituted for the disabled cap so the MILP stays
   solver-agnostic (HiGHS, Gurobi, CBC) — the constraint itself is never
   removed.  A negative number or ``0`` remains a validation error.
-* ``retail_tariff_eur_per_mwh`` — retail tariff used in vnb mode.
+* ``retail_tariff_eur_per_mwh`` — retail tariff used in self_consumption mode.
 * ``allow_bess_grid_charging`` — TRUE → BESS may charge from grid in
   PV-zero periods.
 * ``unavailability_pct`` — annual outage / maintenance factor
@@ -116,11 +116,7 @@ Sheet ``economics``
 * ``opex_inflation_pct`` — annual OPEX escalation.
 * ``retail_inflation_pct`` / ``dam_inflation_pct`` — separate annual
   escalation rates for the retail-indexed revenue stream (load / PPA)
-  and the DAM-indexed export stream.  The legacy
-  ``revenue_inflation_pct`` key is still accepted but is auto-mapped
-  to ``retail_inflation_pct`` with a ``DeprecationWarning`` (the rename
-  table lives in ``pvbess_opt.io._LEGACY_RENAMED``); new workbooks
-  should use the split keys directly.
+  and the DAM-indexed export stream.
 * ``aggregator_fee_pct_revenue`` (default 10 %, Gridcog
   convention) — reduces gross revenue post-solve.  Surfaces as a
   signed ``aggregator_fee_eur`` column on ``cashflow_yearly``.
@@ -157,12 +153,8 @@ Hour-of-day cap profile expressing the share of
   that calendar month.
 
 If the sheet is missing the loader logs an INFO message and falls
-back to a flat 73 % cap.  Workbooks still using the legacy
-``curtailment_profile`` schema (with ``curtailment_pct`` columns)
-continue to load with a ``DeprecationWarning`` and are auto-converted
-via ``100 - x``; the legacy schema will be removed in a future release.
-Curtailed energy is reported as an output
-(``pv_curtail_kwh`` / ``pv_energy_curtailed_mwh``).
+back to a flat 100 % cap (no curtailment).  Curtailed energy is
+reported as an output (``pv_curtail_kwh`` / ``pv_energy_curtailed_mwh``).
 
 The canonical defaults live in
 :data:`pvbess_opt.io.PROJECT_SHEET_DEFAULTS`,

@@ -1,18 +1,15 @@
 """Retail / DAM revenue-inflation split.
 
 Lazard / Aurora / Gridcog do NOT apply CPI to wholesale exports.
-retail_inflation_pct indexes only load-coverage (PPA / VNB) revenue;
+retail_inflation_pct indexes only load-coverage (PPA / Self-consumption) revenue;
 dam_inflation_pct indexes wholesale exports (default 0).
 """
 
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from pvbess_opt.economics import build_yearly_cashflow
-from pvbess_opt.io import _parse_kv_sheet
 
 
 def _base_econ() -> dict:
@@ -106,25 +103,6 @@ def test_zero_dam_inflation_keeps_export_revenue_flat_nominal():
     dam_y10 = float(df.loc[df["project_year"] == 10, "revenue_dam_eur"].iloc[0])
     # No PV degradation, no DAM inflation → year-N DAM equals year-1.
     assert dam_y10 == pytest.approx(dam_y1, rel=1e-9)
-
-
-# ---------------------------------------------------------------------------
-# Legacy revenue_inflation_pct on the workbook maps to retail with WARN
-# ---------------------------------------------------------------------------
-
-
-def test_legacy_revenue_inflation_pct_emits_warning_and_maps_to_retail(caplog):
-    flat = {
-        "revenue_inflation_pct": 3.0,
-        # nothing else — defaults fill in
-    }
-    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
-        out = _parse_kv_sheet("economics", flat)
-    assert out["retail_inflation_pct"] == pytest.approx(3.0)
-    assert any(
-        "revenue_inflation_pct" in rec.getMessage() and "retail_inflation_pct" in rec.getMessage()
-        for rec in caplog.records
-    ), "legacy rename warning missing"
 
 
 # ---------------------------------------------------------------------------

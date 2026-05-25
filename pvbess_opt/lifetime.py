@@ -150,8 +150,8 @@ def build_lifetime_dispatch(
     ``year1_discharge_mwh`` overrides the value derived from ``res_year1``
     when supplied — used to keep the cycle-counter symmetric with
     ``build_yearly_cashflow`` which already reads the post-derate value
-    from ``year1_kpis``.  Falls back to the in-frame sum for
-    backward-compat callers that don't plumb KPIs through.
+    from ``year1_kpis``.  Falls back to summing the per-step discharge
+    columns directly from ``res_year1`` when the override is not given.
 
     Requires ``compute_kpis`` to have been called first so the per-step
     EUR columns are present on ``res_year1``; raises otherwise rather

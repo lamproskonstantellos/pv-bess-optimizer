@@ -26,7 +26,7 @@ from pvbess_opt.kpis import add_economic_columns
 from pvbess_opt.lifetime import _bess_factor, build_lifetime_dispatch
 
 ROOT = Path(__file__).resolve().parent.parent
-FIXTURE = ROOT / "tests" / "fixtures" / "kpi_v087_baseline.json"
+FIXTURE = ROOT / "tests" / "fixtures" / "kpi_baseline.json"
 
 
 # ---------------------------------------------------------------------------
@@ -237,13 +237,13 @@ def test_high_cycling_amplifies_degradation():
 
 
 def test_zero_cycle_pct_lifetime_matches_calendar_only():
-    """build_lifetime_dispatch with d_cycle = 0 reproduces the legacy
+    """build_lifetime_dispatch with d_cycle = 0 reproduces the
     calendar-only scaling exactly."""
     econ_zero = _econ(d_cycle=0.0)
     econ_zero["project_lifecycle_years"] = 12
     econ_zero["bess_replacement_year"] = 0
-    econ_legacy = dict(econ_zero)
-    econ_legacy.pop("bess_degradation_pct_per_cycle", None)
+    econ_calendar = dict(econ_zero)
+    econ_calendar.pop("bess_degradation_pct_per_cycle", None)
     res1 = _make_year1_dispatch(0.2)
     f_zero = _final_year_bess_factor(res1, econ_zero)
     expected = 0.98 ** 11  # (1 - 2%)^(12 - 1)

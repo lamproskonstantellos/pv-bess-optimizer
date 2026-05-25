@@ -1,7 +1,7 @@
 """Parametrized energy-balance + 9-invariant coverage across all
 six mode x asset combinations.
 
-Every mode (vnb / merchant) crossed with every asset configuration
+Every mode (self_consumption / merchant) crossed with every asset configuration
 (hybrid / pv_only / bess_only) runs through verify_energy_balance and
 verify_dispatch_invariants at real scale (35,040 steps).
 
@@ -21,7 +21,7 @@ from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
 
 _COMBOS = [
     (mode, asset)
-    for mode in ("vnb", "merchant")
+    for mode in ("self_consumption", "merchant")
     for asset in ("hybrid", "pv_only", "bess_only")
 ]
 

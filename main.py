@@ -70,6 +70,9 @@ from pvbess_opt.modes import resolve_mode
 from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
 from pvbess_opt.plotting import (
     apply_ieee_style,
+    plot_bess_capacity_vs_activation_split,
+    plot_bess_revenue_by_month,
+    plot_bess_revenue_waterfall,
     plot_cumulative_cashflow,
     plot_daily_combined,
     plot_daily_combined_merchant,
@@ -134,7 +137,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--outdir", default="results",
                         help="output base directory")
     parser.add_argument(
-        "--mode", default=None, choices=("vnb", "merchant"),
+        "--mode", default=None, choices=("self_consumption", "merchant"),
         help="Override regulatory mode (default: read from workbook).",
     )
     parser.add_argument(
@@ -254,11 +257,11 @@ def _generate_energy_plots_for_year(
     daily: bool,
     monthly: bool,
     yearly: bool,
-    mode: str = "vnb",
+    mode: str = "self_consumption",
 ) -> None:
     """Render daily / monthly / yearly plots for a single calendar year.
 
-    In ``vnb`` mode this drives the supply / surplus / combined views.
+    In ``self_consumption`` mode this drives the supply / surplus / combined views.
     In ``merchant`` mode the load is pinned to zero so those plots
     collapse — render the dispatch / SOC / revenue trio instead.
     """
@@ -357,7 +360,7 @@ def _generate_all_energy_plots(
     econ: dict[str, Any],
     energy_plots_dir: Path,
     *,
-    mode: str = "vnb",
+    mode: str = "self_consumption",
 ) -> None:
     """Drive the energy-plot fan-out across the project lifetime."""
     daily_scope = str(econ.get("plot_daily_scope", "year1_only"))
@@ -488,6 +491,7 @@ def _generate_financial_plots(
     year1_kpis: dict[str, Any] | None = None,
     lifetime_yearly: pd.DataFrame | None = None,
     capacities: dict[str, float] | None = None,
+    res_year1: pd.DataFrame | None = None,
 ) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
     start = int(
@@ -562,6 +566,22 @@ def _generate_financial_plots(
                 plots_dir / f"revenue_stack_yearly_{start}-{end}.pdf",
                 econ=econ,
             )
+            plot_bess_revenue_waterfall(
+                year1_kpis,
+                plots_dir / "bess_revenue_waterfall.pdf",
+                econ=econ,
+            )
+            plot_bess_capacity_vs_activation_split(
+                year1_kpis,
+                plots_dir / "bess_revenue_capacity_vs_activation.pdf",
+                econ=econ,
+            )
+            if res_year1 is not None:
+                plot_bess_revenue_by_month(
+                    res_year1, year1_kpis,
+                    plots_dir / "bess_revenue_by_month.pdf",
+                    econ=econ,
+                )
         if lifetime_yearly is not None and capacities is not None:
             plot_lifetime_cycles(
                 lifetime_yearly,
@@ -1035,6 +1055,7 @@ def _run_one(
                 year1_kpis=kpis,
                 lifetime_yearly=bundle.get("lifetime_yearly"),
                 capacities=bundle.get("capacities"),
+                res_year1=res,
             )
 
         _generate_all_energy_plots(
