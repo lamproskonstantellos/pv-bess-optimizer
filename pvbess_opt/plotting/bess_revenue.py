@@ -29,9 +29,12 @@ import numpy as np
 import pandas as pd
 
 from ..config import BM_COLOURS, financial_color
-from ._currency import euro_axis_formatter, resolve_currency_format
+from ._currency import euro_axis_formatter, format_eur, resolve_currency_format
+from .helpers import title_prefix
 from .style import (
+    apply_fine_ticks,
     apply_universal_margins,
+    get_scenario_label,
     save_figure,
     show_titles,
 )
@@ -122,13 +125,15 @@ def plot_bess_revenue_waterfall(
             heights.append(abs(v))
             cumulative += v
 
+    fmt_mode = resolve_currency_format(econ)
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     x = np.arange(len(labels))
     for i, (label, h, b, c) in enumerate(zip(labels, heights, bottoms, colours, strict=True)):
         ax.bar(x[i], h, bottom=b, color=c, edgecolor="black", linewidth=0.4, label=label)
+        annotation_value = values[i] if i < len(values) - 1 else cumulative
         ax.text(
-            x[i], b + h, f"€{values[i] if i < len(values) - 1 else cumulative:,.0f}",
+            x[i], b + h, format_eur(float(annotation_value), fmt_mode),
             ha="center", va="bottom", fontsize=8,
         )
 
@@ -136,11 +141,15 @@ def plot_bess_revenue_waterfall(
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=20, ha="right")
     ax.set_ylabel("EUR")
-    ax.yaxis.set_major_formatter(euro_axis_formatter(resolve_currency_format(econ)))
+    ax.yaxis.set_major_formatter(euro_axis_formatter(fmt_mode))
     if show_titles():
-        ax.set_title("BESS revenue waterfall (Year 1)")
+        ax.set_title(
+            f"BESS revenue waterfall{title_prefix(get_scenario_label())} "
+            f"(Year 1)"
+        )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -199,10 +208,14 @@ def plot_bess_capacity_vs_activation_split(
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(resolve_currency_format(econ)))
     if show_titles():
-        ax.set_title("Balancing revenue: capacity vs activation (Year 1)")
+        ax.set_title(
+            f"Balancing revenue: capacity vs activation"
+            f"{title_prefix(get_scenario_label())} (Year 1)"
+        )
     ax.legend(loc="best")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
 
 
@@ -259,8 +272,10 @@ def plot_bess_revenue_by_month(
 
     plt.figure(figsize=(8, 4))
     ax = plt.gca()
-    month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    # Match the house monthly-axis convention (mdates "%m-%Y") by using
+    # the Year-1 calendar year extracted from the dispatch timestamp.
+    year_label = int(ts.dt.year.iloc[0])
+    month_labels = [f"{m:02d}-{year_label}" for m in range(1, 13)]
     x = np.arange(12)
     dam_arr = by_month_dam.to_numpy()
     ax.bar(x, dam_arr, color=_BESS_DAM_COLOUR,
@@ -276,12 +291,30 @@ def plot_bess_revenue_by_month(
 
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xticks(x)
-    ax.set_xticklabels(month_labels)
+    ax.set_xticklabels(month_labels, rotation=30, ha="right")
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(resolve_currency_format(econ)))
     if show_titles():
-        ax.set_title("BESS revenue by month (Year 1)")
-    ax.legend(loc="best", fontsize=7)
+        ax.set_title(
+            f"BESS revenue by month{title_prefix(get_scenario_label())} "
+            f"(Year 1)"
+        )
+    # Enforce the canonical legend order: DAM first, then each balancing
+    # product in _BM_PRODUCTS order. Independent of stacking order.
+    handles, labels_drawn = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels_drawn, handles, strict=True))
+    ordered_labels = [_BESS_DAM_LABEL] + [
+        label for _key, label, _colour_key in _BM_PRODUCTS
+    ]
+    ordered = [
+        (by_label[lbl], lbl) for lbl in ordered_labels if lbl in by_label
+    ]
+    if ordered:
+        ax.legend(
+            [h for h, _ in ordered], [lbl for _, lbl in ordered],
+            loc="best", fontsize=7,
+        )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    apply_fine_ticks(ax)
     return save_figure(out_path)
