@@ -8,9 +8,9 @@ Asset-mode semantics:
 
 The optimizer pins all PV variables to 0 when PV is absent and pins
 all BESS variables (incl. ``e_cap`` and the binary mode flags) to 0
-when BESS is absent.  ``derive_asset_capacities`` no longer infers
-from the timeseries or from ``p_dis_max_kw`` — declared values pass
-through exactly.
+when BESS is absent.  ``derive_asset_capacities`` reads the declared
+``bess_power_kw`` / ``bess_capacity_kwh`` exactly — no inference from
+the timeseries.
 """
 
 from __future__ import annotations

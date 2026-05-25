@@ -76,7 +76,9 @@ def test_self_consumption_solve_returns_dataframe(short_params, short_ts):
 
 
 def test_invariants_self_consumption(short_params, _solved_self_consumption):
-    inv = verify_dispatch_invariants(_solved_self_consumption, short_params, mode="self_consumption")
+    inv = verify_dispatch_invariants(
+        _solved_self_consumption, short_params, mode="self_consumption",
+    )
     tol = 1.0e-3
     assert inv["invariant_1_pv_balance_kwh"] < tol
     assert inv["invariant_2_load_balance_kwh"] < tol
@@ -89,7 +91,9 @@ def test_invariants_self_consumption(short_params, _solved_self_consumption):
     assert inv["invariant_9_pv_load_priority_kwh"] < tol
 
 
-def test_invariants_merchant_zero_for_self_consumption_only(short_params_merchant, _solved_merchant):
+def test_invariants_merchant_zero_for_self_consumption_only(
+    short_params_merchant, _solved_merchant,
+):
     inv = verify_dispatch_invariants(
         _solved_merchant, short_params_merchant, mode="merchant",
     )

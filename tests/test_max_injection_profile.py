@@ -240,62 +240,6 @@ def test_repo_input_xlsx_hour_of_day_uses_interval_strings():
     assert raw["hour_of_day"].iloc[23] == "23:00-24:00"
 
 
-def test_loader_parses_legacy_integer_hour_of_day(tmp_path):
-    """Legacy workbooks with the old ``curtailment_profile`` sheet AND
-    an integer 0..23 ``hour_of_day`` column still load via the
-    backward-compat shim, with a DeprecationWarning.  Kept on purpose to
-    pin the one-release migration contract."""
-    timestamps = pd.date_range("2026-06-01", periods=24, freq="h")
-    ts = pd.DataFrame({
-        "timestamp": timestamps,
-        "pv_kwh": np.zeros(24),
-        "load_kwh": np.full(24, 100.0),
-        "dam_price_eur_per_mwh": np.full(24, 80.0),
-    })
-    project_kv = pd.DataFrame({
-        "key": ["mode", "p_grid_export_max_kw"],
-        "value": ["self_consumption", 5000.0],
-        "unit": ["", ""],
-        "notes": ["", ""],
-    })
-    pv_kv = pd.DataFrame({
-        "key": ["pv_nameplate_kwp"],
-        "value": [1000.0],
-        "unit": [""],
-        "notes": [""],
-    })
-    bess_kv = pd.DataFrame({
-        "key": ["bess_power_kw", "bess_capacity_kwh"],
-        "value": [500.0, 2000.0],
-        "unit": ["", ""],
-        "notes": ["", ""],
-    })
-    economics_kv = pd.DataFrame({"key": [], "value": [], "unit": [], "notes": []})
-    simulation_kv = pd.DataFrame({"key": [], "value": [], "unit": [], "notes": []})
-    # legacy schema — keeps the old name on purpose
-    legacy_curt = pd.DataFrame({
-        "hour_of_day": np.arange(24, dtype=int),
-        "curtailment_pct": np.full(24, 27.0, dtype=float),
-    })
-    dst = tmp_path / "legacy_hours.xlsx"
-    with pd.ExcelWriter(dst, engine="openpyxl") as writer:
-        ts.to_excel(writer, sheet_name="timeseries", index=False)
-        project_kv.to_excel(writer, sheet_name="project", index=False)
-        pv_kv.to_excel(writer, sheet_name="pv", index=False)
-        bess_kv.to_excel(writer, sheet_name="bess", index=False)
-        economics_kv.to_excel(writer, sheet_name="economics", index=False)
-        simulation_kv.to_excel(writer, sheet_name="simulation", index=False)
-        legacy_curt.to_excel(
-            writer, sheet_name="curtailment_profile", index=False,
-        )
-    with pytest.warns(DeprecationWarning, match="legacy sheet"):
-        out = read_workbook(dst)
-    profile = np.asarray(out["max_injection_profile"], dtype=float)
-    assert profile.shape == (24,)
-    # 27 % curtailment ⇒ 73 % allowed to inject after the 100-x flip.
-    assert np.allclose(profile, 73.0)
-
-
 def test_loader_parses_interval_string_hour_of_day(tmp_path):
     """The ``HH:00-HH:00`` interval string round-trips through the loader."""
     typed = _minimal_typed(np.linspace(15.0, 35.0, 24))

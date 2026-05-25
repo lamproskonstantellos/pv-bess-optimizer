@@ -7,8 +7,6 @@ inflation / degradation constants.
 
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from pvbess_opt.availability import (
@@ -19,7 +17,6 @@ from pvbess_opt.economics import (
     build_yearly_cashflow,
     compute_financial_kpis,
 )
-from pvbess_opt.io import _parse_kv_sheet
 
 
 def _econ() -> dict:
@@ -143,20 +140,6 @@ def test_revenue_grows_yoy_under_default_inflation_and_degradation():
     df = build_yearly_cashflow(kpis, _econ(), _caps())
     rev = df.loc[df["project_year"] >= 2, "revenue_eur"].astype(float)
     assert rev.is_monotonic_increasing
-
-
-# ---------------------------------------------------------------------------
-# Loader: legacy capex_licenses_eur_per_kw warns
-# ---------------------------------------------------------------------------
-
-
-def test_legacy_capex_licenses_warns(caplog):
-    flat = {"capex_licenses_eur_per_kw": 90.0}
-    with caplog.at_level(logging.WARNING):
-        _parse_kv_sheet("economics", flat)
-    msgs = " ".join(r.getMessage() for r in caplog.records)
-    assert "capex_licenses_eur_per_kw" in msgs
-    assert "no longer supported" in msgs
 
 
 # ---------------------------------------------------------------------------

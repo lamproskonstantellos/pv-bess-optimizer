@@ -7,11 +7,6 @@ Covers:
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
-* Legacy two-sheet (project + economic) workbooks load with a
-  single migration WARNING.
-* The four legacy ``# optimization`` keys still warn.
-* The "removed legacy key" warnings for ``capex_licenses_eur_per_kw``,
-  ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw``.
 """
 
 from __future__ import annotations
@@ -207,26 +202,6 @@ def test_misplaced_key_routes_warning_to_correct_sheet(caplog):
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert "capex_pv_eur_per_kw" in msgs
     assert "pv" in msgs
-
-
-# ---------------------------------------------------------------------------
-# Removed legacy keys still warn
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("removed_key", [
-    "capex_licenses_eur_per_kw",
-    "battery_hours",
-    "p_charge_max_kw",
-    "p_dis_max_kw",
-])
-def test_legacy_removed_keys_warn(removed_key, caplog):
-    flat = {removed_key: 42.0}
-    with caplog.at_level("WARNING"):
-        _parse_kv_sheet("bess", flat)
-    msgs = " ".join(r.getMessage() for r in caplog.records)
-    assert removed_key in msgs
-    assert "no longer supported" in msgs
 
 
 # ---------------------------------------------------------------------------

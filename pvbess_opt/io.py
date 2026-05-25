@@ -23,9 +23,7 @@ The schema is **seven sheets**, one logical theme per sheet:
 * ``max_injection_profile`` — hour-of-day cap profile (24 rows),
   optionally with one column per calendar month, expressing the share
   of ``p_grid_export_max_kw`` available for export.  Missing → fall
-  back to the no-curtailment default (a flat 100 %) and log INFO.  The
-  legacy ``curtailment_profile`` sheet is also read and converted via
-  ``100 - x`` with a ``DeprecationWarning`` (removed in a later phase).
+  back to the no-curtailment default (a flat 100 %) and log INFO.
 
 Public loader API
 -----------------
@@ -58,21 +56,12 @@ Mode-specific timeseries semantics
 Removed keys
 --------------------
 
-A handful of keys from earlier schemas trigger a friendly WARNING and
-are ignored:
-
-* ``capex_licenses_eur_per_kw`` — replaced by per-asset DEVEX
-  (``devex_pv_eur_per_kw`` / ``devex_bess_eur_per_kw``).
-* ``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw`` — replaced
-  by the symmetric ``bess_power_kw`` and ``bess_capacity_kwh`` pair
-  (industry standard).
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -261,41 +250,6 @@ _KEY_TO_SHEET: dict[str, str] = {}
 for _sheet_name, _sheet_defaults in _SHEET_DEFAULTS.items():
     for _key in _sheet_defaults:
         _KEY_TO_SHEET[_key] = _sheet_name
-
-
-# Legacy keys remapped to current keys.  A workbook that still carries
-# a legacy key gets a WARNING and the value is mapped to ``new_key`` so
-# existing projects keep working.
-_LEGACY_RENAMED: dict[str, tuple[str, str]] = {
-    "revenue_inflation_pct": (
-        "retail_inflation_pct",
-        "Revenue inflation is split into retail_inflation_pct "
-        "(load / PPA) and dam_inflation_pct (wholesale exports). "
-        "Value mapped to retail_inflation_pct.",
-    ),
-}
-
-
-# Keys no longer supported.  Each maps to a one-line user-facing hint.
-_LEGACY_REMOVED: dict[str, str] = {
-    "capex_licenses_eur_per_kw": (
-        "This key is no longer supported — use devex_pv_eur_per_kw / "
-        "devex_bess_eur_per_kw instead"
-    ),
-    "battery_hours": (
-        "This key is no longer supported — set bess_power_kw / "
-        "bess_capacity_kwh instead (capacity is pinned to the "
-        "workbook value)"
-    ),
-    "p_charge_max_kw": (
-        "This key is no longer supported — set bess_power_kw instead "
-        "(symmetric charge / discharge limit)"
-    ),
-    "p_dis_max_kw": (
-        "This key is no longer supported — set bess_power_kw instead "
-        "(symmetric charge / discharge limit)"
-    ),
-}
 
 
 # ---------------------------------------------------------------------------
@@ -881,28 +835,6 @@ def _parse_kv_sheet(
             else:
                 out[key] = _parse_value(key, raw, defaults[key])
             continue
-        if key in _LEGACY_RENAMED:
-            new_key, hint = _LEGACY_RENAMED[key]
-            if new_key in flat:
-                logger.warning(
-                    "%s sheet key %r is the legacy name of %r; both keys "
-                    "are present so the legacy value %r is ignored. %s",
-                    sheet_name, key, new_key, raw, hint,
-                )
-                continue
-            if new_key in defaults:
-                logger.warning(
-                    "%s sheet key %r is the legacy name of %r. %s",
-                    sheet_name, key, new_key, hint,
-                )
-                out[new_key] = _parse_value(new_key, raw, defaults[new_key])
-                continue
-        if key in _LEGACY_REMOVED:
-            logger.warning(
-                "%s sheet key %r is no longer supported: %s. Value %r ignored.",
-                sheet_name, key, _LEGACY_REMOVED[key], raw,
-            )
-            continue
         # Unknown key for this sheet — but maybe it belongs to another sheet?
         if key in _KEY_TO_SHEET:
             logger.warning(
@@ -917,7 +849,7 @@ def _parse_kv_sheet(
 
 
 # ---------------------------------------------------------------------------
-# Max-injection profile parser (with legacy curtailment_profile shim)
+# Max-injection profile parser
 # ---------------------------------------------------------------------------
 
 
@@ -1013,21 +945,6 @@ def _parse_max_injection_profile_sheet(df: pd.DataFrame) -> np.ndarray:
         df_norm,
         scalar_col="max_injection_pct",
         monthly_prefix="max_injection_pct",
-    )
-
-
-def _parse_curtailment_profile_sheet(df: pd.DataFrame) -> np.ndarray:
-    """Parse the legacy ``curtailment_profile`` sheet.
-
-    The returned array is in the **curtailment-share** units of the old
-    schema (e.g. 27 ⇒ 27 % to curtail).  Callers are responsible for
-    converting to the new max-injection semantic via ``100 - x``.
-    """
-    df_norm = _normalise_hourly_profile_frame(df, sheet_name="curtailment_profile")
-    return _extract_profile(
-        df_norm,
-        scalar_col="curtailment_pct",
-        monthly_prefix="curtailment_pct",
     )
 
 
@@ -1446,23 +1363,6 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             )
         except ValueError as exc:
             raise ValueError(f"max_injection_profile: {exc}") from exc
-    elif "curtailment_profile" in sheets:
-        warnings.warn(
-            "Workbook uses legacy sheet 'curtailment_profile' with column "
-            "'curtailment_pct'. Migrate to 'max_injection_profile' + "
-            "'max_injection_pct' with values inverted as (100 - x). "
-            "Auto-converting for this run; the legacy schema will be "
-            "removed in a future release.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        try:
-            legacy = _parse_curtailment_profile_sheet(
-                pd.read_excel(xlsx_path, sheet_name="curtailment_profile"),
-            )
-        except ValueError as exc:
-            raise ValueError(f"curtailment_profile: {exc}") from exc
-        profile = 100.0 - legacy
     else:
         logger.info(
             "max_injection_profile sheet not found in %s; falling back "

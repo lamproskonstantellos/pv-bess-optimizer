@@ -1,11 +1,9 @@
-"""BESS spec rationalisation tests.
+"""BESS spec tests.
 
-The optimizer's surface drops three legacy keys:
-``battery_hours``, ``p_charge_max_kw``, ``p_dis_max_kw``.  ``bess_power_kw``
-is now the symmetric charge / discharge limit, and ``bess_capacity_kwh``
-pins the BESS energy capacity.  ``e_cap`` is no longer a decision
-variable; ``run_scenario`` returns ``(res, resolved_solver_name)`` and
-the KPI dict carries ``e_cap_mwh`` (renamed from ``e_cap_opt_mwh``).
+``bess_power_kw`` is the symmetric charge / discharge limit;
+``bess_capacity_kwh`` pins the BESS energy capacity.  ``run_scenario``
+returns ``(res, resolved_solver_name)`` and the KPI dict carries
+``e_cap_mwh`` set from ``bess_capacity_kwh`` (not a decision variable).
 """
 
 from __future__ import annotations
@@ -16,7 +14,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvbess_opt.io import _parse_kv_sheet
 from pvbess_opt.kpis import compute_kpis
 from pvbess_opt.optimization import run_scenario
 
@@ -64,24 +61,6 @@ def _params(*, pv_kwp: float, bess_kw: float, bess_kwh: float, mode: str) -> dic
         "allow_bess_grid_charging": False,
         "show_titles": False,
     }
-
-
-# ---------------------------------------------------------------------------
-# Loader rejects dropped keys with a friendly warning
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("dropped", [
-    "battery_hours", "p_charge_max_kw", "p_dis_max_kw",
-])
-def test_loader_warns_on_legacy_bess_keys(dropped, caplog):
-    flat = {dropped: 5000.0}
-    with caplog.at_level("WARNING"):
-        _parse_kv_sheet("bess", flat)
-    msgs = " ".join(r.getMessage() for r in caplog.records)
-    assert dropped in msgs
-    assert "bess_power_kw" in msgs or "bess_capacity_kwh" in msgs
-    assert "no longer supported" in msgs
 
 
 # ---------------------------------------------------------------------------

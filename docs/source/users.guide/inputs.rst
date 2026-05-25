@@ -116,11 +116,7 @@ Sheet ``economics``
 * ``opex_inflation_pct`` — annual OPEX escalation.
 * ``retail_inflation_pct`` / ``dam_inflation_pct`` — separate annual
   escalation rates for the retail-indexed revenue stream (load / PPA)
-  and the DAM-indexed export stream.  The legacy
-  ``revenue_inflation_pct`` key is still accepted but is auto-mapped
-  to ``retail_inflation_pct`` with a ``DeprecationWarning`` (the rename
-  table lives in ``pvbess_opt.io._LEGACY_RENAMED``); new workbooks
-  should use the split keys directly.
+  and the DAM-indexed export stream.
 * ``aggregator_fee_pct_revenue`` (default 10 %, Gridcog
   convention) — reduces gross revenue post-solve.  Surfaces as a
   signed ``aggregator_fee_eur`` column on ``cashflow_yearly``.
@@ -157,12 +153,8 @@ Hour-of-day cap profile expressing the share of
   that calendar month.
 
 If the sheet is missing the loader logs an INFO message and falls
-back to a flat 73 % cap.  Workbooks still using the legacy
-``curtailment_profile`` schema (with ``curtailment_pct`` columns)
-continue to load with a ``DeprecationWarning`` and are auto-converted
-via ``100 - x``; the legacy schema will be removed in a future release.
-Curtailed energy is reported as an output
-(``pv_curtail_kwh`` / ``pv_energy_curtailed_mwh``).
+back to a flat 100 % cap (no curtailment).  Curtailed energy is
+reported as an output (``pv_curtail_kwh`` / ``pv_energy_curtailed_mwh``).
 
 The canonical defaults live in
 :data:`pvbess_opt.io.PROJECT_SHEET_DEFAULTS`,

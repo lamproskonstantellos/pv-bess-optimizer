@@ -58,9 +58,9 @@ cap derived from ``bess_power_kw``:
 
    y^{\text{charge}}_t + y^{\text{dis}}_t \le 1
 
-Separate charge / discharge power keys are not part of the schema (see
-``_LEGACY_REMOVED`` in :mod:`pvbess_opt.io`); both charge and discharge
-power are driven by the symmetric ``bess_power_kw``.
+Charge and discharge power are both driven by the symmetric
+``bess_power_kw`` key; the schema does not carry separate per-direction
+limits.
 
 Static max-injection cap (BOTH modes):
 
