@@ -170,6 +170,65 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "sensitivity_discount_rate_delta_pp": DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
 }
 
+BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
+    # Master switch — when False the MILP and KPIs are bit-identical to
+    # a workbook without the sheet.
+    "balancing_enabled": False,
+    # Per-product capacity shares (% of bess_power_kw). DAM keeps the
+    # majority; the sum across all six lines must stay <= 100 %.
+    "dam_capacity_share_pct": 70.0,
+    "fcr_capacity_share_pct": 10.0,
+    "afrr_up_capacity_share_pct": 8.0,
+    "afrr_dn_capacity_share_pct": 7.0,
+    "mfrr_up_capacity_share_pct": 3.0,
+    "mfrr_dn_capacity_share_pct": 2.0,
+    # Per-product bid-acceptance probabilities (% of submitted bids that
+    # clear the auction).
+    "fcr_bid_acceptance_pct": 70.0,
+    "afrr_up_bid_acceptance_pct": 55.0,
+    "afrr_dn_bid_acceptance_pct": 55.0,
+    "mfrr_up_bid_acceptance_pct": 40.0,
+    "mfrr_dn_bid_acceptance_pct": 40.0,
+    # Per-product activation probabilities (% of cleared bids that get
+    # activated within a settlement period).
+    "fcr_activation_probability_pct": 15.0,
+    "afrr_up_activation_probability_pct": 10.0,
+    "afrr_dn_activation_probability_pct": 8.0,
+    "mfrr_up_activation_probability_pct": 5.0,
+    "mfrr_dn_activation_probability_pct": 4.0,
+    # Per-product fallback capacity prices used when the timeseries
+    # column is absent (EUR per MWh).
+    "fcr_default_capacity_price_eur_per_mwh": 12.0,
+    "afrr_up_default_capacity_price_eur_per_mwh": 18.0,
+    "afrr_dn_default_capacity_price_eur_per_mwh": 15.0,
+    "mfrr_up_default_capacity_price_eur_per_mwh": 6.0,
+    "mfrr_dn_default_capacity_price_eur_per_mwh": 5.0,
+    # Per-product fallback activation prices (EUR per MWh). FCR has no
+    # activation payment so it is absent here.
+    "afrr_up_default_activation_price_eur_per_mwh": 220.0,
+    "afrr_dn_default_activation_price_eur_per_mwh": 25.0,
+    "mfrr_up_default_activation_price_eur_per_mwh": 180.0,
+    "mfrr_dn_default_activation_price_eur_per_mwh": 20.0,
+    # FCR-specific duration requirement (hours of sustained output
+    # required for the reservation to be certifiable).
+    "fcr_required_duration_hours": 0.5,
+    # Settlement period (minutes); must equal 60 * dt_hours when
+    # balancing_enabled.
+    "bm_settlement_minutes": 15,
+    # Extra SOC safety buffer applied on top of the worst-case
+    # activation reservation (percent of activation energy).
+    "bm_soc_headroom_pct": 10.0,
+    # Yearly indexation rate applied to balancing revenue lines in the
+    # multi-year cashflow.
+    "bm_inflation_pct": 2.0,
+    # Log-normal sigmas (in percent) used by the Monte Carlo to perturb
+    # capacity and activation prices around the deterministic schedule.
+    "bm_price_sigma_capacity_pct": 25.0,
+    "bm_price_sigma_activation_pct": 35.0,
+    # Default Monte Carlo seed for the balancing realisation.
+    "bm_random_seed": 1729,
+}
+
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_enabled": False,
     "uncertainty_compare_sources": False,
@@ -195,6 +254,7 @@ _SHEET_DEFAULTS: dict[str, dict[str, Any]] = {
     "bess": BESS_SHEET_DEFAULTS,
     "economics": ECONOMICS_SHEET_DEFAULTS,
     "simulation": SIMULATION_SHEET_DEFAULTS,
+    "balancing": BALANCING_SHEET_DEFAULTS,
 }
 
 _KEY_TO_SHEET: dict[str, str] = {}
@@ -253,6 +313,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "uncertainty_pv_enabled",
     "uncertainty_load_enabled",
     "uncertainty_diagnostics_enabled",
+    "balancing_enabled",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -262,6 +323,8 @@ _INT_KEYS: frozenset[str] = frozenset({
     "uncertainty_n_seeds",
     "uncertainty_window_hours",
     "uncertainty_commit_hours",
+    "bm_settlement_minutes",
+    "bm_random_seed",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -456,6 +519,85 @@ _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "none | year1_only | all."),
 )
 
+_BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("balancing_enabled", False, "bool",
+     "Master switch for stochastic balancing market participation "
+     "(FCR / aFRR / mFRR). When FALSE the MILP, KPIs and outputs are "
+     "bit-identical to a run without the sheet."),
+    ("dam_capacity_share_pct", 70.0, "%",
+     "Share of bess_power_kw reserved for DAM dispatch. Sum across all "
+     "share keys must be <= 100 %."),
+    ("fcr_capacity_share_pct", 10.0, "%",
+     "Share of bess_power_kw available for FCR reservation (symmetric)."),
+    ("afrr_up_capacity_share_pct", 8.0, "%",
+     "Share of bess_power_kw available for aFRR-up reservation."),
+    ("afrr_dn_capacity_share_pct", 7.0, "%",
+     "Share of bess_power_kw available for aFRR-down reservation."),
+    ("mfrr_up_capacity_share_pct", 3.0, "%",
+     "Share of bess_power_kw available for mFRR-up reservation."),
+    ("mfrr_dn_capacity_share_pct", 2.0, "%",
+     "Share of bess_power_kw available for mFRR-down reservation."),
+    ("fcr_bid_acceptance_pct", 70.0, "%",
+     "Probability that a submitted FCR bid clears the auction."),
+    ("afrr_up_bid_acceptance_pct", 55.0, "%",
+     "Probability that a submitted aFRR-up bid clears the auction."),
+    ("afrr_dn_bid_acceptance_pct", 55.0, "%",
+     "Probability that a submitted aFRR-down bid clears the auction."),
+    ("mfrr_up_bid_acceptance_pct", 40.0, "%",
+     "Probability that a submitted mFRR-up bid clears the auction."),
+    ("mfrr_dn_bid_acceptance_pct", 40.0, "%",
+     "Probability that a submitted mFRR-down bid clears the auction."),
+    ("fcr_activation_probability_pct", 15.0, "%",
+     "FCR duty-cycle proxy — probability a cleared FCR reservation is "
+     "activated within a settlement period."),
+    ("afrr_up_activation_probability_pct", 10.0, "%",
+     "Probability a cleared aFRR-up reservation is activated within a "
+     "settlement period."),
+    ("afrr_dn_activation_probability_pct", 8.0, "%",
+     "Probability a cleared aFRR-down reservation is activated."),
+    ("mfrr_up_activation_probability_pct", 5.0, "%",
+     "Probability a cleared mFRR-up reservation is activated."),
+    ("mfrr_dn_activation_probability_pct", 4.0, "%",
+     "Probability a cleared mFRR-down reservation is activated."),
+    ("fcr_default_capacity_price_eur_per_mwh", 12.0, "EUR/MWh",
+     "FCR capacity-price fallback when the timeseries column is absent."),
+    ("afrr_up_default_capacity_price_eur_per_mwh", 18.0, "EUR/MWh",
+     "aFRR-up capacity-price fallback when the timeseries column is absent."),
+    ("afrr_dn_default_capacity_price_eur_per_mwh", 15.0, "EUR/MWh",
+     "aFRR-down capacity-price fallback when the timeseries column is absent."),
+    ("mfrr_up_default_capacity_price_eur_per_mwh", 6.0, "EUR/MWh",
+     "mFRR-up capacity-price fallback when the timeseries column is absent."),
+    ("mfrr_dn_default_capacity_price_eur_per_mwh", 5.0, "EUR/MWh",
+     "mFRR-down capacity-price fallback when the timeseries column is absent."),
+    ("afrr_up_default_activation_price_eur_per_mwh", 220.0, "EUR/MWh",
+     "aFRR-up activation-price fallback when the timeseries column is absent."),
+    ("afrr_dn_default_activation_price_eur_per_mwh", 25.0, "EUR/MWh",
+     "aFRR-down activation-price fallback when the timeseries column is absent."),
+    ("mfrr_up_default_activation_price_eur_per_mwh", 180.0, "EUR/MWh",
+     "mFRR-up activation-price fallback when the timeseries column is absent."),
+    ("mfrr_dn_default_activation_price_eur_per_mwh", 20.0, "EUR/MWh",
+     "mFRR-down activation-price fallback when the timeseries column is absent."),
+    ("fcr_required_duration_hours", 0.5, "hours",
+     "FCR-specific sustained-output requirement; sizes the SOC headroom "
+     "reserved for FCR independently of the settlement period."),
+    ("bm_settlement_minutes", 15, "int",
+     "Balancing-market settlement period in minutes. Must equal "
+     "60 * dt_hours when balancing_enabled is TRUE."),
+    ("bm_soc_headroom_pct", 10.0, "%",
+     "Extra SOC safety buffer applied to the worst-case activation "
+     "reservation in both directions."),
+    ("bm_inflation_pct", 2.0, "%",
+     "Yearly indexation of balancing revenue applied in the multi-year "
+     "lifetime cashflow."),
+    ("bm_price_sigma_capacity_pct", 25.0, "%",
+     "Log-normal sigma for Monte Carlo perturbation of capacity prices."),
+    ("bm_price_sigma_activation_pct", 35.0, "%",
+     "Log-normal sigma for Monte Carlo perturbation of activation prices."),
+    ("bm_random_seed", 1729, "int",
+     "Default seed for the balancing Monte Carlo realisation."),
+)
+
+
 _SHEET_ROW_TEMPLATES: dict[
     str, tuple[tuple[str, object, str, str], ...]
 ] = {
@@ -464,6 +606,7 @@ _SHEET_ROW_TEMPLATES: dict[
     "bess": _BESS_ROWS,
     "economics": _ECONOMICS_ROWS,
     "simulation": _SIMULATION_ROWS,
+    "balancing": _BALANCING_ROWS,
 }
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
@@ -551,6 +694,8 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     bess_df = _build_kv_sheet(typed["bess"], _BESS_ROWS)
     economics_df = _build_kv_sheet(typed["economics"], _ECONOMICS_ROWS)
     simulation_df = _build_kv_sheet(typed["simulation"], _SIMULATION_ROWS)
+    balancing_section = typed.get("balancing") or dict(BALANCING_SHEET_DEFAULTS)
+    balancing_df = _build_kv_sheet(balancing_section, _BALANCING_ROWS)
 
     profile = typed.get("max_injection_profile")
     if profile is None:
@@ -564,6 +709,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         bess_df.to_excel(writer, sheet_name="bess", index=False)
         economics_df.to_excel(writer, sheet_name="economics", index=False)
         simulation_df.to_excel(writer, sheet_name="simulation", index=False)
+        balancing_df.to_excel(writer, sheet_name="balancing", index=False)
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
@@ -1070,6 +1216,173 @@ def _resolve_pv_column(
     return out
 
 
+# ---------------------------------------------------------------------------
+# Balancing market validation + timeseries fallback
+# ---------------------------------------------------------------------------
+
+# Keys whose value is read as the share of bess_power_kw allocated to a
+# specific market product. The DAM line is included so the sum across
+# every consumer of the BESS power budget is bounded by 100 %.
+_BALANCING_SHARE_KEYS: tuple[str, ...] = (
+    "dam_capacity_share_pct",
+    "fcr_capacity_share_pct",
+    "afrr_up_capacity_share_pct",
+    "afrr_dn_capacity_share_pct",
+    "mfrr_up_capacity_share_pct",
+    "mfrr_dn_capacity_share_pct",
+)
+
+_BALANCING_PROBABILITY_KEYS: tuple[str, ...] = (
+    "fcr_bid_acceptance_pct",
+    "afrr_up_bid_acceptance_pct",
+    "afrr_dn_bid_acceptance_pct",
+    "mfrr_up_bid_acceptance_pct",
+    "mfrr_dn_bid_acceptance_pct",
+    "fcr_activation_probability_pct",
+    "afrr_up_activation_probability_pct",
+    "afrr_dn_activation_probability_pct",
+    "mfrr_up_activation_probability_pct",
+    "mfrr_dn_activation_probability_pct",
+)
+
+_BALANCING_PRICE_KEYS: tuple[str, ...] = (
+    "fcr_default_capacity_price_eur_per_mwh",
+    "afrr_up_default_capacity_price_eur_per_mwh",
+    "afrr_dn_default_capacity_price_eur_per_mwh",
+    "mfrr_up_default_capacity_price_eur_per_mwh",
+    "mfrr_dn_default_capacity_price_eur_per_mwh",
+    "afrr_up_default_activation_price_eur_per_mwh",
+    "afrr_dn_default_activation_price_eur_per_mwh",
+    "mfrr_up_default_activation_price_eur_per_mwh",
+    "mfrr_dn_default_activation_price_eur_per_mwh",
+)
+
+# Mapping of timeseries column name to the scalar fallback key when the
+# column is missing. FCR has no activation price by design.
+_BALANCING_TS_COLUMN_DEFAULTS: dict[str, str] = {
+    "fcr_capacity_price_eur_per_mwh": "fcr_default_capacity_price_eur_per_mwh",
+    "afrr_up_capacity_price_eur_per_mwh":
+        "afrr_up_default_capacity_price_eur_per_mwh",
+    "afrr_dn_capacity_price_eur_per_mwh":
+        "afrr_dn_default_capacity_price_eur_per_mwh",
+    "mfrr_up_capacity_price_eur_per_mwh":
+        "mfrr_up_default_capacity_price_eur_per_mwh",
+    "mfrr_dn_capacity_price_eur_per_mwh":
+        "mfrr_dn_default_capacity_price_eur_per_mwh",
+    "afrr_up_activation_price_eur_per_mwh":
+        "afrr_up_default_activation_price_eur_per_mwh",
+    "afrr_dn_activation_price_eur_per_mwh":
+        "afrr_dn_default_activation_price_eur_per_mwh",
+    "mfrr_up_activation_price_eur_per_mwh":
+        "mfrr_up_default_activation_price_eur_per_mwh",
+    "mfrr_dn_activation_price_eur_per_mwh":
+        "mfrr_dn_default_activation_price_eur_per_mwh",
+}
+
+
+def _validate_balancing_config(
+    balancing: dict[str, Any], dt_minutes: int,
+) -> None:
+    """Validate the balancing-market config against the rules in the design note.
+
+    Skipped silently when ``balancing_enabled`` is False so workbooks that
+    carry the sheet for documentation but disable the feature still load.
+    """
+    if not bool(balancing.get("balancing_enabled", False)):
+        return
+
+    for key in _BALANCING_SHARE_KEYS:
+        value = float(balancing.get(key, 0.0) or 0.0)
+        if value < 0.0:
+            raise ValueError(
+                f"balancing sheet key {key!r} must be non-negative; "
+                f"got {value!r}."
+            )
+
+    share_sum = sum(
+        float(balancing.get(key, 0.0) or 0.0)
+        for key in _BALANCING_SHARE_KEYS
+    )
+    if share_sum > 100.0 + 1e-9:
+        raise ValueError(
+            "balancing sheet capacity shares sum to "
+            f"{share_sum:.3f} % which exceeds 100 % of bess_power_kw "
+            f"(keys: {list(_BALANCING_SHARE_KEYS)}). Reduce one or more "
+            "shares so the total stays at or below 100 %."
+        )
+
+    for key in _BALANCING_PROBABILITY_KEYS:
+        value = float(balancing.get(key, 0.0) or 0.0)
+        if value < 0.0 or value > 100.0:
+            raise ValueError(
+                f"balancing sheet key {key!r} must be a probability in "
+                f"[0, 100]; got {value!r}."
+            )
+
+    for key in _BALANCING_PRICE_KEYS:
+        value = float(balancing.get(key, 0.0) or 0.0)
+        if value < 0.0:
+            raise ValueError(
+                f"balancing sheet key {key!r} must be non-negative; "
+                f"got {value!r}."
+            )
+
+    duration = float(balancing.get("fcr_required_duration_hours", 0.0) or 0.0)
+    if duration <= 0.0:
+        raise ValueError(
+            "balancing sheet key 'fcr_required_duration_hours' must be "
+            f"strictly positive; got {duration!r}."
+        )
+
+    settlement = int(balancing.get("bm_settlement_minutes", 0) or 0)
+    if settlement != int(dt_minutes):
+        raise ValueError(
+            "balancing sheet key 'bm_settlement_minutes' is "
+            f"{settlement} min but the timeseries cadence is "
+            f"{int(dt_minutes)} min. Resample the timeseries (see "
+            "scripts/resample_timeseries.py) or set "
+            f"bm_settlement_minutes = {int(dt_minutes)} to match."
+        )
+
+    headroom = float(balancing.get("bm_soc_headroom_pct", 0.0) or 0.0)
+    if headroom < 0.0 or headroom > 50.0:
+        raise ValueError(
+            "balancing sheet key 'bm_soc_headroom_pct' must be in "
+            f"[0, 50]; got {headroom!r}."
+        )
+
+
+def _apply_balancing_timeseries_fallback(
+    ts: pd.DataFrame, balancing: dict[str, Any],
+) -> pd.DataFrame:
+    """Fill in any missing balancing-price column with its scalar default.
+
+    No-op when ``balancing_enabled`` is False (the columns may be absent
+    and the loader leaves them alone). When enabled, each missing column
+    is appended with the scalar value from the balancing config and a
+    single WARNING is emitted naming the column and the default used.
+    """
+    if not bool(balancing.get("balancing_enabled", False)):
+        return ts
+
+    out = ts
+    n_rows = len(out)
+    for col, default_key in _BALANCING_TS_COLUMN_DEFAULTS.items():
+        if col in out.columns:
+            continue
+        default_value = float(balancing.get(default_key, 0.0) or 0.0)
+        if out is ts:  # avoid the copy until we know we need one
+            out = ts.copy()
+        out[col] = np.full(n_rows, default_value, dtype=float)
+        logger.warning(
+            "balancing timeseries column %r is missing; filling with "
+            "the scalar default %.4f EUR/MWh from balancing sheet "
+            "key %r.",
+            col, default_value, default_key,
+        )
+    return out
+
+
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the input workbook and return the typed nested dict."""
     xlsx_path = Path(xlsx_path)
@@ -1099,6 +1412,17 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
                 "[bess] bess_degradation_pct_per_cycle not found in "
                 "workbook; defaulting to 0.0 (calendar-only mode)."
             )
+
+    # Optional ``balancing`` sheet — when absent every key falls back to
+    # the defaults declared above so ``balancing_enabled`` resolves to
+    # False and the rest of the loader behaves exactly as before.
+    if "balancing" in sheets:
+        balancing_flat = _flat_dict_from_sheet(
+            pd.read_excel(xlsx_path, sheet_name="balancing"),
+        )
+        typed["balancing"] = _parse_kv_sheet("balancing", balancing_flat)
+    else:
+        typed["balancing"] = dict(BALANCING_SHEET_DEFAULTS)
 
     # A finite grid-export cap must be strictly positive.  An empty cell
     # or an 'unlimited' token resolves to float('inf') (cap disabled).
@@ -1156,10 +1480,13 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             typed["pv"].get("specific_production_kwh_per_kwp", 0.0) or 0.0,
         ),
     )
+    dt_minutes = detect_timestep_minutes(ts)
+    _validate_balancing_config(typed["balancing"], dt_minutes)
+    ts = _apply_balancing_timeseries_fallback(ts, typed["balancing"])
     out: dict[str, Any] = {
         "ts": ts,
         "max_injection_profile": profile,
-        "dt_minutes": detect_timestep_minutes(ts),
+        "dt_minutes": dt_minutes,
     }
     out.update(typed)
     return out
