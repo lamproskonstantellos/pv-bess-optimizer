@@ -1557,6 +1557,12 @@ def _typed_to_flat(
         # p_grid_export_max_kw.  Expanded to a per-step array by the
         # max-injection helper module before entering the MILP.
         "max_injection_profile": typed.get("max_injection_profile"),
+        # Balancing-market section, forwarded as a nested dict so the
+        # MILP, KPI, lifetime and Monte Carlo paths can opt in without
+        # changing the flat-params contract.
+        "balancing": dict(
+            typed.get("balancing") or BALANCING_SHEET_DEFAULTS,
+        ),
         # simulation
         "plot_daily_scope": str(sim["plot_daily_scope"]),
         "plot_monthly_scope": str(sim["plot_monthly_scope"]),

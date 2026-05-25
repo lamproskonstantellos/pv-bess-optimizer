@@ -62,6 +62,20 @@ import pandas as pd
 import pyomo.environ as pyo
 from pyomo.opt import SolverStatus, TerminationCondition
 
+from .balancing import (
+    PRODUCTS_ALL,
+    PRODUCTS_DN,
+    PRODUCTS_SYMMETRIC,
+    PRODUCTS_UP,
+    PRODUCTS_WITH_ACTIVATION,
+    BalancingConfig,
+    BalancingTimeseries,
+    acceptance_probability,
+    activation_probability,
+    capacity_share_kw,
+    resolve_balancing_config,
+    resolve_balancing_timeseries,
+)
 from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .kpis import ENERGY_TOLERANCE
 from .modes import resolve_mode
@@ -226,6 +240,36 @@ def _resolve_max_injection_per_step(
     return np.full(
         len(ts), DEFAULT_MAX_INJECTION_PCT_HOURLY / 100.0, dtype=float,
     )
+
+
+# ---------------------------------------------------------------------------
+# Balancing-market resolvers (shared between build_model and model_to_dataframe)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_balancing_inputs(
+    params: dict[str, Any],
+    ts: pd.DataFrame,
+    *,
+    n_steps: int,
+    bess_present: bool,
+) -> tuple[BalancingConfig, BalancingTimeseries | None, bool]:
+    """Return the parsed config, per-step prices, and an active flag.
+
+    ``active`` is True only when ``balancing_enabled`` is set AND the
+    project carries a BESS — there is nothing to reserve otherwise.
+    """
+    raw_cfg = params.get("balancing") or {}
+    cfg = resolve_balancing_config(raw_cfg)
+    if not cfg.balancing_enabled or not bess_present:
+        return cfg, None, False
+    bts = resolve_balancing_timeseries(ts, cfg, n_steps)
+    return cfg, bts, True
+
+
+def _alpha_beta(cfg: BalancingConfig, product: str) -> float:
+    """Return alpha_k * beta_k for the expected-activation SOC drift."""
+    return acceptance_probability(cfg, product) * activation_probability(cfg, product)
 
 
 def derive_tight_big_m(
@@ -491,13 +535,49 @@ def build_model(
             rule=lambda m, t: m.pv_to_load[t] >= pv_load_priority[t],
         )
 
+    # --- Balancing-market block (gated on cfg.balancing_enabled) ---------
+    # Variables and bounds are declared up-front because they enter the
+    # SOC dynamics through the expected-activation drift; the power-
+    # budget and SOC-headroom constraints, and the objective, attach
+    # after the rest of the dispatch model is built.
+    balancing_cfg, balancing_ts, balancing_active = _resolve_balancing_inputs(
+        params, ts, n_steps=n_steps, bess_present=bess_present,
+    )
+    if balancing_active:
+        product_caps = {
+            k: capacity_share_kw(balancing_cfg, k, p_bess)
+            for k in PRODUCTS_ALL
+        }
+        m.BALANCING_PRODUCTS = pyo.Set(initialize=list(PRODUCTS_ALL), ordered=True)
+        m.r_balancing = pyo.Var(
+            m.BALANCING_PRODUCTS, m.T, domain=pyo.NonNegativeReals,
+            bounds=lambda _m, k, _t: (0.0, product_caps[k]),
+        )
+
     # --- SOC dynamics ----------------------------------------------------
     def soc_dynamics(m, t):
         if t == n_steps - 1:
             return pyo.Constraint.Skip
         charge_eff = eta_c * (m.pv_to_bess[t] + m.grid_to_bess[t])
         discharge_raw = (m.bess_dis_load[t] + m.bess_dis_grid[t]) / eta_d
-        return m.soc[t + 1] == m.soc[t] + charge_eff - discharge_raw
+        # Expected-value activation drifts in kWh, deterministic from the
+        # solver's point of view. FCR is symmetric in expectation so it
+        # contributes zero net energy.
+        if balancing_active:
+            act_charge = eta_c * dt_h * sum(
+                _alpha_beta(balancing_cfg, k) * m.r_balancing[k, t]
+                for k in PRODUCTS_DN
+            )
+            act_discharge = (dt_h / eta_d) * sum(
+                _alpha_beta(balancing_cfg, k) * m.r_balancing[k, t]
+                for k in PRODUCTS_UP
+            )
+        else:
+            act_charge = 0.0
+            act_discharge = 0.0
+        return m.soc[t + 1] == (
+            m.soc[t] + charge_eff - discharge_raw + act_charge - act_discharge
+        )
 
     m.SOC_DYN = pyo.Constraint(m.T, rule=soc_dynamics)
     m.SOC_MIN = pyo.Constraint(
@@ -525,7 +605,23 @@ def build_model(
         final_discharge = (
             m.bess_dis_load[n_steps - 1] + m.bess_dis_grid[n_steps - 1]
         ) / eta_d
-        final_soc_expr = m.soc[n_steps - 1] + final_charge - final_discharge
+        if balancing_active:
+            t_final = n_steps - 1
+            final_act_charge = eta_c * dt_h * sum(
+                _alpha_beta(balancing_cfg, k) * m.r_balancing[k, t_final]
+                for k in PRODUCTS_DN
+            )
+            final_act_discharge = (dt_h / eta_d) * sum(
+                _alpha_beta(balancing_cfg, k) * m.r_balancing[k, t_final]
+                for k in PRODUCTS_UP
+            )
+        else:
+            final_act_charge = 0.0
+            final_act_discharge = 0.0
+        final_soc_expr = (
+            m.soc[n_steps - 1] + final_charge - final_discharge
+            + final_act_charge - final_act_discharge
+        )
 
         if terminal_soc_free is None:
             terminal_soc_free = not bool(params.get("terminal_soc_equal", True))
@@ -561,6 +657,63 @@ def build_model(
         for indices in day_to_idx.values():
             lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
             m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * e_cap_param)
+
+    # --- Balancing-market constraints (gated) ---------------------------------
+    if balancing_active:
+        h_buf = float(balancing_cfg.bm_soc_headroom_pct) / 100.0
+        d_fcr = float(balancing_cfg.fcr_required_duration_hours)
+        bess_step_lim_bm = p_bess * dt_h
+
+        # Per-direction power budget. FCR is symmetric so it counts in
+        # both directions. r is in kW; multiply by dt_h to compare with
+        # the kWh-per-step DAM flows.
+        def _bm_power_dn(m, t):
+            dn_share = sum(
+                m.r_balancing[k, t]
+                for k in PRODUCTS_DN + PRODUCTS_SYMMETRIC
+            )
+            return (
+                m.pv_to_bess[t] + m.grid_to_bess[t] + dn_share * dt_h
+                <= bess_step_lim_bm
+            )
+
+        def _bm_power_up(m, t):
+            up_share = sum(
+                m.r_balancing[k, t]
+                for k in PRODUCTS_UP + PRODUCTS_SYMMETRIC
+            )
+            return (
+                m.bess_dis_load[t] + m.bess_dis_grid[t] + up_share * dt_h
+                <= bess_step_lim_bm
+            )
+
+        m.BM_POWER_DN = pyo.Constraint(m.T, rule=_bm_power_dn)
+        m.BM_POWER_UP = pyo.Constraint(m.T, rule=_bm_power_up)
+
+        # SOC headroom — must be able to honour a full settlement period
+        # of activation in the worst case, with an extra safety buffer.
+        def _bm_soc_up(m, t):
+            asym = (1.0 + h_buf) * dt_h * sum(
+                m.r_balancing[k, t] for k in PRODUCTS_UP
+            ) / eta_d
+            sym = (1.0 + h_buf) * d_fcr * sum(
+                m.r_balancing[k, t] for k in PRODUCTS_SYMMETRIC
+            ) / eta_d
+            return m.soc[t] - params["soc_min_frac"] * e_cap_param >= asym + sym
+
+        def _bm_soc_dn(m, t):
+            asym = (1.0 + h_buf) * dt_h * sum(
+                m.r_balancing[k, t] for k in PRODUCTS_DN
+            ) * eta_c
+            sym = (1.0 + h_buf) * d_fcr * sum(
+                m.r_balancing[k, t] for k in PRODUCTS_SYMMETRIC
+            ) * eta_c
+            return (
+                params["soc_max_frac"] * e_cap_param - m.soc[t] >= asym + sym
+            )
+
+        m.BM_SOC_UP = pyo.Constraint(m.T, rule=_bm_soc_up)
+        m.BM_SOC_DN = pyo.Constraint(m.T, rule=_bm_soc_dn)
 
     # --- Hourly max-injection cap (HARD constraint, BOTH modes) ----------
     # Section 8 of the VNB spec — regulatory grid-connection limit.
@@ -669,6 +822,42 @@ def build_model(
     )
     profit_eur = avoided_cost + export_revenue - grid_charge_cost + cycles_bonus
 
+    if balancing_active:
+        # Expected capacity revenue across all five products.
+        cap_terms = []
+        for k in PRODUCTS_ALL:
+            alpha = acceptance_probability(balancing_cfg, k)
+            price_col = getattr(
+                balancing_ts, f"{k}_capacity_price_eur_per_mwh",
+            )
+            cap_terms.append(
+                alpha * dt_h * sum(
+                    float(price_col[t]) * m.r_balancing[k, t]
+                    for t in time_index
+                ) / 1000.0
+            )
+        # Expected activation revenue across the four products that
+        # carry an activation payment. Both up and down activation
+        # prices enter as positive payments per the documented sign
+        # convention; the user is responsible for sign-correctness of
+        # the input prices.
+        act_terms = []
+        for k in PRODUCTS_WITH_ACTIVATION:
+            alpha_beta = _alpha_beta(balancing_cfg, k)
+            price_col = getattr(
+                balancing_ts, f"{k}_activation_price_eur_per_mwh",
+            )
+            act_terms.append(
+                alpha_beta * dt_h * sum(
+                    float(price_col[t]) * m.r_balancing[k, t]
+                    for t in time_index
+                ) / 1000.0
+            )
+        m.balancing_revenue_expr = pyo.Expression(
+            expr=sum(cap_terms) + sum(act_terms),
+        )
+        profit_eur = profit_eur + m.balancing_revenue_expr
+
     m.OBJ = pyo.Objective(
         expr=profit_eur - curtail_tiebreak_term, sense=pyo.maximize,
     )
@@ -760,6 +949,28 @@ def model_to_dataframe(
         res["dam_price_eur_per_mwh"] = ts["dam_price_eur_per_mwh"].values
     if "retail_price_eur_per_mwh" in ts.columns:
         res["retail_price_eur_per_mwh"] = ts["retail_price_eur_per_mwh"].values
+
+    # Balancing reservations (kW per timestep). Only emitted when the
+    # MILP carried the balancing block — keeping the dispatch frame
+    # bit-identical to the previous release when balancing is OFF.
+    if hasattr(model, "r_balancing"):
+        for product in PRODUCTS_ALL:
+            res[f"bm_reservation_{product}_kw"] = [
+                pyo.value(model.r_balancing[product, t]) for t in time_index
+            ]
+        for col in (
+            "fcr_capacity_price_eur_per_mwh",
+            "afrr_up_capacity_price_eur_per_mwh",
+            "afrr_dn_capacity_price_eur_per_mwh",
+            "mfrr_up_capacity_price_eur_per_mwh",
+            "mfrr_dn_capacity_price_eur_per_mwh",
+            "afrr_up_activation_price_eur_per_mwh",
+            "afrr_dn_activation_price_eur_per_mwh",
+            "mfrr_up_activation_price_eur_per_mwh",
+            "mfrr_dn_activation_price_eur_per_mwh",
+        ):
+            if col in ts.columns:
+                res[col] = ts[col].values
 
     if round_output:
         numeric_cols = [c for c in res.columns if c != "timestamp"]
@@ -872,6 +1083,13 @@ def verify_dispatch_invariants(
             eta_c * (pv_to_bess[:-1] + grid_to_bess[:-1])
             - (bess_dis_load[:-1] + bess_dis_grid[:-1]) / eta_d
         )
+        # Add the deterministic expected-activation drift when the
+        # balancing block was active. The KPI helper computes the same
+        # per-step drift; reuse it so the two checks stay aligned.
+        from .kpis import _balancing_soc_drift
+        bm_drift = _balancing_soc_drift(res, params)
+        if bm_drift is not None:
+            expected_delta = expected_delta + bm_drift[:-1]
         actual_delta = soc[1:] - soc[:-1]
         inv_3 = float(abs(actual_delta - expected_delta).max())
     else:
@@ -880,15 +1098,28 @@ def verify_dispatch_invariants(
     total_charge = float((pv_to_bess + grid_to_bess).sum())
     total_discharge = float((bess_dis_load + bess_dis_grid).sum())
     soc0 = float(soc[0]) if len(soc) else 0.0
+    # Reuse the balancing SOC drift helper so the rte-bound / closed-
+    # cycle checks stay consistent with the per-step SOC dynamics check.
+    from .kpis import _balancing_soc_drift
+    bm_drift = _balancing_soc_drift(res, params)
     if len(soc):
         final_state = (
             float(soc[-1])
             + eta_c * (float(pv_to_bess[-1]) + float(grid_to_bess[-1]))
             - (float(bess_dis_load[-1]) + float(bess_dis_grid[-1])) / eta_d
         )
+        if bm_drift is not None:
+            final_state += float(bm_drift[-1])
     else:
         final_state = 0.0
-    rte_bound = eta_c * eta_d * total_charge + eta_d * (soc0 - final_state)
+    # The activation drift acts on SOC in addition to DAM charge /
+    # discharge, so the rte bound must absorb the total expected drift.
+    drift_total = float(bm_drift.sum()) if bm_drift is not None else 0.0
+    rte_bound = (
+        eta_c * eta_d * total_charge
+        + eta_d * (soc0 - final_state)
+        + eta_d * drift_total
+    )
     inv_4 = float(max(0.0, total_discharge - rte_bound))
 
     if mode == "vnb":
@@ -925,6 +1156,8 @@ def verify_dispatch_invariants(
                 + eta_c * (pv_to_bess[-1] + grid_to_bess[-1])
                 - (bess_dis_load[-1] + bess_dis_grid[-1]) / eta_d
             )
+            if bm_drift is not None:
+                final_state += float(bm_drift[-1])
             inv_8 = float(abs(final_state - soc[0]))
         else:
             inv_8 = 0.0
