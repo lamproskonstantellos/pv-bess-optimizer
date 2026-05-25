@@ -540,6 +540,25 @@ pandas widening or assignment narrowing pattern; every override in
 - All 10 drivers completed clean (see §2.7).
 - No new P0 surfaced in this phase.
 
+### Phase 4 — Explicit vulture sweep
+
+- `vulture pvbess_opt --min-confidence 70` → 0 findings. The Part 1
+  manual scan plus the dead-code deletions there left the package
+  clean.
+- `vulture pvbess_opt scripts tests --min-confidence 70` → still 0
+  findings.
+- A `[tool.vulture]` block has been added to `pyproject.toml`
+  (`paths = ["pvbess_opt", "scripts", "tests"]`,
+  `min_confidence = 70`) so future bare `vulture` invocations replay
+  the audit configuration. No `ignore_names` whitelist is needed
+  because nothing is being suppressed.
+- At lower thresholds (60 %) vulture reports `BalancingConfig` and
+  `BalancingTimeseries` dataclass fields as unused. Those are read by
+  reflection (`fields(BalancingConfig)` in
+  `resolve_balancing_config`) and parsed positionally by Pyomo
+  variables further downstream, so the 70 % gate correctly skips
+  them; no further action needed.
+
 ## 2.7 Dynamic audit harness results
 
 All 10 driver scripts under `scripts/audit_runs/` produce JSON
