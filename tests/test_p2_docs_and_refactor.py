@@ -1,4 +1,4 @@
-"""Phase 8 regression tests for the P2 documentation / refactor items.
+"""Regression tests for the P2 documentation / refactor items.
 
 Covers:
 

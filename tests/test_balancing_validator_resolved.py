@@ -1,4 +1,4 @@
-"""Phase 6 regression: balancing share-cap validation uses resolved config.
+"""Regression test: balancing share-cap validation uses resolved config.
 
 ``_validate_balancing_config`` previously summed raw workbook share
 values directly, treating missing keys as 0.  ``dam_capacity_share_pct``

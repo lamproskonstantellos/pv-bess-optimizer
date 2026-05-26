@@ -1,4 +1,4 @@
-"""Phase 7 regression tests for the P2 correctness-adjacent items.
+"""Regression tests for the P2 correctness-adjacent items.
 
 Covers:
 

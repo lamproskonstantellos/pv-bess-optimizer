@@ -1,4 +1,4 @@
-"""Phase 5 regression: balancing-product labels are canonical.
+"""Regression test: balancing-product labels are canonical.
 
 Previously the five balancing-product bar labels (FCR, aFRR-up,
 aFRR-dn, mFRR-up, mFRR-dn) were absent from
