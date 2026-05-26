@@ -328,9 +328,14 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Calendar year of Year 1 (first operating year). CAPEX is paid in "
      "Year 0 (calendar = project_start_year - 1)."),
     ("mode", "self_consumption", "enum",
-     "self_consumption | merchant. self_consumption requires a co-located load and enforces load "
-     "priority + no simultaneous grid I/O. merchant has no load; PV/BESS "
-     "dispatch entirely to DAM."),
+     "Accepted values: 'self_consumption' or 'merchant'. "
+     "self_consumption requires a co-located load and enforces hard load "
+     "priority (pv_to_load == min(pv, load)) plus no simultaneous grid "
+     "I/O via a tight big-M. merchant has no co-located load; "
+     "pv_to_load / bess_dis_load / grid_to_load are pinned to zero and "
+     "PV / BESS dispatch entirely to the DAM. The per-step max-injection "
+     "export cap (p_grid_export_max_kw x max_injection_profile) applies "
+     "unconditionally in BOTH modes — curtailment is never skipped."),
     ("settlement_minutes", 15, "int",
      "Greek Self-consumption settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
      "Currently informational; the MILP timestep is auto-detected."),

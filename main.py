@@ -867,6 +867,24 @@ def _run_one(
             n_seeds, n_sources, total_min, per_seed_s, len(ts),
         )
 
+    # Upfront perfect-foresight + balancing solve estimate. Reference
+    # points from the v0.9.0 audit JSONs: 35 040 steps + balancing +
+    # self_consumption + bess-only ~565 s; merchant + hybrid + balancing
+    # on 672 steps ~1.2 s. Scale roughly linearly with n_steps.
+    if bool(params.get("balancing", {}).get("balancing_enabled", False)):
+        ref_steps = 35040.0
+        ref_seconds = 565.0
+        est_s = max(1.0, len(ts) / ref_steps * ref_seconds)
+        est_min = est_s / 60.0
+        logger.warning(
+            "[balancing-runtime-estimate] balancing MILP enabled: %d steps "
+            "=> projected solve wall-clock ~%.1f s (~%.1f min). The MILP "
+            "runs silently by default; pass --tee for live HiGHS chatter, "
+            "or grep for '[milp-solve]' in the run log for the start / "
+            "done markers.",
+            len(ts), est_s, est_min,
+        )
+
     with _tee_stdout_to_log(log_path):
         print(f"[run] mode={params.get('mode')}  "
               f"allow_bess_grid_charging={params.get('allow_bess_grid_charging')}  "

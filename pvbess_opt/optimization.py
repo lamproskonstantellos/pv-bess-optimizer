@@ -55,6 +55,7 @@ keep the user-facing surface small.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Literal, overload
 
 import numpy as np
@@ -894,7 +895,26 @@ def solve_model(
         solver, resolved,
         mip_gap=mip_gap, time_limit_seconds=time_limit_seconds,
     )
+    n_vars = int(model.nvariables())
+    n_cons = int(model.nconstraints())
+    logger.info(
+        "[milp-solve] start: solver=%s vars=%d constraints=%d "
+        "time_limit=%ds mip_gap=%.4g tee=%s",
+        resolved, n_vars, n_cons, int(time_limit_seconds), float(mip_gap),
+        bool(tee),
+    )
+    for h in logger.handlers + logging.getLogger().handlers:
+        h.flush()
+    t_solve_start = time.perf_counter()
     result = solver.solve(model, tee=tee)
+    elapsed = time.perf_counter() - t_solve_start
+    condition = result.solver.termination_condition
+    logger.info(
+        "[milp-solve] done: solver=%s elapsed=%.2fs termination=%s",
+        resolved, elapsed, condition,
+    )
+    for h in logger.handlers + logging.getLogger().handlers:
+        h.flush()
     _check_solver_status(result, resolved, model)
     return model, resolved
 

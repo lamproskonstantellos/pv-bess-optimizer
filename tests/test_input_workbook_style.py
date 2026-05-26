@@ -1,9 +1,10 @@
 """Style checks for the canonical input workbook.
 
 The shipped workbook carries exactly one global accent: row 1 of every
-sheet is bold + filled ``#F2F2F2`` + thin ``#BFBFBF`` bottom border.
-No other cells carry per-sheet styling.  In particular, no cell
-anywhere has the prior amber bootstrap fill ``#FFF2CC``.
+sheet is bold + white text + filled navy ``#1F3864`` + thin ``#BFBFBF``
+bottom border, with the row frozen via ``freeze_panes = "A2"``. No
+other cells carry per-sheet styling. In particular, no cell anywhere
+has the prior amber bootstrap fill ``#FFF2CC``.
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ from openpyxl import load_workbook
 ROOT = Path(__file__).resolve().parent.parent
 WORKBOOK = ROOT / "inputs" / "input.xlsx"
 
-EXPECTED_HEADER_FILL = "F2F2F2"
+EXPECTED_HEADER_FILL = "1F3864"
+EXPECTED_HEADER_FONT = "FFFFFF"
 EXPECTED_HEADER_BORDER = "BFBFBF"
 FORBIDDEN_FILL_HEX = "FFF2CC"
 
@@ -56,7 +58,7 @@ def test_no_amber_fills_anywhere(workbook):
     "simulation", "max_injection_profile", "balancing",
 ])
 def test_header_row_has_global_accent(workbook, sheet_name):
-    """Row 1 of every sheet is bold + has ``F2F2F2`` fill."""
+    """Row 1 of every sheet is bold + white + filled navy ``1F3864``."""
     ws = workbook[sheet_name]
     assert ws.max_row >= 1
     for cell in ws[1]:
@@ -73,6 +75,23 @@ def test_header_row_has_global_accent(workbook, sheet_name):
             f"{sheet_name}!{cell.coordinate}: fill={rgb!r}, "
             f"expected {EXPECTED_HEADER_FILL!r}"
         )
+        font_rgb = _normalise_rgb(getattr(cell.font.color, "rgb", None))
+        assert font_rgb == EXPECTED_HEADER_FONT, (
+            f"{sheet_name}!{cell.coordinate}: font color={font_rgb!r}, "
+            f"expected {EXPECTED_HEADER_FONT!r}"
+        )
+
+
+@pytest.mark.parametrize("sheet_name", [
+    "timeseries", "project", "pv", "bess", "economics",
+    "simulation", "max_injection_profile", "balancing",
+])
+def test_header_row_is_frozen(workbook, sheet_name):
+    """Every sheet freezes its header row via ``freeze_panes = 'A2'``."""
+    ws = workbook[sheet_name]
+    assert ws.freeze_panes == "A2", (
+        f"{sheet_name}: freeze_panes={ws.freeze_panes!r}, expected 'A2'"
+    )
 
 
 @pytest.mark.parametrize("sheet_name", [

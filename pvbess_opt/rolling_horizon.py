@@ -674,7 +674,13 @@ def monte_carlo_balancing(
         for p in PRODUCTS_WITH_ACTIVATION
     }
     constrained_count = 0
-    for s in range(int(n_scenarios)):
+    # Per-scenario progress: emit ~20 INFO lines across the ensemble,
+    # mirroring the monte_carlo_rolling cadence. Always log the final
+    # scenario so the user sees a terminal "done" marker.
+    n_total = int(n_scenarios)
+    log_every = max(1, n_total // 20)
+    t_mc_start = time.perf_counter()
+    for s in range(n_total):
         rng = np.random.default_rng(seed_base + s)
         outcome = realise_balancing_scenario(
             reservations, cfg, prices,
@@ -691,6 +697,19 @@ def monte_carlo_balancing(
             per_product_activation_totals[p][s] = val
         if outcome["soc_constrained"]:
             constrained_count += 1
+
+        done = s + 1
+        if done % log_every == 0 or done == n_total:
+            elapsed = time.perf_counter() - t_mc_start
+            running_median = float(np.median(totals[:done]))
+            eta_s = elapsed / done * (n_total - done) if done else 0.0
+            logger.info(
+                "[mc-balancing] scenario %d/%d done in %.1fs "
+                "(running median = %.0f EUR, ETA %.1fm)",
+                done, n_total, elapsed, running_median, eta_s / 60.0,
+            )
+            for h in logger.handlers + logging.getLogger().handlers:
+                h.flush()
 
     quantiles = np.quantile(totals, [0.10, 0.50, 0.90])
     aggregated: dict[str, Any] = {
