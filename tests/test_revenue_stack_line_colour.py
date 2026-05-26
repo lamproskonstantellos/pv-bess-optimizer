@@ -187,6 +187,95 @@ def test_revenue_stack_sums_to_net_line(tmp_path: Path):
         )
 
 
+def _yearly_cf_with_balancing() -> pd.DataFrame:
+    """Year-1 gross stack 100_000, no aggregator fee.  Adds a constant
+    balancing column to exercise the balancing-bar path in the stack."""
+    rows = []
+    for y in range(1, 6):
+        rows.append({
+            "project_year": y, "calendar_year": 2025 + y,
+            "revenue_eur": 100_000.0,
+            "revenue_retail_eur": 35_000.0,
+            "revenue_dam_eur": 65_000.0,
+            "balancing_revenue_eur": 20_000.0,
+            "bess_capacity_factor": 1.0,
+            "aggregator_fee_eur": 0.0,
+        })
+    return pd.DataFrame(rows)
+
+
+def _y1_kpis_with_balancing() -> dict:
+    return {
+        **_y1_kpis(),
+        # Sum to 20_000 to match _yearly_cf_with_balancing().
+        "revenue_bess_fcr_eur": 8_000.0,
+        "revenue_bess_afrr_up_eur": 4_000.0,
+        "revenue_bess_afrr_dn_eur": 3_000.0,
+        "revenue_bess_mfrr_up_eur": 3_000.0,
+        "revenue_bess_mfrr_dn_eur": 2_000.0,
+    }
+
+
+def test_revenue_stack_sums_to_net_line_with_balancing(tmp_path: Path):
+    """Reconciliation under a balancing-enabled fixture — would have
+    caught P0.1 (balancing bars collapsed when ``revenue_dam_eur`` was
+    zero) and P1.2 (balancing growth tracked the DAM ratio instead of
+    ``bm_inflation_pct``)."""
+    plt.close("all")
+
+    import pvbess_opt.plotting.lifecycle as life_mod
+    captured: dict = {}
+    original_save = life_mod.save_figure
+
+    def keep_open(out):
+        captured["fig"] = plt.gcf()
+        return Path(out)
+
+    life_mod.save_figure = keep_open
+    try:
+        plot_revenue_stack_yearly(
+            _yearly_cf_with_balancing(),
+            _y1_kpis_with_balancing(),
+            tmp_path / "stack.pdf",
+            econ={
+                "retail_inflation_pct": 0.0,
+                "dam_inflation_pct": 0.0,
+                "bm_inflation_pct": 0.0,
+                "currency_format": "auto",
+            },
+        )
+    finally:
+        life_mod.save_figure = original_save
+
+    fig = captured["fig"]
+    ax = fig.axes[0]
+    sums: dict[float, float] = {}
+    for patch in ax.patches:
+        x = patch.get_x() + patch.get_width() / 2.0
+        key = round(x)
+        sums[key] = sums.get(key, 0.0) + patch.get_height()
+
+    from pvbess_opt.config import financial_color
+    target = financial_color("Net revenue").lower()
+    net_line = None
+    from matplotlib.colors import to_hex
+    for line in ax.get_lines():
+        c = line.get_color()
+        c_hex = c.lower() if isinstance(c, str) else to_hex(c).lower()
+        if c_hex == target and line.get_linestyle() == "-":
+            net_line = line
+            break
+    assert net_line is not None
+    xs = net_line.get_xdata()
+    ys = net_line.get_ydata()
+
+    for x, y in zip(xs, ys, strict=False):
+        stacked = sums[round(float(x))]
+        assert abs(stacked - float(y)) < 1.0e-6, (
+            f"Year {x}: stack sum {stacked} != net line {y}"
+        )
+
+
 def test_aggregator_fee_bar_skipped_when_fee_is_zero(tmp_path: Path):
     """A workbook with aggregator_fee_pct_revenue=0 produces no fee bar."""
     plt.close("all")
