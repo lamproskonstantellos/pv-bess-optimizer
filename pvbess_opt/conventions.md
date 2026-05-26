@@ -61,3 +61,17 @@ the rounded frame for downstream display.
 The KPI-aggregation step (`_compute_balancing_kpis` at
 `pvbess_opt/kpis.py:631`) operates on the rounded frame by design: the
 4-dp rounding is intentional for headline KPI display.
+
+## Lifetime aggregates exclude balancing revenue
+
+`aggregate_lifetime_to_yearly` (`pvbess_opt/lifetime.py`) returns a
+DataFrame whose revenue column is named `revenue_eur_dam_retail`.  It
+is the per-step DAM + retail aggregate (matching the cashflow's
+`revenue_eur` column scope) and **deliberately excludes balancing
+revenue**: balancing settles per window via reservation × probability
+× price, not per step, and pulling it into the per-step physics frame
+would require restructuring the lifetime data model.
+
+For total project revenue including balancing, use the cashflow
+DataFrame: `cashflow_yearly['revenue_eur'] +
+cashflow_yearly['balancing_revenue_eur']`.

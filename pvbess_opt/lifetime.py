@@ -297,6 +297,15 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
     Requires the per-step EUR columns produced by ``compute_kpis`` /
     ``build_lifetime_dispatch`` to be present; raises rather than
     silently aggregating zero revenue.
+
+    ``revenue_eur_dam_retail`` is the per-step DAM + retail post-fee
+    aggregate (matching the cashflow's ``revenue_eur`` column).  It
+    deliberately **excludes** balancing revenue — the lifetime frame
+    is per-step physics, while balancing settles per window via
+    reservation × probability × price (see
+    :func:`pvbess_opt.economics.build_yearly_cashflow`).  Callers that
+    want a true project-total revenue should add
+    ``cashflow_yearly['balancing_revenue_eur']`` to this column.
     """
     if lifetime_df.empty:
         return pd.DataFrame(
@@ -305,7 +314,7 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
                 "pv_generation_mwh", "pv_to_load_mwh", "pv_to_grid_mwh",
                 "bess_charge_mwh", "bess_discharge_mwh",
                 "import_to_load_mwh", "export_total_mwh",
-                "revenue_eur_total",
+                "revenue_eur_dam_retail",
             ],
         )
     require_economic_columns(lifetime_df, context="aggregate_lifetime_to_yearly")
@@ -364,7 +373,7 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
             ),
             "import_to_load_mwh": _sum_kwh("grid_to_load_kwh"),
             "export_total_mwh": _sum_kwh("grid_export_total_kwh"),
-            "revenue_eur_total": grouped["_net_revenue_per_step"].sum(),
+            "revenue_eur_dam_retail": grouped["_net_revenue_per_step"].sum(),
         }
     )
     out = out.reset_index()

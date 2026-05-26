@@ -134,7 +134,7 @@ def test_cashflow_and_lifetime_bess_revenue_reconcile():
     lifetime = build_lifetime_dispatch(res1, econ, capacities)
     agg = aggregate_lifetime_to_yearly(lifetime)
     lt_rev1 = float(
-        agg.loc[agg["project_year"] == 1, "revenue_eur_total"].iloc[0]
+        agg.loc[agg["project_year"] == 1, "revenue_eur_dam_retail"].iloc[0]
     )
 
     d_bess = econ["bess_degradation_annual_pct"] / 100.0
@@ -144,7 +144,7 @@ def test_cashflow_and_lifetime_bess_revenue_reconcile():
             cf.loc[cf["project_year"] == y, "revenue_eur"].iloc[0]
         ) / cf_rev1
         lt_ratio = float(
-            agg.loc[agg["project_year"] == y, "revenue_eur_total"].iloc[0]
+            agg.loc[agg["project_year"] == y, "revenue_eur_dam_retail"].iloc[0]
         ) / lt_rev1
         assert abs(cf_ratio - bf) < 1e-9, (y, cf_ratio, bf)
         assert abs(lt_ratio - bf) < 1e-9, (y, lt_ratio, bf)
@@ -161,7 +161,7 @@ def test_aggregate_lifetime_yearly_columns():
         "pv_to_load_mwh", "pv_to_grid_mwh",
         "bess_charge_mwh", "bess_discharge_mwh",
         "import_to_load_mwh", "export_total_mwh",
-        "revenue_eur_total",
+        "revenue_eur_dam_retail",
     ):
         assert col in agg.columns
 

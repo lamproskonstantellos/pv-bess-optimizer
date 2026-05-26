@@ -175,7 +175,7 @@ def test_repo_input_xlsx_headline_kpis_pinned():
         for col in (
             "pv_generation_mwh", "bess_discharge_mwh", "bess_charge_mwh",
             "pv_to_load_mwh", "pv_to_grid_mwh", "import_to_load_mwh",
-            "export_total_mwh", "revenue_eur_total",
+            "export_total_mwh", "revenue_eur_dam_retail",
         ):
             if col in lifetime_yearly.columns:
                 lifetime_yearly[col] = (
