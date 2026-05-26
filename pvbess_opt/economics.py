@@ -176,9 +176,9 @@ def derive_asset_capacities(
     ``econ`` and ``ts`` are kept in the signature for API symmetry.
     """
     _ = econ, ts  # accepted for API symmetry
-    pv_kwp = max(float(params.get("pv_nameplate_kwp", 0.0) or 0.0), 0.0)
-    bess_kw = max(float(params.get("bess_power_kw", 0.0) or 0.0), 0.0)
-    bess_kwh = max(float(params.get("bess_capacity_kwh", 0.0) or 0.0), 0.0)
+    pv_kwp = float(params.get("pv_nameplate_kwp", 0.0) or 0.0)
+    bess_kw = float(params.get("bess_power_kw", 0.0) or 0.0)
+    bess_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
     return {
         "pv_kwp": pv_kwp,
         "bess_kw": bess_kw,

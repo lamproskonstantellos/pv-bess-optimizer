@@ -96,6 +96,7 @@ __all__ = [
     "make_run_layout",
     "read_inputs",
     "read_workbook",
+    "validate_workbook_params",
     "write_assumptions_summary",
     "write_dispatch_artifacts",
     "write_results_workbook",
@@ -1326,6 +1327,108 @@ def _validate_balancing_config(
         )
 
 
+_DT_MINUTES_VALID_DIVISORS: tuple[int, ...] = (
+    1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60,
+)
+
+
+def validate_workbook_params(
+    typed: dict[str, Any], *, dt_minutes: int | None = None,
+) -> None:
+    """Reject out-of-range and physically impossible workbook values.
+
+    Operates on the typed nested dict returned by :func:`read_workbook`
+    (sections ``project``, ``pv``, ``bess``, ``economics``,
+    ``simulation``, optional ``balancing``).  Raises ``ValueError`` with
+    a single message naming the offending key and value on the first
+    failure encountered.
+
+    Callers building ``typed`` programmatically (e.g. unit tests that
+    skip the workbook loader) should still route through here before
+    constructing the flat ``params`` dict — every downstream consumer
+    relies on these invariants.
+    """
+    pv = typed.get("pv") or {}
+    bess = typed.get("bess") or {}
+    economics = typed.get("economics") or {}
+    balancing = typed.get("balancing") or {}
+
+    def _require_non_negative(section: dict[str, Any], key: str) -> None:
+        if key not in section:
+            return
+        raw = section[key]
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return
+        if value < 0.0:
+            raise ValueError(
+                f"{key!r} must be non-negative; got {value!r}."
+            )
+
+    for key in ("pv_nameplate_kwp",):
+        _require_non_negative(pv, key)
+    for key in ("bess_power_kw", "bess_capacity_kwh", "max_cycles_per_day"):
+        _require_non_negative(bess, key)
+    for key in (
+        "capex_pv_eur_per_kw",
+        "capex_bess_eur_per_kw",
+        "opex_pv_eur_per_kwp",
+        "opex_bess_eur_per_kw",
+    ):
+        _require_non_negative(economics, key)
+
+    soc_min = float(bess.get("soc_min_frac", 0.0) or 0.0)
+    soc_max = float(bess.get("soc_max_frac", 1.0) or 1.0)
+    initial_soc = float(bess.get("initial_soc_frac", 0.5) or 0.5)
+    if not (0.0 <= soc_min <= 1.0):
+        raise ValueError(
+            f"'soc_min_frac' must be in [0, 1]; got {soc_min!r}."
+        )
+    if not (0.0 <= soc_max <= 1.0):
+        raise ValueError(
+            f"'soc_max_frac' must be in [0, 1]; got {soc_max!r}."
+        )
+    if soc_min > soc_max:
+        raise ValueError(
+            f"'soc_min_frac' ({soc_min!r}) must be <= 'soc_max_frac' "
+            f"({soc_max!r})."
+        )
+    if not (soc_min <= initial_soc <= soc_max):
+        raise ValueError(
+            f"'initial_soc_frac' ({initial_soc!r}) must lie within "
+            f"['soc_min_frac', 'soc_max_frac'] = [{soc_min!r}, {soc_max!r}]."
+        )
+
+    for key in ("efficiency_charge", "efficiency_discharge"):
+        if key not in bess:
+            continue
+        value = float(bess[key])
+        if not (0.0 < value <= 1.0):
+            raise ValueError(
+                f"{key!r} must be in (0, 1]; got {value!r}."
+            )
+
+    if dt_minutes is not None:
+        if dt_minutes <= 0:
+            raise ValueError(
+                f"'dt_minutes' must be a positive integer; got {dt_minutes!r}."
+            )
+        if dt_minutes not in _DT_MINUTES_VALID_DIVISORS:
+            raise ValueError(
+                f"'dt_minutes' = {dt_minutes!r} does not evenly divide 60; "
+                f"valid cadences are {list(_DT_MINUTES_VALID_DIVISORS)!r}."
+            )
+
+    if bool(balancing.get("balancing_enabled", False)):
+        # Activation / acceptance probabilities are validated by
+        # :func:`_validate_balancing_config` against the [0, 100] range
+        # (percent-scale).  Re-running it here keeps a single source of
+        # truth.
+        if dt_minutes is not None:
+            _validate_balancing_config(balancing, dt_minutes)
+
+
 def _apply_balancing_timeseries_fallback(
     ts: pd.DataFrame, balancing: dict[str, Any],
 ) -> pd.DataFrame:
@@ -1438,7 +1541,7 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         ),
     )
     dt_minutes = detect_timestep_minutes(ts)
-    _validate_balancing_config(typed["balancing"], dt_minutes)
+    validate_workbook_params(typed, dt_minutes=dt_minutes)
     ts = _apply_balancing_timeseries_fallback(ts, typed["balancing"])
     out: dict[str, Any] = {
         "ts": ts,
