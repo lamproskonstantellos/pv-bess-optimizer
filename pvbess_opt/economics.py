@@ -1184,7 +1184,16 @@ def _payback_year(
     for i in range(cumulative.size):
         if cumulative[i] >= 0:
             if i == 0:
-                return float(years[0])
+                # A genuine cross-at-start (cumulative[0] > 0) is a
+                # defined payback at years[0].  But cumulative[0] == 0
+                # with no positive flow yet (incremental[0] within
+                # rounding of zero) is the cumulative-stuck-at-zero
+                # edge case the docstring promises NaN for.
+                if cumulative[0] > 1e-12:
+                    return float(years[0])
+                if incremental[0] > 1e-12:
+                    return float(years[0])
+                return float("nan")
             cum_prev = cumulative[i - 1]
             inc = incremental[i]
             if inc > 1e-12:

@@ -58,6 +58,36 @@ def test_payback_year_returns_nan_for_flat_cumulative_at_zero():
     assert np.isnan(result), f"expected NaN, got {result}"
 
 
+def test_payback_year_nan_when_cumulative_starts_at_zero_with_zero_flows():
+    """Pass-2 P2.1: the docstring promises NaN for the
+    cumulative-stuck-at-zero case, but the previous ``i == 0`` branch
+    returned ``years[0]`` whenever ``cumulative[0] >= 0`` without
+    checking ``incremental[0]``.  An all-zero project (no CAPEX, no
+    revenue) therefore reported a 0-year payback."""
+    years = np.array([0, 1, 2], dtype=float)
+    cum = np.array([0.0, 0.0, 0.0], dtype=float)
+    inc = np.array([0.0, 0.0, 0.0], dtype=float)
+    assert np.isnan(_payback_year(years, cum, inc))
+
+
+def test_payback_year_genuine_cross_at_start_preserved():
+    """A project that genuinely turns positive on day one (Year-0
+    cumulative > 0) must still report a 0-year payback."""
+    years = np.array([0, 1, 2], dtype=float)
+    cum = np.array([1.0, 2.0, 3.0], dtype=float)
+    inc = np.array([1.0, 1.0, 1.0], dtype=float)
+    assert _payback_year(years, cum, inc) == 0.0
+
+
+def test_payback_year_zero_cumulative_with_positive_flow_returns_start():
+    """When cumulative[0] is exactly zero but incremental[0] is
+    positive, year 0 is a legitimate crossing point."""
+    years = np.array([0, 1, 2], dtype=float)
+    cum = np.array([0.0, 1.0, 2.0], dtype=float)
+    inc = np.array([100.0, 1.0, 1.0], dtype=float)
+    assert _payback_year(years, cum, inc) == 0.0
+
+
 def test_payback_year_interpolates_on_normal_crossing():
     """Smoke: the linear-interpolation path still works."""
     years = np.array([0, 1, 2, 3], dtype=float)
