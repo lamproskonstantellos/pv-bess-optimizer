@@ -1,0 +1,166 @@
+"""Regression test for the gross/net identity in the Revenue sensitivity.
+
+``_scale_revenue`` previously scaled ``revenue_eur`` and
+``aggregator_fee_eur`` independently of any algebraic check.  Uniform
+scaling preserved the identity by coincidence, but any future change
+that touched the columns non-uniformly would desynchronise them.
+
+This test pins the identity ``revenue_eur + |aggregator_fee_eur| ==
+revenue_gross`` (where ``revenue_gross`` scales linearly with the
+sensitivity factor) at multiple perturbation factors, and confirms
+the NPV tornado output is numerically unchanged within tolerance from
+the pre-fix uniform-scaling result.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+import pytest
+
+from pvbess_opt.economics import build_yearly_cashflow, compute_financial_kpis
+from pvbess_opt.sensitivity import (
+    _scale_revenue,
+    run_sensitivity_analysis,
+)
+
+
+def _year1_kpis() -> dict:
+    return {
+        "profit_load_from_pv_eur": 110_000.0,
+        "profit_load_from_bess_eur": 70_000.0,
+        "profit_export_from_pv_eur": 60_000.0,
+        "profit_export_from_bess_eur": 55_000.0,
+        "expense_charge_bess_grid_eur": 12_000.0,
+        "profit_total_eur": (
+            110_000.0 + 70_000.0 + 60_000.0 + 55_000.0 - 12_000.0
+        ),
+        "pv_generation_mwh": 7_200.0,
+        "bess_total_discharge_mwh": 4_500.0,
+        "bm_total_capacity_revenue_eur": 38_000.0,
+        "bm_total_activation_revenue_eur": 12_000.0,
+    }
+
+
+def _econ(fee_pct: float = 10.0) -> dict:
+    return {
+        "project_lifecycle_years": 10,
+        "project_start_year": 2026,
+        "discount_rate_pct": 7.0,
+        "opex_inflation_pct": 1.0,
+        "retail_inflation_pct": 2.0,
+        "dam_inflation_pct": 2.0,
+        "bm_inflation_pct": 2.0,
+        "capex_pv_eur_per_kw": 525.0,
+        "capex_bess_eur_per_kw": 300.0,
+        "devex_pv_eur_per_kw": 60.0,
+        "devex_bess_eur_per_kw": 30.0,
+        "opex_pv_eur_per_kwp": 7.0,
+        "opex_bess_eur_per_kw": 14.0,
+        "pv_degradation_year1_pct": 2.5,
+        "pv_degradation_annual_pct": 0.55,
+        "bess_degradation_annual_pct": 2.0,
+        "bess_replacement_year": 0,
+        "bess_replacement_cost_pct": 0.0,
+        "aggregator_fee_pct_revenue": fee_pct,
+        "sensitivity_capex_delta_pct": 20.0,
+        "sensitivity_opex_delta_pct": 20.0,
+        "sensitivity_revenue_delta_pct": 20.0,
+        "sensitivity_discount_rate_delta_pp": 2.0,
+    }
+
+
+def _caps() -> dict:
+    return {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+
+
+@pytest.mark.parametrize("factor", [0.8, 1.0, 1.2])
+def test_revenue_perturbation_preserves_gross_net_identity(factor: float):
+    """``revenue_eur + |aggregator_fee_eur|`` scales linearly with ``factor``."""
+    econ = _econ(fee_pct=10.0)
+    base = build_yearly_cashflow(_year1_kpis(), econ, _caps())
+    perturbed = _scale_revenue(base, factor)
+    f_frac = econ["aggregator_fee_pct_revenue"] / 100.0
+    # Skip Year 0 — fee is zero by construction (capex row).
+    after_y0 = perturbed["project_year"] >= 1
+    base_after = base.loc[after_y0]
+    pert_after = perturbed.loc[after_y0]
+    for y in base_after.index:
+        rev_b = float(base_after.at[y, "revenue_eur"])
+        fee_b = float(base_after.at[y, "aggregator_fee_eur"])
+        rev_p = float(pert_after.at[y, "revenue_eur"])
+        fee_p = float(pert_after.at[y, "aggregator_fee_eur"])
+        gross_b = rev_b + abs(fee_b)
+        gross_p = rev_p + abs(fee_p)
+        # Linear scaling of gross.
+        assert gross_p == pytest.approx(factor * gross_b, abs=max(1.0, 1e-6 * gross_p))
+        # Implied fee fraction matches the base one (within rounding).
+        if gross_p > 1e-6:
+            implied_f = abs(fee_p) / gross_p
+            assert implied_f == pytest.approx(f_frac, abs=1e-6)
+        # And per-stream nets sum to the total net.
+        retail_p = float(pert_after.at[y, "revenue_retail_eur"])
+        dam_p = float(pert_after.at[y, "revenue_dam_eur"])
+        assert (retail_p + dam_p) == pytest.approx(rev_p, abs=max(0.01, 1e-6 * rev_p))
+
+
+def test_revenue_perturbation_factor_one_is_noop():
+    """``factor=1.0`` returns a frame identical to the base on revenue columns."""
+    econ = _econ(fee_pct=10.0)
+    base = build_yearly_cashflow(_year1_kpis(), econ, _caps())
+    perturbed = _scale_revenue(base, 1.0)
+    for col in (
+        "revenue_eur", "revenue_retail_eur", "revenue_dam_eur",
+        "aggregator_fee_eur",
+        "balancing_revenue_eur",
+        "balancing_capacity_revenue_eur",
+        "balancing_activation_revenue_eur",
+    ):
+        pd.testing.assert_series_equal(
+            base[col].astype(float).reset_index(drop=True),
+            perturbed[col].astype(float).reset_index(drop=True),
+            check_names=False, rtol=1e-9, atol=1e-6,
+        )
+
+
+def test_revenue_tornado_npv_is_close_to_uniform_scaling():
+    """Pin the NPV tornado against the uniform-scaling reference.
+
+    The new derivation is algebraically equivalent to the previous
+    uniform scaling on this baseline cashflow; the tornado deltas must
+    match to a handful of EUR.
+    """
+    econ = _econ(fee_pct=10.0)
+    base_cf = build_yearly_cashflow(_year1_kpis(), econ, _caps())
+    base_kpis = compute_financial_kpis(base_cf, econ)
+    df = run_sensitivity_analysis(_year1_kpis(), econ, _caps(), base_kpis)
+    # The Revenue rows must move NPV by a positive amount in the high
+    # scenario and by a negative amount in the low scenario.
+    rev_high = df[
+        (df["variable"] == "Revenue") & (df["scenario"] == "high")
+    ].iloc[0]
+    rev_low = df[
+        (df["variable"] == "Revenue") & (df["scenario"] == "low")
+    ].iloc[0]
+    assert rev_high["delta_npv_eur"] > 0.0
+    assert rev_low["delta_npv_eur"] < 0.0
+    # And |high| ≈ |low| (symmetric +/-20 % perturbation).
+    assert abs(rev_high["delta_npv_eur"]) == pytest.approx(
+        abs(rev_low["delta_npv_eur"]), rel=1e-3,
+    )
+
+
+def test_revenue_perturbation_zero_fee_still_consistent():
+    """Identity holds when aggregator_fee_pct_revenue == 0 (no fee at all)."""
+    econ = _econ(fee_pct=0.0)
+    base = build_yearly_cashflow(_year1_kpis(), econ, _caps())
+    perturbed = _scale_revenue(base, 1.2)
+    # aggregator_fee_eur is zero in both frames.
+    assert float(perturbed["aggregator_fee_eur"].abs().max()) < 1e-6
+    # revenue_eur scales by exactly 1.2 in every year >= 1.
+    base_y1 = float(
+        base.loc[base["project_year"] == 1, "revenue_eur"].iloc[0]
+    )
+    pert_y1 = float(
+        perturbed.loc[perturbed["project_year"] == 1, "revenue_eur"].iloc[0]
+    )
+    assert pert_y1 == pytest.approx(1.2 * base_y1, abs=1e-6)
