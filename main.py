@@ -67,7 +67,11 @@ from pvbess_opt.kpis import (
 )
 from pvbess_opt.lifetime import aggregate_lifetime_to_yearly, build_lifetime_dispatch
 from pvbess_opt.modes import resolve_mode
-from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
+from pvbess_opt.optimization import (
+    BALANCING_INVARIANT_KEYS,
+    run_scenario,
+    verify_dispatch_invariants,
+)
 from pvbess_opt.plotting import (
     apply_ieee_style,
     plot_bess_capacity_vs_activation_split,
@@ -696,13 +700,31 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
     tol = ENERGY_TOLERANCE
     # Invariant 6 is an integer count and piggybacks on the same tol;
     # the smallest non-zero count is 1, which trivially exceeds tol=1e-3.
+    # Invariant B1 reports a percent excess; allow a 0.5 % tolerance to
+    # stay aligned with the loader's epsilon (_validate_balancing_config).
+    bal_b1 = "invariant_b1_capacity_share_sum_pct_excess"
+    bal_b2 = "invariant_b2_reservation_share_cap_excess_kw"
+    skip_keys = {"invariant_5_no_sim_grid_io_max_product_kwh2", bal_b1, bal_b2}
     offenders = {
         k: v for k, v in invariants.items()
-        if v > tol and k != "invariant_5_no_sim_grid_io_max_product_kwh2"
+        if v > tol and k not in skip_keys
     }
     sim_io = invariants["invariant_5_no_sim_grid_io_max_product_kwh2"]
     if sim_io > tol ** 2:
         offenders["invariant_5_no_sim_grid_io_max_product_kwh2"] = sim_io
+    # Balancing-specific tolerances.
+    if invariants.get(bal_b1, 0.0) > 0.5:
+        offenders[bal_b1] = float(invariants[bal_b1])
+    if invariants.get(bal_b2, 0.0) > tol:
+        offenders[bal_b2] = float(invariants[bal_b2])
+    # Sanity guard against API drift — the verifier must always emit
+    # every balancing-invariant key, even when the block did not fire.
+    missing = [k for k in BALANCING_INVARIANT_KEYS if k not in invariants]
+    if missing:
+        raise AssertionError(
+            "verify_dispatch_invariants is missing balancing-invariant "
+            f"keys: {missing}"
+        )
     if offenders:
         raise AssertionError(
             "Strict-mode invariant violations: "
