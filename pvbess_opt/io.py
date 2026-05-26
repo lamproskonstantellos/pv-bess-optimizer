@@ -1435,15 +1435,20 @@ def _apply_balancing_timeseries_fallback(
     """Fill in any missing balancing-price column with its scalar default.
 
     No-op when ``balancing_enabled`` is False (the columns may be absent
-    and the loader leaves them alone). When enabled, each missing column
-    is appended with the scalar value from the balancing config and a
-    single WARNING is emitted naming the column and the default used.
+    and the loader leaves them alone).  When enabled, each missing
+    column is appended with the scalar value from the balancing config
+    and a SINGLE WARNING is emitted enumerating every missing column
+    and the default applied to it — previously this function logged one
+    warning per missing column, which produced a 9-line warning storm
+    for a workbook that simply hadn't carried any balancing-price
+    timeseries.
     """
     if not bool(balancing.get("balancing_enabled", False)):
         return ts
 
     out = ts
     n_rows = len(out)
+    missing_columns: list[tuple[str, float, str]] = []
     for col, default_key in _BALANCING_TS_COLUMN_DEFAULTS.items():
         if col in out.columns:
             continue
@@ -1451,11 +1456,17 @@ def _apply_balancing_timeseries_fallback(
         if out is ts:  # avoid the copy until we know we need one
             out = ts.copy()
         out[col] = np.full(n_rows, default_value, dtype=float)
+        missing_columns.append((col, default_value, default_key))
+
+    if missing_columns:
+        formatted = ", ".join(
+            f"{col}={value:.4f} EUR/MWh (from {default_key!r})"
+            for col, value, default_key in missing_columns
+        )
         logger.warning(
-            "balancing timeseries column %r is missing; filling with "
-            "the scalar default %.4f EUR/MWh from balancing sheet "
-            "key %r.",
-            col, default_value, default_key,
+            "Balancing timeseries columns missing; applied per-product "
+            "defaults: %s.",
+            formatted,
         )
     return out
 
