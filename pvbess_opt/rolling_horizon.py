@@ -50,12 +50,39 @@ from .optimization import run_scenario
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "PRICE_COLUMNS",
     "add_forecast_noise",
     "monte_carlo_balancing",
     "monte_carlo_rolling",
     "realise_balancing_scenario",
     "rolling_horizon_dispatch",
 ]
+
+
+# Canonical list of every price column the rolling-horizon engine must
+# treat as a "noise-free input" when running with
+# ``evaluate_with_actuals=True``.  Includes DAM, retail, and every
+# balancing capacity / activation price column.  This is the single
+# source of truth used by both :func:`add_forecast_noise` (when deciding
+# which columns are eligible for forecast noise) and
+# :func:`rolling_horizon_dispatch` (when restoring noise-free prices
+# before re-deriving the economic columns).  Adding a new noisable
+# price -- e.g. a balancing capacity price variant -- only requires
+# extending this list; the actuals-restore path will pick it up
+# automatically and the realised KPIs will not absorb the noise.
+PRICE_COLUMNS: tuple[str, ...] = (
+    "dam_price_eur_per_mwh",
+    "retail_price_eur_per_mwh",
+    "fcr_capacity_price_eur_per_mwh",
+    "afrr_up_capacity_price_eur_per_mwh",
+    "afrr_dn_capacity_price_eur_per_mwh",
+    "mfrr_up_capacity_price_eur_per_mwh",
+    "mfrr_dn_capacity_price_eur_per_mwh",
+    "afrr_up_activation_price_eur_per_mwh",
+    "afrr_dn_activation_price_eur_per_mwh",
+    "mfrr_up_activation_price_eur_per_mwh",
+    "mfrr_dn_activation_price_eur_per_mwh",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +252,16 @@ def rolling_horizon_dispatch(
 
     If ``evaluate_with_actuals`` is True the returned KPIs are recomputed
     against the original (noise-free) ``ts`` — this reflects realised
-    performance.  Otherwise KPIs reflect what the solver thought it was
-    getting.
+    performance.  The actuals-restore path overwrites every price
+    column listed in :data:`PRICE_COLUMNS` (DAM, retail, and every
+    balancing capacity / activation price) with the noise-free input,
+    then drops the per-step EUR columns and re-derives them via
+    :func:`pvbess_opt.kpis.add_economic_columns`.  The restore is
+    driven by :data:`PRICE_COLUMNS` rather than the
+    ``_eur_per_mwh`` suffix so a future addition of a non-conforming
+    price column still gets restored and so the EUR-suffix drop cannot
+    accidentally remove a restored price.  Otherwise KPIs reflect what
+    the solver thought it was getting.
 
     The MILP's closed-cycle ``terminal_soc_equal`` is **not** enforced
     inside rolling-horizon windows (that constraint only makes sense
@@ -336,18 +371,20 @@ def rolling_horizon_dispatch(
     full = pd.concat(committed_chunks, ignore_index=True)
 
     if evaluate_with_actuals:
-        if "dam_price_eur_per_mwh" in ts.columns:
-            full["dam_price_eur_per_mwh"] = (
-                ts["dam_price_eur_per_mwh"].iloc[: len(full)].values
-            )
-        if "retail_price_eur_per_mwh" in ts.columns:
-            full["retail_price_eur_per_mwh"] = (
-                ts["retail_price_eur_per_mwh"].iloc[: len(full)].values
-            )
-        price_cols = ("retail_price_eur_per_mwh", "dam_price_eur_per_mwh")
+        # Restore every noise-free price column from the original
+        # ``ts``.  PRICE_COLUMNS is the single source of truth -- any
+        # new noisable price added there is automatically restored here.
+        for col in PRICE_COLUMNS:
+            if col in ts.columns:
+                full[col] = ts[col].iloc[: len(full)].values
+        # Drop every per-step EUR column the noisy solve wrote (revenue,
+        # expense, etc.) so add_economic_columns can re-derive them
+        # from the restored prices.  PRICE_COLUMNS ends in
+        # ``_eur_per_mwh`` rather than ``_eur`` so the suffix filter
+        # below cannot accidentally drop a restored price column.
         eur_cols = [
             c for c in full.columns
-            if c.endswith("_eur") and c not in price_cols
+            if c.endswith("_eur") and c not in PRICE_COLUMNS
         ]
         if eur_cols:
             full = full.drop(columns=eur_cols)
