@@ -4,16 +4,23 @@ Three plots, all driven by the canonical revenue aggregate keys
 produced by :func:`pvbess_opt.kpis.compute_kpis`:
 
 * :func:`plot_bess_revenue_waterfall` — single waterfall stepping from
-  BESS-DAM arbitrage through each balancing product to the total
-  BESS revenue.  The terminal bar is drawn in a darker shade.
+  the BESS's DAM-arbitrage segment through each balancing product to
+  the total BESS revenue.  The terminal bar is drawn in a darker shade.
 * :func:`plot_bess_capacity_vs_activation_split` — grouped-bar chart
   comparing capacity revenue and activation revenue per balancing
   product.  FCR has a single bar (capacity-only); aFRR / mFRR each get
   a paired (capacity, activation) bar in matching lighter / darker
   shades of the product's canonical colour.
 * :func:`plot_bess_revenue_by_month` — 12 stacked bars (one per
-  calendar month) showing BESS-DAM arbitrage plus the five balancing
-  products' contribution to monthly BESS revenue.
+  calendar month) showing the DAM-arbitrage segment plus the five
+  balancing products' contribution to monthly BESS revenue.
+
+These plots are entirely BESS-scoped — their content is only BESS
+revenue — so the DAM-arbitrage segment is labelled ``"DAM"`` rather
+than ``"BESS-DAM arbitrage"`` to avoid the redundant ``BESS-`` prefix.
+The parent revenue-stack plot in :mod:`pvbess_opt.plotting.lifecycle`
+also carries PV-DAM exports and keeps the BESS qualifier attached as
+``"Export from BESS"``.
 
 Colour mapping uses :data:`pvbess_opt.config.BM_COLOURS` so the
 balancing products are visually consistent across plots.
@@ -49,11 +56,17 @@ __all__ = [
 ]
 
 
-# Single source of truth for the five balancing products + the BESS-DAM
-# arbitrage segment, in the order they appear in every plot in this
+# Single source of truth for the five balancing products + the
+# DAM-arbitrage segment, in the order they appear in every plot in this
 # module.  Keeping the order frozen makes the legend stable across
 # plots and ensures the waterfall steps are deterministic.
-_BESS_DAM_LABEL = "BESS-DAM arbitrage"
+#
+# The plots in this module are entirely BESS-scoped, so the segment
+# reads ``"DAM"`` rather than ``"BESS-DAM arbitrage"`` — the parent
+# revenue-stack plot in :mod:`pvbess_opt.plotting.lifecycle` carries
+# PV-DAM exports too and keeps the BESS qualifier attached via the
+# ``"Export from BESS"`` label.
+_BESS_DAM_LABEL = "DAM"
 _BESS_DAM_COLOUR = financial_color("Export from BESS")
 _BM_PRODUCTS: tuple[tuple[str, str, str], ...] = (
     ("revenue_bess_fcr_eur", "FCR", "fcr"),
@@ -89,10 +102,10 @@ def plot_bess_revenue_waterfall(
 ) -> Path:
     """Render a horizontal-step waterfall chart.
 
-    The first bar is the BESS-DAM arbitrage net of grid-charging
-    expense; each subsequent bar is the per-product capacity +
-    activation revenue.  The final bar is the cumulative total in a
-    distinct shade.
+    The first bar is the BESS's DAM-arbitrage segment (exports net of
+    grid-charging expense, labelled ``DAM``); each subsequent bar is
+    the per-product capacity + activation revenue.  The final bar is
+    the cumulative total in a distinct shade.
     """
     out_path = Path(out_path)
     bess_dam = float(year1_kpis.get("revenue_bess_dam_eur", 0.0) or 0.0)
@@ -228,11 +241,12 @@ def plot_bess_revenue_by_month(
 ) -> Path:
     """Twelve stacked bars showing per-month BESS revenue breakdown.
 
-    BESS-DAM arbitrage is computed per-month from the dispatch frame
-    (``profit_export_from_bess_eur`` minus ``expense_charge_bess_grid_eur``).
-    Each balancing product's annual revenue is allocated to months in
-    proportion to the per-step reservation profile so the per-month
-    breakdown reflects when capacity was reserved, not a flat split.
+    The DAM-arbitrage segment is computed per-month from the dispatch
+    frame (``profit_export_from_bess_eur`` minus
+    ``expense_charge_bess_grid_eur``).  Each balancing product's annual
+    revenue is allocated to months in proportion to the per-step
+    reservation profile so the per-month breakdown reflects when
+    capacity was reserved, not a flat split.
     """
     out_path = Path(out_path)
     if res_year1.empty or "timestamp" not in res_year1.columns:
