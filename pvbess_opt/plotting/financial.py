@@ -428,7 +428,15 @@ def plot_monthly_cashflow_year1(
     monthly_cf: pd.DataFrame, out_path: Path,
     *, econ: dict[str, Any] | None = None,
 ) -> Path:
-    """Year-1 monthly stacked bars showing the seasonality of cash-flows."""
+    """Year-1 monthly stacked bars showing the seasonality of cash-flows.
+
+    ``revenue_eur`` is the DAM + retail post-fee stream;
+    ``balancing_revenue_eur`` is stacked on top of it when present so
+    the per-month bars reconcile to the net-cash-flow line.  The
+    aggregator fee is already netted out of ``revenue_eur`` upstream
+    (see :func:`derive_monthly_cashflow`) and is therefore not shown
+    as a separate bar here.
+    """
     out_path = Path(out_path)
     yr_col = (
         "project_year" if "project_year" in monthly_cf.columns else "year"
@@ -438,11 +446,20 @@ def plot_monthly_cashflow_year1(
     revenue = sub["revenue_eur"].astype(float).to_numpy()
     opex = sub["opex_eur"].astype(float).to_numpy()
     net = sub["net_cashflow_eur"].astype(float).to_numpy()
+    if "balancing_revenue_eur" in sub.columns:
+        balancing = sub["balancing_revenue_eur"].astype(float).to_numpy()
+    else:
+        balancing = np.zeros_like(revenue)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     ax.bar(months, revenue, color=financial_color("Revenue"),
            edgecolor="black", linewidth=0.4, label="Revenue")
+    if np.any(np.abs(balancing) > 1e-9):
+        ax.bar(months, balancing, bottom=revenue,
+               color=financial_color("Balancing revenue"),
+               edgecolor="black", linewidth=0.4,
+               label="Balancing revenue")
     ax.bar(months, opex, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
     ax.plot(months, net, color=financial_color("Net cash-flow"),

@@ -477,6 +477,42 @@ def derive_monthly_cashflow(
     Requires ``compute_kpis`` to have been called first so the per-step
     EUR columns are present on ``res``; raises otherwise rather than
     silently defaulting revenue to zero.
+
+    Output frame columns
+    --------------------
+
+    * ``project_year`` / ``calendar_year`` / ``period`` / ``period_type``
+      — period descriptors. ``period`` is the month (1..12) or quarter
+      (1..4) and ``period_type`` is ``"month"`` or ``"quarter"``.
+    * ``pv_production_mwh`` — Year-1 monthly PV energy scaled by the
+      year's PV degradation factor.
+    * ``revenue_eur`` — DAM + retail revenue net of the aggregator fee
+      (matches ``yearly_cf['revenue_eur']`` in scope). Balancing is not
+      included here; it is surfaced in its own column so callers can
+      reconcile against either ``yearly_cf['revenue_eur']`` or
+      ``yearly_cf['revenue_eur'] + yearly_cf['balancing_revenue_eur']``.
+    * ``balancing_revenue_eur`` — per-month allocation of
+      ``yearly_cf['balancing_revenue_eur']``. The Year-1 share comes
+      from the aggregate per-month sum of every
+      ``bm_reservation_<product>_kw`` column on ``res`` (matching the
+      reservation-weighted allocation in
+      :func:`plot_bess_revenue_by_month`); when reservations are
+      identically zero, falls back to a flat ``1/12`` split.
+    * ``aggregator_fee_eur`` — per-month allocation of
+      ``yearly_cf['aggregator_fee_eur']``, weighted by the monthly
+      ``revenue_eur`` share so each month carries its proportional
+      slice of the fee that has already been deducted from
+      ``revenue_eur``.
+    * ``opex_eur`` — Year-1 ``opex`` split evenly across months, scaled
+      by the year's opex inflation factor.
+    * ``net_cashflow_eur`` — ``revenue_eur + balancing_revenue_eur
+      + opex_eur``. Sums to ``yearly_cf['net_cashflow_eur']`` row-for-
+      row in any operating year without replacement / devex events.
+    * ``discounted_cf_eur`` — ``net_cashflow_eur`` discounted at
+      ``econ['discount_rate_pct']`` to the start of the project.
+
+    The quarterly frame carries the same columns aggregated by
+    ``period = ((month - 1) // 3) + 1``.
     """
     if not pd.api.types.is_datetime64_any_dtype(res["timestamp"]):
         raise ValueError(
@@ -542,6 +578,55 @@ def derive_monthly_cashflow(
 
     monthly_pv_mwh_y1 = monthly_pv_kwh_y1 / 1000.0
 
+    # Per-month balancing share — aggregate reservation kW across every
+    # balancing product, group by month, normalize.  Falls back to a
+    # flat 1/12 when no reservation columns are present or when every
+    # reservation is identically zero (e.g. balancing toggled on with no
+    # bids).  The chosen allocation matches the per-product weighting in
+    # ``plot_bess_revenue_by_month``.
+    balancing_products = ("fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+    total_reservation = pd.Series(0.0, index=res.index, dtype=float)
+    any_reservation_column = False
+    for product in balancing_products:
+        rcol = f"bm_reservation_{product}_kw"
+        if rcol in res.columns:
+            any_reservation_column = True
+            total_reservation = total_reservation + res[rcol].astype(float)
+
+    if any_reservation_column:
+        monthly_reservation = (
+            total_reservation.groupby(month_idx).sum()
+            .reindex(range(1, 13), fill_value=0.0)
+            .astype(float)
+        )
+        reservation_sum = float(monthly_reservation.sum())
+        if reservation_sum > 1e-9:
+            balancing_share = monthly_reservation / reservation_sum
+        else:
+            logger.debug(
+                "derive_monthly_cashflow: reservation columns present but "
+                "all zeros; falling back to flat 1/12 balancing allocation."
+            )
+            balancing_share = pd.Series(
+                1.0 / 12.0, index=range(1, 13), dtype=float,
+            )
+    else:
+        balancing_share = pd.Series(
+            1.0 / 12.0, index=range(1, 13), dtype=float,
+        )
+
+    # Aggregator-fee share — proportional to the monthly post-fee
+    # ``revenue_eur`` so each month carries its slice of the fee that
+    # has already been deducted from ``revenue_eur``.
+    rev_y1_total = float(monthly_revenue_y1.sum())
+    if abs(rev_y1_total) > 1e-9:
+        fee_share = monthly_revenue_y1 / rev_y1_total
+    else:
+        fee_share = pd.Series(1.0 / 12.0, index=range(1, 13), dtype=float)
+
+    has_balancing_col = "balancing_revenue_eur" in yearly_cf.columns
+    has_fee_col = "aggregator_fee_eur" in yearly_cf.columns
+
     rows: list[dict[str, Any]] = []
     yearly_indexed = yearly_cf.set_index("project_year")
     for y in yearly_indexed.index:
@@ -551,6 +636,14 @@ def derive_monthly_cashflow(
         opex_y = float(yearly_indexed.loc[y, "opex_eur"])
         pv_factor = float(yearly_indexed.loc[y, "pv_production_factor"])
         cal_y = int(yearly_indexed.loc[y, "calendar_year"])
+        balancing_y = (
+            float(yearly_indexed.loc[y, "balancing_revenue_eur"])
+            if has_balancing_col else 0.0
+        )
+        fee_y = (
+            float(yearly_indexed.loc[y, "aggregator_fee_eur"])
+            if has_fee_col else 0.0
+        )
 
         if abs(yearly_y1_revenue) > 1e-9:
             rev_scale = rev_y / yearly_y1_revenue
@@ -565,7 +658,9 @@ def derive_monthly_cashflow(
             rev_m = float(monthly_revenue_y1.loc[m]) * rev_scale
             opex_m = float(monthly_opex_y1.loc[m]) * opex_scale
             pv_mwh_m = float(monthly_pv_mwh_y1.loc[m]) * pv_factor
-            net_m = rev_m + opex_m
+            balancing_m = float(balancing_share.loc[m]) * balancing_y
+            fee_m = float(fee_share.loc[m]) * fee_y
+            net_m = rev_m + balancing_m + opex_m
             t_years = float(y) + (m - 1) / 12.0
             disc_factor = 1.0 / (1.0 + discount_rate) ** t_years
             rows.append(
@@ -576,6 +671,8 @@ def derive_monthly_cashflow(
                     "period_type": "month",
                     "pv_production_mwh": float(pv_mwh_m),
                     "revenue_eur": float(rev_m),
+                    "balancing_revenue_eur": float(balancing_m),
+                    "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
                     "net_cashflow_eur": float(net_m),
                     "discounted_cf_eur": float(net_m * disc_factor),
@@ -584,15 +681,16 @@ def derive_monthly_cashflow(
 
     monthly_cf = pd.DataFrame(rows)
 
+    monthly_columns = [
+        "project_year", "calendar_year", "period",
+        "period_type", "pv_production_mwh", "revenue_eur",
+        "balancing_revenue_eur", "aggregator_fee_eur",
+        "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
+    ]
     if monthly_cf.empty:
-        quarterly_cf = pd.DataFrame(
-            columns=[
-                "project_year", "calendar_year", "period",
-                "period_type", "pv_production_mwh", "revenue_eur",
-                "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
-            ]
-        )
+        quarterly_cf = pd.DataFrame(columns=monthly_columns)
     else:
+        monthly_cf = monthly_cf[monthly_columns]
         monthly_with_q = monthly_cf.copy()
         monthly_with_q["quarter"] = ((monthly_with_q["period"] - 1) // 3) + 1
         agg = (
@@ -600,20 +698,15 @@ def derive_monthly_cashflow(
                 ["project_year", "calendar_year", "quarter"], as_index=False,
             )[
                 [
-                    "pv_production_mwh", "revenue_eur", "opex_eur",
-                    "net_cashflow_eur", "discounted_cf_eur",
+                    "pv_production_mwh", "revenue_eur",
+                    "balancing_revenue_eur", "aggregator_fee_eur",
+                    "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
                 ]
             ].sum()
         )
         agg = agg.rename(columns={"quarter": "period"})
         agg["period_type"] = "quarter"
-        agg = agg[
-            [
-                "project_year", "calendar_year", "period",
-                "period_type", "pv_production_mwh", "revenue_eur",
-                "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
-            ]
-        ]
+        agg = agg[monthly_columns]
         quarterly_cf = agg.reset_index(drop=True)
 
     return monthly_cf, quarterly_cf

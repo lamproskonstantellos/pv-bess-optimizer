@@ -243,6 +243,10 @@ FINANCIAL_COLORS: dict[str, str] = {
     "export_from_bess": "#0D47A1",  # Material blue 900
     "grid_charge_cost": "#D32F2F",  # Material red 700 (negative stack)
     "aggregator_fee":   "#AD1457",  # Material pink 800 (deduction tone)
+    # Aggregate balancing-revenue marker used by plots that surface the
+    # FCR / aFRR / mFRR products as a single roll-up (e.g. the Year-1
+    # monthly cash-flow stack).  Distinct from every per-product hex.
+    "balancing_revenue": "#00796B",  # Material teal 700
     # Balancing-product segments — colours match the per-product
     # palette in :data:`BM_COLOURS` so the same product reads as the
     # same colour on the revenue-stack plot and on the balancing
@@ -340,6 +344,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Discounted payback",
     # Bar / stack components
     "Revenue",
+    "Balancing revenue",
     "OPEX",
     "CAPEX",
     "DEVEX",
@@ -373,6 +378,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Simple payback":                   "net",
     "Discounted payback":               "discounted",
     "Revenue":                          "revenue",
+    "Balancing revenue":                 "balancing_revenue",
     "OPEX":                             "opex",
     "CAPEX":                            "capex",
     "DEVEX":                            "devex",
@@ -406,6 +412,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Discounted payback",
     # Then bars / stacks, positive flows first
     "Revenue",
+    "Balancing revenue",
     "Load from PV",
     "Load from BESS",
     "Export from PV",
