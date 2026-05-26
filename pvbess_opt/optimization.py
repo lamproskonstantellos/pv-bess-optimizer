@@ -182,13 +182,28 @@ def configure_solver_options(
 def _has_feasible_incumbent(model: pyo.ConcreteModel | None) -> bool:
     """Return True when the model carries a loaded (feasible) solution.
 
-    Probes a representative decision variable; an unloaded model returns
-    ``None`` for ``var.value`` (or raises), which we treat as "no
-    incumbent".
+    Probes the SOC variable specifically — every active scenario in this
+    codebase declares ``model.soc`` (the SOC trajectory) and the SOC
+    variable is always loaded from the solver's incumbent when a
+    feasible solution exists.  An unloaded model returns ``None`` for
+    ``var.value``, which we treat as "no incumbent".  Probing a named
+    variable instead of "first var encountered via
+    ``component_data_objects``" makes the check robust to refactors that
+    change the declaration order (Pass-2 P2.8).
     """
     if model is None:
         return False
+    soc = getattr(model, "soc", None)
     try:
+        if soc is not None:
+            for v in soc.values():
+                return v.value is not None
+        # Fallback for tests that mock a barebones model with no .soc:
+        # fall through to the first SOC-like variable, then to any var.
+        for v in model.component_data_objects(pyo.Var, active=True):
+            name = v.name or ""
+            if name.startswith("soc"):
+                return v.value is not None
         for v in model.component_data_objects(pyo.Var, active=True):
             return v.value is not None
     except (AttributeError, ValueError):
@@ -1163,8 +1178,13 @@ def _balancing_invariants(
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
     bess_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
-    soc_min = float(params.get("soc_min_frac", 0.0) or 0.0) * bess_kwh
-    soc_max = float(params.get("soc_max_frac", 1.0) or 1.0) * bess_kwh
+    # Strict key access — the MILP build path uses params["soc_min_frac"]
+    # / params["soc_max_frac"] directly, so the loader always populates
+    # both keys (io.py:1490-1491).  A silent .get fallback here would let
+    # a hand-built ``params`` dict bypass the invariant check that build
+    # would have rejected with KeyError.  Pass-2 P2.4.
+    soc_min = float(params["soc_min_frac"]) * bess_kwh
+    soc_max = float(params["soc_max_frac"]) * bess_kwh
     h_buf = cfg.bm_soc_headroom_pct / 100.0
     d_fcr = cfg.fcr_required_duration_hours
 

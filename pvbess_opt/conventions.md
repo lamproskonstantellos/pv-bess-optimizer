@@ -75,3 +75,13 @@ would require restructuring the lifetime data model.
 For total project revenue including balancing, use the cashflow
 DataFrame: `cashflow_yearly['revenue_eur'] +
 cashflow_yearly['balancing_revenue_eur']`.
+
+## Default inflation: balancing tracks CPI, DAM is held nominal
+
+The economics defaults set `bm_inflation_pct = 2.0` (Greek balancing
+market historically tracks inflation as the TSO indexes capacity
+payments) while `dam_inflation_pct = 0.0` (wholesale DAM stays at the
+nominal user-supplied price unless explicitly overridden, since DAM
+price forecasts already incorporate an inflation view in their
+trajectory).  Override either knob in the `economics` sheet to model
+an explicit indexation curve.
