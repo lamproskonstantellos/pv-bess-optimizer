@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..config import BM_COLOURS, FINANCIAL_COLORS, apply_financial_legend, financial_color
+from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ..constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOE_LOW_EUR_PER_MWH,
@@ -243,7 +243,7 @@ def plot_revenue_stack_yearly(
         bm_arrays.append((label, colour_key, seg))
         ax.bar(
             years, seg, bottom=bottoms,
-            color=BM_COLOURS[colour_key],
+            color=financial_color(label),
             edgecolor="black", linewidth=0.4,
             label=label,
         )
