@@ -630,14 +630,24 @@ def compute_financial_kpis(
     NPV / IRR / ROI / BCR / payback read ``net_cashflow_eur`` and
     ``discounted_cf_eur`` directly, so any site-wide lump-sum CAPEX/DEVEX
     folded into the Year-0 ``capex_eur`` / ``devex_eur`` rows by
-    :func:`build_yearly_cashflow` is reflected automatically.
+    :func:`build_yearly_cashflow` is reflected automatically.  Balancing
+    revenue enters NPV / IRR / ROI / BCR / payback the same way — via
+    ``balancing_revenue_eur`` in the yearly cashflow, which is included
+    in ``net_cashflow_eur`` by :func:`build_yearly_cashflow` — so all
+    five cashflow-derived KPIs already account for the FCR / aFRR /
+    mFRR streams when balancing is on.
 
     LCOE is PV-only and LCOS is BESS-only (IEA / IRENA / NREL ATB /
     Lazard convention): their numerators are built from the per-asset
     CAPEX/DEVEX/OPEX directly, never from the cash-flow ``capex_eur``
     column.  Site-wide lump-sum costs are neither PV-only nor BESS-only
     and are therefore **excluded** from both LCOE and LCOS so the values
-    stay Lazard-comparable.
+    stay Lazard-comparable.  Balancing revenue is also **excluded** from
+    LCOE and LCOS by the same convention: balancing is a revenue (not a
+    cost), it does not move the LCOS discharge-MWh denominator, and
+    Lazard's published bands are revenue-agnostic energy-cost figures.
+    Toggling ``balancing_enabled`` with identical capacities and price
+    inputs must therefore leave LCOE and LCOS unchanged.
     """
     df = yearly_cf
 

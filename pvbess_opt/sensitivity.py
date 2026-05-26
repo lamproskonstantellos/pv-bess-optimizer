@@ -120,10 +120,21 @@ def variables_for_irr_sensitivity(
 
 
 def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
-    """Refresh net / discounted / cumulative columns after a column edit."""
+    """Refresh net / discounted / cumulative columns after a column edit.
+
+    ``net_cashflow_eur`` must mirror the build-time formula in
+    :func:`pvbess_opt.economics.build_yearly_cashflow`, which folds
+    ``balancing_revenue_eur`` into the net alongside ``revenue_eur``,
+    ``opex_eur``, ``capex_eur`` and ``devex_eur``.  Dropping balancing
+    here would make every perturbed scenario strip balancing revenue
+    while the base KPI still includes it — the symptom that surfaced
+    in the IRR / NPV tornadoes after the balancing block landed.
+    """
     components = ["revenue_eur", "opex_eur", "capex_eur"]
     if "devex_eur" in df.columns:
         components.append("devex_eur")
+    if "balancing_revenue_eur" in df.columns:
+        components.append("balancing_revenue_eur")
     df["net_cashflow_eur"] = sum(df[c].astype(float) for c in components)
     df["discounted_cf_eur"] = (
         df["net_cashflow_eur"] * df["discount_factor"].astype(float)
@@ -154,12 +165,28 @@ def _scale_opex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
 
 
 def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
+    """Scale every revenue stream by the same factor.
+
+    The Revenue driver sweeps the project's Year-1+ income holistically:
+    retail + DAM net revenue (``revenue_eur`` and its per-stream
+    breakdowns), the aggregator-fee deduction that scales with gross
+    revenue, and balancing capacity + activation revenue.  Scaling only
+    ``revenue_eur`` would keep balancing constant as an offset and
+    yield a "Revenue +10 %" scenario that's actually weaker than the
+    base case once balancing dominates — the bug fixed in this commit.
+    """
     df = yearly_cf.copy()
     df["revenue_eur"] = df["revenue_eur"].astype(float) * float(factor)
-    if "aggregator_fee_eur" in df.columns:
-        df["aggregator_fee_eur"] = (
-            df["aggregator_fee_eur"].astype(float) * float(factor)
-        )
+    for col in (
+        "revenue_retail_eur",
+        "revenue_dam_eur",
+        "aggregator_fee_eur",
+        "balancing_capacity_revenue_eur",
+        "balancing_activation_revenue_eur",
+        "balancing_revenue_eur",
+    ):
+        if col in df.columns:
+            df[col] = df[col].astype(float) * float(factor)
     return _recompute_net(df)
 
 
@@ -207,11 +234,14 @@ def run_sensitivity_analysis(
             base_yearly_cf["project_year"] >= 1, "opex_eur"
         ].sum()
     )
+    after_y0_mask = base_yearly_cf["project_year"] >= 1
     base_revenue_total = float(
-        base_yearly_cf.loc[
-            base_yearly_cf["project_year"] >= 1, "revenue_eur"
-        ].sum()
+        base_yearly_cf.loc[after_y0_mask, "revenue_eur"].sum()
     )
+    if "balancing_revenue_eur" in base_yearly_cf.columns:
+        base_revenue_total += float(
+            base_yearly_cf.loc[after_y0_mask, "balancing_revenue_eur"].sum()
+        )
     base_rate = float(econ.get("discount_rate_pct", 7.0))
 
     base_npv = float(base_kpis.get("npv_eur", float("nan")))

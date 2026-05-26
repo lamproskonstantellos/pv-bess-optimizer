@@ -1,5 +1,15 @@
 """Balancing market (FCR / aFRR / mFRR) data model and helpers.
 
+Balancing revenue is a function of BESS reserved capacity only. PV
+nameplate, PV generation, and load do not enter the balancing block.
+When ``bess_power_kw == 0`` or ``balancing_enabled == False``, every
+balancing KPI is exactly zero. The per-product reservation cap is a
+share of ``bess_power_kw`` (see :func:`capacity_share_kw`); the MILP
+power-budget and SOC-headroom constraints consume only BESS power and
+SOC; the KPI helper returns zero across the board whenever the
+optimizer did not emit ``bm_reservation_*_kw`` columns. This contract
+is regression-tested by ``tests/test_balancing_bess_only.py``.
+
 This module contains pure-Python data structures and helper functions
 for the European balancing market extension. Five products are
 modelled:

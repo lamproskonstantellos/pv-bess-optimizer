@@ -41,6 +41,7 @@ from .style import (
     apply_fine_ticks,
     apply_universal_margins,
     empty_placeholder,
+    reserve_legend_headroom,
     save_figure,
     show_titles,
 )
@@ -173,9 +174,10 @@ def plot_cumulative_cashflow(
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Cumulative Cash-flow — {_title_window(yearly_cf)}")
+    reserve_legend_headroom(ax, loc="best")
     apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -233,9 +235,10 @@ def plot_yearly_cashflow_bars(
     # Pin to the lower right — the post-payback region is roughly
     # horizontal there, so the legend stays clear of the bars and the
     # Year-0 CAPEX stack on the left.
+    reserve_legend_headroom(ax, loc="lower right")
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -320,9 +323,10 @@ def plot_npv_waterfall(
     ax.set_ylabel("Discounted EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
+    reserve_legend_headroom(ax, loc="lower right")
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -399,9 +403,10 @@ def plot_payback(
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Payback Visualisation — {_title_window(yearly_cf)}")
+    reserve_legend_headroom(ax, loc="best")
     apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, skip_y=True)
     return save_figure(out_path)
 
 
@@ -445,9 +450,10 @@ def plot_monthly_cashflow_year1(
     else:
         _maybe_set_title(ax, "Year-1 Monthly Cash-flow")
 
+    reserve_legend_headroom(ax, loc="best")
     apply_financial_legend(ax, max_rows=2)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, skip_y=True)
     return save_figure(out_path)
 
 

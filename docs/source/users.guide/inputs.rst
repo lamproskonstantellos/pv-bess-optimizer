@@ -125,6 +125,29 @@ Sheet ``economics``
   ``sensitivity_revenue_delta_pct`` /
   ``sensitivity_discount_rate_delta_pp`` — tornado configuration.
 
+Sheet ``balancing``
+-------------------
+
+Optional FCR / aFRR / mFRR balancing-market block, gated by
+``balancing_enabled``.  The block is **BESS-only**: every reservation
+cap is a share of ``bess_power_kw`` and every revenue KPI is zero
+whenever ``bess_power_kw == 0`` or ``balancing_enabled`` is FALSE,
+regardless of PV nameplate or load profile.  See
+:mod:`pvbess_opt.balancing` for the per-product configuration and the
+formal contract.
+
+The Year-1 balancing capacity + activation revenues flow into the
+cashflow as ``balancing_revenue_eur`` and are then escalated by
+``bm_inflation_pct``.  They enter NPV / IRR / ROI / BCR / payback via
+``net_cashflow_eur`` in ``cashflow_yearly``.  They are **excluded**
+from LCOE and LCOS by Lazard convention — both metrics measure cost
+per delivered MWh and balancing is a revenue, not a cost.  Toggling
+``balancing_enabled`` with identical capacities and price inputs
+leaves LCOE and LCOS bit-identical.  The Revenue tornado driver
+sweeps the full Year-1+ income stream including balancing, so a
+"+10 % Revenue" scenario produces a strictly higher NPV than the
+base case under any positive cashflow configuration.
+
 Sheet ``simulation``
 --------------------
 
