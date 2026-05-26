@@ -227,7 +227,12 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
 
     gross = revenue_net / one_minus_f
     df["revenue_eur"] = revenue_net
-    df["aggregator_fee_eur"] = -aggregator_fee_frac * gross
+    # Clamp gross at zero to match the base build (economics.py:396-400):
+    # the aggregator fee is by spec a non-negative deduction (BSPs do
+    # not rebate negative-gross dispatches).  Without the clamp the
+    # perturbed cashflow flips the fee sign whenever the perturbed gross
+    # turns negative, which the base build never does.  Pass-2 P2.7.
+    df["aggregator_fee_eur"] = -aggregator_fee_frac * gross.clip(lower=0.0)
 
     return _recompute_net(df)
 

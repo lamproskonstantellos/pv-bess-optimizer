@@ -109,15 +109,20 @@ def plot_revenue_stack_yearly(
     """Stacked bar per operating year of the four revenue sources minus
     the grid-charging cost, with the net line overlaid.
 
-    Stacks are scaled per-stream so retail and DAM indexation are
-    rendered separately: retail-priced components (``Load from PV``,
-    ``Load from BESS``) track the year-over-year ratio of
-    ``yearly_cf['revenue_retail_eur']``; DAM-priced components
+    Stacks are scaled per-stream so retail, DAM, and balancing
+    indexation are rendered separately: retail-priced components
+    (``Load from PV``, ``Load from BESS``) track the year-over-year
+    ratio of ``yearly_cf['revenue_retail_eur']``; DAM-priced components
     (``Export from PV``, ``Export from BESS``, ``Grid-charging cost``)
-    track ``yearly_cf['revenue_dam_eur']``.  The aggregator-fee bar is
-    read directly from ``yearly_cf['aggregator_fee_eur']``.  Fixtures
-    lacking the per-stream columns fall back to a single
-    ``revenue_eur``-based ratio applied uniformly.
+    track ``yearly_cf['revenue_dam_eur']``.  Balancing per-product bars
+    (``FCR``, ``aFRR-up/dn``, ``mFRR-up/dn``) scale by the BESS
+    capacity-fade factor in ``yearly_cf['bess_capacity_factor']``
+    indexed by ``econ['bm_inflation_pct']`` — the same growth
+    :func:`build_yearly_cashflow` applies to the balancing-revenue
+    cashflow column.  The aggregator-fee bar is read directly from
+    ``yearly_cf['aggregator_fee_eur']``.  Fixtures lacking the
+    per-stream columns fall back to a single ``revenue_eur``-based
+    ratio applied uniformly.
     """
     out_path = Path(out_path)
     if yearly_cf.empty:
@@ -169,7 +174,14 @@ def plot_revenue_stack_yearly(
             if abs(y1_dam) > 1e-9:
                 dam_ratio = dam_series / y1_dam
             else:
-                dam_ratio = pd.Series(0.0, index=op.index, dtype=float)
+                # Year-1 DAM is zero (e.g. self-consumption only).  The
+                # DAM-side bar heights (rev_exp_pv_y1, rev_exp_bess_y1,
+                # cost_grid_y1) are themselves zero in this regime, so
+                # the multiplier is mathematically irrelevant; use a
+                # unity series rather than zero, which previously also
+                # squashed the balancing bars before they were given
+                # their own scaling factor below.
+                dam_ratio = pd.Series(1.0, index=op.index, dtype=float)
     else:
         y1_total = float(op.loc[y1_mask, "revenue_eur"].iloc[0])
         if abs(y1_total) > 1e-9:
@@ -245,12 +257,29 @@ def plot_revenue_stack_yearly(
             label="Aggregator fee",
         )
 
-    # Balancing-revenue segments — one stacked bar per product on top of
-    # the DAM/retail revenue stack.  Year-1 values come from the
+    # Balancing-revenue segments — one stacked bar per product on top
+    # of the DAM/retail revenue stack.  Year-1 values come from the
     # canonical revenue aggregates in ``year1_kpis``; subsequent years
-    # scale by the DAM ratio (balancing settles with the TSO at DAM-
-    # indexed prices in the model).  Zero in projects without
-    # balancing — the bars then collapse to nothing.
+    # scale by the BESS capacity-fade factor indexed by the balancing
+    # inflation rate, which is the same growth ``build_yearly_cashflow``
+    # applies to ``balancing_revenue_eur`` (economics.py:407-412).
+    # Previously this used ``dam_ratio``, which drove the bars to zero
+    # for self-consumption projects (Year-1 DAM revenue = 0) and drifted
+    # against the net line whenever ``bm_inflation_pct`` differed from
+    # ``dam_inflation_pct``.
+    bm_infl = 0.0
+    if econ is not None:
+        bm_infl = float(econ.get("bm_inflation_pct", 0.0) or 0.0) / 100.0
+    project_years_arr = op["project_year"].to_numpy(dtype=int)
+    if "bess_capacity_factor" in op.columns:
+        bess_factor_arr = op["bess_capacity_factor"].astype(float).to_numpy()
+    else:
+        bess_factor_arr = np.ones_like(project_years_arr, dtype=float)
+    balancing_ratio = pd.Series(
+        bess_factor_arr * np.power(1.0 + bm_infl, project_years_arr - 1),
+        index=op.index, dtype=float,
+    )
+
     bm_segments = [
         ("revenue_bess_fcr_eur", "FCR", "fcr"),
         ("revenue_bess_afrr_up_eur", "aFRR-up", "afrr_up"),
@@ -263,7 +292,7 @@ def plot_revenue_stack_yearly(
         y1_val = float(year1_kpis.get(kpi_key, 0.0) or 0.0)
         if abs(y1_val) <= 1e-9:
             continue
-        seg = (y1_val * dam_ratio).to_numpy()
+        seg = (y1_val * balancing_ratio).to_numpy()
         bm_arrays.append((label, colour_key, seg))
         ax.bar(
             years, seg, bottom=bottoms,

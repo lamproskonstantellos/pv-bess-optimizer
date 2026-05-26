@@ -135,6 +135,9 @@ def _lognormal_multiplier(rng: np.random.Generator, sigma: float, n: int) -> np.
     return rng.lognormal(mean=mu, sigma=sigma, size=n)
 
 
+_NAMEPLATE_FALLBACK_WARNED = False
+
+
 def add_forecast_noise(
     ts: pd.DataFrame,
     *,
@@ -146,6 +149,7 @@ def add_forecast_noise(
     enable_dam: bool = True,
     enable_pv: bool = True,
     enable_load: bool = True,
+    pv_nameplate_kwh_per_step: float | None = None,
 ) -> pd.DataFrame:
     """Apply log-normal multiplicative noise BEYOND the commit horizon.
 
@@ -161,6 +165,15 @@ def add_forecast_noise(
     left exactly as in the input.  Negative DAM prices are sign-aware:
     noise is applied to the absolute value and the sign is restored.
     ``load_kwh`` is skipped when absent (merchant mode).
+
+    PV noise is clipped to ``pv_nameplate_kwh_per_step`` (the configured
+    PV nameplate in kWp times the timestep in hours) — the true physical
+    ceiling of the array.  Clipping at the per-window observed maximum
+    instead biases the realised mean downward because samples already
+    sitting at the peak can only be pushed lower.  When the caller does
+    not supply a nameplate (legacy programmatic path), the previous
+    per-window-max behaviour is retained with a one-time
+    ``logger.warning`` flagging the bias.
     """
     if commit_steps < 0:
         raise ValueError(
@@ -188,12 +201,22 @@ def add_forecast_noise(
     if "pv_kwh" in out.columns:
         pv = out["pv_kwh"].to_numpy(dtype=float).copy()
         mult = _lognormal_multiplier(rng, eff_sigma_pv, n_perturb)
-        # Clip to the per-window PV max as a proxy for nameplate — this
-        # function has no access to pv_nameplate_kwp.
-        pv_max = float(pv.max()) if pv.size else 0.0
+        if pv_nameplate_kwh_per_step is not None and pv_nameplate_kwh_per_step > 0.0:
+            clip_ceiling = float(pv_nameplate_kwh_per_step)
+        else:
+            global _NAMEPLATE_FALLBACK_WARNED
+            if not _NAMEPLATE_FALLBACK_WARNED:
+                logger.warning(
+                    "add_forecast_noise called without pv_nameplate_kwh_per_step; "
+                    "falling back to clipping at the per-window PV maximum, which "
+                    "biases the realised mean downward. Pass the configured PV "
+                    "nameplate to remove the bias."
+                )
+                _NAMEPLATE_FALLBACK_WARNED = True
+            clip_ceiling = float(pv.max()) if pv.size else 0.0
         pv[commit_steps:] = np.minimum(
             np.maximum(pv[commit_steps:] * mult, 0.0),
-            pv_max,
+            clip_ceiling,
         )
         out["pv_kwh"] = pv
 
@@ -290,6 +313,17 @@ def rolling_horizon_dispatch(
         if forecast_seed is not None else None
     )
 
+    # Convert the configured PV nameplate (in kWp) to the per-step
+    # energy ceiling (kWh per step) so add_forecast_noise can clip noised
+    # PV at the true physical limit instead of the per-window max.
+    pv_nameplate_kwp = float(params.get("pv_nameplate_kwp", 0.0) or 0.0)
+    dt_h_value = dt_hours_from(params)
+    pv_nameplate_kwh_per_step: float | None
+    if pv_nameplate_kwp > 0.0 and dt_h_value > 0.0:
+        pv_nameplate_kwh_per_step = pv_nameplate_kwp * dt_h_value
+    else:
+        pv_nameplate_kwh_per_step = None
+
     # BESS energy capacity is pinned to params['bess_capacity_kwh']
     # in build_model, so every window automatically uses the same asset
     # — no need to plumb a fixed_e_cap_kwh through.
@@ -323,6 +357,7 @@ def rolling_horizon_dispatch(
                 enable_dam=enable_dam,
                 enable_pv=enable_pv,
                 enable_load=enable_load,
+                pv_nameplate_kwh_per_step=pv_nameplate_kwh_per_step,
             )
         else:
             window_noisy = window_ts
