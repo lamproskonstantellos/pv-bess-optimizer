@@ -46,6 +46,7 @@ from .balancing import (
     resolve_balancing_config,
 )
 from .modes import resolve_mode
+from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ def _balancing_soc_drift(
     if not all(f"bm_reservation_{p}_kw" in res.columns for p in PRODUCTS_UP + PRODUCTS_DN):
         return None
 
-    dt_h = float(params.get("dt_minutes", 0) or 0) / 60.0
+    dt_h = dt_hours_from(params)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
     drift = np.zeros(len(res), dtype=float)
@@ -679,12 +680,16 @@ def _compute_balancing_kpis(
         # reservation columns (e.g. a BESS-absent run). Leave zeros.
         return out
 
-    dt_h = float(params.get("dt_minutes", 0) or 0) / 60.0
+    dt_h = dt_hours_from(params)
     if dt_h <= 0.0:
         return out
 
     total_capacity = 0.0
     total_activation = 0.0
+    # Note: reservation columns come from the rounded dispatch frame
+    # (model_to_dataframe(round_output=True) rounds to 4 dp), so
+    # sub-0.5 mW reservations are zero here.  See the rounding section
+    # of pvbess_opt/conventions.md for the full contract.
     for product in PRODUCTS_ALL:
         r_kw = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
         alpha = acceptance_probability(cfg, product)

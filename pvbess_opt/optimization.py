@@ -81,6 +81,7 @@ from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .kpis import ENERGY_TOLERANCE, _balancing_soc_drift
 from .max_injection import build_per_step_max_injection_frac
 from .modes import resolve_mode
+from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +361,7 @@ def build_model(
         Used by the rolling-horizon dispatcher (a single window should not
         be forced to close its cycle).
     """
-    dt_h = params["dt_minutes"] / 60.0
+    dt_h = dt_hours_from(params)
     n_steps = len(ts)
     if n_steps == 0:
         raise ValueError("timeseries is empty; nothing to optimise.")
@@ -933,10 +934,20 @@ def model_to_dataframe(
     model values — used for the dispatch-invariant checks so the sum-based
     invariant_4 is not polluted by round(4) accumulation across tens of
     thousands of rows.
+
+    Rounding note: a 4-decimal-place round zeroes any sub-0.5 mW
+    reservation (e.g. a balancing reservation that the MILP set to a
+    fraction of a watt for a numerical tie-break).  Callers that need
+    full precision -- the per-step energy-balance verifier and the
+    invariant-4 RTE bound -- should pass
+    ``return_unrounded=True`` to :func:`run_scenario` and read the
+    full-precision frame.  Headline KPIs and downstream display use
+    the rounded frame by design; see ``pvbess_opt/conventions.md``
+    for the full rounding contract.
     """
     n_steps = len(ts)
     time_index = range(n_steps)
-    dt_h = params["dt_minutes"] / 60.0
+    dt_h = dt_hours_from(params)
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
     max_injection_per_step = _resolve_max_injection_per_step(params, ts)
     export_cap_kwh_per_step = (
@@ -1148,7 +1159,7 @@ def _balancing_invariants(
         return out
 
     bess_power_kw = float(params.get("bess_power_kw", 0.0) or 0.0)
-    dt_h = float(params.get("dt_minutes", 0) or 0) / 60.0
+    dt_h = dt_hours_from(params)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
     bess_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)

@@ -587,13 +587,38 @@ def _dumbbell_plot(
         # Map each segment end to the absolute driver value that
         # produced it: ``low``/``high`` are the metric outcomes, so the
         # smaller outcome pairs with its scenario's driver value.
+        # The mapping assumes a monotonic driver->metric relationship --
+        # ``low <= high`` means a smaller driver value produced the
+        # smaller metric outcome.  When the relationship is actually
+        # non-monotonic (very rare for the four built-in drivers, but
+        # plausible for any future driver), the implied left / right
+        # driver labels are wrong.  Detect the case by comparing the
+        # direction of the driver delta against the direction of the
+        # metric outcomes and warn rather than silently mislabel.
         left_driver_text = right_driver_text = None
         ds = drivers.get(labels[i])
         if ds is not None:
-            if low <= high:
+            driver_low_to_high = ds.high_value >= ds.low_value
+            metric_low_to_high = high >= low
+            if driver_low_to_high == metric_low_to_high:
                 lo_dv, hi_dv = ds.low_value, ds.high_value
             else:
                 lo_dv, hi_dv = ds.high_value, ds.low_value
+            # Non-monotonic guard: when low_outcome ~= high_outcome
+            # but the driver values differ, or when one outcome equals
+            # base while the other moves either way, the left/right
+            # implication is ambiguous.  Warn so the developer adds an
+            # explicit direction hint to the driver descriptor.
+            if (
+                abs(high - low) <= 1e-9
+                and abs(ds.high_value - ds.low_value) > 1e-9
+            ):
+                logger.warning(
+                    "Tornado driver %r maps both perturbations to the "
+                    "same metric value (low=%g, high=%g): driver-end "
+                    "annotation is ambiguous and may be mislabelled.",
+                    labels[i], low, high,
+                )
             left_driver_text = _format_driver_value(lo_dv, ds.driver_type)
             right_driver_text = _format_driver_value(hi_dv, ds.driver_type)
         if right <= base_value:

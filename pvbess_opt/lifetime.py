@@ -76,9 +76,10 @@ _BESS_ORIGIN_COLUMNS: tuple[str, ...] = (
 
 # EUR-per-step columns added by :func:`pvbess_opt.kpis.add_economic_columns`.
 # Scaling convention: PV-origin revenue degrades on the PV production
-# factor, BESS-origin revenue on the BESS capacity factor.  This matches
-# the per-stream degradation in
-# :func:`pvbess_opt.economics.build_yearly_cashflow`.
+# factor, BESS-origin revenue on the BESS capacity factor.  The
+# ``expense_charge_bess_grid_eur`` column is bundled into the BESS-DAM
+# stream by convention -- see ``pvbess_opt/conventions.md`` -- so it
+# scales on ``bess_factor`` here AND in :func:`pvbess_opt.economics.build_yearly_cashflow`.
 _PV_REVENUE_COLUMNS: tuple[str, ...] = (
     "profit_load_from_pv_eur",
     "profit_export_from_pv_eur",

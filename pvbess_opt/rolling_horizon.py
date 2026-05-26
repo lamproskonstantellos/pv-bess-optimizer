@@ -46,6 +46,7 @@ from .balancing import (
 )
 from .kpis import add_economic_columns, compute_kpis
 from .optimization import run_scenario
+from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
 
@@ -667,7 +668,7 @@ def monte_carlo_balancing(
         )
         return {}
 
-    dt_h = float(params.get("dt_minutes", 0) or 0) / 60.0
+    dt_h = dt_hours_from(params)
     if dt_h <= 0.0:
         return {}
 

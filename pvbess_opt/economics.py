@@ -269,6 +269,11 @@ def build_yearly_cashflow(
             year1_kpis.get("profit_load_from_bess_eur", 0.0) or 0.0
         )
         rev1_dam_pv = float(year1_kpis.get("profit_export_from_pv_eur", 0.0) or 0.0)
+        # expense_charge_bess_grid_eur is bundled into the BESS-DAM
+        # stream by convention -- see ``pvbess_opt/conventions.md``.
+        # The same convention is honoured by ``_BESS_REVENUE_COLUMNS``
+        # in ``pvbess_opt/lifetime.py`` so the cashflow and lifetime
+        # sheets stay aligned.
         rev1_dam_bess = float(
             year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0
         ) - float(year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
