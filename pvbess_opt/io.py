@@ -68,6 +68,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .balancing import resolve_balancing_config
 from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
@@ -1249,7 +1250,11 @@ def _validate_balancing_config(
     if not bool(balancing.get("balancing_enabled", False)):
         return
 
+    # Pre-default workbook checks: catch obviously bad input (negative
+    # shares) before we materialise the BalancingConfig.
     for key in _BALANCING_SHARE_KEYS:
+        if key not in balancing:
+            continue
         value = float(balancing.get(key, 0.0) or 0.0)
         if value < 0.0:
             raise ValueError(
@@ -1257,16 +1262,27 @@ def _validate_balancing_config(
                 f"got {value!r}."
             )
 
+    # Authoritative share-cap check on the RESOLVED BalancingConfig.
+    # Earlier we summed only the keys the workbook supplied, treating
+    # every missing key as 0 %.  The dataclass default for
+    # ``dam_capacity_share_pct`` is 70 %, so a workbook that omitted
+    # the DAM line and listed product shares summing to 60 % would
+    # pass the raw sum check (60 % <= 100 %) and then materialise a
+    # 130 % allocation once the default landed.  Resolve first, then
+    # sum across every consumer of the BESS power budget so the cap
+    # check sees the same numbers the optimiser will.
+    resolved = resolve_balancing_config(balancing)
+    cap_eps = 0.5  # percent — tolerates rounding from external workbooks.
     share_sum = sum(
-        float(balancing.get(key, 0.0) or 0.0)
-        for key in _BALANCING_SHARE_KEYS
+        float(getattr(resolved, key)) for key in _BALANCING_SHARE_KEYS
     )
-    if share_sum > 100.0 + 1e-9:
+    if share_sum > 100.0 + cap_eps:
         raise ValueError(
             "balancing sheet capacity shares sum to "
             f"{share_sum:.3f} % which exceeds 100 % of bess_power_kw "
-            f"(keys: {list(_BALANCING_SHARE_KEYS)}). Reduce one or more "
-            "shares so the total stays at or below 100 %."
+            f"(keys: {list(_BALANCING_SHARE_KEYS)}; resolved values "
+            "after dataclass defaults). Reduce one or more shares "
+            "so the total stays at or below 100 %."
         )
 
     for key in _BALANCING_PROBABILITY_KEYS:

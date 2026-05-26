@@ -269,6 +269,11 @@ def build_yearly_cashflow(
             year1_kpis.get("profit_load_from_bess_eur", 0.0) or 0.0
         )
         rev1_dam_pv = float(year1_kpis.get("profit_export_from_pv_eur", 0.0) or 0.0)
+        # expense_charge_bess_grid_eur is bundled into the BESS-DAM
+        # stream by convention -- see ``pvbess_opt/conventions.md``.
+        # The same convention is honoured by ``_BESS_REVENUE_COLUMNS``
+        # in ``pvbess_opt/lifetime.py`` so the cashflow and lifetime
+        # sheets stay aligned.
         rev1_dam_bess = float(
             year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0
         ) - float(year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
@@ -386,7 +391,13 @@ def build_yearly_cashflow(
                 rev1_dam_pv * pv_factor + rev1_dam_bess * bess_factor
             ) * (1.0 + dam_infl) ** (y - 1)
             revenue_gross_y = revenue_retail_y + revenue_dam_y
-            aggregator_fee_y = -revenue_gross_y * aggregator_fee_frac
+            # The aggregator fee is by spec a non-negative deduction
+            # (BSPs charge a positive fraction of gross revenue, never
+            # rebate negative-gross dispatches).  Clamping the gross at
+            # zero stops the fee from flipping to a revenue when
+            # revenue_gross_y < 0 (a regime that can occur in pure-
+            # arbitrage projects with sustained negative DAM hours).
+            aggregator_fee_y = -max(revenue_gross_y, 0.0) * aggregator_fee_frac
             opex_y = opex_1 * (1.0 + opex_infl) ** (y - 1)
             if bess_repl_year > 0 and y == bess_repl_year:
                 capex_y = capex_bess_y0 * (bess_repl_cost_pct / 100.0)
@@ -814,6 +825,14 @@ def compute_financial_kpis(
                 extras["lcoe_eur_per_mwh"] = float(
                     round(disc_pv_total / disc_pv_mwh, 4),
                 )
+            # Expose the discounted components so downstream sensitivity
+            # plots can compute the correct LCOE range
+            # (disc_capex * (1 +/- capex_d) + disc_opex * (1 +/- opex_d)) / disc_mwh
+            # rather than the incorrect base * (1 +/- capex_d)(1 +/- opex_d)
+            # multiplicative approximation.
+            extras["lcoe_disc_pv_capex_eur"] = float(disc_pv_capex)
+            extras["lcoe_disc_pv_opex_eur"] = float(disc_pv_opex)
+            extras["lcoe_disc_pv_mwh"] = float(disc_pv_mwh)
 
         if (
             bess_kw > 0.0 and bess_kwh > 0.0
@@ -871,6 +890,12 @@ def compute_financial_kpis(
                 extras["lcos_eur_per_mwh"] = float(
                     round(disc_bess_total / disc_bess_mwh, 4),
                 )
+            # Expose the discounted components so the LCOS sensitivity
+            # plot can compute the correct range; see the LCOE
+            # comment above for the rationale.
+            extras["lcos_disc_bess_capex_eur"] = float(disc_bess_capex)
+            extras["lcos_disc_bess_opex_eur"] = float(disc_bess_opex)
+            extras["lcos_disc_bess_mwh"] = float(disc_bess_mwh)
 
             # bess_lifetime_cycles: sum of (degraded discharge / nameplate)
             # — discharge is already scaled by bess_factor in lifetime.py.
@@ -1043,7 +1068,20 @@ def _payback_year(
     cumulative: np.ndarray,
     incremental: np.ndarray,
 ) -> float:
-    """Linear-interpolate the year at which ``cumulative`` first reaches 0."""
+    """Linear-interpolate the project year at which ``cumulative`` first reaches 0.
+
+    The returned value is the number of project years from the CAPEX
+    year (project year 0).  A "Simple payback: 0.7 yr" therefore lands
+    0.7 years after CAPEX commitment, NOT 0.7 years after the
+    Commercial Operation Date.  The downstream plot
+    (:func:`pvbess_opt.plotting.financial.plot_payback`) anchors the
+    vertical line to the calendar of the CAPEX year so the on-axis
+    geometry stays consistent with the scalar value.
+
+    Returns ``float('nan')`` when no crossing exists -- including the
+    cumulative-stuck-at-zero edge case (every ``incremental[i]``
+    smaller than the rounding epsilon means no defined payback).
+    """
     cumulative = np.asarray(cumulative, dtype=float)
     years = np.asarray(years, dtype=float)
     incremental = np.asarray(incremental, dtype=float)
@@ -1058,5 +1096,9 @@ def _payback_year(
             inc = incremental[i]
             if inc > 1e-12:
                 return float(years[i - 1] + (-cum_prev) / inc)
-            return float(years[i])
+            # Degenerate crossing -- cumulative reaches 0 with a flat
+            # incremental column (every year's flow within rounding
+            # of zero).  There is no defined payback in that case;
+            # surfacing NaN keeps the plot / KPI sheet honest.
+            return float("nan")
     return float("nan")

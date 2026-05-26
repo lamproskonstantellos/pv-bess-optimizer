@@ -165,29 +165,98 @@ def _scale_opex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
 
 
 def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
-    """Scale every revenue stream by the same factor.
+    """Scale every revenue stream by the same factor, then rederive the fee.
 
     The Revenue driver sweeps the project's Year-1+ income holistically:
     retail + DAM net revenue (``revenue_eur`` and its per-stream
     breakdowns), the aggregator-fee deduction that scales with gross
-    revenue, and balancing capacity + activation revenue.  Scaling only
-    ``revenue_eur`` would keep balancing constant as an offset and
-    yield a "Revenue +10 %" scenario that's actually weaker than the
-    base case once balancing dominates — the bug fixed in this commit.
+    revenue, and balancing capacity + activation revenue.
+
+    The perturbed frame is reconstructed in two steps so it satisfies
+    the same gross/net identity the original cashflow does:
+
+    1. Scale the per-stream revenue columns (``revenue_retail_eur``,
+       ``revenue_dam_eur``) and the balancing-revenue columns by
+       ``factor``.  Each per-stream column is stored as a NET value in
+       :func:`pvbess_opt.economics.build_yearly_cashflow`
+       (= ``(1 - aggregator_fee_frac) * gross_stream``), so multiplying
+       them by ``factor`` scales the underlying gross stream by the same
+       factor.
+    2. Rederive ``aggregator_fee_eur`` and ``revenue_eur`` from the
+       scaled per-stream nets using the SAME aggregator-fee fraction the
+       base cashflow used.  The fraction is recovered from the
+       unperturbed frame as
+       ``|aggregator_fee_eur| / (revenue_eur + |aggregator_fee_eur|)``
+       so the helper stays self-contained and no econ dict has to be
+       threaded through.
+
+    Without step 2 the gross/net identity
+    ``revenue_eur + |aggregator_fee_eur| == revenue_gross`` (where
+    ``revenue_gross`` scales linearly with the driver) holds only by
+    coincidence — uniform scaling preserves it, but any future addition
+    of a non-uniformly-scaled term (a fixed surcharge, a balancing-
+    bundled fee variant, ...) would silently desynchronise the two
+    columns.  Step 2 makes the derivation explicit.
     """
     df = yearly_cf.copy()
-    df["revenue_eur"] = df["revenue_eur"].astype(float) * float(factor)
+    aggregator_fee_frac = _infer_aggregator_fee_frac(df)
+    one_minus_f = max(1e-12, 1.0 - aggregator_fee_frac)
+
+    # Step 1 — scale per-stream nets and balancing-revenue columns.
     for col in (
         "revenue_retail_eur",
         "revenue_dam_eur",
-        "aggregator_fee_eur",
         "balancing_capacity_revenue_eur",
         "balancing_activation_revenue_eur",
         "balancing_revenue_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)
+
+    # Step 2 — rederive aggregator_fee_eur and revenue_eur from the
+    # scaled nets with the SAME aggregator_fee_frac.
+    if (
+        "revenue_retail_eur" in df.columns
+        and "revenue_dam_eur" in df.columns
+    ):
+        retail_net = df["revenue_retail_eur"].astype(float)
+        dam_net = df["revenue_dam_eur"].astype(float)
+        revenue_net = retail_net + dam_net
+    else:
+        revenue_net = df["revenue_eur"].astype(float) * float(factor)
+
+    gross = revenue_net / one_minus_f
+    df["revenue_eur"] = revenue_net
+    df["aggregator_fee_eur"] = -aggregator_fee_frac * gross
+
     return _recompute_net(df)
+
+
+def _infer_aggregator_fee_frac(df: pd.DataFrame) -> float:
+    """Recover the aggregator-fee fraction the base cashflow used.
+
+    Uses the algebraic identity
+    ``aggregator_fee_eur = -aggregator_fee_frac * (revenue_eur +
+    |aggregator_fee_eur|)`` over any year where the fee is non-zero,
+    so the perturbation stays in sync with the base cashflow without
+    having to thread the ``econ`` dict through the sensitivity helpers.
+    Returns 0 when ``aggregator_fee_eur`` is missing or identically zero.
+    """
+    if "aggregator_fee_eur" not in df.columns:
+        return 0.0
+    revenue_net = df.get("revenue_eur", pd.Series(0.0, index=df.index)).astype(float)
+    fee = df["aggregator_fee_eur"].astype(float)
+    # Look at any year where the fee is non-trivial; avoid Year-0 (CAPEX
+    # row, fee is zero by construction).
+    mask = fee.abs() > 1e-6
+    if not bool(mask.any()):
+        return 0.0
+    fee_abs = float(fee[mask].abs().iloc[0])
+    rev = float(revenue_net[mask].iloc[0])
+    denom = rev + fee_abs
+    if abs(denom) <= 1e-12:
+        return 0.0
+    return max(0.0, min(1.0, fee_abs / denom))
 
 
 def _rebuild_with_discount_rate(

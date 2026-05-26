@@ -81,6 +81,7 @@ from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .kpis import ENERGY_TOLERANCE, _balancing_soc_drift
 from .max_injection import build_per_step_max_injection_frac
 from .modes import resolve_mode
+from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +361,7 @@ def build_model(
         Used by the rolling-horizon dispatcher (a single window should not
         be forced to close its cycle).
     """
-    dt_h = params["dt_minutes"] / 60.0
+    dt_h = dt_hours_from(params)
     n_steps = len(ts)
     if n_steps == 0:
         raise ValueError("timeseries is empty; nothing to optimise.")
@@ -933,10 +934,20 @@ def model_to_dataframe(
     model values — used for the dispatch-invariant checks so the sum-based
     invariant_4 is not polluted by round(4) accumulation across tens of
     thousands of rows.
+
+    Rounding note: a 4-decimal-place round zeroes any sub-0.5 mW
+    reservation (e.g. a balancing reservation that the MILP set to a
+    fraction of a watt for a numerical tie-break).  Callers that need
+    full precision -- the per-step energy-balance verifier and the
+    invariant-4 RTE bound -- should pass
+    ``return_unrounded=True`` to :func:`run_scenario` and read the
+    full-precision frame.  Headline KPIs and downstream display use
+    the rounded frame by design; see ``pvbess_opt/conventions.md``
+    for the full rounding contract.
     """
     n_steps = len(ts)
     time_index = range(n_steps)
-    dt_h = params["dt_minutes"] / 60.0
+    dt_h = dt_hours_from(params)
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
     max_injection_per_step = _resolve_max_injection_per_step(params, ts)
     export_cap_kwh_per_step = (
@@ -1085,8 +1096,150 @@ def run_scenario(
 
 
 # ---------------------------------------------------------------------------
-# 9 audit invariants — verify_dispatch_invariants
+# Dispatch invariants — verify_dispatch_invariants
+#
+# 9 general-dispatch invariants + 6 balancing-market invariants
+# (INV-B1..INV-B6).  The balancing block is verified iff
+# ``params['balancing']['balancing_enabled']`` is true and the dispatch
+# frame carries the per-product reservation columns; otherwise the
+# corresponding residuals are reported as 0.0 (vacuously satisfied).
 # ---------------------------------------------------------------------------
+
+
+# Names of the six balancing-invariant residual keys returned by
+# :func:`verify_dispatch_invariants`.  Anchored as a tuple so
+# downstream consumers (``main._check_strict_invariants``) can refer to
+# the canonical list without re-declaring the names.
+BALANCING_INVARIANT_KEYS: tuple[str, ...] = (
+    "invariant_b1_capacity_share_sum_pct_excess",
+    "invariant_b2_reservation_share_cap_excess_kw",
+    "invariant_b3_soc_headroom_up_excess_kwh",
+    "invariant_b4_soc_headroom_dn_excess_kwh",
+    "invariant_b5_power_budget_excess_kwh",
+    "invariant_b6_off_invariants_max_residual",
+)
+
+
+def _balancing_invariants(
+    res: pd.DataFrame,
+    params: dict[str, Any],
+    *,
+    general_invariants: dict[str, float],
+    tol_kwh: float,
+) -> dict[str, float]:
+    """Compute the six INV-B1..INV-B6 balancing-invariant residuals.
+
+    The residuals are returned as positive floats; 0.0 means satisfied
+    within machine precision.  See the docstring of
+    :func:`verify_dispatch_invariants` for the per-invariant definition.
+
+    When the balancing block did not fire (master switch off or
+    dispatch frame missing the reservation columns) every B1..B5
+    residual is 0.0 and B6 carries the maximum of the nine
+    general-dispatch invariants -- the property INV-B6 anchors -- so a
+    balancing-OFF run still fails strict mode if any of the existing
+    nine invariants is violated.
+    """
+    out: dict[str, float] = {k: 0.0 for k in BALANCING_INVARIANT_KEYS}
+
+    raw_cfg = params.get("balancing") or {}
+    cfg = resolve_balancing_config(raw_cfg)
+    balancing_on = bool(cfg.balancing_enabled)
+    have_reservations = all(
+        f"bm_reservation_{p}_kw" in res.columns for p in PRODUCTS_ALL
+    )
+
+    if not (balancing_on and have_reservations):
+        # INV-B6: balancing-OFF run must preserve the existing nine
+        # invariants.  Surface the worst residual so strict mode rejects
+        # a balancing-OFF dispatch that violates any of them.
+        out["invariant_b6_off_invariants_max_residual"] = max(
+            (v for v in general_invariants.values()), default=0.0,
+        )
+        return out
+
+    bess_power_kw = float(params.get("bess_power_kw", 0.0) or 0.0)
+    dt_h = dt_hours_from(params)
+    eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
+    eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
+    bess_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
+    soc_min = float(params.get("soc_min_frac", 0.0) or 0.0) * bess_kwh
+    soc_max = float(params.get("soc_max_frac", 1.0) or 1.0) * bess_kwh
+    h_buf = cfg.bm_soc_headroom_pct / 100.0
+    d_fcr = cfg.fcr_required_duration_hours
+
+    # INV-B1: sum of per-product capacity shares + DAM share <= 100 %.
+    share_total = (
+        cfg.dam_capacity_share_pct
+        + cfg.fcr_capacity_share_pct
+        + cfg.afrr_up_capacity_share_pct
+        + cfg.afrr_dn_capacity_share_pct
+        + cfg.mfrr_up_capacity_share_pct
+        + cfg.mfrr_dn_capacity_share_pct
+    )
+    out["invariant_b1_capacity_share_sum_pct_excess"] = float(
+        max(0.0, share_total - 100.0)
+    )
+
+    # INV-B2: per-step reservation <= product share cap (kW).
+    max_share_excess = 0.0
+    for product in PRODUCTS_ALL:
+        cap_kw = capacity_share_kw(cfg, product, bess_power_kw)
+        r = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
+        if r.size:
+            max_share_excess = max(
+                max_share_excess, float((r - cap_kw).max(initial=0.0)),
+            )
+    out["invariant_b2_reservation_share_cap_excess_kw"] = max_share_excess
+
+    soc = res["soc_kwh"].to_numpy(dtype=float)
+    r_afrr_up = res["bm_reservation_afrr_up_kw"].to_numpy(dtype=float)
+    r_mfrr_up = res["bm_reservation_mfrr_up_kw"].to_numpy(dtype=float)
+    r_afrr_dn = res["bm_reservation_afrr_dn_kw"].to_numpy(dtype=float)
+    r_mfrr_dn = res["bm_reservation_mfrr_dn_kw"].to_numpy(dtype=float)
+    r_fcr = res["bm_reservation_fcr_kw"].to_numpy(dtype=float)
+
+    # INV-B3: soc_kwh - soc_min >= headroom_up.
+    headroom_up = (
+        (1.0 + h_buf) * dt_h * (r_afrr_up + r_mfrr_up) / eta_d
+        + (1.0 + h_buf) * d_fcr * r_fcr / eta_d
+    )
+    up_excess = headroom_up - (soc - soc_min)
+    out["invariant_b3_soc_headroom_up_excess_kwh"] = float(
+        max(0.0, up_excess.max(initial=0.0))
+    )
+
+    # INV-B4: soc_max - soc_kwh >= headroom_dn.
+    headroom_dn = (
+        (1.0 + h_buf) * dt_h * (r_afrr_dn + r_mfrr_dn) * eta_c
+        + (1.0 + h_buf) * d_fcr * r_fcr * eta_c
+    )
+    dn_excess = headroom_dn - (soc_max - soc)
+    out["invariant_b4_soc_headroom_dn_excess_kwh"] = float(
+        max(0.0, dn_excess.max(initial=0.0))
+    )
+
+    # INV-B5: per-direction power budget within p_bess * dt_h.
+    bess_dis_load = res["bess_dis_load_kwh"].to_numpy(dtype=float)
+    bess_dis_grid = res["bess_dis_grid_kwh"].to_numpy(dtype=float)
+    pv_to_bess = res["pv_to_bess_kwh"].to_numpy(dtype=float)
+    grid_to_bess = res["bess_charge_grid_kwh"].to_numpy(dtype=float)
+    up_share_kw = r_fcr + r_afrr_up + r_mfrr_up
+    dn_share_kw = r_fcr + r_afrr_dn + r_mfrr_dn
+    budget = bess_power_kw * dt_h
+    lhs_up = bess_dis_load + bess_dis_grid + up_share_kw * dt_h
+    lhs_dn = pv_to_bess + grid_to_bess + dn_share_kw * dt_h
+    out["invariant_b5_power_budget_excess_kwh"] = float(
+        max(
+            (lhs_up - budget).max(initial=0.0),
+            (lhs_dn - budget).max(initial=0.0),
+            0.0,
+        )
+    )
+
+    # INV-B6 is vacuous when balancing is ON (the property is anchored
+    # at the OFF case in the test contract); keep the residual at 0.
+    return out
 
 
 def verify_dispatch_invariants(
@@ -1096,14 +1249,17 @@ def verify_dispatch_invariants(
     mode: str | None = None,
     tol_kwh: float = ENERGY_TOLERANCE,
 ) -> dict[str, float]:
-    """Check the nine audit invariants on a solved dispatch.
+    """Check the dispatch invariants on a solved dispatch.
 
-    Returns a dict of named residuals.
+    Verifies the nine general-dispatch invariants plus, when the
+    balancing block fired, the six INV-B1..INV-B6 balancing-market
+    invariants.  Returns a dict of named residuals; ``main.py``'s
+    ``--strict`` mode rejects any residual above the energy tolerance.
 
     Returns
     -------
     dict[str, float]
-        Keys:
+        Nine general-dispatch keys:
             ``invariant_1_pv_balance_kwh``
             ``invariant_2_load_balance_kwh``      (self_consumption only; 0.0 in merchant)
             ``invariant_3_soc_dynamics_kwh``
@@ -1113,6 +1269,14 @@ def verify_dispatch_invariants(
             ``invariant_7_curtail_behavior_kwh``  (BOTH modes)
             ``invariant_8_soc_closed_cycle_kwh``  (when terminal_soc_equal)
             ``invariant_9_pv_load_priority_kwh``  (self_consumption only; Section 2)
+        Plus six balancing-invariant keys (always present; zero when the
+        balancing block did not fire):
+            ``invariant_b1_capacity_share_sum_pct_excess``  (DAM + per-product shares <= 100 %)
+            ``invariant_b2_reservation_share_cap_excess_kw`` (per-step reservation <= share)
+            ``invariant_b3_soc_headroom_up_excess_kwh``
+            ``invariant_b4_soc_headroom_dn_excess_kwh``
+            ``invariant_b5_power_budget_excess_kwh``        (per-direction power budget)
+            ``invariant_b6_off_invariants_max_residual``    (worst general residual when OFF)
     """
     if mode is None:
         mode = resolve_mode(params)
@@ -1141,15 +1305,15 @@ def verify_dispatch_invariants(
     else:
         inv_2 = 0.0
 
+    # Reuse the balancing SOC drift helper across the three per-step
+    # checks that depend on it (B3 dynamics, B4 rte bound, B8 closed cycle).
+    bm_drift = _balancing_soc_drift(res, params)
+
     if len(soc) >= 2:
         expected_delta = (
             eta_c * (pv_to_bess[:-1] + grid_to_bess[:-1])
             - (bess_dis_load[:-1] + bess_dis_grid[:-1]) / eta_d
         )
-        # Add the deterministic expected-activation drift when the
-        # balancing block was active. The KPI helper computes the same
-        # per-step drift; reuse it so the two checks stay aligned.
-        bm_drift = _balancing_soc_drift(res, params)
         if bm_drift is not None:
             expected_delta = expected_delta + bm_drift[:-1]
         actual_delta = soc[1:] - soc[:-1]
@@ -1160,9 +1324,6 @@ def verify_dispatch_invariants(
     total_charge = float((pv_to_bess + grid_to_bess).sum())
     total_discharge = float((bess_dis_load + bess_dis_grid).sum())
     soc0 = float(soc[0]) if len(soc) else 0.0
-    # Reuse the balancing SOC drift helper so the rte-bound / closed-
-    # cycle checks stay consistent with the per-step SOC dynamics check.
-    bm_drift = _balancing_soc_drift(res, params)
     if len(soc):
         final_state = (
             float(soc[-1])
@@ -1232,7 +1393,7 @@ def verify_dispatch_invariants(
     else:
         inv_9 = 0.0
 
-    return {
+    general_invariants: dict[str, float] = {
         "invariant_1_pv_balance_kwh": inv_1,
         "invariant_2_load_balance_kwh": inv_2,
         "invariant_3_soc_dynamics_kwh": inv_3,
@@ -1243,3 +1404,9 @@ def verify_dispatch_invariants(
         "invariant_8_soc_closed_cycle_kwh": inv_8,
         "invariant_9_pv_load_priority_kwh": inv_9,
     }
+    balancing_invariants = _balancing_invariants(
+        res, params,
+        general_invariants=general_invariants,
+        tol_kwh=tol_kwh,
+    )
+    return {**general_invariants, **balancing_invariants}

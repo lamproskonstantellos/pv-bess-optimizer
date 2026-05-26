@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from .balancing import PRODUCTS_ALL, PRODUCTS_WITH_ACTIVATION
+
 __all__ = [
     "apply_unavailability_derate",
     "availability_factor",
@@ -38,36 +40,109 @@ def availability_factor(unavailability_pct: float) -> float:
     return max(0.0, min(1.0, 1.0 - raw))
 
 
+# Base set of energy + raw revenue keys that scale linearly with
+# availability.  Balancing per-product capacity / activation revenue keys
+# and canonical revenue aggregates are added dynamically by
+# :func:`_default_derated_keys` so the list stays in sync with the
+# balancing product taxonomy.
+_BASE_DERATED_KEYS: tuple[str, ...] = (
+    # Energy MWh keys
+    "pv_generation_mwh",
+    "bess_total_discharge_mwh",
+    "system_total_export_mwh",
+    "system_total_import_mwh",
+    "bess_total_charge_mwh",
+    "pv_to_bess_mwh",
+    "bess_charge_grid_mwh",
+    "pv_direct_to_load_mwh",
+    "bess_to_load_mwh",
+    "bess_green_to_load_mwh",
+    "system_green_to_load_mwh",
+    "pv_energy_curtailed_mwh",
+    # Raw per-stream EUR keys (the canonical aggregates downstream are
+    # algebraic combinations of these).
+    "profit_load_from_pv_eur",
+    "profit_load_from_bess_eur",
+    "profit_export_from_pv_eur",
+    "profit_export_from_bess_eur",
+    "expense_charge_bess_grid_eur",
+    "profit_total_eur",
+    # Balancing expected-activation energies (kWh) — they scale with the
+    # reservation throughput which the derate applies to.
+    "bm_expected_activation_energy_up_kwh",
+    "bm_expected_activation_energy_dn_kwh",
+)
+
+
+def _default_derated_keys() -> tuple[str, ...]:
+    """Assemble the full default derate list including balancing keys."""
+    keys: list[str] = list(_BASE_DERATED_KEYS)
+    # Per-product capacity revenue (every balancing product).
+    for product in PRODUCTS_ALL:
+        keys.append(f"bm_{product}_capacity_revenue_eur")
+    # Per-product activation revenue (every product that earns activation).
+    for product in PRODUCTS_WITH_ACTIVATION:
+        keys.append(f"bm_{product}_activation_revenue_eur")
+    # Balancing totals.
+    keys.extend(
+        [
+            "bm_total_capacity_revenue_eur",
+            "bm_total_activation_revenue_eur",
+            "bm_total_balancing_revenue_eur",
+        ]
+    )
+    # Canonical revenue aggregates consumed by the financial pipeline.
+    keys.extend(
+        [
+            "revenue_pv_dam_eur",
+            "revenue_bess_dam_eur",
+            "revenue_self_consumption_eur",
+            "revenue_bess_fcr_eur",
+            "revenue_bess_afrr_up_eur",
+            "revenue_bess_afrr_dn_eur",
+            "revenue_bess_mfrr_up_eur",
+            "revenue_bess_mfrr_dn_eur",
+        ]
+    )
+    return tuple(keys)
+
+
 def apply_unavailability_derate(
     kpis: dict[str, float],
     unavailability_pct: float,
     *,
-    derated_keys: Iterable[str] = (
-        "pv_generation_mwh",
-        "bess_total_discharge_mwh",
-        "system_total_export_mwh",
-        "system_total_import_mwh",
-        "bess_total_charge_mwh",
-        "pv_to_bess_mwh",
-        "bess_charge_grid_mwh",
-        "pv_direct_to_load_mwh",
-        "bess_to_load_mwh",
-        "bess_green_to_load_mwh",
-        "system_green_to_load_mwh",
-        "pv_energy_curtailed_mwh",
-        "profit_load_from_pv_eur",
-        "profit_load_from_bess_eur",
-        "profit_export_from_pv_eur",
-        "profit_export_from_bess_eur",
-        "expense_charge_bess_grid_eur",
-        "profit_total_eur",
-    ),
+    derated_keys: Iterable[str] | None = None,
 ) -> dict[str, float]:
-    """Return ``kpis`` with selected MWh/EUR keys derated by availability.
+    """Return ``kpis`` with every revenue-bearing key scaled by availability.
+
+    Post-condition: every revenue-bearing top-level EUR key is scaled by
+    ``availability_factor`` -- this covers the raw per-stream profit
+    components (``profit_*_eur``, ``expense_charge_bess_grid_eur``), the
+    per-product balancing capacity and activation revenues
+    (``bm_<product>_capacity_revenue_eur`` /
+    ``bm_<product>_activation_revenue_eur``), the balancing totals
+    (``bm_total_capacity_revenue_eur``,
+    ``bm_total_activation_revenue_eur``,
+    ``bm_total_balancing_revenue_eur``) and the canonical revenue
+    aggregates (``revenue_pv_dam_eur``, ``revenue_bess_dam_eur``,
+    ``revenue_self_consumption_eur`` and the per-product
+    ``revenue_bess_<product>_eur``).  Because every component AND every
+    aggregate is multiplied by the same scalar the algebraic identities
+    that the KPI builders establish (e.g.
+    ``revenue_bess_dam_eur = profit_export_from_bess_eur -
+    expense_charge_bess_grid_eur``) are preserved after the derate.
+
+    The nested-dict ``bess_utilization_diagnostics`` (see
+    :func:`pvbess_opt.kpis.compute_kpis`) is intentionally NOT derated:
+    it reports raw Year-1 dispatch utilisation for the audit log, not
+    derated lifetime numbers.  This asymmetry with the surrounding
+    top-level MWh keys is by design.
 
     The factor is also recorded under ``availability_factor`` so the
     downstream cashflow can re-apply it consistently.
     """
+    if derated_keys is None:
+        derated_keys = _default_derated_keys()
     factor = availability_factor(unavailability_pct)
     out = dict(kpis)
     for key in derated_keys:

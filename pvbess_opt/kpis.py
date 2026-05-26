@@ -46,6 +46,7 @@ from .balancing import (
     resolve_balancing_config,
 )
 from .modes import resolve_mode
+from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ def _balancing_soc_drift(
     if not all(f"bm_reservation_{p}_kw" in res.columns for p in PRODUCTS_UP + PRODUCTS_DN):
         return None
 
-    dt_h = float(params.get("dt_minutes", 0) or 0) / 60.0
+    dt_h = dt_hours_from(params)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
     drift = np.zeros(len(res), dtype=float)
@@ -552,6 +553,37 @@ def _compute_canonical_revenue_aggregates(
     * ``revenue_bess_afrr_dn_eur``  — aFRR-dn capacity + activation.
     * ``revenue_bess_mfrr_up_eur``  — mFRR-up capacity + activation.
     * ``revenue_bess_mfrr_dn_eur``  — mFRR-dn capacity + activation.
+
+    CONTRACT -- two parallel revenue-key families:
+
+    Per-product balancing raws (written by
+    :func:`_compute_balancing_kpis`):
+        ``bm_<product>_capacity_revenue_eur``
+        ``bm_<product>_activation_revenue_eur``
+
+    Per-product canonical aggregates (written here, sum of the two
+    raws above for every product that earns activation; capacity-only
+    for FCR):
+        ``revenue_bess_<product>_eur``
+
+    Top-level balancing totals (written by
+    :func:`_compute_balancing_kpis`):
+        ``bm_total_capacity_revenue_eur``
+        ``bm_total_activation_revenue_eur``
+        ``bm_total_balancing_revenue_eur``
+
+    Consumers:
+        * :func:`pvbess_opt.plotting.bess_revenue.plot_bess_revenue_waterfall`
+          reads the per-product canonical aggregates.
+        * :func:`pvbess_opt.plotting.lifecycle.plot_revenue_stack_yearly`
+          reads the per-product canonical aggregates.
+        * :func:`pvbess_opt.economics.build_yearly_cashflow`
+          reads ``bm_total_capacity_revenue_eur`` and
+          ``bm_total_activation_revenue_eur``.
+
+    :func:`pvbess_opt.availability.apply_unavailability_derate` scales
+    every key in both families by the same availability factor so the
+    aggregates and their components stay in lockstep.
     """
     rev_pv_dam = float(kpis.get("profit_export_from_pv_eur", 0.0) or 0.0)
     rev_bess_dam = (
@@ -593,6 +625,33 @@ def _compute_balancing_kpis(
 
     When the balancing block did not fire (sheet absent / switch off /
     no BESS) every key is set to 0.0 so the dict shape stays stable.
+
+    CONTRACT -- emitted keys:
+
+    Per-product raws (one pair per balancing product):
+        ``bm_<product>_capacity_revenue_eur``   (every product)
+        ``bm_<product>_activation_revenue_eur`` (products in
+        :data:`pvbess_opt.balancing.PRODUCTS_WITH_ACTIVATION`)
+
+    Per-product diagnostics:
+        ``bm_reservation_avg_kw_<product>``     (every product)
+
+    Top-level aggregates:
+        ``bm_total_capacity_revenue_eur``    = sum of all
+        ``bm_<p>_capacity_revenue_eur``.
+        ``bm_total_activation_revenue_eur``  = sum of all
+        ``bm_<p>_activation_revenue_eur``.
+        ``bm_total_balancing_revenue_eur``   = capacity total +
+        activation total.
+        ``bm_expected_activation_energy_up_kwh`` /
+        ``bm_expected_activation_energy_dn_kwh``  — deterministic
+        expected-activation throughput.
+        ``bm_revenue_share_pct``             — share of total
+        revenue contributed by balancing.
+
+    The canonical per-product aggregates ``revenue_bess_<product>_eur``
+    are written by :func:`_compute_canonical_revenue_aggregates` from
+    the raws above.  See its CONTRACT block for the full key map.
     """
 
     out: dict[str, Any] = {}
@@ -621,12 +680,16 @@ def _compute_balancing_kpis(
         # reservation columns (e.g. a BESS-absent run). Leave zeros.
         return out
 
-    dt_h = float(params.get("dt_minutes", 0) or 0) / 60.0
+    dt_h = dt_hours_from(params)
     if dt_h <= 0.0:
         return out
 
     total_capacity = 0.0
     total_activation = 0.0
+    # Note: reservation columns come from the rounded dispatch frame
+    # (model_to_dataframe(round_output=True) rounds to 4 dp), so
+    # sub-0.5 mW reservations are zero here.  See the rounding section
+    # of pvbess_opt/conventions.md for the full contract.
     for product in PRODUCTS_ALL:
         r_kw = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
         alpha = acceptance_probability(cfg, product)
@@ -681,14 +744,27 @@ def _compute_balancing_kpis(
     out["bm_expected_activation_energy_up_kwh"] = round(e_act_up, 4)
     out["bm_expected_activation_energy_dn_kwh"] = round(e_act_dn, 4)
 
-    dam_revenue = (
+    # Denominator for bm_revenue_share_pct: every non-balancing revenue
+    # stream the project earns (retail-load coverage + DAM exports net of
+    # grid-charging expense) plus total balancing revenue.  The name
+    # "non-balancing" makes explicit that this is NOT just DAM exports --
+    # the retail-load coverage from PV-direct and BESS-discharge is the
+    # bulk of it in any self-consumption project.  Used downstream to
+    # report what fraction of total revenue the balancing block
+    # contributes.
+    non_balancing_revenue_eur = (
         float(res.get("profit_load_from_pv_eur", pd.Series(0.0)).sum())
         + float(res.get("profit_load_from_bess_eur", pd.Series(0.0)).sum())
         + float(res.get("profit_export_from_pv_eur", pd.Series(0.0)).sum())
         + float(res.get("profit_export_from_bess_eur", pd.Series(0.0)).sum())
         - float(res.get("expense_charge_bess_grid_eur", pd.Series(0.0)).sum())
     )
-    denom = dam_revenue + total
+    # The construction is safe today because balancing revenue does NOT
+    # enter ``profit_*_eur`` (those columns are driven by DAM / retail
+    # only).  If a future change folds balancing into profit_total_eur,
+    # the denominator would double-count balancing -- guard regression
+    # is tests/test_balancing_kpi_denominator_non_overlap.py.
+    denom = non_balancing_revenue_eur + total
     if abs(denom) > 1e-9:
         out["bm_revenue_share_pct"] = round(100.0 * total / denom, 4)
     return out

@@ -243,6 +243,15 @@ FINANCIAL_COLORS: dict[str, str] = {
     "export_from_bess": "#0D47A1",  # Material blue 900
     "grid_charge_cost": "#D32F2F",  # Material red 700 (negative stack)
     "aggregator_fee":   "#AD1457",  # Material pink 800 (deduction tone)
+    # Balancing-product segments — colours match the per-product
+    # palette in :data:`BM_COLOURS` so the same product reads as the
+    # same colour on the revenue-stack plot and on the balancing
+    # revenue waterfall / capacity-vs-activation split plots.
+    "bm_fcr":      "#1f77b4",
+    "bm_afrr_up":  "#ff7f0e",
+    "bm_afrr_dn":  "#ffbb78",
+    "bm_mfrr_up":  "#2ca02c",
+    "bm_mfrr_dn":  "#98df8a",
     # Foreground net-revenue line — near-black (Material grey 900),
     # IEEE publication-style emphasis colour.  High contrast against
     # every saturated stack colour above; white-edged markers keep it
@@ -341,6 +350,12 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Export from BESS",
     "Grid-charging cost",
     "Aggregator fee",
+    # Balancing-product subcomponents (FCR / aFRR / mFRR)
+    "FCR",
+    "aFRR-up",
+    "aFRR-dn",
+    "mFRR-up",
+    "mFRR-dn",
 )
 
 
@@ -367,6 +382,11 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Export from BESS":                 "export_from_bess",
     "Grid-charging cost":               "grid_charge_cost",
     "Aggregator fee":                   "aggregator_fee",
+    "FCR":                              "bm_fcr",
+    "aFRR-up":                          "bm_afrr_up",
+    "aFRR-dn":                          "bm_afrr_dn",
+    "mFRR-up":                          "bm_mfrr_up",
+    "mFRR-dn":                          "bm_mfrr_dn",
 }
 
 
@@ -390,6 +410,14 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Load from BESS",
     "Export from PV",
     "Export from BESS",
+    # Balancing-product segments (after DAM/retail stack components,
+    # before negative flows).  Per-product palette ordering mirrors
+    # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.
+    "FCR",
+    "aFRR-up",
+    "aFRR-dn",
+    "mFRR-up",
+    "mFRR-dn",
     # Negative flows last
     "OPEX",
     "DEVEX",
