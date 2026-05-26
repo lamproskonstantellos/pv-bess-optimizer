@@ -27,12 +27,15 @@ EUR axes use the compact ``EUR 12.3M`` / ``EUR 45k`` formatter via
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ..constants import (
@@ -142,10 +145,31 @@ def plot_revenue_stack_yearly(
             retail_ratio = op["revenue_retail_eur"].astype(float) / y1_retail
         else:
             retail_ratio = pd.Series(0.0, index=op.index, dtype=float)
-        if abs(y1_dam) > 1e-9:
-            dam_ratio = op["revenue_dam_eur"].astype(float) / y1_dam
+        # Degenerate Year-1 DAM cases: a non-positive Year-1 base
+        # (predominantly-negative DAM hours, or sign flip across years)
+        # makes ``revenue_dam_eur / y1_dam`` either explode or invert
+        # the per-year stack heights.  Fall back to the literal column
+        # values so each year draws at its own height, and log a debug
+        # so degenerate scenarios surface in the run log.
+        dam_series = op["revenue_dam_eur"].astype(float)
+        opposite_signs = (
+            (y1_dam > 0) and (dam_series.min() < 0)
+        ) or (
+            (y1_dam < 0) and (dam_series.max() > 0)
+        )
+        if y1_dam > 1e-9 and not opposite_signs:
+            dam_ratio = dam_series / y1_dam
         else:
-            dam_ratio = pd.Series(0.0, index=op.index, dtype=float)
+            logger.debug(
+                "plot_revenue_stack_yearly: degenerate DAM Year-1 base "
+                "(y1_dam=%.3f, dam_min=%.3f, dam_max=%.3f); falling back "
+                "to literal per-year values for the DAM stack.",
+                y1_dam, float(dam_series.min()), float(dam_series.max()),
+            )
+            if abs(y1_dam) > 1e-9:
+                dam_ratio = dam_series / y1_dam
+            else:
+                dam_ratio = pd.Series(0.0, index=op.index, dtype=float)
     else:
         y1_total = float(op.loc[y1_mask, "revenue_eur"].iloc[0])
         if abs(y1_total) > 1e-9:
@@ -352,14 +376,53 @@ def plot_lifetime_cycles(
     return save_figure(out_path)
 
 
-def _sensitivity_factors(econ: dict[str, Any]) -> tuple[float, float]:
+def _sensitivity_deltas(econ: dict[str, Any]) -> tuple[float, float]:
+    """Return the (capex, opex) relative deltas as fractions in [0, 1]."""
     capex_d = float(
         econ.get("sensitivity_capex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT)
     ) / 100.0
     opex_d = float(
         econ.get("sensitivity_opex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT)
     ) / 100.0
-    return (1.0 - capex_d) * (1.0 - opex_d), (1.0 + capex_d) * (1.0 + opex_d)
+    return capex_d, opex_d
+
+
+def _levelized_sensitivity_range(
+    fin_kpis: dict[str, Any],
+    capex_key: str, opex_key: str, mwh_key: str,
+    capex_d: float, opex_d: float,
+) -> tuple[float, float] | None:
+    """Compute the (low, high) range for a levelized metric correctly.
+
+    Uses the algebraic
+    ``(disc_capex * (1 +/- capex_d) + disc_opex * (1 +/- opex_d)) / disc_mwh``
+    so the displayed range reflects the actual NREL ATB / Lazard
+    decomposition of the metric.  The previous
+    ``base * (1 +/- capex_d) * (1 +/- opex_d)`` multiplicative
+    approximation overshoots the true range by the
+    capex_d * opex_d cross term and ignores the relative weight of
+    CAPEX vs. OPEX in the numerator.
+
+    Returns ``None`` when any required discounted component is
+    missing from ``fin_kpis`` so the caller can fall back.
+    """
+    disc_capex = fin_kpis.get(capex_key)
+    disc_opex = fin_kpis.get(opex_key)
+    disc_mwh = fin_kpis.get(mwh_key)
+    if disc_capex is None or disc_opex is None or disc_mwh is None:
+        return None
+    disc_capex = float(disc_capex)
+    disc_opex = float(disc_opex)
+    disc_mwh = float(disc_mwh)
+    if disc_mwh <= 1e-9:
+        return None
+    low = (
+        disc_capex * (1.0 - capex_d) + disc_opex * (1.0 - opex_d)
+    ) / disc_mwh
+    high = (
+        disc_capex * (1.0 + capex_d) + disc_opex * (1.0 + opex_d)
+    ) / disc_mwh
+    return float(low), float(high)
 
 
 def plot_lcoe_summary(
@@ -386,8 +449,8 @@ def plot_lcoe_summary(
     out_path = Path(out_path)
     pv_kwp = float(capacities.get("pv_kwp", 0.0) or 0.0)
     base_lcoe = float(fin_kpis.get("lcoe_eur_per_mwh", float("nan")))
-    low_factor, high_factor = _sensitivity_factors(econ)
-    _ = sensitivity_df  # kept for API symmetry; range derived above
+    capex_d, opex_d = _sensitivity_deltas(econ)
+    _ = sensitivity_df  # kept for API symmetry; range derived from fin_kpis
     pv_present = pv_kwp > 0.0 and not np.isnan(base_lcoe)
     benchmark = (
         float(econ.get("benchmark_lcoe_low_eur_per_mwh",
@@ -395,13 +458,34 @@ def plot_lcoe_summary(
         float(econ.get("benchmark_lcoe_high_eur_per_mwh",
                        BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH[1])),
     )
+    rng = _levelized_sensitivity_range(
+        fin_kpis,
+        "lcoe_disc_pv_capex_eur",
+        "lcoe_disc_pv_opex_eur",
+        "lcoe_disc_pv_mwh",
+        capex_d, opex_d,
+    )
+    if pv_present and rng is not None:
+        low_val, high_val = rng
+    else:
+        # Fallback: when the discounted components are missing (older
+        # KPI dicts) keep the legacy multiplicative range so the plot
+        # still renders something usable.
+        low_val = (
+            base_lcoe * (1.0 - capex_d) * (1.0 - opex_d)
+            if pv_present else float("nan")
+        )
+        high_val = (
+            base_lcoe * (1.0 + capex_d) * (1.0 + opex_d)
+            if pv_present else float("nan")
+        )
 
     fig, ax = plt.subplots(figsize=(7, 2.5))
     _draw_benchmark_row(
         ax,
         base=base_lcoe,
-        low=base_lcoe * low_factor if pv_present else float("nan"),
-        high=base_lcoe * high_factor if pv_present else float("nan"),
+        low=low_val,
+        high=high_val,
         bar_colour=FINANCIAL_COLORS["lcoe_bar"],
         benchmark=benchmark,
         label="LCOE", asset_present=pv_present,
@@ -436,7 +520,7 @@ def plot_lcos_summary(
     out_path = Path(out_path)
     bess_kw = float(capacities.get("bess_kw", 0.0) or 0.0)
     base_lcos = float(fin_kpis.get("lcos_eur_per_mwh", float("nan")))
-    low_factor, high_factor = _sensitivity_factors(econ)
+    capex_d, opex_d = _sensitivity_deltas(econ)
     _ = sensitivity_df
     bess_present = bess_kw > 0.0 and not np.isnan(base_lcos)
     benchmark = (
@@ -445,13 +529,31 @@ def plot_lcos_summary(
         float(econ.get("benchmark_lcos_high_eur_per_mwh",
                        BENCHMARK_LCOS_LITHIUM_ION_EUR_PER_MWH[1])),
     )
+    rng = _levelized_sensitivity_range(
+        fin_kpis,
+        "lcos_disc_bess_capex_eur",
+        "lcos_disc_bess_opex_eur",
+        "lcos_disc_bess_mwh",
+        capex_d, opex_d,
+    )
+    if bess_present and rng is not None:
+        low_val, high_val = rng
+    else:
+        low_val = (
+            base_lcos * (1.0 - capex_d) * (1.0 - opex_d)
+            if bess_present else float("nan")
+        )
+        high_val = (
+            base_lcos * (1.0 + capex_d) * (1.0 + opex_d)
+            if bess_present else float("nan")
+        )
 
     fig, ax = plt.subplots(figsize=(7, 2.5))
     _draw_benchmark_row(
         ax,
         base=base_lcos,
-        low=base_lcos * low_factor if bess_present else float("nan"),
-        high=base_lcos * high_factor if bess_present else float("nan"),
+        low=low_val,
+        high=high_val,
         bar_colour=FINANCIAL_COLORS["lcos_bar"],
         benchmark=benchmark,
         label="LCOS", asset_present=bess_present,

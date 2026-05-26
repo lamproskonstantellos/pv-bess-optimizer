@@ -374,10 +374,16 @@ def plot_payback(
         x = _to_axis(float(simple_payback_years))
         # Label is year-annotated for legend readability; canonical
         # ordering is recovered by apply_financial_legend's prefix match.
+        # The "(from CAPEX year)" suffix makes the reference frame
+        # explicit: the scalar value is years since project year 0
+        # (CAPEX commitment), not since the Commercial Operation Date.
         ax.axvline(
             x, color=financial_color("Simple payback"),
             linewidth=0.8, linestyle=":", alpha=0.8,
-            label=f"Simple payback: {simple_payback_years:.1f} yr",
+            label=(
+                f"Simple payback: {simple_payback_years:.1f} yr "
+                "(from CAPEX year)"
+            ),
         )
         ax.scatter(
             [x], [0.0], color=financial_color("Simple payback"),
@@ -391,7 +397,10 @@ def plot_payback(
         ax.axvline(
             x, color=financial_color("Discounted payback"),
             linewidth=0.8, linestyle=":", alpha=0.8,
-            label=f"Discounted payback: {discounted_payback_years:.1f} yr",
+            label=(
+                f"Discounted payback: {discounted_payback_years:.1f} yr "
+                "(from CAPEX year)"
+            ),
         )
         ax.scatter(
             [x], [0.0], color=financial_color("Discounted payback"),
