@@ -52,6 +52,7 @@ from .financial import _integer_year_axis
 from .style import (
     apply_fine_ticks,
     apply_universal_margins,
+    reserve_legend_headroom,
     save_figure,
     show_titles,
 )
@@ -296,9 +297,10 @@ def plot_revenue_stack_yearly(
     ax.yaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
     if show_titles():
         ax.set_title(f"Revenue stack — {int(years[0])}-{int(years[-1])}")
+    reserve_legend_headroom(ax, loc="best")
     apply_financial_legend(ax)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -549,6 +551,7 @@ def _draw_benchmark_row(
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
+    reserve_legend_headroom(ax, loc="upper right")
     ax.legend(loc="upper right", framealpha=0.9, fontsize=6, ncol=1)
 
     # Per-row independent x-axis: span the union of (benchmark, project

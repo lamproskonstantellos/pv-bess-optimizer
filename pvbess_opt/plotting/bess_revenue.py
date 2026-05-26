@@ -42,6 +42,7 @@ from .style import (
     apply_fine_ticks,
     apply_universal_margins,
     get_scenario_label,
+    reserve_legend_headroom,
     save_figure,
     show_titles,
 )
@@ -225,9 +226,10 @@ def plot_bess_capacity_vs_activation_split(
             f"Balancing revenue: capacity vs activation"
             f"{title_prefix(get_scenario_label())} (Year 1)"
         )
+    reserve_legend_headroom(ax, loc="best")
     ax.legend(loc="best")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -324,11 +326,12 @@ def plot_bess_revenue_by_month(
         (by_label[lbl], lbl) for lbl in ordered_labels if lbl in by_label
     ]
     if ordered:
+        reserve_legend_headroom(ax, loc="best")
         ax.legend(
             [h for h, _ in ordered], [lbl for _, lbl in ordered],
             loc="best", fontsize=7,
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
     return save_figure(out_path)

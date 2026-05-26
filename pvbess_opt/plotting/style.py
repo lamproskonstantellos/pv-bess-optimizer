@@ -36,6 +36,7 @@ __all__ = [
     "empty_placeholder",
     "get_project_mode_label",
     "get_scenario_label",
+    "reserve_legend_headroom",
     "save_figure",
     "save_figure_daily",
     "set_project_mode_label",
@@ -307,6 +308,68 @@ def apply_universal_margins(
                 ax.set_xlim(xmin, xmax + x_frac * span_x)
             else:
                 ax.set_xlim(xmin - x_frac * span_x, xmax + x_frac * span_x)
+
+
+# ---------------------------------------------------------------------------
+# Legend-headroom helper
+# ---------------------------------------------------------------------------
+
+
+def reserve_legend_headroom(
+    ax,
+    *,
+    loc: str = "best",
+    frac: float = 0.15,
+) -> None:
+    """Reserve y-axis space so a legend sits clear of any bar or marker.
+
+    Call this immediately before the legend is attached (i.e. before
+    ``apply_financial_legend`` / ``ax.legend``).  Idempotent — a second
+    call on the same axis is a no-op (the axis is tagged via the
+    ``_legend_headroom_applied`` attribute).
+
+    Behaviour mirrors the directions a legend can sit in:
+
+    * ``loc`` in ``{"upper left", "upper right", "upper center",
+      "best"}`` — the legend lives near the top, so the helper extends
+      ``ymax`` upward.  When ``ymin >= 0`` the bottom is preserved at
+      the data minimum and the top is padded by ``frac * (ymax -
+      ymin)``.  When ``ymin < 0`` (plot crosses zero) the positive
+      half-span is multiplied by ``1 + frac``.
+    * ``loc`` in ``{"lower left", "lower right", "lower center"}`` —
+      the legend lives near the bottom; the helper extends ``ymin``
+      downward by ``frac * (ymax - ymin)`` when ``ymin < 0``.  When the
+      data is non-negative the lower-corner regions are already in
+      clear space and the helper is a no-op.
+
+    Call before :func:`apply_universal_margins`; pass ``skip_y=True``
+    to the universal helper afterwards to keep its 5 % top-pad from
+    eroding the headroom.  The legend itself can still be requested at
+    ``loc="best"`` — matplotlib will pick the corner with the most
+    clear space, which is the one this helper just produced.
+    """
+    if getattr(ax, "_legend_headroom_applied", False):
+        return
+    ymin, ymax = ax.get_ylim()
+    span = ymax - ymin
+    if span <= 0:
+        ax._legend_headroom_applied = True
+        return
+
+    upper_locs = {"upper left", "upper right", "upper center", "best"}
+    lower_locs = {"lower left", "lower right", "lower center"}
+
+    if loc in upper_locs:
+        if ymin >= 0:
+            ax.set_ylim(ymin, ymax + frac * span)
+        else:
+            upward = max(ymax, 0.0)
+            ax.set_ylim(ymin, ymax + frac * (upward if upward > 0 else span))
+    elif loc in lower_locs:
+        if ymin < 0:
+            ax.set_ylim(ymin - frac * span, ymax)
+
+    ax._legend_headroom_applied = True
 
 
 # ---------------------------------------------------------------------------
