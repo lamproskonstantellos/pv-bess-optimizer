@@ -153,7 +153,7 @@ def plot_bess_revenue_waterfall(
 
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=20, ha="right")
+    ax.set_xticklabels(labels, rotation=0, ha="center")
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(fmt_mode))
     if show_titles():
