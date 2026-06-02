@@ -16,7 +16,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvbess_opt.balancing import PRODUCTS_ALL
 from pvbess_opt.io import BALANCING_SHEET_DEFAULTS
 from pvbess_opt.optimization import (
     BALANCING_INVARIANT_KEYS,

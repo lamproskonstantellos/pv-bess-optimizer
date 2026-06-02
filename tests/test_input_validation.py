@@ -173,11 +173,11 @@ def test_dt_minutes_zero_rejected():
     _assert_raises_containing(t, dt_minutes=0, fragment="dt_minutes")
 
 
-def test_no_clamp_in_derive_asset_capacities():
-    """Once the validator rejects negative bess_power_kw upstream, the
-    quiet ``max(..., 0.0)`` clamp in ``derive_asset_capacities`` is
-    gone — negative values now flow through verbatim so the violation
-    surfaces if a downstream caller bypasses validation."""
+def test_clamp_in_derive_asset_capacities():
+    """``derive_asset_capacities`` clamps negative capacities to zero as
+    defense-in-depth.  The validator rejects negative inputs upstream,
+    but a hand-built params dict that bypasses validation must not
+    propagate a negative capacity into the EUR/kW math."""
     import pandas as pd
 
     from pvbess_opt.economics import derive_asset_capacities
@@ -187,9 +187,10 @@ def test_no_clamp_in_derive_asset_capacities():
               "bess_capacity_kwh": -200.0},
         pd.DataFrame(),
     )
-    # The clamp is gone — the negative values pass through.
-    assert caps["pv_kwp"] == -100.0
-    assert caps["bess_kw"] == -50.0
+    # Negative values are clamped to zero.
+    assert caps["pv_kwp"] == 0.0
+    assert caps["bess_kw"] == 0.0
+    assert caps["bess_kwh"] == 0.0
 
 
 def test_balancing_probability_validation_runs():

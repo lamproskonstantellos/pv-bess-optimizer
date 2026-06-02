@@ -418,10 +418,7 @@ def rolling_horizon_dispatch(
         # from the restored prices.  PRICE_COLUMNS ends in
         # ``_eur_per_mwh`` rather than ``_eur`` so the suffix filter
         # below cannot accidentally drop a restored price column.
-        eur_cols = [
-            c for c in full.columns
-            if c.endswith("_eur") and c not in PRICE_COLUMNS
-        ]
+        eur_cols = [c for c in full.columns if c.endswith("_eur")]
         if eur_cols:
             full = full.drop(columns=eur_cols)
         full = add_economic_columns(full, params)
