@@ -19,6 +19,8 @@ import pytest
 
 from pvbess_opt.optimization import (
     _has_feasible_incumbent,
+    build_model,
+    model_to_dataframe,
     verify_dispatch_invariants,
 )
 from pvbess_opt.sensitivity import _scale_revenue
@@ -179,3 +181,56 @@ def test_has_feasible_incumbent_fallback_for_models_without_soc():
     m = pyo.ConcreteModel()
     m.x = pyo.Var(initialize=5.0)
     assert _has_feasible_incumbent(m) is True
+
+
+# ---------------------------------------------------------------------------
+# B1 — dt_minutes build-path guard (defense-in-depth)
+#
+# build_model / model_to_dataframe raise ValueError("dt_minutes must be
+# positive") when dt_hours_from(params) <= 0.  The loader rejects dt <= 0
+# upstream, so the guard is unreachable in normal flow; call the build
+# functions directly with a hand-built params dict (bypassing the loader /
+# validator) so the build-site guard itself is exercised.
+# ---------------------------------------------------------------------------
+
+
+def _dt_guard_ts(n: int = 1) -> pd.DataFrame:
+    """A one-row timeseries; the dt guard fires before it is read."""
+    return pd.DataFrame({
+        "timestamp": list(pd.date_range("2026-01-01", periods=n, freq="1h")),
+        "load_kwh": [0.0] * n,
+        "pv_kwh": [0.0] * n,
+    })
+
+
+# dt_hours_from() maps a zero, negative, or missing dt_minutes to 0.0 hours
+# (it clamps negatives and defaults the missing key), so all three reach the
+# `if dt_h <= 0: raise ValueError` guard at the build site.
+_NONPOSITIVE_DT_PARAMS = [
+    {"dt_minutes": 0},        # zero
+    {"dt_minutes": -15},      # negative
+    {},                       # missing key entirely
+]
+
+
+@pytest.mark.parametrize("dt_params", _NONPOSITIVE_DT_PARAMS)
+def test_build_model_rejects_nonpositive_dt(dt_params: dict):
+    """build_model's dt guard fires for dt_minutes in {0, -15, missing}.
+
+    The guard sits ahead of the empty-timeseries check, so a one-row ts is
+    enough; the ValueError must carry the build-site message, proving the
+    guard (not some downstream failure) is what fired.
+    """
+    with pytest.raises(ValueError, match="dt_minutes must be positive"):
+        build_model(dt_params, _dt_guard_ts())
+
+
+@pytest.mark.parametrize("dt_params", _NONPOSITIVE_DT_PARAMS)
+def test_model_to_dataframe_rejects_nonpositive_dt(dt_params: dict):
+    """model_to_dataframe's dt guard fires for dt_minutes in {0, -15, missing}.
+
+    Pass an empty ConcreteModel: the guard raises before the model is ever
+    inspected, so no solved model is required to reach it.
+    """
+    with pytest.raises(ValueError, match="dt_minutes must be positive"):
+        model_to_dataframe(pyo.ConcreteModel(), _dt_guard_ts(), dt_params)
