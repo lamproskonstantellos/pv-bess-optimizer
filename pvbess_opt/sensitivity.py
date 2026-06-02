@@ -172,44 +172,60 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     breakdowns), the aggregator-fee deduction that scales with gross
     revenue, and balancing capacity + activation revenue.
 
-    The perturbed frame is reconstructed in two steps so it satisfies
-    the same gross/net identity the original cashflow does:
+    The perturbed frame is reconstructed so it satisfies the same
+    gross/net identity the original cashflow does:
 
-    1. Scale the per-stream revenue columns (``revenue_retail_eur``,
-       ``revenue_dam_eur``) and the balancing-revenue columns by
-       ``factor``.  Each per-stream column is stored as a NET value in
-       :func:`pvbess_opt.economics.build_yearly_cashflow`
-       (= ``(1 - aggregator_fee_frac) * gross_stream``), so multiplying
-       them by ``factor`` scales the underlying gross stream by the same
-       factor.
-    2. Rederive ``aggregator_fee_eur``, ``revenue_eur`` and the
-       per-stream net columns from the scaled streams using the SAME
-       aggregator-fee fraction the base cashflow used.  The fraction is
-       recovered from the unperturbed frame as
-       ``|aggregator_fee_eur| / (revenue_eur + |aggregator_fee_eur|)``
-       so the helper stays self-contained and no econ dict has to be
-       threaded through.  The fee is clamped at a non-negative-gross
+    1. Recover the TRUE per-year gross directly from the base frame.
+       :func:`pvbess_opt.economics.build_yearly_cashflow` stores
+       ``revenue_eur == gross`` in years where the gross is <= 0 (the
+       aggregator fee is clamped to zero) and
+       ``revenue_eur == (1 - frac) * gross`` where the gross is > 0, so
+       in BOTH regimes ``revenue_eur + |aggregator_fee_eur| == gross``.
+       Recovering the gross this way — rather than inverting the net
+       with a single ``net / (1 - frac)`` — is essential: a constant
+       inversion over-inflates the fee-clamped years by ``1 / (1 - frac)``
+       whenever a positive-gross year makes ``frac`` non-zero, which
+       breaks the ``_scale_revenue(cf, 1.0)`` no-op on mixed-sign
+       cashflows.
+    2. Scale the gross by ``factor`` and rederive ``aggregator_fee_eur``,
+       ``revenue_eur`` and the per-stream nets using the SAME
+       aggregator-fee fraction the base cashflow used (recovered by
+       :func:`_infer_aggregator_fee_frac`, so no econ dict has to be
+       threaded through).  The fee is clamped at a non-negative-gross
        deduction (as the base build does) and re-split across the
        retail/DAM streams in proportion to their gross, so
        ``revenue_retail_eur + revenue_dam_eur == revenue_eur`` holds
        even in the negative-gross regime where the clamp fires.
 
-    Without step 2 the gross/net identity
-    ``revenue_eur + |aggregator_fee_eur| == revenue_gross`` (where
-    ``revenue_gross`` scales linearly with the driver) holds only by
-    coincidence — uniform scaling preserves it, but any future addition
-    of a non-uniformly-scaled term (a fixed surcharge, a balancing-
-    bundled fee variant, ...) would silently desynchronise the two
-    columns.  Step 2 makes the derivation explicit.
+    Recovering the gross from the base frame keeps the gross/net identity
+    ``revenue_eur + |aggregator_fee_eur| == factor * gross_base`` exact
+    across the sign flip, and the explicit fee rederivation keeps the two
+    columns in sync against any future non-uniformly-scaled term (a fixed
+    surcharge, a balancing-bundled fee variant, ...).
     """
     df = yearly_cf.copy()
-    aggregator_fee_frac = _infer_aggregator_fee_frac(df)
-    one_minus_f = max(1e-12, 1.0 - aggregator_fee_frac)
+    frac = _infer_aggregator_fee_frac(df)
 
-    # Step 1 — scale per-stream nets and balancing-revenue columns.
+    # Step 1 — recover the true per-year gross from the base frame.  This is
+    # correct in both the fee-applied (revenue_eur == (1-frac)*gross) and the
+    # fee-free / clamped (revenue_eur == gross, fee == 0) years.
+    revenue_base = df["revenue_eur"].astype(float)
+    if "aggregator_fee_eur" in df.columns:
+        fee_base_abs = df["aggregator_fee_eur"].astype(float).abs()
+    else:
+        fee_base_abs = pd.Series(0.0, index=df.index)
+    gross_base = revenue_base + fee_base_abs
+    # Per-year (1 - frac): 1.0 in the fee-free / clamped years, (1 - frac)
+    # where the fee applied.  Guard the zero-gross division exactly as the
+    # per-stream split below (gross_base ~ 0 -> treat the year as fee-free).
+    nonzero_base = gross_base.abs() > 1e-12
+    one_minus_f_year = (
+        revenue_base / gross_base.where(nonzero_base, 1.0)
+    ).where(nonzero_base, 1.0)
+
+    # Balancing-revenue streams carry no aggregator fee, so they scale by
+    # the driver directly.
     for col in (
-        "revenue_retail_eur",
-        "revenue_dam_eur",
         "balancing_capacity_revenue_eur",
         "balancing_activation_revenue_eur",
         "balancing_revenue_eur",
@@ -217,35 +233,32 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)
 
-    # Step 2 — rederive aggregator_fee_eur, revenue_eur and the
-    # per-stream nets from the scaled streams with the SAME
-    # aggregator_fee_frac.
+    # Step 2 — scale the gross and rederive the fee with the SAME frac and the
+    # SAME non-negative-gross clamp the base build applies (economics.py:
+    # 399-405): the aggregator fee is a non-negative deduction; BSPs do not
+    # rebate negative-gross dispatches.  Without the clamp the perturbed
+    # cashflow would flip the fee sign whenever the perturbed gross turns
+    # negative, which the base build never does.  Pass-2 P2.7.
+    gross = float(factor) * gross_base
+    fee = -frac * gross.clip(lower=0.0)
+    df["aggregator_fee_eur"] = fee
+    df["revenue_eur"] = gross + fee
+
+    # Re-split the (possibly clamped) fee across the retail/DAM streams in
+    # proportion to their gross contribution so the per-stream net columns
+    # still sum to revenue_eur once the gross<0 clamp has zeroed the fee --
+    # mirrors build_yearly_cashflow (economics.py:419-430, same 1e-12
+    # zero-gross threshold).
     has_streams = (
         "revenue_retail_eur" in df.columns
         and "revenue_dam_eur" in df.columns
     )
     if has_streams:
-        retail_net = df["revenue_retail_eur"].astype(float)
-        dam_net = df["revenue_dam_eur"].astype(float)
-        revenue_net = retail_net + dam_net
-    else:
-        revenue_net = df["revenue_eur"].astype(float) * float(factor)
-
-    gross = revenue_net / one_minus_f
-    # Clamp gross at zero to match the base build (economics.py:394-400):
-    # the aggregator fee is by spec a non-negative deduction (BSPs do
-    # not rebate negative-gross dispatches).  Without the clamp the
-    # perturbed cashflow flips the fee sign whenever the perturbed gross
-    # turns negative, which the base build never does.  Pass-2 P2.7.
-    fee = -aggregator_fee_frac * gross.clip(lower=0.0)
-    df["aggregator_fee_eur"] = fee
-    df["revenue_eur"] = gross + fee
-    # Re-split the (possibly clamped) fee across the retail/DAM streams
-    # in proportion to their gross contribution so the per-stream net
-    # columns still sum to revenue_eur once the gross<0 clamp has zeroed
-    # the fee -- mirrors build_yearly_cashflow (economics.py:414-425).
-    if has_streams:
-        retail_gross = retail_net / one_minus_f
+        # Recover each stream's per-year gross from its base net the same way
+        # as the total (net / one_minus_f_year), then scale by the driver.
+        retail_gross = float(factor) * (
+            df["revenue_retail_eur"].astype(float) / one_minus_f_year
+        )
         dam_gross = gross - retail_gross
         nonzero = gross.abs() > 1e-12
         retail_share = (retail_gross / gross.where(nonzero, 1.0)).where(
