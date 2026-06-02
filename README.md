@@ -199,8 +199,8 @@ automatically if installed.
 
 ```bash
 pip install -e .[dev]
-pytest                       # default fast lane (~480 tests, ~2 min)
-pytest -m slow               # the real-scale full-year suite (~6 tests)
+pytest                       # default fast lane (the full fast-lane suite)
+pytest -m slow               # opt-in real-scale workbook suite (minutes wall-clock)
 ```
 
 ### Code style
@@ -212,6 +212,6 @@ labels, `€` in prices, Greek-letter docstring math).
 
 ## Quality
 
-End-to-end audit findings, the P1 / P2 backlog, and per-fix
-verification tests are in
-[`docs/audit_report.md`](docs/audit_report.md).
+The test-suite audit, with per-file verdicts and the verification
+tests behind each fix, is indexed in
+[`docs/audit_test_index.md`](docs/audit_test_index.md).
