@@ -35,8 +35,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-logger = logging.getLogger(__name__)
-
 from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ..constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
@@ -62,6 +60,8 @@ from .style import (
 from .style import (
     empty_placeholder as _empty_placeholder,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "BENCHMARK_LCOE_PV_UTILITY_EUR_PER_MWH",

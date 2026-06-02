@@ -28,7 +28,6 @@ from pvbess_opt.config import (
     financial_color,
 )
 
-
 BALANCING_LABELS = ("FCR", "aFRR-up", "aFRR-dn", "mFRR-up", "mFRR-dn")
 
 

@@ -25,7 +25,6 @@ import pytest
 from pvbess_opt.economics import (
     _payback_year,
     build_yearly_cashflow,
-    compute_financial_kpis,
 )
 from pvbess_opt.plotting.lifecycle import (
     _levelized_sensitivity_range,
@@ -34,7 +33,6 @@ from pvbess_opt.plotting.lifecycle import (
     plot_lcos_summary,
     plot_revenue_stack_yearly,
 )
-
 
 # ---------------------------------------------------------------------------
 # P2.6 -- _payback_year NaN fallthrough

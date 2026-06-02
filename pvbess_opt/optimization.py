@@ -1140,7 +1140,6 @@ def _balancing_invariants(
     params: dict[str, Any],
     *,
     general_invariants: dict[str, float],
-    tol_kwh: float,
 ) -> dict[str, float]:
     """Compute the six INV-B1..INV-B6 balancing-invariant residuals.
 
@@ -1427,6 +1426,5 @@ def verify_dispatch_invariants(
     balancing_invariants = _balancing_invariants(
         res, params,
         general_invariants=general_invariants,
-        tol_kwh=tol_kwh,
     )
     return {**general_invariants, **balancing_invariants}

@@ -21,7 +21,6 @@ from pvbess_opt.balancing import PRODUCTS_ALL, PRODUCTS_WITH_ACTIVATION
 from pvbess_opt.kpis import _compute_balancing_kpis
 from pvbess_opt.timeutils import dt_hours_from
 
-
 # ---------------------------------------------------------------------------
 # P2.17 -- dt_hours_from helper
 # ---------------------------------------------------------------------------
@@ -53,7 +52,7 @@ def test_no_remaining_inline_dt_minutes_literals():
     repo_root = Path(__file__).resolve().parent.parent
     pkg = repo_root / "pvbess_opt"
     main_py = repo_root / "main.py"
-    sources = list(pkg.rglob("*.py")) + [main_py]
+    sources = [*pkg.rglob("*.py"), main_py]
     offenders: list[str] = []
     for src in sources:
         if src.name == "timeutils.py":
