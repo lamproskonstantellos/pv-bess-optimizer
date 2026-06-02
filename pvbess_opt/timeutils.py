@@ -28,10 +28,12 @@ def dt_hours_from(params: dict[str, Any]) -> float:
     ``float(params.get('dt_minutes', 0) or 0) / 60.0`` continues to
     receive the same value (callers downstream interpret 0.0 as "no
     balancing block fired" or "no timestep duration"; preserve that
-    semantics).  Callers that hard-required ``dt_minutes`` to be
-    present in ``params`` keep their KeyError surface by reading it
-    directly -- only the explicit ``.get`` callers route through this
-    helper.
+    semantics).  Build call sites that require a positive timestep --
+    :func:`pvbess_opt.optimization.build_model` and
+    :func:`pvbess_opt.optimization.model_to_dataframe` -- guard the
+    returned value explicitly (``if dt_h <= 0: raise ValueError``)
+    rather than relying on a ``KeyError`` from this helper, which never
+    raises.
     """
     raw = params.get("dt_minutes", 0) or 0
     minutes = float(raw)

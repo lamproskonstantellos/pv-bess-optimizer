@@ -377,6 +377,8 @@ def build_model(
         be forced to close its cycle).
     """
     dt_h = dt_hours_from(params)
+    if dt_h <= 0:
+        raise ValueError("dt_minutes must be positive")
     n_steps = len(ts)
     if n_steps == 0:
         raise ValueError("timeseries is empty; nothing to optimise.")
@@ -963,6 +965,8 @@ def model_to_dataframe(
     n_steps = len(ts)
     time_index = range(n_steps)
     dt_h = dt_hours_from(params)
+    if dt_h <= 0:
+        raise ValueError("dt_minutes must be positive")
     p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
     max_injection_per_step = _resolve_max_injection_per_step(params, ts)
     export_cap_kwh_per_step = (
