@@ -641,8 +641,22 @@ def _build_financials(
     year1_discharge_for_cycles = float(
         kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
     )
+    # The PPA premium is projected analytically in the yearly cashflow,
+    # NOT in the per-step lifetime frame (see pvbess_opt/conventions.md).
+    # Drop the per-step PPA columns before build_lifetime_dispatch so the
+    # lifetime frame carries no PPA — the per-step premium would otherwise
+    # be repeated unscaled across every year.  This keeps lifetime.py
+    # untouched (the drop lives at the call site).  When the PPA is off
+    # there are no such columns and this is a no-op.
+    _ppa_step_cols = [
+        c for c in (
+            "ppa_contracted_kwh", "ppa_merchant_kwh", "ppa_premium_eur",
+            "ppa_premium_pv_eur", "ppa_premium_bess_eur",
+        ) if c in res.columns
+    ]
+    res_for_lifetime = res.drop(columns=_ppa_step_cols) if _ppa_step_cols else res
     lifetime_df = build_lifetime_dispatch(
-        res, econ, capacities,
+        res_for_lifetime, econ, capacities,
         year1_discharge_mwh=year1_discharge_for_cycles,
     )
     lifetime_yearly = aggregate_lifetime_to_yearly(lifetime_df)

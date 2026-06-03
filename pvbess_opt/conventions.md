@@ -85,3 +85,78 @@ nominal user-supplied price unless explicitly overridden, since DAM
 price forecasts already incorporate an inflation view in their
 trajectory).  Override either knob in the `economics` sheet to model
 an explicit indexation curve.
+
+## PPA (with merchant tail) is a parallel revenue stream
+
+A power purchase agreement reprices the **grid-export stream**
+(`pv_to_grid + bess_dis_grid`) only; energy serving load
+(retail-priced) is never touched.  It is modelled as an **additive
+premium** on top of the existing DAM-priced export, written per step by
+`pvbess_opt.kpis.add_economic_columns` (only when `ppa_enabled`):
+
+```
+ppa_premium_eur[t] = contracted[t] / 1000 * (ppa_price_y1 - dam[t])
+```
+
+where `contracted[t]` is `ppa_coverage_fraction * export[t]`
+(`pay_as_produced`) or `min(export[t], ppa_baseload_mw * 1000 * dt_h)`
+(`baseload`; v1 is **as-available up to target**, firm baseload with
+spot-buy firming is out of scope).  The premium is split pro-rata by the
+PV vs BESS export share so PV-origin premium degrades on the PV factor
+and BESS-origin premium on the BESS factor.
+
+The premium is a **parallel** stream, handled exactly like balancing
+revenue:
+
+1. It is **not** added to `profit_total_eur` and **not** part of the
+   retail/DAM Year-1 breakdown, so the
+   `pvbess_opt.economics.build_yearly_cashflow` reconciliation guard is
+   never tripped.  A separate reporting KPI `project_revenue_total_eur`
+   rolls up `profit_total_eur + PPA premium + balancing total`.
+2. It is **not** subject to the aggregator fee (the fee is charged on
+   the retail + DAM gross only).
+3. It is **not** part of LCOE or LCOS — those read no PPA column, so
+   toggling the PPA leaves both identical (they stay revenue-agnostic,
+   Lazard-comparable).
+4. It has its **own** escalation index `ppa_escalation_pct` (parallel to
+   balancing's `bm_inflation_pct`), applied only in the multi-year
+   cashflow `ppa_revenue_eur` column, never in dispatch or the Year-1
+   repricing.
+5. It is projected **analytically** in `build_yearly_cashflow`, not in
+   the per-step lifetime frame: the per-step PPA columns are deliberately
+   excluded from `pvbess_opt.kpis.ECONOMIC_COLUMNS`, so
+   `pvbess_opt.lifetime` is unchanged.
+
+By default the PPA is a **post-dispatch repricing** (the MILP is
+untouched, so the physical dispatch is bit-identical to a non-PPA run).
+Optionally, **dispatch-aware pay-as-produced** values the export term in
+the objective at the blended price `f*ppa_price + (1 - f)*dam[t]`
+(Year-1 price, never escalated in dispatch); this changes only objective
+coefficients, so every dispatch invariant still holds.  Baseload
+dispatch-aware is out of scope (financial-only).
+
+## `zero_feed_in` is a flat 0 % max-injection cap
+
+`zero_feed_in` (self-consumption mode only) is the export-prohibition
+("zero feed-in") option of the same Greek Ministerial Decision the
+net-billing regime references.  It is implemented as a single chokepoint:
+`pvbess_opt.optimization._resolve_max_injection_per_step` returns an
+all-zero per-step fraction array when `params["zero_feed_in"]` is set,
+which **overrides** the `max_injection_profile` sheet.
+
+Every downstream consumer flows from that one array, so no new constraint
+and no objective edit are needed: `build_model` derives
+`export_cap_kwh_per_step = 0` for every step (so the existing
+`EXPORT_CAP` constraint forces `pv_to_grid + bess_dis_grid = 0`),
+`model_to_dataframe` reports `grid_export_cap_kwh = 0`, and
+`derive_tight_big_m` yields `M_exp = 0`.  PV surplus beyond load + BESS
+charging is curtailed.
+
+Invariant compatibility: because the effective cap is zero, the
+curtailment invariant (cap-not-binding ⇒ no curtailment) sees
+`cap_residual = cap - export = 0` and does **not** flag the expected
+surplus curtailment, so every dispatch invariant continues to hold for
+PV-only, BESS-only and hybrid.  `zero_feed_in` is rejected by the loader
+in merchant mode (a merchant installation exports its whole output, so an
+export prohibition is meaningless), and a warning is logged when it is
+combined with an enabled PPA (there is no export to contract).
