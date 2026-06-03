@@ -346,6 +346,19 @@ def build_yearly_cashflow(
         year1_kpis.get("bm_total_activation_revenue_eur", 0.0) or 0.0
     )
 
+    # PPA premium (parallel revenue stream) Year-1 split.  PV-origin
+    # premium degrades on pv_factor and BESS-origin premium on
+    # bess_factor (mirroring the per-stream profit components), and the
+    # premium carries its OWN escalation index (ppa_escalation_pct),
+    # parallel to balancing's bm_inflation_pct.  The premium is excluded
+    # from the aggregator-fee base (it is not part of revenue_gross_y) and
+    # from LCOE / LCOS, exactly like balancing revenue.
+    ppa_premium_pv_y1 = float(year1_kpis.get("ppa_premium_pv_eur", 0.0) or 0.0)
+    ppa_premium_bess_y1 = float(
+        year1_kpis.get("ppa_premium_bess_eur", 0.0) or 0.0
+    )
+    ppa_escalation = float(econ.get("ppa_escalation_pct", 0.0) or 0.0) / 100.0
+
     bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
     bess_repl_cost_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
 
@@ -373,6 +386,7 @@ def build_yearly_cashflow(
             aggregator_fee_y = 0.0
             balancing_capacity_y = 0.0
             balancing_activation_y = 0.0
+            ppa_revenue_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -419,6 +433,10 @@ def build_yearly_cashflow(
             balancing_activation_y = (
                 bm_act_y1 * bess_factor * (1.0 + bm_infl) ** (y - 1)
             )
+            ppa_revenue_y = (
+                ppa_premium_pv_y1 * pv_factor
+                + ppa_premium_bess_y1 * bess_factor
+            ) * (1.0 + ppa_escalation) ** (y - 1)
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -438,8 +456,11 @@ def build_yearly_cashflow(
         # streams, so we do not derate balancing revenue by it (industry
         # convention: BSPs typically settle ancillary services directly
         # with the TSO, not through the same aggregator).
+        # PPA premium folds into the net cash-flow alongside balancing
+        # revenue; like balancing it is NOT subject to the aggregator fee
+        # (it is not part of revenue_gross_y) and NOT part of LCOE / LCOS.
         net_cf = (
-            revenue_net_y + balancing_revenue_y
+            revenue_net_y + balancing_revenue_y + ppa_revenue_y
             + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -456,6 +477,7 @@ def build_yearly_cashflow(
                 "balancing_capacity_revenue_eur": float(balancing_capacity_y),
                 "balancing_activation_revenue_eur": float(balancing_activation_y),
                 "balancing_revenue_eur": float(balancing_revenue_y),
+                "ppa_revenue_eur": float(ppa_revenue_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
                 "devex_eur": float(devex_y),
@@ -514,9 +536,13 @@ def derive_monthly_cashflow(
       ``revenue_eur``.
     * ``opex_eur`` — Year-1 ``opex`` split evenly across months, scaled
       by the year's opex inflation factor.
+    * ``ppa_revenue_eur`` — per-month allocation of
+      ``yearly_cf['ppa_revenue_eur']`` (the PPA premium), on the same
+      monthly market-revenue share basis as the aggregator fee.
     * ``net_cashflow_eur`` — ``revenue_eur + balancing_revenue_eur
-      + opex_eur``. Sums to ``yearly_cf['net_cashflow_eur']`` row-for-
-      row in any operating year without replacement / devex events.
+      + ppa_revenue_eur + opex_eur``. Sums to
+      ``yearly_cf['net_cashflow_eur']`` row-for-row in any operating year
+      without replacement / devex events.
     * ``discounted_cf_eur`` — ``net_cashflow_eur`` discounted at
       ``econ['discount_rate_pct']`` to the start of the project.
 
@@ -635,6 +661,7 @@ def derive_monthly_cashflow(
 
     has_balancing_col = "balancing_revenue_eur" in yearly_cf.columns
     has_fee_col = "aggregator_fee_eur" in yearly_cf.columns
+    has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
 
     rows: list[dict[str, Any]] = []
     yearly_indexed = yearly_cf.set_index("project_year")
@@ -653,6 +680,10 @@ def derive_monthly_cashflow(
             float(yearly_indexed.loc[y, "aggregator_fee_eur"])
             if has_fee_col else 0.0
         )
+        ppa_y = (
+            float(yearly_indexed.loc[y, "ppa_revenue_eur"])
+            if has_ppa_col else 0.0
+        )
 
         if abs(yearly_y1_revenue) > 1e-9:
             rev_scale = rev_y / yearly_y1_revenue
@@ -669,7 +700,10 @@ def derive_monthly_cashflow(
             pv_mwh_m = float(monthly_pv_mwh_y1.loc[m]) * pv_factor
             balancing_m = float(balancing_share.loc[m]) * balancing_y
             fee_m = float(fee_share.loc[m]) * fee_y
-            net_m = rev_m + balancing_m + opex_m
+            # PPA premium is allocated on the same monthly market-revenue
+            # share basis as the aggregator fee.
+            ppa_m = float(fee_share.loc[m]) * ppa_y
+            net_m = rev_m + balancing_m + ppa_m + opex_m
             t_years = float(y) + (m - 1) / 12.0
             disc_factor = 1.0 / (1.0 + discount_rate) ** t_years
             rows.append(
@@ -681,6 +715,7 @@ def derive_monthly_cashflow(
                     "pv_production_mwh": float(pv_mwh_m),
                     "revenue_eur": float(rev_m),
                     "balancing_revenue_eur": float(balancing_m),
+                    "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
                     "net_cashflow_eur": float(net_m),
@@ -693,7 +728,7 @@ def derive_monthly_cashflow(
     monthly_columns = [
         "project_year", "calendar_year", "period",
         "period_type", "pv_production_mwh", "revenue_eur",
-        "balancing_revenue_eur", "aggregator_fee_eur",
+        "balancing_revenue_eur", "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
     ]
     if monthly_cf.empty:
@@ -708,7 +743,8 @@ def derive_monthly_cashflow(
             )[
                 [
                     "pv_production_mwh", "revenue_eur",
-                    "balancing_revenue_eur", "aggregator_fee_eur",
+                    "balancing_revenue_eur", "ppa_revenue_eur",
+                    "aggregator_fee_eur",
                     "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
                 ]
             ].sum()
@@ -828,6 +864,10 @@ def compute_financial_kpis(
     total_balancing_capacity_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_capacity_revenue_eur"].sum())
         if "balancing_capacity_revenue_eur" in df.columns else 0.0
+    )
+    total_ppa_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "ppa_revenue_eur"].sum())
+        if "ppa_revenue_eur" in df.columns else 0.0
     )
     total_balancing_activation_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_activation_revenue_eur"].sum())
@@ -1117,6 +1157,20 @@ def compute_financial_kpis(
         "lifetime_bm_activation_revenue_total_eur": float(round(
             total_balancing_activation_revenue_eur_lifecycle, 2,
         )),
+        # PPA premium lifetime totals (parallel stream; excluded from
+        # LCOE / LCOS by the same convention as balancing — they are
+        # revenue, not cost, and do not move the LCOS discharge-MWh
+        # denominator).
+        "lifetime_ppa_revenue_total_eur": float(round(
+            total_ppa_revenue_eur_lifecycle, 2,
+        )),
+        "lifetime_ppa_revenue_eur_per_year": (
+            [
+                float(round(v, 2))
+                for v in df.loc[after_y0_mask, "ppa_revenue_eur"].tolist()
+            ]
+            if "ppa_revenue_eur" in df.columns else []
+        ),
         "capex_year": int(capex_year),
         "project_start_year": int(project_start_year),
         "project_end_year": int(project_end_year),

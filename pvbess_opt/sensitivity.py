@@ -135,6 +135,11 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("devex_eur")
     if "balancing_revenue_eur" in df.columns:
         components.append("balancing_revenue_eur")
+    # PPA premium folds into net exactly like balancing revenue; dropping
+    # it here would strip PPA from every perturbed scenario while the base
+    # KPI still includes it.
+    if "ppa_revenue_eur" in df.columns:
+        components.append("ppa_revenue_eur")
     df["net_cashflow_eur"] = sum(df[c].astype(float) for c in components)
     df["discounted_cf_eur"] = (
         df["net_cashflow_eur"] * df["discount_factor"].astype(float)
@@ -223,12 +228,13 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
         revenue_base / gross_base.where(nonzero_base, 1.0)
     ).where(nonzero_base, 1.0)
 
-    # Balancing-revenue streams carry no aggregator fee, so they scale by
-    # the driver directly.
+    # Balancing-revenue and PPA-premium streams carry no aggregator fee,
+    # so they scale by the driver directly.
     for col in (
         "balancing_capacity_revenue_eur",
         "balancing_activation_revenue_eur",
         "balancing_revenue_eur",
+        "ppa_revenue_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)
@@ -350,6 +356,10 @@ def run_sensitivity_analysis(
     if "balancing_revenue_eur" in base_yearly_cf.columns:
         base_revenue_total += float(
             base_yearly_cf.loc[after_y0_mask, "balancing_revenue_eur"].sum()
+        )
+    if "ppa_revenue_eur" in base_yearly_cf.columns:
+        base_revenue_total += float(
+            base_yearly_cf.loc[after_y0_mask, "ppa_revenue_eur"].sum()
         )
     base_rate = float(econ.get("discount_rate_pct", 7.0))
 
