@@ -837,6 +837,32 @@ def build_model(
             rule=lambda m, t: pv[t] <= big_m["M_pv"] * m.z_pv_active[t],
         )
 
+    # --- Optional PPA dispatch-aware repricing (pay-as-produced only) ----
+    # When enabled, value the export term at the blended effective price
+    # f*ppa_price + (1 - f)*dam[t] (Year-1 price, never escalated inside
+    # dispatch) instead of dam[t].  This changes only objective
+    # COEFFICIENTS, so every constraint and invariant stays valid
+    # (contract C3).  When off, export_price is dam_price verbatim and the
+    # objective is untouched, so the dispatch is bit-identical to a
+    # non-PPA run (contract C2).  Baseload dispatch-aware is out of scope
+    # (financial-only) — only pay_as_produced reprices the MILP.
+    ppa_cfg = params.get("ppa") or {}
+    ppa_dispatch_aware = (
+        bool(ppa_cfg.get("ppa_enabled", False))
+        and bool(ppa_cfg.get("ppa_dispatch_aware", False))
+        and str(ppa_cfg.get("ppa_structure", "pay_as_produced")).strip().lower()
+        == "pay_as_produced"
+    )
+    if ppa_dispatch_aware:
+        f_cov = float(ppa_cfg.get("ppa_coverage_fraction", 0.0) or 0.0)
+        ppa_price = float(ppa_cfg.get("ppa_price_eur_per_mwh", 0.0) or 0.0)
+        export_price = {
+            t: f_cov * ppa_price + (1.0 - f_cov) * dam_price[t]
+            for t in time_index
+        }
+    else:
+        export_price = dam_price
+
     # --- Objective: profit -----------------------------------------------
     curtail_tiebreak_term = _WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH * sum(
         m.pv_curtail[t] for t in time_index
@@ -848,13 +874,13 @@ def build_model(
             for t in time_index
         )
         export_revenue = sum(
-            dam_price[t] * (m.pv_to_grid[t] + m.bess_dis_grid[t]) / 1000.0
+            export_price[t] * (m.pv_to_grid[t] + m.bess_dis_grid[t]) / 1000.0
             for t in time_index
         )
     else:  # merchant
         avoided_cost = 0.0
         export_revenue = sum(
-            dam_price[t] * (m.pv_to_grid[t] + m.bess_dis_grid[t]) / 1000.0
+            export_price[t] * (m.pv_to_grid[t] + m.bess_dis_grid[t]) / 1000.0
             for t in time_index
         )
 

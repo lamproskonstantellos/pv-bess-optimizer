@@ -46,7 +46,7 @@ def _kpis_self_consumption_with_balancing() -> dict[str, float]:
     }
 
 
-def test_canonical_aggregates_exposes_eight_keys():
+def test_canonical_aggregates_exposes_nine_keys():
     out = _compute_canonical_revenue_aggregates(
         _kpis_self_consumption_with_balancing(), "self_consumption",
     )
@@ -59,6 +59,7 @@ def test_canonical_aggregates_exposes_eight_keys():
         "revenue_bess_afrr_dn_eur",
         "revenue_bess_mfrr_up_eur",
         "revenue_bess_mfrr_dn_eur",
+        "revenue_ppa_premium_eur",
     }
     assert set(out) == expected
 

@@ -67,6 +67,15 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     "profit_export_from_bess_eur",
     "expense_charge_bess_grid_eur",
     "profit_total_eur",
+    # PPA premium (parallel revenue stream) — scales with the export
+    # streams it reprices, exactly like the per-stream profit components.
+    # project_revenue_total_eur is the sum of profit_total_eur + the PPA
+    # premium + balancing, all scaled by the same factor, so derating it
+    # directly keeps the identity exact.
+    "ppa_premium_total_eur",
+    "ppa_premium_pv_eur",
+    "ppa_premium_bess_eur",
+    "project_revenue_total_eur",
     # Balancing expected-activation energies (kWh) — they scale with the
     # reservation throughput which the derate applies to.
     "bm_expected_activation_energy_up_kwh",
@@ -102,6 +111,7 @@ def _default_derated_keys() -> tuple[str, ...]:
             "revenue_bess_afrr_dn_eur",
             "revenue_bess_mfrr_up_eur",
             "revenue_bess_mfrr_dn_eur",
+            "revenue_ppa_premium_eur",
         ]
     )
     return tuple(keys)

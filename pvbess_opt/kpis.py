@@ -294,6 +294,62 @@ def add_economic_columns(
     res["expense_charge_bess_grid_eur"] = (
         res["bess_charge_grid_kwh"].fillna(0.0) / 1000.0 * dam_series
     )
+
+    # --- PPA (with merchant tail) per-step repricing --------------------
+    # Emitted ONLY when the PPA is enabled, so a non-PPA dispatch frame
+    # stays bit-identical.  The PPA reprices the grid-export stream
+    # (pv_to_grid + bess_dis_grid) as an ADDITIVE premium on top of the
+    # existing DAM-priced export columns; energy serving load
+    # (retail-priced) is never touched.  These columns are deliberately
+    # NOT in ECONOMIC_COLUMNS — the financial pipeline reads the PPA
+    # premium only through the always-emitted PPA KPIs / cashflow column,
+    # so lifetime.py (which scales ECONOMIC_COLUMNS) is unaffected.
+    ppa_cfg = params.get("ppa") or {}
+    if bool(ppa_cfg.get("ppa_enabled", False)):
+        dt_h = dt_hours_from(params)
+        structure = str(
+            ppa_cfg.get("ppa_structure", "pay_as_produced"),
+        ).strip().lower()
+        price_y1 = float(ppa_cfg.get("ppa_price_eur_per_mwh", 0.0) or 0.0)
+        pv_to_grid = res["pv_to_grid_kwh"].astype(float)
+        bess_to_grid = res["bess_dis_grid_kwh"].astype(float)
+        export = pv_to_grid + bess_to_grid
+        export_arr = export.to_numpy()
+        if structure == "baseload":
+            # As-available up to a flat per-step target (v1 baseload):
+            # contracted = min(export, target); the excess is the
+            # merchant tail.  Firm baseload (spot-buy firming of the
+            # shortfall) is out of scope.
+            q_target_kwh = (
+                float(ppa_cfg.get("ppa_baseload_mw", 0.0) or 0.0)
+                * 1000.0 * dt_h
+            )
+            contracted_arr = np.minimum(export_arr, q_target_kwh)
+        else:  # pay_as_produced
+            f_cov = float(ppa_cfg.get("ppa_coverage_fraction", 0.0) or 0.0)
+            contracted_arr = f_cov * export_arr
+        contracted = pd.Series(contracted_arr, index=res.index)
+        merchant = export - contracted
+        # Additive premium = contracted MWh x (PPA price - DAM price):
+        # positive when the contract beats DAM, negative when it gives up
+        # upside.  Year-1 price only — escalation lives in the cashflow.
+        ppa_premium = contracted / 1000.0 * (price_y1 - dam_series)
+        # Split the premium pro-rata by PV vs BESS export share so the
+        # lifetime degradation attributes PV-origin premium to the PV
+        # factor and BESS-origin premium to the BESS factor.  When export
+        # is zero the share is zero (and the premium is zero anyway), so
+        # the pv + bess == total identity holds at every step.
+        pv_share_arr = np.divide(
+            pv_to_grid.to_numpy(), export_arr,
+            out=np.zeros_like(export_arr), where=export_arr > 0.0,
+        )
+        pv_share = pd.Series(pv_share_arr, index=res.index)
+        res["ppa_contracted_kwh"] = contracted
+        res["ppa_merchant_kwh"] = merchant
+        res["ppa_premium_eur"] = ppa_premium
+        res["ppa_premium_pv_eur"] = ppa_premium * pv_share
+        res["ppa_premium_bess_eur"] = ppa_premium * (1.0 - pv_share)
+
     return res
 
 
@@ -527,6 +583,28 @@ def compute_kpis(
     kpis.update(_compute_balancing_kpis(res, params))
 
     # ---------------------------------------------------------------------
+    # PPA (with merchant tail) premium KPIs.  Always emitted, zero when
+    # the feature is off, so downstream code (availability derate,
+    # cashflow, plots) reads the keys unconditionally — the balancing
+    # pattern.  Computed before the canonical aggregates so the canonical
+    # revenue_ppa_premium_eur can read ppa_premium_total_eur.
+    # ---------------------------------------------------------------------
+    kpis.update(_compute_ppa_kpis(res, params))
+
+    # Reporting roll-up of every parallel revenue stream.  profit_total_eur
+    # is NOT modified and the PPA premium is NOT folded into the
+    # retail/DAM Year-1 breakdown, so the build_yearly_cashflow
+    # reconciliation guard is never tripped.  All three components derate
+    # by the same availability factor, so the identity survives the
+    # post-solve derate.
+    kpis["project_revenue_total_eur"] = round(
+        float(kpis["profit_total_eur"])
+        + float(kpis.get("ppa_premium_total_eur", 0.0) or 0.0)
+        + float(kpis.get("bm_total_balancing_revenue_eur", 0.0) or 0.0),
+        2,
+    )
+
+    # ---------------------------------------------------------------------
     # Canonical revenue aggregates for the financial-plot stack.  These
     # split DAM revenue between PV-direct exports and BESS-arbitrage
     # exports, and aggregate each balancing product's capacity +
@@ -540,7 +618,7 @@ def compute_kpis(
 def _compute_canonical_revenue_aggregates(
     kpis: dict[str, Any], mode: str,
 ) -> dict[str, float]:
-    """Return the 8 canonical revenue aggregate keys used by the
+    """Return the 9 canonical revenue aggregate keys used by the
     financial-plot stack and the BESS-revenue waterfall / split plots.
 
     * ``revenue_pv_dam_eur``        — PV → DAM exports.
@@ -553,6 +631,8 @@ def _compute_canonical_revenue_aggregates(
     * ``revenue_bess_afrr_dn_eur``  — aFRR-dn capacity + activation.
     * ``revenue_bess_mfrr_up_eur``  — mFRR-up capacity + activation.
     * ``revenue_bess_mfrr_dn_eur``  — mFRR-dn capacity + activation.
+    * ``revenue_ppa_premium_eur``   — PPA premium (parallel stream; the
+      total of ppa_premium_total_eur, mirrored here for the plot stack).
 
     CONTRACT -- two parallel revenue-key families:
 
@@ -615,7 +695,61 @@ def _compute_canonical_revenue_aggregates(
         "revenue_bess_afrr_dn_eur": round(_bm("afrr_dn", True), 2),
         "revenue_bess_mfrr_up_eur": round(_bm("mfrr_up", True), 2),
         "revenue_bess_mfrr_dn_eur": round(_bm("mfrr_dn", True), 2),
+        # PPA premium is a parallel revenue stream (like balancing): it is
+        # NOT part of profit_total_eur and NOT in the retail/DAM breakdown.
+        "revenue_ppa_premium_eur": round(
+            float(kpis.get("ppa_premium_total_eur", 0.0) or 0.0), 2,
+        ),
     }
+
+
+def _compute_ppa_kpis(
+    res: pd.DataFrame, params: dict[str, Any],
+) -> dict[str, float]:
+    """Per-step PPA-premium roll-up; every key zero when the PPA is off.
+
+    Always emits the five keys so downstream code can read them
+    unconditionally — the balancing pattern.  Reads the per-step columns
+    written by :func:`add_economic_columns` when ``ppa_enabled``; returns
+    zeros when the feature is off OR when the export columns are absent
+    (e.g. a run that produced no PPA columns).
+
+    CONTRACT -- emitted keys:
+        ``ppa_premium_total_eur``  = sum of per-step ppa_premium_eur.
+        ``ppa_premium_pv_eur``     = PV-origin share (pro-rata by export).
+        ``ppa_premium_bess_eur``   = BESS-origin share.
+        ``ppa_contracted_mwh``     = contracted grid-export volume.
+        ``ppa_merchant_mwh``       = merchant-tail grid-export volume.
+
+    The pv + bess split sums to the total at every step, so
+    ``ppa_premium_pv_eur + ppa_premium_bess_eur == ppa_premium_total_eur``
+    (within rounding).  :func:`pvbess_opt.availability.apply_unavailability_derate`
+    scales all three by the same factor, preserving the identity.
+    """
+    out: dict[str, float] = {
+        "ppa_premium_total_eur": 0.0,
+        "ppa_premium_pv_eur": 0.0,
+        "ppa_premium_bess_eur": 0.0,
+        "ppa_contracted_mwh": 0.0,
+        "ppa_merchant_mwh": 0.0,
+    }
+    ppa_cfg = params.get("ppa") or {}
+    if not bool(ppa_cfg.get("ppa_enabled", False)):
+        return out
+    if "ppa_premium_eur" not in res.columns:
+        return out
+    out["ppa_premium_total_eur"] = round(float(res["ppa_premium_eur"].sum()), 2)
+    out["ppa_premium_pv_eur"] = round(float(res["ppa_premium_pv_eur"].sum()), 2)
+    out["ppa_premium_bess_eur"] = round(
+        float(res["ppa_premium_bess_eur"].sum()), 2,
+    )
+    out["ppa_contracted_mwh"] = round(
+        float(res["ppa_contracted_kwh"].sum()) / 1000.0, 4,
+    )
+    out["ppa_merchant_mwh"] = round(
+        float(res["ppa_merchant_kwh"].sum()) / 1000.0, 4,
+    )
+    return out
 
 
 def _compute_balancing_kpis(
