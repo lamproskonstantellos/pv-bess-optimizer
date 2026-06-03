@@ -76,6 +76,13 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     "ppa_premium_pv_eur",
     "ppa_premium_bess_eur",
     "project_revenue_total_eur",
+    # PPA contracted / merchant-tail volumes (MWh) — slices of the same
+    # grid-export stream as system_total_export_mwh, which IS derated.
+    # Derate them by the same factor so the contracted + merchant ==
+    # export identity survives the derate (otherwise the reported
+    # contracted volume can exceed the derated export volume).
+    "ppa_contracted_mwh",
+    "ppa_merchant_mwh",
     # Balancing expected-activation energies (kWh) — they scale with the
     # reservation throughput which the derate applies to.
     "bm_expected_activation_energy_up_kwh",
@@ -133,14 +140,20 @@ def apply_unavailability_derate(
     ``bm_<product>_activation_revenue_eur``), the balancing totals
     (``bm_total_capacity_revenue_eur``,
     ``bm_total_activation_revenue_eur``,
-    ``bm_total_balancing_revenue_eur``) and the canonical revenue
+    ``bm_total_balancing_revenue_eur``), the canonical revenue
     aggregates (``revenue_pv_dam_eur``, ``revenue_bess_dam_eur``,
     ``revenue_self_consumption_eur`` and the per-product
-    ``revenue_bess_<product>_eur``).  Because every component AND every
+    ``revenue_bess_<product>_eur``) and the PPA-premium parallel stream
+    (``ppa_premium_total_eur``, ``ppa_premium_pv_eur``,
+    ``ppa_premium_bess_eur``, ``project_revenue_total_eur`` and the
+    contracted / merchant-tail volumes ``ppa_contracted_mwh`` /
+    ``ppa_merchant_mwh``).  Because every component AND every
     aggregate is multiplied by the same scalar the algebraic identities
     that the KPI builders establish (e.g.
     ``revenue_bess_dam_eur = profit_export_from_bess_eur -
-    expense_charge_bess_grid_eur``) are preserved after the derate.
+    expense_charge_bess_grid_eur``, and
+    ``ppa_contracted_mwh + ppa_merchant_mwh = system_total_export_mwh``)
+    are preserved after the derate.
 
     The nested-dict ``bess_utilization_diagnostics`` (see
     :func:`pvbess_opt.kpis.compute_kpis`) is intentionally NOT derated:

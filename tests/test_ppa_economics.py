@@ -270,6 +270,30 @@ def test_availability_derate_preserves_ppa_identities(solved_base):
     )
 
 
+def test_availability_derate_scales_ppa_volumes_with_export(solved_base):
+    """The contracted / merchant-tail MWh volumes are slices of the grid
+    export, so the derate must scale them by the same factor as
+    ``system_total_export_mwh`` — otherwise the reported contracted volume
+    can exceed the (derated) export volume.  Regression guard for the
+    parallel-stream volume keys (they were previously left un-derated).
+    """
+    kpis, _ = _kpis_with(solved_base, _ppa())
+    assert kpis["ppa_contracted_mwh"] > 0.0  # the scenario must contract
+    factor = 0.95
+    derated = apply_unavailability_derate(dict(kpis), 5.0)  # 95 % available
+    # Volumes scale by the availability factor, exactly like the export.
+    assert derated["ppa_contracted_mwh"] == pytest.approx(
+        kpis["ppa_contracted_mwh"] * factor, rel=1e-6,
+    )
+    assert derated["ppa_merchant_mwh"] == pytest.approx(
+        kpis["ppa_merchant_mwh"] * factor, rel=1e-6,
+    )
+    # contracted + merchant == export survives the derate.
+    assert (
+        derated["ppa_contracted_mwh"] + derated["ppa_merchant_mwh"]
+    ) == pytest.approx(derated["system_total_export_mwh"], rel=1e-6)
+
+
 # ---------------------------------------------------------------------------
 # Optional dispatch-aware pay-as-produced (objective coefficients only)
 # ---------------------------------------------------------------------------
