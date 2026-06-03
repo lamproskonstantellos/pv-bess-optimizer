@@ -668,6 +668,26 @@ def _build_financials(
         lifetime_yearly=lifetime_yearly,
         year1_kpis=kpis,
     )
+
+    if bool(econ.get("ppa_enabled", False)):
+        logger.info(
+            "[PPA] %s @ %.2f EUR/MWh Year-1 (coverage=%.2f, "
+            "baseload=%.2f MW, escalation=%.2f %%, dispatch_aware=%s): "
+            "Year-1 premium %.2f EUR (PV %.2f / BESS %.2f); lifetime "
+            "premium %.2f EUR.  Parallel stream — excluded from "
+            "profit_total_eur, the aggregator fee, and LCOE/LCOS.",
+            str(econ.get("ppa_structure", "pay_as_produced")),
+            float(econ.get("ppa_price_eur_per_mwh", 0.0) or 0.0),
+            float(econ.get("ppa_coverage_fraction", 0.0) or 0.0),
+            float(econ.get("ppa_baseload_mw", 0.0) or 0.0),
+            float(econ.get("ppa_escalation_pct", 0.0) or 0.0),
+            bool(econ.get("ppa_dispatch_aware", False)),
+            float(kpis.get("ppa_premium_total_eur", 0.0) or 0.0),
+            float(kpis.get("ppa_premium_pv_eur", 0.0) or 0.0),
+            float(kpis.get("ppa_premium_bess_eur", 0.0) or 0.0),
+            float(fin_kpis.get("lifetime_ppa_revenue_total_eur", 0.0) or 0.0),
+        )
+
     sensitivity_df: pd.DataFrame | None
     if bool(econ.get("sensitivity_enabled", True)):
         sensitivity_df = run_sensitivity_analysis(

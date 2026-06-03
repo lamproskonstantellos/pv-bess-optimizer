@@ -450,6 +450,10 @@ def plot_monthly_cashflow_year1(
         balancing = sub["balancing_revenue_eur"].astype(float).to_numpy()
     else:
         balancing = np.zeros_like(revenue)
+    if "ppa_revenue_eur" in sub.columns:
+        ppa = sub["ppa_revenue_eur"].astype(float).to_numpy()
+    else:
+        ppa = np.zeros_like(revenue)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -460,6 +464,23 @@ def plot_monthly_cashflow_year1(
                color=financial_color("Balancing revenue"),
                edgecolor="black", linewidth=0.4,
                label="Balancing revenue")
+    # PPA premium — signed segment (positive stacks above revenue +
+    # balancing, negative stacks below the OPEX bar) so the bars still
+    # reconcile to the net line, which already includes the premium.
+    if np.any(np.abs(ppa) > 1e-9):
+        ppa_pos = np.where(ppa > 0.0, ppa, 0.0)
+        ppa_neg = np.where(ppa < 0.0, ppa, 0.0)
+        ppa_label_used = False
+        if np.any(ppa_pos > 1e-9):
+            ax.bar(months, ppa_pos, bottom=revenue + balancing,
+                   color=financial_color("PPA premium"),
+                   edgecolor="black", linewidth=0.4, label="PPA premium")
+            ppa_label_used = True
+        if np.any(ppa_neg < -1e-9):
+            ax.bar(months, ppa_neg, bottom=opex,
+                   color=financial_color("PPA premium"),
+                   edgecolor="black", linewidth=0.4,
+                   label=None if ppa_label_used else "PPA premium")
     ax.bar(months, opex, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
     ax.plot(months, net, color=financial_color("Net cash-flow"),

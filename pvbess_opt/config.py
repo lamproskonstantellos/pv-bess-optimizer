@@ -247,6 +247,11 @@ FINANCIAL_COLORS: dict[str, str] = {
     # FCR / aFRR / mFRR products as a single roll-up (e.g. the Year-1
     # monthly cash-flow stack).  Distinct from every per-product hex.
     "balancing_revenue": "#00796B",  # Material teal 700
+    # PPA premium (parallel revenue stream) — dark goldenrod, distinct
+    # from the revenue green, balancing teal and opex orange.  The
+    # segment is signed (premium can be negative when the contract price
+    # is below DAM), drawn the same way as the other signed components.
+    "ppa_premium": "#B8860B",
     # Balancing-product segments — colours match the per-product
     # palette in :data:`BM_COLOURS` so the same product reads as the
     # same colour on the revenue-stack plot and on the balancing
@@ -345,6 +350,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     # Bar / stack components
     "Revenue",
     "Balancing revenue",
+    "PPA premium",
     "OPEX",
     "CAPEX",
     "DEVEX",
@@ -379,6 +385,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Discounted payback":               "discounted",
     "Revenue":                          "revenue",
     "Balancing revenue":                 "balancing_revenue",
+    "PPA premium":                      "ppa_premium",
     "OPEX":                             "opex",
     "CAPEX":                            "capex",
     "DEVEX":                            "devex",
@@ -417,6 +424,10 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Load from BESS",
     "Export from PV",
     "Export from BESS",
+    # PPA premium (parallel revenue stream) sits with the positive
+    # revenue flows; it is signed, so it may render below the axis when
+    # the contract price is under DAM.
+    "PPA premium",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.

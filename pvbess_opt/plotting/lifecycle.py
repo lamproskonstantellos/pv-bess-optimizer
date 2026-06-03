@@ -302,9 +302,35 @@ def plot_revenue_stack_yearly(
         )
         bottoms = bottoms + seg
 
+    # PPA premium — a signed parallel-revenue segment.  Positive premium
+    # stacks upward on the revenue stack; negative premium (contract price
+    # below DAM) stacks downward beneath the grid-charge / aggregator-fee
+    # bars, the same way those negative components are handled.  Sourced
+    # from the cashflow's ``ppa_revenue_eur`` column so the segment height
+    # matches the contribution folded into the net line below.
+    if "ppa_revenue_eur" in op.columns:
+        ppa_seg = op["ppa_revenue_eur"].astype(float).to_numpy()
+        ppa_pos = np.where(ppa_seg > 0.0, ppa_seg, 0.0)
+        ppa_neg = np.where(ppa_seg < 0.0, ppa_seg, 0.0)
+        neg_bottom = cost + agg_fee  # lowest edge of the negative stack
+        ppa_label_used = False
+        if np.any(ppa_pos > 1e-9):
+            ax.bar(years, ppa_pos, bottom=bottoms,
+                   color=financial_color("PPA premium"),
+                   edgecolor="black", linewidth=0.4, label="PPA premium")
+            bottoms = bottoms + ppa_pos
+            ppa_label_used = True
+        if np.any(ppa_neg < -1e-9):
+            ax.bar(years, ppa_neg, bottom=neg_bottom,
+                   color=financial_color("PPA premium"),
+                   edgecolor="black", linewidth=0.4,
+                   label=None if ppa_label_used else "PPA premium")
+
     net = (op["revenue_eur"].astype(float)).to_numpy()
     if "balancing_revenue_eur" in op.columns:
         net = net + op["balancing_revenue_eur"].astype(float).to_numpy()
+    if "ppa_revenue_eur" in op.columns:
+        net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The
     # universality rule forbids markeredgecolor="white" rings; line
     # contrast comes from the charcoal colour itself.
