@@ -261,7 +261,22 @@ def _resolve_max_injection_per_step(
     :data:`~pvbess_opt.config.DEFAULT_MAX_INJECTION_PCT_HOURLY` (as a
     fraction) — matching the loader's default — rather than an
     inconsistent no-cap 1.0.
+
+    Zero feed-in (self-consumption export prohibition): when
+    ``params["zero_feed_in"]`` is True this short-circuits to a flat 0 %
+    max-injection profile (an all-zero per-step fraction array) and
+    OVERRIDES any ``max_injection_profile`` sheet.  This is the single
+    chokepoint for the feature — every downstream consumer flows from
+    it: :func:`build_model` derives ``export_cap_kwh_per_step = 0`` for
+    every step (so the existing ``EXPORT_CAP`` constraint forces
+    ``pv_to_grid + bess_dis_grid = 0``), :func:`model_to_dataframe`
+    reports ``grid_export_cap_kwh = 0``, and :func:`derive_tight_big_m`
+    yields ``M_exp = 0``.  No new constraint and no objective edit are
+    needed — the export-revenue term is naturally zero because export is
+    zero, and any PV surplus beyond load + BESS charging is curtailed.
     """
+    if params.get("zero_feed_in"):
+        return np.zeros(len(ts), dtype=float)
     profile = params.get("max_injection_profile")
     if profile is not None and "timestamp" in ts.columns:
         return build_per_step_max_injection_frac(ts["timestamp"], profile)
