@@ -87,6 +87,7 @@ __all__ = [
     "ECONOMICS_SHEET_DEFAULTS",
     "FALSY",
     "LAYOUT_SUBDIRS",
+    "PPA_SHEET_DEFAULTS",
     "PROJECT_SHEET_DEFAULTS",
     "PV_SHEET_DEFAULTS",
     "SIMULATION_SHEET_DEFAULTS",
@@ -132,6 +133,14 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "site_devex_eur": 0.0,
     "currency_format": "auto",
     "show_titles": False,
+    # Zero feed-in (self-consumption export prohibition).  When True the
+    # installation may not export any net energy at the point of common
+    # coupling: PV serves load and charges the BESS, any surplus is
+    # curtailed.  Implemented as a flat 0 % max-injection cap (see
+    # pvbess_opt.optimization._resolve_max_injection_per_step) so it
+    # overrides the max_injection_profile sheet.  Only valid in
+    # self_consumption mode.
+    "zero_feed_in": False,
 }
 
 PV_SHEET_DEFAULTS: dict[str, Any] = {
@@ -241,6 +250,34 @@ BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
     "bm_random_seed": 1729,
 }
 
+PPA_SHEET_DEFAULTS: dict[str, Any] = {
+    # Master switch — when False the dispatch, every KPI, LCOE/LCOS, and
+    # cashflow are bit-identical to a workbook without the sheet; the only
+    # difference is the always-emitted PPA KPI keys, all exactly zero.
+    "ppa_enabled": False,
+    # Contract structure: 'pay_as_produced' takes a fixed fraction of each
+    # step's grid export at the contract price (the remainder is the
+    # merchant tail at DAM); 'baseload' takes up to a flat target volume
+    # per step (the excess is the merchant tail).
+    "ppa_structure": "pay_as_produced",
+    # Year-1 contract price (EUR per MWh).  Escalated only in the
+    # multi-year cashflow via ppa_escalation_pct, never inside dispatch.
+    "ppa_price_eur_per_mwh": 70.0,
+    # pay_as_produced coverage fraction f in [0, 1]; (1 - f) is settled at
+    # DAM as the merchant tail.
+    "ppa_coverage_fraction": 1.0,
+    # baseload flat target volume per step (MW).  contracted =
+    # min(export, target); the excess is the merchant tail.
+    "ppa_baseload_mw": 0.0,
+    # Annual % escalation applied to the contract price in the multi-year
+    # cashflow only (NOT in dispatch / Year-1 repricing).
+    "ppa_escalation_pct": 0.0,
+    # When True (pay_as_produced only) the MILP values the export term at
+    # the blended price f*ppa + (1-f)*dam so dispatch can respond to the
+    # contract.  When False the PPA is a pure post-dispatch repricing.
+    "ppa_dispatch_aware": False,
+}
+
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_enabled": False,
     "uncertainty_compare_sources": False,
@@ -267,6 +304,7 @@ _SHEET_DEFAULTS: dict[str, dict[str, Any]] = {
     "economics": ECONOMICS_SHEET_DEFAULTS,
     "simulation": SIMULATION_SHEET_DEFAULTS,
     "balancing": BALANCING_SHEET_DEFAULTS,
+    "ppa": PPA_SHEET_DEFAULTS,
 }
 
 _KEY_TO_SHEET: dict[str, str] = {}
@@ -291,6 +329,9 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "uncertainty_load_enabled",
     "uncertainty_diagnostics_enabled",
     "balancing_enabled",
+    "zero_feed_in",
+    "ppa_enabled",
+    "ppa_dispatch_aware",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -309,6 +350,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_daily_scope",
     "plot_monthly_scope",
     "plot_yearly_scope",
+    "ppa_structure",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -316,6 +358,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_daily_scope": frozenset({"none", "year1_only", "all"}),
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
+    "ppa_structure": frozenset({"pay_as_produced", "baseload"}),
 }
 
 
@@ -365,6 +408,14 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "auto | millions | raw — financial-axis label format."),
     ("show_titles", False, "bool",
      "Render plot titles. IEEE figures normally rely on the figure caption."),
+    ("zero_feed_in", False, "bool",
+     "Self-consumption export prohibition (the 'zero feed-in' option of "
+     "the same Greek Ministerial Decision the net-billing regime "
+     "references). When TRUE no net energy may be exported at the point "
+     "of common coupling: PV serves load and charges the BESS, any "
+     "surplus is curtailed. Implemented as a flat 0 % max-injection cap "
+     "that OVERRIDES the max_injection_profile sheet. Only valid in "
+     "self_consumption mode (raises in merchant)."),
 )
 
 _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -585,6 +636,48 @@ _BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Default seed for the balancing Monte Carlo realisation."),
 )
 
+_PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("ppa_enabled", False, "bool",
+     "Master switch for the power purchase agreement (with merchant "
+     "tail). When FALSE the dispatch, every KPI, LCOE/LCOS and cashflow "
+     "are bit-identical to a run without the sheet; the only difference "
+     "is the always-emitted PPA KPI keys, all exactly zero."),
+    ("ppa_structure", "pay_as_produced", "enum",
+     "Accepted values: 'pay_as_produced' or 'baseload'. pay_as_produced "
+     "takes a fixed fraction f (ppa_coverage_fraction) of each step's "
+     "grid export at the contract price; (1 - f) is the merchant tail "
+     "settled at DAM. baseload takes up to a flat target volume "
+     "(ppa_baseload_mw) per step: contracted = min(export, target), the "
+     "excess is the merchant tail. v1 baseload is as-available up to "
+     "target (volume-capped pay-as-produced); firm baseload is out of "
+     "scope."),
+    ("ppa_price_eur_per_mwh", 70.0, "EUR/MWh",
+     "Year-1 PPA contract price applied to the contracted grid-export "
+     "slice. The merchant tail is settled at the DAM price instead. "
+     "Escalated across the lifetime by ppa_escalation_pct in the "
+     "cashflow only — never inside dispatch / the Year-1 repricing."),
+    ("ppa_coverage_fraction", 1.0, "-",
+     "pay_as_produced only: fraction f in [0, 1] of each step's grid "
+     "export taken by the offtaker at the contract price. (1 - f) is "
+     "the merchant tail. Ignored when ppa_structure = baseload."),
+    ("ppa_baseload_mw", 0.0, "MW",
+     "baseload only: flat target volume per step (MW). contracted = "
+     "min(export, ppa_baseload_mw x dt_hours x 1000 kWh); the excess is "
+     "the merchant tail. Ignored when ppa_structure = pay_as_produced."),
+    ("ppa_escalation_pct", 0.0, "%",
+     "Annual escalation of the PPA contract price, applied ONLY in the "
+     "multi-year lifetime cashflow (its own index, parallel to "
+     "retail / DAM / balancing). Not applied to dispatch or the Year-1 "
+     "premium."),
+    ("ppa_dispatch_aware", False, "bool",
+     "pay_as_produced only. When TRUE the MILP values the export term at "
+     "the blended effective price f*ppa_price + (1 - f)*dam[t] (Year-1 "
+     "price, not escalated), so dispatch can respond to the contract; "
+     "all dispatch invariants still hold. When FALSE (default) the PPA "
+     "is a pure post-dispatch repricing and the dispatch is unchanged. "
+     "Baseload dispatch-aware is out of scope (financial-only)."),
+)
+
 
 _SHEET_ROW_TEMPLATES: dict[
     str, tuple[tuple[str, object, str, str], ...]
@@ -595,6 +688,7 @@ _SHEET_ROW_TEMPLATES: dict[
     "economics": _ECONOMICS_ROWS,
     "simulation": _SIMULATION_ROWS,
     "balancing": _BALANCING_ROWS,
+    "ppa": _PPA_ROWS,
 }
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
@@ -684,6 +778,8 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     simulation_df = _build_kv_sheet(typed["simulation"], _SIMULATION_ROWS)
     balancing_section = typed.get("balancing") or dict(BALANCING_SHEET_DEFAULTS)
     balancing_df = _build_kv_sheet(balancing_section, _BALANCING_ROWS)
+    ppa_section = typed.get("ppa") or dict(PPA_SHEET_DEFAULTS)
+    ppa_df = _build_kv_sheet(ppa_section, _PPA_ROWS)
 
     profile = typed.get("max_injection_profile")
     if profile is None:
@@ -698,6 +794,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         economics_df.to_excel(writer, sheet_name="economics", index=False)
         simulation_df.to_excel(writer, sheet_name="simulation", index=False)
         balancing_df.to_excel(writer, sheet_name="balancing", index=False)
+        ppa_df.to_excel(writer, sheet_name="ppa", index=False)
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
@@ -1327,6 +1424,46 @@ def _validate_balancing_config(
         )
 
 
+def _validate_ppa_config(ppa: dict[str, Any]) -> None:
+    """Validate the PPA config (fail fast on bad input).
+
+    Skipped silently when ``ppa_enabled`` is False so workbooks that
+    carry the sheet for documentation but disable the feature still
+    load — the same gating contract as :func:`_validate_balancing_config`.
+    """
+    if not bool(ppa.get("ppa_enabled", False)):
+        return
+
+    structure = str(ppa.get("ppa_structure", "pay_as_produced")).strip().lower()
+    allowed = _ALLOWED_VALUES["ppa_structure"]
+    if structure not in allowed:
+        raise ValueError(
+            "ppa sheet key 'ppa_structure' must be one of "
+            f"{sorted(allowed)}; got {structure!r}."
+        )
+
+    price = float(ppa.get("ppa_price_eur_per_mwh", 0.0) or 0.0)
+    if price < 0.0:
+        raise ValueError(
+            "ppa sheet key 'ppa_price_eur_per_mwh' must be non-negative; "
+            f"got {price!r}."
+        )
+
+    coverage = float(ppa.get("ppa_coverage_fraction", 0.0) or 0.0)
+    if not (0.0 <= coverage <= 1.0):
+        raise ValueError(
+            "ppa sheet key 'ppa_coverage_fraction' must be in [0, 1]; "
+            f"got {coverage!r}."
+        )
+
+    baseload = float(ppa.get("ppa_baseload_mw", 0.0) or 0.0)
+    if baseload < 0.0:
+        raise ValueError(
+            "ppa sheet key 'ppa_baseload_mw' must be non-negative; "
+            f"got {baseload!r}."
+        )
+
+
 _DT_MINUTES_VALID_DIVISORS: tuple[int, ...] = (
     1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60,
 )
@@ -1348,10 +1485,12 @@ def validate_workbook_params(
     constructing the flat ``params`` dict — every downstream consumer
     relies on these invariants.
     """
+    project = typed.get("project") or {}
     pv = typed.get("pv") or {}
     bess = typed.get("bess") or {}
     economics = typed.get("economics") or {}
     balancing = typed.get("balancing") or {}
+    ppa = typed.get("ppa") or {}
 
     def _require_non_negative(section: dict[str, Any], key: str) -> None:
         if key not in section:
@@ -1427,6 +1566,31 @@ def validate_workbook_params(
         # truth.
         if dt_minutes is not None:
             _validate_balancing_config(balancing, dt_minutes)
+
+    # --- PPA + zero feed-in interaction checks ---------------------------
+    # zero_feed_in is a self-consumption-regime option only: in merchant
+    # mode there is no co-located load and "no net export" would leave
+    # nothing to dispatch, so reject it fast.
+    mode = str(project.get("mode", "self_consumption")).strip().lower()
+    zero_feed_in = bool(project.get("zero_feed_in", False))
+    if zero_feed_in and mode == "merchant":
+        raise ValueError(
+            "zero_feed_in is only valid in self_consumption mode "
+            "(got mode='merchant'); a merchant installation exports its "
+            "entire output, so an export prohibition is meaningless."
+        )
+
+    _validate_ppa_config(ppa)
+
+    # When there is no export to contract (zero feed-in), a PPA on the
+    # export stream can have no effect — warn rather than raise so the
+    # two options can still coexist in a documented workbook.
+    if zero_feed_in and bool(ppa.get("ppa_enabled", False)):
+        logger.warning(
+            "zero_feed_in is TRUE and ppa_enabled is TRUE: no net energy "
+            "is exported at the point of common coupling, so the PPA "
+            "reprices a zero export stream and has zero effect.",
+        )
 
 
 def _apply_balancing_timeseries_fallback(
@@ -1511,6 +1675,18 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         typed["balancing"] = _parse_kv_sheet("balancing", balancing_flat)
     else:
         typed["balancing"] = dict(BALANCING_SHEET_DEFAULTS)
+
+    # Optional ``ppa`` sheet — mirrors the balancing-sheet contract: when
+    # absent every key falls back to the defaults so ``ppa_enabled``
+    # resolves to False and the run is bit-identical to a workbook
+    # without the sheet.
+    if "ppa" in sheets:
+        ppa_flat = _flat_dict_from_sheet(
+            pd.read_excel(xlsx_path, sheet_name="ppa"),
+        )
+        typed["ppa"] = _parse_kv_sheet("ppa", ppa_flat)
+    else:
+        typed["ppa"] = dict(PPA_SHEET_DEFAULTS)
 
     # A finite grid-export cap must be strictly positive.  An empty cell
     # or an 'unlimited' token resolves to float('inf') (cap disabled).
@@ -1624,6 +1800,10 @@ def _typed_to_flat(
         "site_capex_eur": float(project.get("site_capex_eur", 0.0) or 0.0),
         "site_devex_eur": float(project.get("site_devex_eur", 0.0) or 0.0),
         "show_titles": bool(project["show_titles"]),
+        # Zero feed-in (self-consumption export prohibition).  Consumed by
+        # _resolve_max_injection_per_step, which short-circuits to a flat
+        # 0 % max-injection profile when this is True.
+        "zero_feed_in": bool(project.get("zero_feed_in", False)),
         # Max-injection cap profile (24,) or (24, 12), in percent of
         # p_grid_export_max_kw.  Expanded to a per-step array by the
         # max-injection helper module before entering the MILP.
@@ -1633,6 +1813,12 @@ def _typed_to_flat(
         # changing the flat-params contract.
         "balancing": dict(
             typed.get("balancing") or BALANCING_SHEET_DEFAULTS,
+        ),
+        # PPA (with merchant tail) section, forwarded as a nested dict so
+        # the KPI and dispatch-aware paths can opt in without changing the
+        # flat-params contract.  Mirrors the ``balancing`` forwarding.
+        "ppa": dict(
+            typed.get("ppa") or PPA_SHEET_DEFAULTS,
         ),
         # simulation
         "plot_daily_scope": str(sim["plot_daily_scope"]),

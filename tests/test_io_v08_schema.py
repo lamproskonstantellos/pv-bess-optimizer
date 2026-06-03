@@ -20,6 +20,7 @@ import pytest
 from pvbess_opt.io import (
     BESS_SHEET_DEFAULTS,
     ECONOMICS_SHEET_DEFAULTS,
+    PPA_SHEET_DEFAULTS,
     PROJECT_SHEET_DEFAULTS,
     PV_SHEET_DEFAULTS,
     SIMULATION_SHEET_DEFAULTS,
@@ -39,7 +40,7 @@ def test_project_sheet_keys():
         "settlement_minutes", "p_grid_export_max_kw",
         "retail_tariff_eur_per_mwh", "allow_bess_grid_charging",
         "unavailability_pct", "site_capex_eur", "site_devex_eur",
-        "currency_format", "show_titles",
+        "currency_format", "show_titles", "zero_feed_in",
     }
     assert set(PROJECT_SHEET_DEFAULTS) == expected
 
@@ -99,6 +100,15 @@ def test_simulation_sheet_keys():
     assert set(SIMULATION_SHEET_DEFAULTS) == expected
 
 
+def test_ppa_sheet_keys():
+    expected = {
+        "ppa_enabled", "ppa_structure", "ppa_price_eur_per_mwh",
+        "ppa_coverage_fraction", "ppa_baseload_mw", "ppa_escalation_pct",
+        "ppa_dispatch_aware",
+    }
+    assert set(PPA_SHEET_DEFAULTS) == expected
+
+
 # ---------------------------------------------------------------------------
 # Repository workbook — seven sheets exposed
 # ---------------------------------------------------------------------------
@@ -108,7 +118,7 @@ def test_all_sheets_present(repo_input_xlsx):
     sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "balancing", "max_injection_profile",
+        "simulation", "balancing", "ppa", "max_injection_profile",
     }
 
 

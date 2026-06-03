@@ -59,7 +59,7 @@ COL_WIDTH_PADDING: float = 2.0
 _TIMESERIES_AUTOFIT_SAMPLE_ROWS: int = 200
 
 _PARAMETER_SHEETS: tuple[str, ...] = (
-    "project", "pv", "bess", "economics", "simulation", "balancing",
+    "project", "pv", "bess", "economics", "simulation", "balancing", "ppa",
 )
 
 logger = logging.getLogger(__name__)

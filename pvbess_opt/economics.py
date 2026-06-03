@@ -152,8 +152,12 @@ def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     """
     typed = read_workbook(xlsx_path)
     merged: dict[str, Any] = {}
-    for section in ("project", "pv", "bess", "economics", "simulation"):
-        merged.update(typed[section])
+    # The optional ``ppa`` section is merged in so the flat econ dict
+    # carries the PPA keys (e.g. ``ppa_escalation_pct``) the multi-year
+    # cashflow needs; read_workbook always populates ``typed['ppa']``
+    # (defaults when the sheet is absent), mirroring ``balancing``.
+    for section in ("project", "pv", "bess", "economics", "simulation", "ppa"):
+        merged.update(typed.get(section, {}))
     return merged
 
 
