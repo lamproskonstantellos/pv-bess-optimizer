@@ -143,6 +143,43 @@ Sheet ``economics``
   ``sensitivity_revenue_delta_pct`` /
   ``sensitivity_discount_rate_delta_pp`` — tornado configuration.
 
+Debt / equity leverage
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Four optional ``economics`` keys turn the all-equity project into a
+geared one.  They are inert at their defaults, so an unconfigured run
+is bit-identical to the unlevered case:
+
+* ``gearing_pct`` (default 0) — debt as a share of Year-0 CAPEX.
+  ``0`` keeps the project all-equity and suppresses every leverage
+  output.
+* ``debt_interest_rate_pct`` (default 5) — fixed annual rate on the
+  drawn debt.
+* ``debt_tenor_years`` (default 15) — amortisation horizon in years.
+* ``debt_repayment`` ∈ ``annuity | linear`` (default ``annuity``) —
+  ``annuity`` levels the total debt service; ``linear`` levels the
+  principal repayment.  Both fully amortise the loan to a zero closing
+  balance by the end of the tenor.
+
+When ``gearing_pct > 0`` the run reports two leverage KPIs alongside
+the project metrics — ``equity_irr_pct`` (IRR on the equity cashflow
+after debt service) and ``min_dscr`` (the minimum debt-service
+coverage ratio over the tenor) — and writes a styled ``debt_schedule``
+sheet (year, opening / closing balance, interest, principal, debt
+service, equity cashflow, DSCR).  The unlevered metrics
+(``npv_eur``, project ``irr_pct``, LCOE, LCOS, …) are computed from
+the pre-financing cashflow and are unchanged by gearing.
+
+In a YAML / JSON config the same settings can be supplied as a
+``financing:`` block whose keys are expressed as fractions / years and
+mapped onto the ``economics`` keys above::
+
+    financing:
+      gearing: 0.70          # → gearing_pct = 70
+      interest_rate: 0.05    # → debt_interest_rate_pct = 5
+      tenor_years: 15        # → debt_tenor_years
+      repayment: annuity     # → debt_repayment
+
 Sheet ``balancing``
 -------------------
 

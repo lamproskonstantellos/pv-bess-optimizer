@@ -187,6 +187,11 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "sensitivity_opex_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
     "sensitivity_revenue_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
     "sensitivity_discount_rate_delta_pp": DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+    # Project-finance debt layer (all-equity by default: gearing 0).
+    "gearing_pct": 0.0,
+    "debt_interest_rate_pct": 5.0,
+    "debt_tenor_years": 15,
+    "debt_repayment": "annuity",
 }
 
 BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
@@ -303,6 +308,7 @@ _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
     "project_start_year",
     "settlement_minutes",
+    "debt_tenor_years",
     "bess_replacement_year",
     "uncertainty_n_seeds",
     "uncertainty_window_hours",
@@ -317,6 +323,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_monthly_scope",
     "plot_yearly_scope",
     "pv_source",
+    "debt_repayment",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -325,6 +332,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
     "pv_source": frozenset({"file", "pvgis"}),
+    "debt_repayment": frozenset({"annuity", "linear"}),
 }
 
 
@@ -481,6 +489,16 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("sensitivity_discount_rate_delta_pp", DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP, "pp",
      "Symmetric +/- delta on the discount rate, in percentage points. "
      "NPV tornado only - drops out of IRR tornado by definition."),
+    ("gearing_pct", 0.0, "%",
+     "Debt fraction of the initial investment (0 = all-equity, the "
+     "default; unlevered results are unchanged)."),
+    ("debt_interest_rate_pct", 5.0, "%",
+     "Annual debt interest rate (used only when gearing_pct > 0)."),
+    ("debt_tenor_years", 15, "years",
+     "Debt repayment tenor in years (used only when gearing_pct > 0)."),
+    ("debt_repayment", "annuity", "annuity | linear",
+     "Repayment profile: annuity (level debt service) or linear "
+     "(level principal)."),
 )
 
 _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -1855,6 +1873,7 @@ def write_results_workbook(
     rolling_horizon_mc: pd.DataFrame | None = None,
     rolling_horizon_compare_mc: pd.DataFrame | None = None,
     degradation: pd.DataFrame | None = None,
+    debt_schedule: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -1906,5 +1925,7 @@ def write_results_workbook(
             )
         if degradation is not None and not degradation.empty:
             degradation.to_excel(writer, sheet_name="degradation", index=False)
+        if debt_schedule is not None and not debt_schedule.empty:
+            debt_schedule.to_excel(writer, sheet_name="debt_schedule", index=False)
         style_workbook(writer.book)
     return out_path

@@ -93,6 +93,28 @@ def _resolve_timeseries(raw: dict[str, Any], base_dir: Path) -> pd.DataFrame:
     )
 
 
+def _apply_financing_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
+    """Map an optional top-level ``financing:`` block onto economics keys.
+
+    ``gearing`` / ``interest_rate`` are fractions (0..1); they map to the
+    percentage economics keys ``gearing_pct`` / ``debt_interest_rate_pct``.
+    """
+    fin = raw.get("financing")
+    if not isinstance(fin, dict):
+        return
+    econ = typed["economics"]
+    if "gearing" in fin:
+        econ["gearing_pct"] = float(fin["gearing"]) * 100.0
+    if "interest_rate" in fin:
+        econ["debt_interest_rate_pct"] = float(fin["interest_rate"]) * 100.0
+    if "tenor_years" in fin:
+        econ["debt_tenor_years"] = int(fin["tenor_years"])
+    elif "tenor" in fin:
+        econ["debt_tenor_years"] = int(fin["tenor"])
+    if "repayment" in fin:
+        econ["debt_repayment"] = str(fin["repayment"])
+
+
 def load_structured_config(path: str | Path) -> dict[str, Any]:
     """Load a YAML/JSON config into the typed nested dict that
     :func:`pvbess_opt.io.read_workbook` produces."""
@@ -109,6 +131,7 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
         # does not leak into the workbook pv sheet.
         user = {k: v for k, v in user.items() if k != "timeseries_path"}
         typed[section] = {**defaults, **user}
+    _apply_financing_block(raw, typed)
     typed["ts"] = _resolve_timeseries(raw, path.parent)
     mip = raw.get("max_injection_profile")
     if mip is not None:

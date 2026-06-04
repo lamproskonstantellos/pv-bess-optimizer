@@ -142,6 +142,128 @@ def calculate_irr(
 # ---------------------------------------------------------------------------
 
 
+_DEFAULT_DEBT_INTEREST_RATE_PCT = 5.0
+_DEFAULT_DEBT_TENOR_YEARS = 15
+
+
+def _financing_params(econ: dict[str, Any]) -> tuple[float, float, int, str]:
+    """Return ``(gearing, interest_rate, tenor, repayment)`` from ``econ``;
+    gearing and rate as fractions."""
+    gearing = float(econ.get("gearing_pct", 0.0) or 0.0) / 100.0
+    rate = float(
+        econ.get("debt_interest_rate_pct", _DEFAULT_DEBT_INTEREST_RATE_PCT) or 0.0
+    ) / 100.0
+    tenor = int(econ.get("debt_tenor_years", _DEFAULT_DEBT_TENOR_YEARS) or 0)
+    repayment = str(econ.get("debt_repayment", "annuity") or "annuity").strip().lower()
+    return gearing, rate, tenor, repayment
+
+
+def _amortization_schedule(
+    debt: float, rate: float, tenor: int, repayment: str,
+) -> list[dict[str, float]]:
+    """Per-year (interest, principal, debt_service, balance) for years 1..tenor.
+
+    ``annuity`` keeps debt service level; ``linear`` keeps principal level.
+    The balance amortises to ~0 at ``tenor`` for both profiles.
+    """
+    rows: list[dict[str, float]] = []
+    debt = float(debt)
+    tenor = int(tenor)
+    if debt <= 0.0 or tenor <= 0:
+        return rows
+    service = (
+        debt * rate / (1.0 - (1.0 + rate) ** (-tenor)) if rate > 0.0
+        else debt / tenor
+    )
+    balance = debt
+    for year in range(1, tenor + 1):
+        interest = balance * rate
+        if repayment == "linear":
+            principal = debt / tenor
+            svc = principal + interest
+        else:
+            svc = service
+            principal = svc - interest
+        balance = max(0.0, balance - principal)
+        rows.append({
+            "year": float(year),
+            "interest_eur": interest,
+            "principal_eur": principal,
+            "debt_service_eur": svc,
+            "debt_balance_eur": balance,
+        })
+    return rows
+
+
+def _leverage_kpis(
+    net_cashflow_eur: np.ndarray, econ: dict[str, Any],
+) -> tuple[float, float]:
+    """Return ``(equity_irr_pct, min_dscr)``; ``(nan, nan)`` when all-equity.
+
+    Debt funds ``gearing`` of the Year-0 investment; equity cashflow is the
+    project cashflow net of debt service over the tenor.  DSCR is the
+    operating cashflow over the debt service per year.
+    """
+    gearing, rate, tenor, repayment = _financing_params(econ)
+    net_cf = np.asarray(net_cashflow_eur, dtype=float)
+    if gearing <= 0.0 or net_cf.size < 2:
+        return float("nan"), float("nan")
+    initial_investment = -float(net_cf[0])
+    if initial_investment <= 0.0:
+        return float("nan"), float("nan")
+    debt = gearing * initial_investment
+    schedule = _amortization_schedule(debt, rate, tenor, repayment)
+    if not schedule:
+        return float("nan"), float("nan")
+    equity_cf = net_cf.copy()
+    equity_cf[0] = net_cf[0] + debt
+    dscrs: list[float] = []
+    for row in schedule:
+        y = int(row["year"])
+        svc = row["debt_service_eur"]
+        if y < equity_cf.size:
+            equity_cf[y] -= svc
+            if svc > 0.0:
+                dscrs.append(float(net_cf[y]) / svc)
+    eq_irr = calculate_irr(equity_cf)
+    equity_irr_pct = float("nan") if np.isnan(eq_irr) else eq_irr * 100.0
+    min_dscr = float(min(dscrs)) if dscrs else float("nan")
+    return equity_irr_pct, min_dscr
+
+
+def build_debt_schedule(
+    yearly_cf: pd.DataFrame, econ: dict[str, Any],
+) -> pd.DataFrame | None:
+    """Per-year debt schedule + equity cashflow + DSCR; None when all-equity."""
+    gearing, rate, tenor, repayment = _financing_params(econ)
+    if gearing <= 0.0 or "net_cashflow_eur" not in yearly_cf.columns:
+        return None
+    net_cf = yearly_cf["net_cashflow_eur"].to_numpy(dtype=float)
+    if net_cf.size < 2 or net_cf[0] >= 0.0:
+        return None
+    schedule = _amortization_schedule(
+        gearing * (-float(net_cf[0])), rate, tenor, repayment,
+    )
+    if not schedule:
+        return None
+    rows: list[dict[str, float]] = []
+    for row in schedule:
+        y = int(row["year"])
+        op_cf = float(net_cf[y]) if y < net_cf.size else float("nan")
+        svc = row["debt_service_eur"]
+        rows.append({
+            "year": float(y),
+            "interest_eur": round(row["interest_eur"], 2),
+            "principal_eur": round(row["principal_eur"], 2),
+            "debt_service_eur": round(svc, 2),
+            "debt_balance_eur": round(row["debt_balance_eur"], 2),
+            "operating_cf_eur": round(op_cf, 2),
+            "equity_cf_eur": round(op_cf - svc, 2),
+            "dscr": round(op_cf / svc, 4) if svc > 0.0 else float("nan"),
+        })
+    return pd.DataFrame(rows)
+
+
 def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the project / pv / bess / economics / simulation sheets.
 
@@ -773,6 +895,8 @@ def compute_financial_kpis(
     cf_array = df["net_cashflow_eur"].to_numpy(dtype=float)
     irr = calculate_irr(cf_array)
     irr_pct = float("nan") if np.isnan(irr) else irr * 100.0
+    gearing_pct_val = float(econ.get("gearing_pct", 0.0) or 0.0)
+    equity_irr_pct, min_dscr = _leverage_kpis(cf_array, econ)
 
     after_y0_cf = df.loc[after_y0_mask, "net_cashflow_eur"]
     if capex_abs > 1e-9:
@@ -1088,6 +1212,14 @@ def compute_financial_kpis(
         "discounted_payback_years": (
             float("nan") if np.isnan(discounted_payback)
             else float(round(discounted_payback, 4))
+        ),
+        "gearing_pct": float(round(gearing_pct_val, 4)),
+        "equity_irr_pct": (
+            float("nan") if np.isnan(equity_irr_pct)
+            else float(round(equity_irr_pct, 4))
+        ),
+        "min_dscr": (
+            float("nan") if np.isnan(min_dscr) else float(round(min_dscr, 4))
         ),
         "total_capex_eur": float(round(total_capex_eur, 2)),
         "total_devex_eur": float(round(total_devex_eur, 2)),

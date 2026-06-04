@@ -83,6 +83,8 @@ def test_economics_sheet_keys():
         "sensitivity_enabled", "sensitivity_capex_delta_pct",
         "sensitivity_opex_delta_pct", "sensitivity_revenue_delta_pct",
         "sensitivity_discount_rate_delta_pp",
+        "gearing_pct", "debt_interest_rate_pct", "debt_tenor_years",
+        "debt_repayment",
     }
     assert set(ECONOMICS_SHEET_DEFAULTS) == expected
 

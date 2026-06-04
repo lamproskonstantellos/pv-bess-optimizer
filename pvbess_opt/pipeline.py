@@ -35,6 +35,7 @@ import pandas as pd
 from pvbess_opt.availability import apply_unavailability_derate, availability_factor
 from pvbess_opt.degradation import build_degradation_report
 from pvbess_opt.economics import (
+    build_debt_schedule,
     build_yearly_cashflow,
     compute_financial_kpis,
     derive_asset_capacities,
@@ -643,6 +644,7 @@ def _build_financials(
         "lifetime_df": lifetime_df,
         "lifetime_yearly": lifetime_yearly,
         "sensitivity": sensitivity_df,
+        "debt_schedule": build_debt_schedule(yearly_cf, econ),
     }
 
 
@@ -1073,6 +1075,7 @@ def _run_one(
             rolling_horizon_mc=rolling_mc_df,
             rolling_horizon_compare_mc=rolling_compare_df,
             degradation=degradation_df,
+            debt_schedule=bundle.get("debt_schedule"),
         )
         if degradation_df is not None and not degradation_df.empty:
             plot_soh_trajectory(
