@@ -194,7 +194,7 @@ def test_self_consumption_combined_with_soc_legend_shows_grid_charge():
 
 
 def test_dispatcher_renders_self_consumption_combined_with_soc(tmp_path):
-    from main import _generate_energy_plots_for_year
+    from pvbess_opt.pipeline import _generate_energy_plots_for_year
 
     df = _make_dispatch_self_consumption()
     _generate_energy_plots_for_year(
@@ -206,7 +206,7 @@ def test_dispatcher_renders_self_consumption_combined_with_soc(tmp_path):
 
 
 def test_dispatcher_renders_merchant_combined_with_soc(tmp_path):
-    from main import _generate_energy_plots_for_year
+    from pvbess_opt.pipeline import _generate_energy_plots_for_year
 
     df = _make_dispatch_merchant()
     _generate_energy_plots_for_year(

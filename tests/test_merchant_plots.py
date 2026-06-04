@@ -172,7 +172,7 @@ def test_plot_yearly_combined_merchant_renders(tmp_path):
 
 
 def test_dispatcher_renders_merchant_trio(tmp_path):
-    from main import _generate_energy_plots_for_year
+    from pvbess_opt.pipeline import _generate_energy_plots_for_year
     df = _make_dispatch()
     _generate_energy_plots_for_year(
         df, 2026, tmp_path,
@@ -189,7 +189,7 @@ def test_dispatcher_renders_merchant_trio(tmp_path):
 
 def test_dispatcher_renders_merchant_combined(tmp_path):
     """The merchant branch also produces the combined trio."""
-    from main import _generate_energy_plots_for_year
+    from pvbess_opt.pipeline import _generate_energy_plots_for_year
     df = _make_dispatch()
     _generate_energy_plots_for_year(
         df, 2026, tmp_path,
@@ -202,7 +202,7 @@ def test_dispatcher_renders_merchant_combined(tmp_path):
 
 
 def test_dispatcher_renders_self_consumption_trio(tmp_path):
-    from main import _generate_energy_plots_for_year
+    from pvbess_opt.pipeline import _generate_energy_plots_for_year
     df = _make_dispatch()
     df["load_kwh"] = 200.0  # add load for self_consumption
     df["pv_to_load_kwh"] = np.minimum(df["pv_kwh"], 200.0)

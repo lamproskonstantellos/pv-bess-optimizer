@@ -10,6 +10,9 @@ requires-python = ">=3.11"
 license = { file = "LICENSE" }
 dynamic = ["version", "dependencies"]
 
+[project.scripts]
+pvbess = "pvbess_opt.cli:main"
+
 [tool.setuptools]
 packages = ["pvbess_opt", "pvbess_opt.plotting"]
 py-modules = ["main"]

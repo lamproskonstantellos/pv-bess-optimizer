@@ -50,6 +50,8 @@ Highlights:
       benchmark bands.
 """
 
-__all__ = ["__version__"]
+from .pipeline import Results, RunConfig, run
+
+__all__ = ["Results", "RunConfig", "__version__", "run"]
 
 __version__ = "0.9.0"

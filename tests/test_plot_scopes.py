@@ -5,16 +5,16 @@ The daily / monthly / yearly scope vocabulary is unified to
 (the historical bool ``plot_daily_year1`` is replaced by an enum
 identical to monthly / yearly.
 
-This module probes the dispatcher logic in ``main`` rather than
-executing the full plot fan-out (which lives behind a HiGHS-required
-smoke test in test_input_workbook_smoke.py).
+This module probes the dispatcher logic in ``pvbess_opt.pipeline``
+rather than executing the full plot fan-out (which lives behind a
+HiGHS-required smoke test in test_input_workbook_smoke.py).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from main import _scope_active_for_year
+from pvbess_opt.pipeline import _scope_active_for_year
 
 
 @pytest.mark.parametrize("scope,year,expected", [
@@ -56,12 +56,12 @@ def test_econ_defaults_use_unified_vocabulary():
     assert _ALLOWED_VALUES["plot_yearly_scope"] == expected
 
 
-def test_main_dispatcher_drops_obsolete_token():
-    """main.py must not contain the obsolete plot_daily_year1 token."""
+def test_pipeline_dispatcher_drops_obsolete_token():
+    """The pipeline must not contain the obsolete plot_daily_year1 token."""
     import inspect
 
-    import main
-    src = inspect.getsource(main)
+    import pvbess_opt.pipeline
+    src = inspect.getsource(pvbess_opt.pipeline)
     assert "plot_daily_year1" not in src
 
 
@@ -69,7 +69,7 @@ def test_warning_when_plot_daily_scope_is_all(caplog):
     """Selecting plot_daily_scope=all logs a WARNING with the PDF count."""
     import argparse
 
-    from main import _resolve_uncertainty_config
+    from pvbess_opt.pipeline import _resolve_uncertainty_config
 
     # Synthesize the args + econ a real run would produce.
     args = argparse.Namespace(

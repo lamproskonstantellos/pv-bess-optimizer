@@ -116,9 +116,9 @@ def test_payback_plot_renders_with_markers(tmp_path: Path):
     )
 
 
-def test_main_uses_renamed_payback_filename():
-    """main.py wires plot_payback into the
+def test_pipeline_uses_renamed_payback_filename():
+    """The pipeline wires plot_payback into the
     cumulative_cashflow_with_payback_<start>-<end>.pdf filename."""
-    src = Path("main.py").read_text()
+    src = Path("pvbess_opt/pipeline.py").read_text()
     assert "cumulative_cashflow_with_payback_" in src
     assert "payback_visualization.pdf" not in src
