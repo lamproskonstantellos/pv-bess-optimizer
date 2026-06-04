@@ -81,6 +81,7 @@ from .constants import (
     DEFAULT_SENSITIVITY_DELTA_PCT,
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
 )
+from .io_style import style_workbook
 
 logger = logging.getLogger(__name__)
 
@@ -675,6 +676,10 @@ _MONTH_TOKENS: tuple[str, ...] = (
 )
 
 
+# Output-styling contract: every workbook written below passes through
+# pvbess_opt.io_style.style_workbook before save, so all outputs share the
+# input workbook's navy frozen-header house style.  Never save an output
+# sheet unstyled.
 def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     """Write a workbook from a typed nested dict (eight-sheet schema)."""
     dst = Path(dst)
@@ -704,6 +709,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
+        style_workbook(writer.book)
     return dst
 
 
@@ -1766,6 +1772,7 @@ def write_dispatch_artifacts(
                 lifetime_df.loc[lifetime_df["calendar_year"] == cy].to_excel(
                     writer, sheet_name=sheet, index=False,
                 )
+            style_workbook(writer.book)
     else:
         if pd.api.types.is_datetime64_any_dtype(res_year1["timestamp"]):
             cal_year = int(
@@ -1775,6 +1782,7 @@ def write_dispatch_artifacts(
             cal_year = int(project_start_year)
         with pd.ExcelWriter(out, engine="openpyxl") as writer:
             res_year1.to_excel(writer, sheet_name=str(cal_year), index=False)
+            style_workbook(writer.book)
 
     return {"hourly_xlsx": out}
 
@@ -1871,4 +1879,5 @@ def write_results_workbook(
             _format_assumptions(economic_assumptions).to_excel(
                 writer, sheet_name="economic_assumptions", index=False,
             )
+        style_workbook(writer.book)
     return out_path

@@ -33,13 +33,13 @@ from pvbess_opt.io import (
     SIMULATION_SHEET_DEFAULTS,
     write_workbook,
 )
-from scripts.polish_input_workbook import (
+from pvbess_opt.theme import (
+    COL_WIDTH_MAX,
+    COL_WIDTH_MIN,
     HEADER_FILL_HEX,
     HEADER_FONT_HEX,
-    MAX_COL_WIDTH,
-    MIN_COL_WIDTH,
-    polish_workbook,
 )
+from scripts.polish_input_workbook import polish_workbook
 
 
 def _normalise_rgb(value: object) -> str:
@@ -120,9 +120,9 @@ def test_every_column_has_explicit_width(polished_workbook: Path) -> None:
             assert dim is not None and dim.width is not None, (
                 f"{sn}: column {letter} has no explicit width"
             )
-            assert MIN_COL_WIDTH <= float(dim.width) <= MAX_COL_WIDTH, (
+            assert COL_WIDTH_MIN <= float(dim.width) <= COL_WIDTH_MAX, (
                 f"{sn}: column {letter} width "
-                f"{dim.width} outside [{MIN_COL_WIDTH}, {MAX_COL_WIDTH}]"
+                f"{dim.width} outside [{COL_WIDTH_MIN}, {COL_WIDTH_MAX}]"
             )
 
 

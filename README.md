@@ -70,9 +70,12 @@ python main.py inputs/input.xlsx --mode merchant --outdir results/merchant
 
 ## Input workbook reference
 
-The canonical workbook is `inputs/input.xlsx`.  Every sheet's first
-row is the global header accent (bold + light grey fill + thin bottom
-border); no other styling is applied.
+The canonical workbook is `inputs/input.xlsx`.  Every sheet's first row
+is the house header accent — white bold text on a navy `#1F3864` fill
+with a thin `#BFBFBF` bottom border, frozen so it stays visible while
+scrolling, plus AutoFit column widths.  Every workbook the tool *writes*
+shares this exact style (one styler in `pvbess_opt/io_style.py`), so
+inputs and outputs look identical.
 
 ### `timeseries`
 
