@@ -77,7 +77,7 @@ from .balancing import (
     resolve_balancing_config,
     resolve_balancing_timeseries,
 )
-from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
+from .constants import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .kpis import ENERGY_TOLERANCE, _balancing_soc_drift
 from .max_injection import build_per_step_max_injection_frac
 from .modes import resolve_mode
@@ -258,7 +258,7 @@ def _resolve_max_injection_per_step(
     profile when the workbook omits the sheet).  This resolver expands
     it to a per-timestep fraction in [0, 1].  When no profile is
     supplied the fallback is the canonical
-    :data:`~pvbess_opt.config.DEFAULT_MAX_INJECTION_PCT_HOURLY` (as a
+    :data:`~pvbess_opt.constants.DEFAULT_MAX_INJECTION_PCT_HOURLY` (as a
     fraction) — matching the loader's default — rather than an
     inconsistent no-cap 1.0.
     """

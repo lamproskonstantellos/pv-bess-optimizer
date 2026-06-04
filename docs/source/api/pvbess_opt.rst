@@ -7,10 +7,10 @@ The ``pvbess_opt`` package
 .. automodule:: pvbess_opt
    :members:
 
-Configuration
-~~~~~~~~~~~~~
+Theme
+~~~~~
 
-.. automodule:: pvbess_opt.config
+.. automodule:: pvbess_opt.theme
    :members:
 
 Excel I/O

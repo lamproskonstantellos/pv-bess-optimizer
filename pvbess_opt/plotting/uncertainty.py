@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..config import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
+from ..theme import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
 from ._currency import euro_axis_formatter
 from .style import (
     apply_universal_margins,

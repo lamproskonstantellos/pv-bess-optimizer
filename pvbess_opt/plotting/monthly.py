@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.ticker import ScalarFormatter
 
-from ..config import FINANCIAL_COLORS, XTICK_ROT
+from ..theme import FINANCIAL_COLORS, XTICK_ROT
 from .helpers import (
     bar_stacked_bins,
     edges_and_widths_monthly,

@@ -17,8 +17,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from pvbess_opt.config import FINANCIAL_COLORS
 from pvbess_opt.plotting.lifecycle import plot_revenue_stack_yearly
+from pvbess_opt.theme import FINANCIAL_COLORS
 
 
 def _econ() -> dict:
@@ -166,7 +166,7 @@ def test_revenue_stack_sums_to_net_line(tmp_path: Path):
         sums[key] = sums.get(key, 0.0) + patch.get_height()
 
     # Find the Net-revenue line.
-    from pvbess_opt.config import financial_color
+    from pvbess_opt.theme import financial_color
     target = financial_color("Net revenue").lower()
     net_line = None
     from matplotlib.colors import to_hex
@@ -255,7 +255,7 @@ def test_revenue_stack_sums_to_net_line_with_balancing(tmp_path: Path):
         key = round(x)
         sums[key] = sums.get(key, 0.0) + patch.get_height()
 
-    from pvbess_opt.config import financial_color
+    from pvbess_opt.theme import financial_color
     target = financial_color("Net revenue").lower()
     net_line = None
     from matplotlib.colors import to_hex

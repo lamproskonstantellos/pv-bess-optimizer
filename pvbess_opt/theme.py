@@ -1,4 +1,4 @@
-"""Constants shared across modules: plot labels, colors, IEEE style."""
+"""Theme: plot labels, colours, IEEE matplotlib style, and financial labels."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ __all__ = [
     "ALPHA_STACK_BARS",
     "BM_COLOURS",
     "COLORS",
-    "DEFAULT_MAX_INJECTION_PCT_HOURLY",
     "FINANCIAL_COLORS",
     "FINANCIAL_LABELS",
     "FINANCIAL_LABEL_TO_COLOR_KEY",
@@ -29,17 +28,6 @@ __all__ = [
     "financial_color",
     "label_color",
 ]
-
-# ---------------------------------------------------------------------------
-# Project-level defaults
-# ---------------------------------------------------------------------------
-
-# Default share of ``p_grid_export_max_kw`` that is available for export,
-# in percent (per hour-of-day).  Applied when the workbook omits the
-# ``max_injection_profile`` sheet.  100.0 means "no curtailment" — the
-# constraint binds only on the regulatory grid-connection nameplate.
-# Users opt in to curtailment by supplying a profile below 100.
-DEFAULT_MAX_INJECTION_PCT_HOURLY: float = 100.0
 
 # ---------------------------------------------------------------------------
 # Plot labels and colors

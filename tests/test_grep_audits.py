@@ -131,7 +131,7 @@ def test_audit_6_no_inline_hex_colour_literals():
     assert not offenders, (
         f"Inline hex colour literal(s) found: {offenders}.  Source "
         "every colour from FINANCIAL_COLORS / financial_color / "
-        "COLORS in pvbess_opt.config."
+        "COLORS in pvbess_opt.theme."
     )
 
 
@@ -146,7 +146,7 @@ def test_audit_7_financial_labels_route_through_legend_helper():
     ``apply_financial_legend`` so legend ordering is governed by the
     single source of truth.  This is the soft side of Audit 7 — the
     strict label match is enforced at render time by
-    :func:`pvbess_opt.config.apply_financial_legend` itself, which
+    :func:`pvbess_opt.theme.apply_financial_legend` itself, which
     logs warnings for non-canonical entries (covered by
     tests/test_financial_label_consistency.py)."""
     for filename in ("financial.py", "lifecycle.py"):

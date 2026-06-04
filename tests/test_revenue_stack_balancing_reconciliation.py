@@ -23,8 +23,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from pvbess_opt.config import financial_color
 from pvbess_opt.plotting.lifecycle import plot_revenue_stack_yearly
+from pvbess_opt.theme import financial_color
 
 
 def _stack_sums_and_net_line(fig) -> tuple[dict[int, float], dict[int, float]]:

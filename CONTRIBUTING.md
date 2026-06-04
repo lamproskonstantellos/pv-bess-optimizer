@@ -2,19 +2,23 @@
 
 ## Package layout
 
-The `pvbess_opt/` package keeps a **flat module layout** (≤ 12 top-level
-modules).  This is a deliberate ceiling: re-evaluate subpackaging into
-`solve/` / `finance/` / `uncertainty/` / `plotting/` only when the module
-count crosses **12**.
+The `pvbess_opt/` package keeps a **flat module layout**.  The historical
+≤ 12-module ceiling is now **advisory** — the count has grown past it as
+the model gained features; re-evaluate subpackaging into `solve/` /
+`finance/` / `uncertainty/` / `plotting/` if the flat layout becomes hard
+to navigate.
 
-Current modules (11 + plotting subpackage):
+Current modules (14 + plotting subpackage):
 
 ```
 pvbess_opt/
 ├── __init__.py
-├── config.py
+├── theme.py
+├── constants.py
 ├── io.py
 ├── optimization.py
+├── balancing.py
+├── modes.py
 ├── kpis.py
 ├── lifetime.py
 ├── economics.py
@@ -22,11 +26,12 @@ pvbess_opt/
 ├── rolling_horizon.py
 ├── availability.py
 ├── max_injection.py
+├── timeutils.py
 └── plotting/
 ```
 
-If the count crosses 12, future PRs should subpackage by responsibility:
-`solve/` (optimization, lifetime, max_injection), `finance/` (economics,
+A future subpackaging would group by responsibility: `solve/`
+(optimization, lifetime, max_injection), `finance/` (economics,
 sensitivity, availability), `uncertainty/` (rolling_horizon),
 `plotting/` (already a subpackage).
 
@@ -45,19 +50,21 @@ The input workbook is split across **eight themed sheets**:
   workbook key.
 * All KPI keys returned by `compute_kpis` are lowercase.
 
-## Tests
+## Tests and checks
 
-Run the full suite:
+Run the gates locally:
 
 ```bash
 pip install -r requirements/dev.txt
-python -m pyflakes pvbess_opt/ main.py tests/ scripts/
-python -m pycodestyle --max-line-length=100 --select=E9,W6,E501 pvbess_opt/ main.py tests/ scripts/
-python -m pytest tests/ -v
+ruff check .
+mypy
+vulture
+python -m pytest tests/ -q
 ```
 
-CI runs the same three commands across Python 3.11 / 3.12 on
-Ubuntu / macOS / Windows.
+CI runs ruff, mypy, and vulture, then the fast-lane pytest across
+Python 3.11 / 3.12, all on Ubuntu.  The slow lane runs on pushes to the
+default branch and on the nightly schedule.
 
 ## Naming conventions
 

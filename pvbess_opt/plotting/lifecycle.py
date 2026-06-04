@@ -35,7 +35,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ..constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOE_LOW_EUR_PER_MWH,
@@ -43,6 +42,7 @@ from ..constants import (
     BENCHMARK_LCOS_LOW_EUR_PER_MWH,
     DEFAULT_SENSITIVITY_DELTA_PCT,
 )
+from ..theme import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import (
     euro_axis_formatter,
 )

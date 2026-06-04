@@ -22,7 +22,7 @@ The parent revenue-stack plot in :mod:`pvbess_opt.plotting.lifecycle`
 also carries PV-DAM exports and keeps the BESS qualifier attached as
 ``"Export from BESS"``.
 
-Colour mapping uses :data:`pvbess_opt.config.BM_COLOURS` so the
+Colour mapping uses :data:`pvbess_opt.theme.BM_COLOURS` so the
 balancing products are visually consistent across plots.
 """
 
@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..config import BM_COLOURS, financial_color
+from ..theme import BM_COLOURS, financial_color
 from ._currency import euro_axis_formatter, format_eur, resolve_currency_format
 from .helpers import title_prefix
 from .style import (

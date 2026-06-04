@@ -2,10 +2,10 @@
 
 Previously the five balancing-product bar labels (FCR, aFRR-up,
 aFRR-dn, mFRR-up, mFRR-dn) were absent from
-:data:`pvbess_opt.config.FINANCIAL_LABELS` and
-:data:`pvbess_opt.config.FINANCIAL_LEGEND_ORDER`, so every balancing-on
+:data:`pvbess_opt.theme.FINANCIAL_LABELS` and
+:data:`pvbess_opt.theme.FINANCIAL_LEGEND_ORDER`, so every balancing-on
 revenue-stack plot logged a warning per label inside
-:func:`pvbess_opt.config.apply_financial_legend`.
+:func:`pvbess_opt.theme.apply_financial_legend`.
 
 This test renders a balancing-on revenue stack with the WARNING
 logger captured and asserts no "Non-canonical financial legend
@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from pvbess_opt.config import (
+from pvbess_opt.theme import (
     BM_COLOURS,
     FINANCIAL_LABEL_TO_COLOR_KEY,
     FINANCIAL_LABELS,
@@ -102,7 +102,7 @@ def test_balancing_on_revenue_stack_logs_no_legend_warning(caplog, tmp_path: Pat
         "revenue_bess_mfrr_dn_eur": 6_000.0,
     }
     out_path = tmp_path / "rev_stack.png"
-    caplog.set_level(logging.WARNING, logger="pvbess_opt.config")
+    caplog.set_level(logging.WARNING, logger="pvbess_opt.theme")
     plot_revenue_stack_yearly(
         yearly_cf, year1_kpis, out_path,
         econ={"aggregator_fee_pct_revenue": 2.0},
@@ -147,7 +147,7 @@ def test_balancing_off_revenue_stack_still_logs_no_warning(caplog, tmp_path: Pat
         # No balancing keys set => zero bars => no balancing labels emitted.
     }
     out_path = tmp_path / "rev_stack_off.png"
-    caplog.set_level(logging.WARNING, logger="pvbess_opt.config")
+    caplog.set_level(logging.WARNING, logger="pvbess_opt.theme")
     plot_revenue_stack_yearly(
         yearly_cf, year1_kpis, out_path,
         econ={"aggregator_fee_pct_revenue": 2.0},
@@ -173,7 +173,7 @@ def test_bess_revenue_waterfall_does_not_emit_legend_warnings(caplog, tmp_path: 
         "revenue_bess_mfrr_dn_eur": 6_000.0,
     }
     out_path = tmp_path / "waterfall.png"
-    caplog.set_level(logging.WARNING, logger="pvbess_opt.config")
+    caplog.set_level(logging.WARNING, logger="pvbess_opt.theme")
     plot_bess_revenue_waterfall(year1_kpis, out_path)
     offenders = [
         rec.getMessage() for rec in caplog.records

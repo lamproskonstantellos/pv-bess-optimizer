@@ -28,7 +28,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
+from .constants import DEFAULT_MAX_INJECTION_PCT_HOURLY
 
 logger = logging.getLogger(__name__)
 

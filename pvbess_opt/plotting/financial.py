@@ -26,9 +26,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.ticker import MaxNLocator
 
-from ..config import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ..io import PROJECT_SHEET_DEFAULTS
 from ..sensitivity import DriverSensitivity, build_driver_sensitivities
+from ..theme import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import (
     euro_axis_formatter,
     format_eur,

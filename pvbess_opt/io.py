@@ -72,12 +72,12 @@ import numpy as np
 import pandas as pd
 
 from .balancing import resolve_balancing_config
-from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOE_LOW_EUR_PER_MWH,
     BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOS_LOW_EUR_PER_MWH,
+    DEFAULT_MAX_INJECTION_PCT_HOURLY,
     DEFAULT_SENSITIVITY_DELTA_PCT,
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
 )
@@ -602,7 +602,7 @@ _SHEET_ROW_TEMPLATES: dict[
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
 # rows) applied when the workbook omits the max_injection_profile sheet.
-# Single source of truth lives in pvbess_opt.config; re-imported above.
+# Single source of truth lives in pvbess_opt.constants; re-imported above.
 
 
 # ---------------------------------------------------------------------------
@@ -1477,7 +1477,7 @@ def _apply_balancing_timeseries_fallback(
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the input workbook and return the typed nested dict."""
     xlsx_path = Path(xlsx_path)
-    sheets = set(pd.ExcelFile(xlsx_path).sheet_names)
+    sheets = {str(name) for name in pd.ExcelFile(xlsx_path).sheet_names}
 
     missing = _V08_REQUIRED_SHEETS - sheets
     if missing:
