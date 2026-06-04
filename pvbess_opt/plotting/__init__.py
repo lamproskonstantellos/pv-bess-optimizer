@@ -35,6 +35,9 @@ from .daily import (
     plot_daily_supply,
     plot_daily_surplus,
 )
+from .degradation import (
+    plot_soh_trajectory,
+)
 from .financial import (
     plot_cumulative_cashflow,
     plot_irr_tornado,
@@ -140,6 +143,7 @@ __all__ = [
     "plot_rolling_horizon_distribution",
     "plot_scenario_comparison_bars",
     "plot_scenario_revenue_bridge",
+    "plot_soh_trajectory",
     "plot_uncertainty_coverage_by_horizon",
     "plot_uncertainty_crps_timeline",
     "plot_uncertainty_pit_histogram",

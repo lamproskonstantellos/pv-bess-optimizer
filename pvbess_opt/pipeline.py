@@ -33,6 +33,7 @@ from typing import Any
 import pandas as pd
 
 from pvbess_opt.availability import apply_unavailability_derate, availability_factor
+from pvbess_opt.degradation import build_degradation_report
 from pvbess_opt.economics import (
     build_yearly_cashflow,
     compute_financial_kpis,
@@ -96,6 +97,7 @@ from pvbess_opt.plotting import (
     plot_payback,
     plot_revenue_stack_yearly,
     plot_rolling_horizon_distribution,
+    plot_soh_trajectory,
     plot_yearly_cashflow_bars,
     plot_yearly_combined,
     plot_yearly_combined_merchant,
@@ -644,6 +646,41 @@ def _build_financials(
     }
 
 
+def _build_degradation_report(
+    res: pd.DataFrame, params: dict[str, Any], econ: dict[str, Any],
+) -> pd.DataFrame | None:
+    """Post-hoc Rainflow SOH / capacity-fade report from the SOC trace.
+
+    Returns None when there is no BESS or no SOC trace.  This is a
+    diagnostic — it does not feed back into the NPV (the replacement CAPEX
+    in the finance layer already charges degradation), so the wear cost is
+    never double-counted.
+    """
+    if float(params.get("bess_capacity_kwh", 0.0) or 0.0) <= 0.0:
+        return None
+    if "soc_kwh" not in res.columns:
+        return None
+    return build_degradation_report(
+        res["soc_kwh"],
+        capacity_kwh=float(params.get("bess_capacity_kwh", 0.0) or 0.0),
+        soc_min_frac=float(params.get("soc_min_frac", 0.0) or 0.0),
+        soc_max_frac=float(params.get("soc_max_frac", 1.0) or 1.0),
+        degradation_pct_per_cycle=float(
+            econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
+        ),
+        project_years=int(
+            econ.get("project_lifecycle_years",
+                     PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+            or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+        ),
+        start_year=int(
+            econ.get("project_start_year",
+                     PROJECT_SHEET_DEFAULTS["project_start_year"])
+            or PROJECT_SHEET_DEFAULTS["project_start_year"]
+        ),
+    )
+
+
 def _scenario_slug(params: dict[str, Any]) -> str:
     """Return the ``<mode>[_grid_ch]`` folder slug."""
     mode = resolve_mode(params)
@@ -1019,6 +1056,8 @@ def _run_one(
             ),
         )
 
+        degradation_df = _build_degradation_report(res, params, econ)
+
         write_results_workbook(
             out_dir / "03_results.xlsx",
             res_year1=res,
@@ -1033,7 +1072,12 @@ def _run_one(
             economic_assumptions=econ,
             rolling_horizon_mc=rolling_mc_df,
             rolling_horizon_compare_mc=rolling_compare_df,
+            degradation=degradation_df,
         )
+        if degradation_df is not None and not degradation_df.empty:
+            plot_soh_trajectory(
+                degradation_df, layout["financial_plots"] / "soh_trajectory.pdf",
+            )
 
         if bundle.get("yearly_cf") is not None:
             _generate_financial_plots(

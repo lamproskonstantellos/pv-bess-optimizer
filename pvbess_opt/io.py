@@ -168,6 +168,8 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     # LFP cycle-fade default (matches the canonical workbook row in
     # _BESS_ROWS and the schema default); range 0.005-0.010.
     "bess_degradation_pct_per_cycle": 0.008,
+    # Per-MWh-throughput cycle wear cost in the dispatch objective (0 = off).
+    "bess_wear_cost_eur_per_mwh": 0.0,
 }
 
 ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
@@ -418,6 +420,10 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "If TRUE, force final SOC == initial SOC (closed cycle)."),
     ("max_cycles_per_day", 1.0, "-",
      "Daily equivalent-cycle cap (sum of discharge / capacity)."),
+    ("bess_wear_cost_eur_per_mwh", 0.0, "EUR/MWh",
+     "Cycle wear cost penalised per MWh discharged in the dispatch "
+     "objective (0 = off). Derive from replacement cost / cycle-life / "
+     "usable energy via pvbess_opt.degradation."),
     ("capex_bess_eur_per_kw", 200, "EUR/kW",
      "Per-kW BESS CAPEX (DC + PCS). Set 0 if BESS already exists."),
     ("devex_bess_eur_per_kw", 30, "EUR/kW",
@@ -1632,6 +1638,9 @@ def _typed_to_flat(
         "max_cycles_per_day": float(bess["max_cycles_per_day"]),
         "bess_power_kw": bess_power_kw,
         "bess_capacity_kwh": bess_capacity_kwh,
+        "bess_wear_cost_eur_per_mwh": float(
+            bess.get("bess_wear_cost_eur_per_mwh", 0.0) or 0.0
+        ),
         # pv
         "pv_nameplate_kwp": pv_nameplate_kwp,
         # project
@@ -1845,6 +1854,7 @@ def write_results_workbook(
     economic_assumptions: dict[str, Any] | None = None,
     rolling_horizon_mc: pd.DataFrame | None = None,
     rolling_horizon_compare_mc: pd.DataFrame | None = None,
+    degradation: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -1894,5 +1904,7 @@ def write_results_workbook(
             _format_assumptions(economic_assumptions).to_excel(
                 writer, sheet_name="economic_assumptions", index=False,
             )
+        if degradation is not None and not degradation.empty:
+            degradation.to_excel(writer, sheet_name="degradation", index=False)
         style_workbook(writer.book)
     return out_path

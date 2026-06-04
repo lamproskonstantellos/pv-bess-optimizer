@@ -111,6 +111,21 @@ Sheet ``bess``
   full equivalent cycle, in percent (LFP default 0.008, range
   0.005–0.010; NMC ~0.010–0.020).  Layered additively on the calendar
   fade.  Set to 0 — or omit the row — to use calendar-only fade.
+* ``bess_wear_cost_eur_per_mwh`` — cycle wear cost penalised per MWh
+  discharged in the dispatch objective (default 0 = off).  When set, the
+  optimizer only cycles when the price spread beats the wear cost.  It is
+  a behavioural shadow price: it shapes dispatch but is **not** added to
+  the reported cashflow / NPV (the replacement CAPEX already charges
+  degradation), so the cost is never double-counted.  Derive it from
+  replacement cost / cycle-life / usable energy with
+  :func:`pvbess_opt.degradation.derive_wear_cost_eur_per_mwh`.
+
+Every run also writes a **degradation** report (a styled ``degradation``
+sheet in ``03_results.xlsx`` plus an SOH-trajectory plot): ASTM Rainflow
+cycle counting on the SOC trace gives DoD-weighted equivalent full
+cycles, projected into a state-of-health / capacity-fade trajectory and
+replacement schedule
+(:func:`pvbess_opt.degradation.build_degradation_report`).
 
 Sheet ``economics``
 -------------------

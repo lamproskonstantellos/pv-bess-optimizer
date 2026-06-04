@@ -101,9 +101,10 @@ __all__ = [
 # Set to 0.0 to disable.  NOT a constraint substitute.
 _WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH: float = 1.0e-5
 
-# Optional bonus per discharged MWh.  Default 0 — turn on only when
-# debugging the BESS-utilisation balance versus the curtailment penalty.
-_WEIGHT_CYCLES_TERM_EUR_PER_MWH: float = 0.0
+# Battery wear cost (cycle degradation) is a per-MWh-throughput penalty
+# read from params['bess_wear_cost_eur_per_mwh'] (default 0 = off) and
+# subtracted in the objective; see pvbess_opt.degradation for the
+# calibration helper.
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +432,9 @@ def build_model(
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
+    wear_cost_eur_per_mwh = float(
+        params.get("bess_wear_cost_eur_per_mwh", 0.0) or 0.0
+    )
 
     # Per-step export cap derived from the max-injection profile.
     export_cap_kwh_per_step = {
@@ -847,10 +851,13 @@ def build_model(
     grid_charge_cost = sum(
         dam_price[t] * m.grid_to_bess[t] / 1000.0 for t in time_index
     )
-    cycles_bonus = _WEIGHT_CYCLES_TERM_EUR_PER_MWH * sum(
+    # Battery wear cost: penalise discharge throughput so the optimizer only
+    # cycles when the spread beats the per-MWh degradation cost.  Default 0
+    # (off).  Shadow price only — not added to the reported cashflow / NPV.
+    wear_cost_term = wear_cost_eur_per_mwh * sum(
         (m.bess_dis_load[t] + m.bess_dis_grid[t]) / 1000.0 for t in time_index
     )
-    profit_eur = avoided_cost + export_revenue - grid_charge_cost + cycles_bonus
+    profit_eur = avoided_cost + export_revenue - grid_charge_cost - wear_cost_term
 
     if balancing_active:
         # Expected capacity revenue across all five products.

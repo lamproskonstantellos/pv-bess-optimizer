@@ -55,6 +55,8 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     "plot_efficient_frontier", "plot_npv_vs_capacity",
     # Scenarios
     "plot_scenario_comparison_bars", "plot_scenario_revenue_bridge",
+    # Degradation
+    "plot_soh_trajectory",
 )
 
 
