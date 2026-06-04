@@ -298,3 +298,33 @@ scatter and the NPV-vs-capacity curve marking the **oversizing
 break-even** — the BESS energy where the marginal value of storage
 (dNPV/dMWh) crosses zero.  With no ``sizing:`` block the run is a single
 size, unchanged.
+
+Scenario batches (``--scenarios``)
+----------------------------------
+
+Run many named variants in one invocation and emit a comparison::
+
+    pvbess inputs/input.xlsx --scenarios examples/scenarios.yaml
+
+The scenarios file lists overrides on the base input; ``inherits`` clones
+another scenario.  Overrides accept the canonical sheet keys or short
+aliases (``pv.nameplate_kwp``, ``bess.power_kw`` ...), plus
+``balancing: on|off`` and ``capex_multiplier``::
+
+    scenarios:
+      - name: "Merchant hybrid"
+        project: { mode: merchant }
+      - name: "Merchant hybrid + balancing"
+        inherits: "Merchant hybrid"
+        balancing: on
+      - name: "Cheap CAPEX case"
+        inherits: "Merchant hybrid"
+        capex_multiplier: 0.8
+
+Each scenario runs through the same path as a standalone run, so its
+results match running it alone.  The batch writes a styled
+``scenario_comparison.xlsx`` (one row per scenario: NPV / IRR / payback /
+LCOE / LCOS + revenue by stream) plus a comparison-bars plot and a
+revenue bridge between the first two scenarios.  Scenarios vary on a
+shared base PV shape (rescaled per nameplate); use separate configs for
+different sites.

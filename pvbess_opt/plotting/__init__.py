@@ -68,6 +68,10 @@ from .monthly import (
     plot_monthly_supply,
     plot_monthly_surplus,
 )
+from .scenarios import (
+    plot_scenario_comparison_bars,
+    plot_scenario_revenue_bridge,
+)
 from .sizing import (
     plot_efficient_frontier,
     plot_npv_vs_capacity,
@@ -134,6 +138,8 @@ __all__ = [
     "plot_payback",
     "plot_revenue_stack_yearly",
     "plot_rolling_horizon_distribution",
+    "plot_scenario_comparison_bars",
+    "plot_scenario_revenue_bridge",
     "plot_uncertainty_coverage_by_horizon",
     "plot_uncertainty_crps_timeline",
     "plot_uncertainty_pit_histogram",

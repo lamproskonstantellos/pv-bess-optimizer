@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from pvbess_opt.pipeline import RunConfig, run
+from pvbess_opt.scenarios import read_scenarios_file, run_scenarios
 from pvbess_opt.sizing import read_sizing_block, run_sizing
 
 logger = logging.getLogger("pvbess_opt.cli")
@@ -30,6 +31,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--config", default=None,
         help="Structured config file (.yaml / .yml / .json) to run instead "
              "of the Excel workbook.",
+    )
+    parser.add_argument(
+        "--scenarios", default=None,
+        help="Scenarios file (.yaml / .yml / .json) to run as a batch "
+             "comparison against the base input.",
     )
     parser.add_argument("--solver", default="highs", help="gurobi | highs | cbc")
     parser.add_argument("--outdir", default="results",
@@ -119,7 +125,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         sizing_block = read_sizing_block(input_path)
-        if sizing_block:
+        if args.scenarios:
+            run_scenarios(config, read_scenarios_file(args.scenarios))
+        elif sizing_block:
             run_sizing(config, sizing_block)
         else:
             run(config)

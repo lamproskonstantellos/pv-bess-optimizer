@@ -53,6 +53,8 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     "plot_bess_revenue_by_month",
     # Sizing
     "plot_efficient_frontier", "plot_npv_vs_capacity",
+    # Scenarios
+    "plot_scenario_comparison_bars", "plot_scenario_revenue_bridge",
 )
 
 

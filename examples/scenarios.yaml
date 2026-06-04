@@ -1,0 +1,30 @@
+# Worked scenario comparison.  Run against the case-study workbook:
+#
+#     pvbess inputs/input.xlsx --scenarios examples/scenarios.yaml
+#
+# Each scenario overrides the base input; `inherits` clones another
+# scenario and overrides it.  Overrides use either the canonical sheet
+# keys or the short aliases (pv.nameplate_kwp, bess.power_kw, ...).
+scenarios:
+  - name: "Self-consumption hybrid"
+    project: { mode: self_consumption }
+
+  - name: "Merchant hybrid"
+    project: { mode: merchant }
+
+  - name: "Merchant hybrid + balancing"
+    inherits: "Merchant hybrid"
+    balancing: on
+
+  - name: "Merchant PV only"
+    inherits: "Merchant hybrid"
+    bess: { power_kw: 0, capacity_kwh: 0 }
+
+  - name: "Merchant BESS only"
+    inherits: "Merchant hybrid"
+    pv: { nameplate_kwp: 0 }
+    project: { mode: merchant, allow_bess_grid_charging: true }
+
+  - name: "Cheap CAPEX (merchant hybrid)"
+    inherits: "Merchant hybrid"
+    capex_multiplier: 0.8
