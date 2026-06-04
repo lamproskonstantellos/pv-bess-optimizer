@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import logging
 import sys
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,7 @@ from pvbess_opt.io import (
     write_dispatch_artifacts,
     write_results_workbook,
 )
+from pvbess_opt.io_read import is_structured_config, materialize_to_xlsx
 from pvbess_opt.kpis import (
     ENERGY_TOLERANCE,
     compute_kpis,
@@ -1097,12 +1099,23 @@ def _run_one(
 
 
 def run(config: RunConfig) -> Results:
-    """Read the workbook, solve, post-process, archive and plot one run."""
-    params, ts = read_inputs(config.excel)
+    """Read the input, solve, post-process, archive and plot one run.
+
+    Accepts an Excel workbook or a structured (YAML/JSON) config; a
+    structured config is materialized to an equivalent workbook so both
+    inputs flow through the same read path and produce identical results.
+    """
+    src = Path(config.excel)
+    base_name = src.stem
+    if is_structured_config(src):
+        tmp_dir = Path(tempfile.mkdtemp(prefix="pvbess_cfg_"))
+        run_config = replace(config, excel=materialize_to_xlsx(src, tmp_dir))
+    else:
+        run_config = config
+    params, ts = read_inputs(run_config.excel)
     apply_ieee_style()
     set_show_titles(params.get("show_titles", False))
-    if config.mode is not None:
-        params["mode"] = config.mode
+    if run_config.mode is not None:
+        params["mode"] = run_config.mode
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_name = Path(config.excel).stem
-    return _run_one(params, ts, config, base_name, timestamp)
+    return _run_one(params, ts, run_config, base_name, timestamp)

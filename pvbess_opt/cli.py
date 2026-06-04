@@ -23,7 +23,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "excel", nargs="?", default="inputs/input.xlsx",
-        help="Excel input file (default: inputs/input.xlsx)",
+        help="Excel workbook input (default: inputs/input.xlsx).",
+    )
+    parser.add_argument(
+        "--config", default=None,
+        help="Structured config file (.yaml / .yml / .json) to run instead "
+             "of the Excel workbook.",
     )
     parser.add_argument("--solver", default="highs", help="gurobi | highs | cbc")
     parser.add_argument("--outdir", default="results",
@@ -90,13 +95,13 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    excel_path = Path(args.excel)
-    if not excel_path.exists():
-        logger.error("Input file not found: %s", excel_path)
+    input_path = Path(args.config) if args.config else Path(args.excel)
+    if not input_path.exists():
+        logger.error("Input file not found: %s", input_path)
         return 2
 
     config = RunConfig(
-        excel=excel_path,
+        excel=input_path,
         solver=args.solver,
         outdir=Path(args.outdir),
         mode=args.mode,

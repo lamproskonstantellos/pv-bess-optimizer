@@ -77,6 +77,12 @@ ignore_missing_imports = true
 module = ["openpyxl.*"]
 ignore_missing_imports = true
 
+# PyYAML ships no type stubs in this project's pinned set; the structured
+# config loader uses yaml.safe_load / safe_dump only.
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true
+
 # Plotting subpackage: matplotlib axes / figure objects flow through
 # nearly every helper, and the matplotlib stubs publish most public
 # methods as returning `Any`.  Annotating every plot function strictly

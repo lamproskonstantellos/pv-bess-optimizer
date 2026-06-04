@@ -139,6 +139,7 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
 }
 
 PV_SHEET_DEFAULTS: dict[str, Any] = {
+    "pv_source": "file",
     "pv_nameplate_kwp": 0.0,
     "specific_production_kwh_per_kwp": 1500.0,
     "pv_degradation_year1_pct": 2.5,
@@ -313,6 +314,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_daily_scope",
     "plot_monthly_scope",
     "plot_yearly_scope",
+    "pv_source",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -320,6 +322,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_daily_scope": frozenset({"none", "year1_only", "all"}),
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
+    "pv_source": frozenset({"file", "pvgis"}),
 }
 
 
@@ -372,6 +375,10 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
 )
 
 _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("pv_source", "file", "file | pvgis",
+     "Where the PV profile comes from. 'file' uses the timeseries "
+     "pv_kwh column (rescaled to nameplate x specific production, or a "
+     "verbatim pv_kwh_override). 'pvgis' fetches it from lat/lon."),
     ("pv_nameplate_kwp", 0, "kWp",
      "PV nameplate capacity. 0 = no PV in this project."),
     ("specific_production_kwh_per_kwp", 1500, "kWh/kWp/yr",
@@ -1553,6 +1560,12 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
     )
+    pv_source = str(typed["pv"].get("pv_source", "file")).strip().lower()
+    if pv_source == "pvgis":
+        raise NotImplementedError(
+            "pv_source='pvgis' requires the PVGIS resource layer, which is "
+            "not enabled in this build; use pv_source='file'."
+        )
     ts = _resolve_pv_column(
         ts,
         pv_nameplate_kwp=float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0),

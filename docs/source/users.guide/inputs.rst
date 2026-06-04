@@ -76,6 +76,9 @@ High-level run configuration:
 Sheet ``pv``
 ------------
 
+* ``pv_source`` — where the PV profile comes from: ``file`` (default,
+  today's behaviour — use the ``timeseries`` ``pv_kwh`` column) or
+  ``pvgis`` (fetch from latitude / longitude via the resource layer).
 * ``pv_nameplate_kwp`` — PV nameplate.  ``0`` ⇒ no PV in this project.
 * ``specific_production_kwh_per_kwp`` — annual specific production
   (informational; the MILP consumes the timeseries directly).
@@ -192,3 +195,46 @@ workbook PV column to match the user's ``pv_nameplate_kwp`` ×
 ``specific_production_kwh_per_kwp`` target at run time; every
 per-step ratio is preserved.  See ``inputs/input.xlsx`` for the
 as-shipped nameplate and yield.
+
+PV source and the two ``file`` sub-modes
+----------------------------------------
+
+``pv_source`` makes the PV-profile origin explicit:
+
+* ``file`` (default) — the PV profile is taken from the ``timeseries``
+  sheet, in one of two sub-modes:
+
+  * **absolute** — populate ``pv_kwh_override`` for every row and the
+    loader uses those kWh **verbatim** (your own measured / modelled
+    series).
+  * **rescaled shape** — leave ``pv_kwh_override`` empty and supply a
+    ``pv_kwh`` shape; the loader rescales it so the annual total matches
+    ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` while
+    preserving every per-step ratio
+    (:func:`pvbess_opt.io._rescale_pv_to_user_target`).
+
+* ``pvgis`` — the profile is fetched from latitude / longitude by the
+  resource layer (no PV column needed).
+
+YAML / JSON config
+------------------
+
+Instead of the Excel workbook the optimiser also accepts a YAML or JSON
+config whose sections mirror the eight sheets, with the time-series
+referenced by ``timeseries_path`` (a CSV / Parquet file) rather than a
+35 040-row inline column::
+
+    pv:
+      pv_source: file
+      pv_nameplate_kwp: 15000
+      specific_production_kwh_per_kwp: 1500
+    bess:
+      bess_power_kw: 15000
+      bess_capacity_kwh: 30000
+    timeseries_path: my_timeseries.csv
+
+Run it with ``pvbess --config run.yaml``.  A structured config and the
+equivalent workbook parse to the same typed dict and produce identical
+results.  :func:`pvbess_opt.io_read.config_json_schema` emits a JSON
+Schema for external validation and
+:func:`pvbess_opt.io_read.validate_config` checks a config against it.
