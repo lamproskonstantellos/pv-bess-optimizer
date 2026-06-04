@@ -444,10 +444,11 @@ def build_model(
     m.mode = pyo.Param(initialize=mode, within=pyo.Any, mutable=False)
 
     # --- BESS energy capacity is a parameter, not a decision variable.
-    # e_cap is pinned to bess_capacity_kwh (industry standard for
-    # sizing-as-input projects; matches Gridcog / Aurora Chronos /
-    # HOMER).  When BESS is absent the value is 0 and the SOC pins
-    # below take effect.
+    # e_cap is pinned to bess_capacity_kwh: the MILP optimises *dispatch*
+    # for a given size.  Capacity sizing is handled outside the MILP by
+    # pvbess_opt.sizing, which sweeps (pv_kwp, bess_kw, bess_kwh) points
+    # and re-runs this solve per point to build an efficient frontier.
+    # When BESS is absent the value is 0 and the SOC pins below take effect.
     e_cap_param = bess_capacity_kwh if bess_present else 0.0
     m.soc = pyo.Var(m.T, domain=pyo.NonNegativeReals)
 
@@ -1085,9 +1086,10 @@ def run_scenario(
 ) -> tuple[pd.DataFrame, str] | tuple[pd.DataFrame, str, pd.DataFrame]:
     """Build, solve and extract dispatch for a single scenario.
 
-    Returns ``(res, resolved_solver_name)``.  ``e_cap`` is a
-    parameter pinned to ``params['bess_capacity_kwh']`` (industry
-    standard for sizing-as-input projects); it is not a decision
+    Returns ``(res, resolved_solver_name)``.  ``e_cap`` is a parameter
+    pinned to ``params['bess_capacity_kwh']``: this solve optimises
+    dispatch for a fixed size.  Capacity sizing is an outer sweep over
+    this solve (see :mod:`pvbess_opt.sizing`); it is not a decision
     variable and is not returned.
 
     When ``return_unrounded`` is True the tuple is extended with a

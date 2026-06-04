@@ -275,3 +275,26 @@ alignment, re-grid the transition days first.
 ``pv_source: pvgis`` is resolved by the structured-config loader only; an
 Excel workbook with ``pv_source=pvgis`` is rejected with a pointer to use
 a YAML/JSON config.
+
+Capacity sizing sweep (``sizing:`` block)
+-----------------------------------------
+
+Add a ``sizing:`` block to a YAML/JSON config to sweep capacities instead
+of running a single size.  Each axis is an explicit list or a
+``{min, max, step}`` mapping; BESS energy may be given as
+``bess_capacity_kwh`` or ``bess_duration_hours`` (capacity = power x
+duration)::
+
+    sizing:
+      pv_nameplate_kwp: [8000, 10000, 12000]
+      bess_power_kw: [2000, 4000]
+      bess_capacity_kwh: {min: 4000, max: 12000, step: 4000}
+
+``pvbess --config run.yaml`` then re-runs the dispatch solve at every
+``(pv, power, capacity)`` point, ranks an **efficient frontier** by NPV,
+and writes ``sizing.xlsx`` (frontier + marginal value + summary, styled
+like every other workbook) plus two plots: the NPV-vs-IRR frontier
+scatter and the NPV-vs-capacity curve marking the **oversizing
+break-even** — the BESS energy where the marginal value of storage
+(dNPV/dMWh) crosses zero.  With no ``sizing:`` block the run is a single
+size, unchanged.

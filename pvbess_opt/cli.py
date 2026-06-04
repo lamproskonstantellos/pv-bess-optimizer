@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from pvbess_opt.pipeline import RunConfig, run
+from pvbess_opt.sizing import read_sizing_block, run_sizing
 
 logger = logging.getLogger("pvbess_opt.cli")
 
@@ -117,7 +118,11 @@ def main(argv: list[str] | None = None) -> int:
         compare_uncertainty_sources=args.compare_uncertainty_sources,
     )
     try:
-        run(config)
+        sizing_block = read_sizing_block(input_path)
+        if sizing_block:
+            run_sizing(config, sizing_block)
+        else:
+            run(config)
     except Exception:
         logger.exception("Run failed")
         return 1
