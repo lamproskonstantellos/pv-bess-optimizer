@@ -16,21 +16,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvbess_opt.io import BALANCING_SHEET_DEFAULTS
 from pvbess_opt.optimization import (
     BALANCING_INVARIANT_KEYS,
     run_scenario,
     verify_dispatch_invariants,
 )
-
-
-def _balancing_on(params: dict, **overrides) -> dict:
-    out = dict(params)
-    bm = dict(BALANCING_SHEET_DEFAULTS, balancing_enabled=True)
-    bm["bm_settlement_minutes"] = int(out.get("dt_minutes", 60))
-    bm.update(overrides)
-    out["balancing"] = bm
-    return out
+from tests._balancing_helpers import _balancing_on
 
 
 def test_verifier_emits_every_balancing_invariant_key():

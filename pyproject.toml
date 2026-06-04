@@ -111,7 +111,7 @@ disable_error_code = [
 ]
 
 [tool.vulture]
-# The audit threshold (see docs/audit_report.md §2.6): ≥70 % confidence is the gate.
+# The audit threshold: ≥70 % confidence is the gate.
 # Findings below that almost always reflect dataclass fields populated by
 # reflection or pytest fixtures injected by name — both false positives.
 paths = ["pvbess_opt", "scripts", "tests"]

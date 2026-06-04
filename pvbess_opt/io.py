@@ -1,6 +1,6 @@
 """Excel input parsing and output writing for the PV+BESS optimizer.
 
-The schema is **seven sheets**, one logical theme per sheet:
+The schema is **eight sheets**, one logical theme per sheet:
 
 * ``timeseries`` — per-step data with lowercase snake_case column names:
   ``timestamp``, ``load_kwh``, ``pv_kwh``, ``dam_price_eur_per_mwh``,
@@ -20,6 +20,9 @@ The schema is **seven sheets**, one logical theme per sheet:
   sensitivity deltas.
 * ``simulation`` — uncertainty (rolling-horizon Monte Carlo) and plot
   scope flags.
+* ``balancing`` — stochastic balancing-market participation
+  (FCR / aFRR / mFRR): per-product capacity shares, acceptance /
+  activation probabilities, fallback prices, and the Monte Carlo seeds.
 * ``max_injection_profile`` — hour-of-day cap profile (24 rows),
   optionally with one column per calendar month, expressing the share
   of ``p_grid_export_max_kw`` available for export.  Missing → fall
@@ -673,7 +676,7 @@ _MONTH_TOKENS: tuple[str, ...] = (
 
 
 def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
-    """Write a workbook from a typed nested dict (seven-sheet schema)."""
+    """Write a workbook from a typed nested dict (eight-sheet schema)."""
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
 

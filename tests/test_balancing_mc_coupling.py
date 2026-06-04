@@ -3,9 +3,9 @@
 Before the fix, the SOC-trajectory pass opened an independent child RNG and
 resampled activation outcomes; a scenario could therefore report revenue from
 activations that never appeared in its SOC trace, and "SOC OK" for a trace that
-never accrued the matching revenue. The pre-fix audit reported
-``bm_soc_constrained_scenarios_pct = 0.0`` across every balancing-ON case in
-``scripts/audit_runs/results/`` precisely because of this decoupling.
+never accrued the matching revenue. The pre-fix behaviour reported
+``bm_soc_constrained_scenarios_pct = 0.0`` across every balancing-ON case
+precisely because of this decoupling.
 """
 
 from __future__ import annotations

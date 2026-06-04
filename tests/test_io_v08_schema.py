@@ -2,8 +2,9 @@
 
 Covers:
 
-* The seven-sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
-  ``economics`` / ``simulation`` / ``max_injection_profile``).
+* The eight-sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
+  ``economics`` / ``simulation`` / ``balancing`` /
+  ``max_injection_profile``).
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
@@ -100,7 +101,7 @@ def test_simulation_sheet_keys():
 
 
 # ---------------------------------------------------------------------------
-# Repository workbook — seven sheets exposed
+# Repository workbook — eight sheets exposed
 # ---------------------------------------------------------------------------
 
 

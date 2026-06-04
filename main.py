@@ -890,7 +890,7 @@ def _run_one(
         )
 
     # Upfront perfect-foresight + balancing solve estimate. Reference
-    # points from the v0.9.0 audit JSONs: 35 040 steps + balancing +
+    # points from full-scale reference runs: 35 040 steps + balancing +
     # self_consumption + bess-only ~565 s; merchant + hybrid + balancing
     # on 672 steps ~1.2 s. Scale roughly linearly with n_steps.
     if bool(params.get("balancing", {}).get("balancing_enabled", False)):

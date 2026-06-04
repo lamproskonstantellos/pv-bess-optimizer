@@ -1,10 +1,10 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook with **seven sheets**:
+The optimiser consumes a single Excel workbook with **eight sheets**:
 ``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
-``simulation``, ``max_injection_profile``.  All keys use lowercase
-snake_case.
+``simulation``, ``balancing``, ``max_injection_profile``.  All keys use
+lowercase snake_case.
 
 Sheet ``timeseries``
 --------------------

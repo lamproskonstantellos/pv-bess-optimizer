@@ -1,7 +1,7 @@
 # Balancing logic verification (v0.9.0+)
 
-Companion to `docs/audit_report_v0_9_0.md` and
-`docs/balancing_market_design.md`. Each numbered section states the
+Companion to `docs/balancing_market_design.md`. Each numbered section
+states the
 intended math or semantics, cites the implementing file:line, and
 records a **PASS / FAIL** status. The accompanying conformance test
 `tests/test_logic_spec_conformance.py` parses the section headings and
@@ -155,9 +155,8 @@ pass. A single Monte Carlo scenario therefore cannot report revenue
 from activation events that did not appear in its SOC trace, nor
 "SOC OK" on a trace that never produced revenue.
 
-This is the fix recorded in `docs/audit_report_v0_9_0.md` under "MC
-SOC-violation decoupling (1.7)"; regression coverage lives in
-`tests/test_balancing_mc_coupling.py`. The corresponding commit
+This fixes the Monte Carlo SOC-violation coupling; regression coverage
+lives in `tests/test_balancing_mc_coupling.py`. The corresponding commit
 `fix(balancing): correct Monte Carlo SOC-violation coupling and
 clarify DAM share semantics` is on `main`.
 

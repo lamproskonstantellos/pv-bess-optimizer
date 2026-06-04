@@ -32,10 +32,10 @@ sensitivity, availability), `uncertainty/` (rolling_horizon),
 
 ## Workbook schema
 
-The input workbook is split across **seven themed sheets**:
+The input workbook is split across **eight themed sheets**:
 `timeseries`, `project`, `pv`, `bess`, `economics`, `simulation`,
-`max_injection_profile`.  See `docs/source/users.guide/inputs.rst` for
-the full reference.
+`balancing`, `max_injection_profile`.  See
+`docs/source/users.guide/inputs.rst` for the full reference.
 
 ## Style
 

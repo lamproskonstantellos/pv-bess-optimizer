@@ -8,22 +8,12 @@ from pvbess_opt.balancing import (
 )
 from pvbess_opt.io import BALANCING_SHEET_DEFAULTS
 from pvbess_opt.optimization import run_scenario
+from tests._balancing_helpers import _balancing_on
 
 
 def _balancing_off(params: dict) -> dict:
     out = dict(params)
     out["balancing"] = dict(BALANCING_SHEET_DEFAULTS)
-    return out
-
-
-def _balancing_on(params: dict, **overrides) -> dict:
-    out = dict(params)
-    bm = dict(BALANCING_SHEET_DEFAULTS, balancing_enabled=True)
-    # The test fixtures use hourly cadence (dt_minutes=60), so align
-    # the balancing settlement period.
-    bm["bm_settlement_minutes"] = int(out.get("dt_minutes", 60))
-    bm.update(overrides)
-    out["balancing"] = bm
     return out
 
 
