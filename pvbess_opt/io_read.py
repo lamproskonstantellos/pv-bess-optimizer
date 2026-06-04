@@ -32,6 +32,10 @@ STRUCTURED_SUFFIXES: frozenset[str] = frozenset({".yaml", ".yml", ".json"})
 _REFERENCE_SPECIFIC_YIELD: float = 1200.0
 _PV_CONSISTENCY_THRESHOLD_PCT: float = 30.0
 
+# Europe/Athens standard-time offset applied to PVGIS (UTC) profiles —
+# fixed, no DST, so the uniform 35 040-step grid is preserved.
+_PVGIS_UTC_OFFSET_HOURS: int = 2
+
 
 def is_structured_config(path: str | Path) -> bool:
     """True if ``path`` is a YAML/JSON config (vs an Excel workbook)."""
@@ -109,7 +113,63 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
     mip = raw.get("max_injection_profile")
     if mip is not None:
         typed["max_injection_profile"] = np.asarray(mip, dtype=float)
+    if str(typed["pv"].get("pv_source", "file")).strip().lower() == "pvgis":
+        _resolve_pvgis(typed)
     return typed
+
+
+def _resolve_pvgis(typed: dict[str, Any]) -> None:
+    """Resolve ``pv_source='pvgis'`` in place.
+
+    Fetch the per-kWp PVGIS profile, scale it by ``pv_nameplate_kwp``,
+    upsample it onto the model grid, shift it to Europe/Athens standard
+    time, and write it into ``ts['pv_kwh']``.  The section is then switched
+    to ``file`` mode so the materialized workbook reads the resolved profile
+    back through the standard path.
+    """
+    from .resource import fetch_pv_profile
+    from .resource.resample import upsample_hourly_to_grid
+    from .timeutils import apply_fixed_utc_offset
+
+    pv = typed["pv"]
+    ts = typed["ts"]
+    lat = pv.get("latitude")
+    lon = pv.get("longitude")
+    nameplate = float(pv.get("pv_nameplate_kwp", 0.0) or 0.0)
+    if lat is None or lon is None:
+        raise ValueError(
+            "pv_source='pvgis' requires 'latitude' and 'longitude' in the "
+            "pv section."
+        )
+    if nameplate <= 0.0:
+        raise ValueError("pv_source='pvgis' requires pv_nameplate_kwp > 0.")
+
+    result = fetch_pv_profile(
+        float(lat), float(lon),
+        tilt=pv.get("tilt", "optimal"),
+        azimuth=float(pv.get("azimuth", 0.0) or 0.0),
+        losses_pct=float(pv.get("losses_pct", 14.0) or 14.0),
+        weather_year=pv.get("weather_year", 2019),
+        raddatabase=pv.get("raddatabase") or None,
+    )
+    scaled = result.per_kwp_kwh * nameplate
+    n_steps = len(ts)
+    hours = int(result.per_kwp_kwh.size)
+    if hours <= 0 or n_steps % hours != 0:
+        raise ValueError(
+            f"time-series has {n_steps} steps, not a whole-hour multiple of "
+            f"the {hours}-hour PVGIS profile; use a 15-minute non-leap-year "
+            "grid (35 040 steps)."
+        )
+    steps_per_hour = n_steps // hours
+    grid = upsample_hourly_to_grid(scaled, steps_per_hour)
+    grid = apply_fixed_utc_offset(grid, _PVGIS_UTC_OFFSET_HOURS, steps_per_hour)
+
+    ts = ts.copy()
+    ts["pv_kwh"] = grid
+    typed["ts"] = ts
+    validate_pv_consistency(scaled, nameplate)
+    pv["pv_source"] = "file"
 
 
 def materialize_to_xlsx(input_path: str | Path, dst_dir: str | Path) -> Path:

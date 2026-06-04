@@ -17,7 +17,9 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["dt_hours_from"]
+import numpy as np
+
+__all__ = ["apply_fixed_utc_offset", "dt_hours_from"]
 
 
 def dt_hours_from(params: dict[str, Any]) -> float:
@@ -40,3 +42,22 @@ def dt_hours_from(params: dict[str, Any]) -> float:
     if minutes < 0.0:
         minutes = 0.0
     return minutes / 60.0
+
+
+def apply_fixed_utc_offset(
+    profile: object, offset_hours: int, steps_per_hour: int,
+) -> np.ndarray:
+    """Shift a per-step profile by a fixed whole-hour UTC offset (no DST).
+
+    A profile indexed in UTC is rolled forward by ``offset_hours`` so each
+    step carries the value that occurred ``offset_hours`` earlier in UTC —
+    e.g. ``+2`` maps UTC midnight to 02:00 local for Europe/Athens.
+
+    A **fixed** offset (rather than a DST-aware ``zoneinfo`` conversion) is
+    deliberate: the model runs on a uniform 35 040-step grid (15-min x a
+    non-leap year), and a true UTC->Europe/Athens conversion would produce
+    23h/25h transition days that break that assumption.  Callers that need
+    wall-clock DST alignment must re-grid the transition days first.
+    """
+    arr = np.asarray(profile, dtype=float)
+    return np.roll(arr, int(offset_hours) * int(steps_per_hour))

@@ -1562,9 +1562,11 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     )
     pv_source = str(typed["pv"].get("pv_source", "file")).strip().lower()
     if pv_source == "pvgis":
-        raise NotImplementedError(
-            "pv_source='pvgis' requires the PVGIS resource layer, which is "
-            "not enabled in this build; use pv_source='file'."
+        raise ValueError(
+            "pv_source='pvgis' is resolved by the structured-config loader, "
+            "not the Excel reader. Run a YAML/JSON config "
+            "(pvbess --config run.yaml) so the PV profile is fetched from "
+            "latitude/longitude."
         )
     ts = _resolve_pv_column(
         ts,

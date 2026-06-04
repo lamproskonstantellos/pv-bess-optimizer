@@ -238,3 +238,40 @@ equivalent workbook parse to the same typed dict and produce identical
 results.  :func:`pvbess_opt.io_read.config_json_schema` emits a JSON
 Schema for external validation and
 :func:`pvbess_opt.io_read.validate_config` checks a config against it.
+
+PVGIS PV profiles (``pv_source: pvgis``)
+----------------------------------------
+
+In a YAML/JSON config, ``pv_source: pvgis`` fetches the PV profile
+automatically from latitude / longitude — no hand-built ``pv_kwh``
+column::
+
+    pv:
+      pv_source: pvgis
+      pv_nameplate_kwp: 10000     # scaling quantity (= PVGIS peakpower)
+      latitude: 37.98
+      longitude: 23.73
+      tilt: optimal               # or a number in degrees
+      azimuth: 0                  # 0 = south
+      losses_pct: 14
+      weather_year: 2019          # non-leap year for a clean 8760
+      # raddatabase: PVGIS-SARAH3 # optional
+    project:
+      mode: merchant
+    timeseries_path: prices.csv   # timestamp + dam_price (+ load)
+
+The loader fetches a **per-kWp** profile once (PVGIS ``peakpower=1``),
+caches it on disk keyed on the request geometry, scales it by
+``pv_nameplate_kwp``, upsamples it onto the 15-minute grid and writes
+``ts['pv_kwh']``; a second run reuses the cache.  Latitude, longitude and
+``pv_nameplate_kwp`` are required; the rest default as shown.
+
+**Timezone.** PVGIS data is fetched in UTC and shifted by a **fixed**
+``+2`` hours (Europe/Athens standard time, no DST) so the uniform
+35 040-step grid is preserved.  A DST-aware conversion would create
+23h/25h transition days that break that grid; if you need wall-clock DST
+alignment, re-grid the transition days first.
+
+``pv_source: pvgis`` is resolved by the structured-config loader only; an
+Excel workbook with ``pv_source=pvgis`` is rejected with a pointer to use
+a YAML/JSON config.

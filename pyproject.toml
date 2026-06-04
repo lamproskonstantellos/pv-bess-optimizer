@@ -14,7 +14,7 @@ dynamic = ["version", "dependencies"]
 pvbess = "pvbess_opt.cli:main"
 
 [tool.setuptools]
-packages = ["pvbess_opt", "pvbess_opt.plotting"]
+packages = ["pvbess_opt", "pvbess_opt.plotting", "pvbess_opt.resource"]
 py-modules = ["main"]
 
 [tool.setuptools.dynamic]
@@ -81,6 +81,12 @@ ignore_missing_imports = true
 # config loader uses yaml.safe_load / safe_dump only.
 [[tool.mypy.overrides]]
 module = ["yaml"]
+ignore_missing_imports = true
+
+# requests ships type stubs (types-requests) but they are not in the pinned
+# dev set; the resource layer uses requests.get only.
+[[tool.mypy.overrides]]
+module = ["requests"]
 ignore_missing_imports = true
 
 # Plotting subpackage: matplotlib axes / figure objects flow through
