@@ -13,26 +13,26 @@ Per-step data (one row per timestep; the timestep is auto-detected).
 The case-study workbook ships at 15-minute cadence (35 040 rows for one
 year) per MD YPEN/DAPEEK/93976/2772/2024.
 
-==============================  =========  ====================================
-Column                          Required   Notes
-==============================  =========  ====================================
-``timestamp``                   yes        Datetime; regular cadence required.
-``pv_kwh``                      yes        PV production per step.
-``load_kwh``                    self_consumption only   Required when ``mode=self_consumption``.  In
-                                           ``mode=merchant`` the column is
-                                           ignored if present (an INFO log
-                                           message is emitted) and
-                                           ``pv_to_load`` / ``bess_dis_load`` /
-                                           ``grid_to_load`` are pinned to 0.
-``dam_price_eur_per_mwh``       no         Day-ahead price per step.  Negative
-                                           prices are accepted and preserved
-                                           sign-aware in the rolling-horizon
-                                           noise model.
-``retail_price_eur_per_mwh``    no         Time-varying retail tariff.  Falls
-                                           back to the scalar
-                                           ``retail_tariff_eur_per_mwh`` from
-                                           the ``project`` sheet.
-==============================  =========  ====================================
+==============================  =======================  ====================================
+Column                          Required                 Notes
+==============================  =======================  ====================================
+``timestamp``                   yes                      Datetime; regular cadence required.
+``pv_kwh``                      yes                      PV production per step.
+``load_kwh``                    self_consumption only    Required when ``mode=self_consumption``.  In
+                                                         ``mode=merchant`` the column is
+                                                         ignored if present (an INFO log
+                                                         message is emitted) and
+                                                         ``pv_to_load`` / ``bess_dis_load`` /
+                                                         ``grid_to_load`` are pinned to 0.
+``dam_price_eur_per_mwh``       no                       Day-ahead price per step.  Negative
+                                                         prices are accepted and preserved
+                                                         sign-aware in the rolling-horizon
+                                                         noise model.
+``retail_price_eur_per_mwh``    no                       Time-varying retail tariff.  Falls
+                                                         back to the scalar
+                                                         ``retail_tariff_eur_per_mwh`` from
+                                                         the ``project`` sheet.
+==============================  =======================  ====================================
 
 Sheet ``project``
 -----------------

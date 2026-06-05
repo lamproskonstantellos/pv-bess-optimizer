@@ -42,7 +42,7 @@ Mode definitions
 ----------------
 
 ``self_consumption``
-~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 * Co-located load is required (the ``timeseries`` sheet must include a
   ``load_kwh`` column).

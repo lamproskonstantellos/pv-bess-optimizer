@@ -1296,23 +1296,26 @@ def verify_dispatch_invariants(
     -------
     dict[str, float]
         Nine general-dispatch keys:
-            ``invariant_1_pv_balance_kwh``
-            ``invariant_2_load_balance_kwh``      (self_consumption only; 0.0 in merchant)
-            ``invariant_3_soc_dynamics_kwh``
-            ``invariant_4_rte_bound_excess_kwh``
-            ``invariant_5_no_sim_grid_io_max_product_kwh2``  (self_consumption only)
-            ``invariant_6_load_priority_violations``         (self_consumption only)
-            ``invariant_7_curtail_behavior_kwh``  (BOTH modes)
-            ``invariant_8_soc_closed_cycle_kwh``  (when terminal_soc_equal)
-            ``invariant_9_pv_load_priority_kwh``  (self_consumption only; Section 2)
+
+        * ``invariant_1_pv_balance_kwh``
+        * ``invariant_2_load_balance_kwh`` (self_consumption only; 0.0 in merchant)
+        * ``invariant_3_soc_dynamics_kwh``
+        * ``invariant_4_rte_bound_excess_kwh``
+        * ``invariant_5_no_sim_grid_io_max_product_kwh2`` (self_consumption only)
+        * ``invariant_6_load_priority_violations`` (self_consumption only)
+        * ``invariant_7_curtail_behavior_kwh`` (BOTH modes)
+        * ``invariant_8_soc_closed_cycle_kwh`` (when terminal_soc_equal)
+        * ``invariant_9_pv_load_priority_kwh`` (self_consumption only; Section 2)
+
         Plus six balancing-invariant keys (always present; zero when the
         balancing block did not fire):
-            ``invariant_b1_capacity_share_sum_pct_excess``  (DAM + per-product shares <= 100 %)
-            ``invariant_b2_reservation_share_cap_excess_kw`` (per-step reservation <= share)
-            ``invariant_b3_soc_headroom_up_excess_kwh``
-            ``invariant_b4_soc_headroom_dn_excess_kwh``
-            ``invariant_b5_power_budget_excess_kwh``        (per-direction power budget)
-            ``invariant_b6_off_invariants_max_residual``    (worst general residual when OFF)
+
+        * ``invariant_b1_capacity_share_sum_pct_excess`` (DAM + per-product shares <= 100 %)
+        * ``invariant_b2_reservation_share_cap_excess_kw`` (per-step reservation <= share)
+        * ``invariant_b3_soc_headroom_up_excess_kwh``
+        * ``invariant_b4_soc_headroom_dn_excess_kwh``
+        * ``invariant_b5_power_budget_excess_kwh`` (per-direction power budget)
+        * ``invariant_b6_off_invariants_max_residual`` (worst general residual when OFF)
     """
     if mode is None:
         mode = resolve_mode(params)
