@@ -35,10 +35,11 @@ def _highs_available() -> bool:
     return bool(highspy)
 
 
-def test_pv_source_defaults_to_file_for_legacy_workbook():
-    """A workbook with no pv_source row maps to source='file'."""
+def test_shipped_workbook_pv_source_is_auto():
+    """The shipped workbook ships pv_source='auto' (it resolves to file mode
+    because pv_kwh is filled and no location is set)."""
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
-    assert typed["pv"]["pv_source"] == "file"
+    assert typed["pv"]["pv_source"] == "auto"
 
 
 def test_json_schema_validates_a_sample_config():

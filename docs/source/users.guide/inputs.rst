@@ -17,7 +17,7 @@ year) per MD YPEN/DAPEEK/93976/2772/2024.
 Column                          Required                 Notes
 ==============================  =======================  ====================================
 ``timestamp``                   yes                      Datetime; regular cadence required.
-``pv_kwh``                      yes                      PV production per step.
+``pv_kwh``                      column                   PV production per step. The single PV column: leave its cells blank to source the profile from a location instead (see ``pv_source`` on the ``pv`` sheet). The deprecated ``pv_kwh_override`` column is read only as a fallback when ``pv_kwh`` is empty.
 ``load_kwh``                    self_consumption only    Required when ``mode=self_consumption``.  In
                                                          ``mode=merchant`` the column is
                                                          ignored if present (an INFO log
@@ -76,9 +76,23 @@ High-level run configuration:
 Sheet ``pv``
 ------------
 
-* ``pv_source`` — where the PV profile comes from: ``file`` (default,
-  today's behaviour — use the ``timeseries`` ``pv_kwh`` column) or
-  ``pvgis`` (fetch from latitude / longitude via the resource layer).
+* ``pv_source`` — where the PV profile comes from: ``auto`` (default),
+  ``file`` or ``pvgis``.  ``auto`` uses the ``timeseries`` ``pv_kwh``
+  column (or a ``timeseries_path`` file) when it carries data, and
+  otherwise fetches the profile from ``latitude`` / ``longitude``.  A
+  blank cell means ``auto``.  See the **PV source and location** section
+  below for the full resolution table.
+* ``latitude`` / ``longitude`` — site coordinates (degrees).  Required
+  when ``pv_kwh`` is empty so the profile is fetched from PVGIS.
+* ``tilt`` — array tilt in degrees, or the literal ``optimal``
+  (PVGIS picks the optimal inclination).
+* ``azimuth`` — array azimuth in degrees: ``0`` = south, ``90`` = west,
+  ``-90`` = east.
+* ``losses_pct`` — PVGIS system losses (percent).
+* ``weather_year`` — PVGIS weather year; use a non-leap year for a clean
+  8760-hour profile, or ``tmy``.
+* ``timeseries_path`` — file sub-mode: an optional external CSV / Parquet
+  whose ``pv_kwh`` column replaces the inline column.
 * ``pv_nameplate_kwp`` — PV nameplate.  ``0`` ⇒ no PV in this project.
 * ``specific_production_kwh_per_kwp`` — annual specific production
   (informational; the MILP consumes the timeseries directly).
@@ -283,25 +297,67 @@ workbook PV column to match the user's ``pv_nameplate_kwp`` ×
 per-step ratio is preserved.  See ``inputs/input.xlsx`` for the
 as-shipped nameplate and yield.
 
-PV source and the two ``file`` sub-modes
-----------------------------------------
+PV source and location
+----------------------
 
-``pv_source`` makes the PV-profile origin explicit:
+``pv_source`` (on the ``pv`` sheet) makes the PV-profile origin explicit:
+``auto`` (default — also what a blank cell means), ``file`` or ``pvgis``.
+One presence-aware rule — shared by the Excel reader and the YAML / JSON
+loader, so a workbook and the equivalent config resolve identically —
+decides the source from ``pv_source``, whether the ``pv_kwh`` column (or a
+``timeseries_path`` file) carries data, and whether a ``latitude`` +
+``longitude`` is set:
 
-* ``file`` (default) — the PV profile is taken from the ``timeseries``
-  sheet, in one of two sub-modes:
+.. list-table::
+   :header-rows: 1
+   :widths: 12 26 22 40
 
-  * **absolute** — populate ``pv_kwh_override`` for every row and the
-    loader uses those kWh **verbatim** (your own measured / modelled
-    series).
-  * **rescaled shape** — leave ``pv_kwh_override`` empty and supply a
-    ``pv_kwh`` shape; the loader rescales it so the annual total matches
-    ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` while
-    preserving every per-step ratio
-    (:func:`pvbess_opt.io._rescale_pv_to_user_target`).
+   * - ``pv_source``
+     - ``pv_kwh`` / ``timeseries_path``
+     - ``latitude`` + ``longitude``
+     - Result
+   * - ``auto``
+     - has data
+     - (any)
+     - **file** — the column / path wins; a location set as well is
+       ignored (a warning is logged)
+   * - ``auto``
+     - empty
+     - present
+     - **pvgis** fetch
+   * - ``auto``
+     - empty
+     - missing
+     - **error**
+   * - ``file``
+     - has data
+     - (any)
+     - **file**
+   * - ``file``
+     - empty
+     - (any)
+     - **error**
+   * - ``pvgis``
+     - (any)
+     - present
+     - **pvgis** — the column is ignored (a warning is logged if it has
+       data)
+   * - ``pvgis``
+     - (any)
+     - missing
+     - **error**
 
-* ``pvgis`` — the profile is fetched from latitude / longitude by the
-  resource layer (no PV column needed).
+The empty-and-no-location case and the two explicit mismatches raise a
+clear, actionable error rather than returning a partial profile.
+
+In ``file`` mode the profile is the ``timeseries`` ``pv_kwh`` column (or
+an external ``timeseries_path`` CSV / Parquet), rescaled so the annual
+total matches ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp``
+while every per-step ratio is preserved
+(:func:`pvbess_opt.io._rescale_pv_to_user_target`).  The legacy
+``pv_kwh_override`` column is **deprecated**: it is read only as a
+fallback when ``pv_kwh`` is empty (and emits a one-time deprecation
+warning), so older workbooks keep loading without losing their data.
 
 YAML / JSON config
 ------------------
@@ -326,12 +382,14 @@ results.  :func:`pvbess_opt.io_read.config_json_schema` emits a JSON
 Schema for external validation and
 :func:`pvbess_opt.io_read.validate_config` checks a config against it.
 
-PVGIS PV profiles (``pv_source: pvgis``)
-----------------------------------------
+PVGIS PV profiles (location-sourced)
+------------------------------------
 
-In a YAML/JSON config, ``pv_source: pvgis`` fetches the PV profile
-automatically from latitude / longitude — no hand-built ``pv_kwh``
-column::
+Setting ``latitude`` / ``longitude`` (and leaving ``pv_kwh`` empty, or
+forcing ``pv_source: pvgis``) fetches the PV profile automatically — no
+hand-built ``pv_kwh`` column.  This works from the Excel workbook **and**
+from a YAML / JSON config; both funnel through the same resolver, so the
+results are identical.  In a config it reads::
 
     pv:
       pv_source: pvgis
@@ -359,9 +417,12 @@ caches it on disk keyed on the request geometry, scales it by
 23h/25h transition days that break that grid; if you need wall-clock DST
 alignment, re-grid the transition days first.
 
-``pv_source: pvgis`` is resolved by the structured-config loader only; an
-Excel workbook with ``pv_source=pvgis`` is rejected with a pointer to use
-a YAML/JSON config.
+From an Excel workbook the same applies: fill ``latitude`` / ``longitude``
+on the ``pv`` sheet and clear the ``pv_kwh`` column.  The fetched profile
+is scaled by ``pv_nameplate_kwp`` (the realised PVGIS yield is kept — it
+is not renormalised to ``specific_production_kwh_per_kwp``), so the
+timeseries must span a whole number of hours (e.g. the 35 040-row
+15-minute grid).
 
 Capacity sizing sweep (``sizing:`` block)
 -----------------------------------------
