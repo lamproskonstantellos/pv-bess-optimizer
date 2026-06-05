@@ -9,6 +9,14 @@ the time-series referenced by ``timeseries_path`` (CSV/Parquet) instead of a
 A structured config is *materialized* to a workbook
 (:func:`materialize_to_xlsx`) and then read through the same well-tested
 Excel path, so YAML and Excel inputs produce identical results.
+
+This module also owns the single PV-source resolution rule
+(:func:`resolve_pv_source`): a blank / ``auto`` ``pv_source`` uses the
+``pv_kwh`` column (or an external ``timeseries_path``) when it carries data
+and otherwise fetches the profile from ``latitude`` / ``longitude`` via
+PVGIS.  Both the Excel reader and the structured-config loader funnel
+through it, so an Excel workbook with a location resolves exactly like the
+equivalent YAML config.
 """
 
 from __future__ import annotations
@@ -153,8 +161,7 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
     mip = raw.get("max_injection_profile")
     if mip is not None:
         typed["max_injection_profile"] = np.asarray(mip, dtype=float)
-    if str(typed["pv"].get("pv_source", "file")).strip().lower() == "pvgis":
-        _resolve_pvgis(typed)
+    resolve_pv_source(typed, base_dir=path.parent)
     return typed
 
 
@@ -210,6 +217,263 @@ def _resolve_pvgis(typed: dict[str, Any]) -> None:
     typed["ts"] = ts
     validate_pv_consistency(scaled, nameplate)
     pv["pv_source"] = "file"
+
+
+# ---------------------------------------------------------------------------
+# Single PV-source resolution rule (auto | file | pvgis)
+# ---------------------------------------------------------------------------
+#
+# One rule, shared by the Excel reader (:func:`pvbess_opt.io.read_workbook`)
+# and the structured-config loader, decides where the PV profile comes from:
+#
+#   pv_source | pv_kwh / timeseries_path | latitude+longitude | result
+#   --------- | ---------------------- | ------------------ | --------------
+#   auto      | has data               | (any)              | file (+warn if
+#             |                        |                    | location too)
+#   auto      | empty                  | present            | pvgis
+#   auto      | empty                  | missing            | error
+#   file      | has data               | (any)              | file
+#   file      | empty                  | (any)              | error
+#   pvgis     | (any)                  | present            | pvgis (+warn if
+#             |                        |                    | column has data)
+#   pvgis     | (any)                  | missing            | error
+#
+# A blank ``pv_source`` maps to ``auto``.  The deprecated ``pv_kwh_override``
+# column counts as data only as a fallback when ``pv_kwh`` is empty.
+
+
+def _normalize_pv_source(raw: Any) -> str:
+    """Lower-case ``pv_source``; a blank / missing value maps to ``auto``."""
+    if raw is None:
+        return "auto"
+    if isinstance(raw, float) and np.isnan(raw):
+        return "auto"
+    return str(raw).strip().lower() or "auto"
+
+
+def _is_present_number(value: Any) -> bool:
+    if value is None:
+        return False
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return not np.isnan(number)
+
+
+def _pv_has_location(pv: dict[str, Any]) -> bool:
+    return _is_present_number(pv.get("latitude")) and _is_present_number(
+        pv.get("longitude")
+    )
+
+
+def _column_has_data(ts: pd.DataFrame, column: str) -> bool:
+    if column not in ts.columns:
+        return False
+    return bool(ts[column].notna().any())
+
+
+def _pv_external_path(pv: dict[str, Any], base_dir: Path | None) -> Path | None:
+    ref = pv.get("timeseries_path")
+    if ref is None:
+        return None
+    text = str(ref).strip()
+    if not text:
+        return None
+    path = Path(text)
+    if not path.is_absolute() and base_dir is not None:
+        path = base_dir / path
+    return path
+
+
+def _decide_pv_source(
+    source: str, *, has_file_data: bool, has_location: bool,
+) -> str:
+    """Return ``'file'`` or ``'pvgis'`` per the resolution table, or raise."""
+    if source not in ("auto", "file", "pvgis"):
+        raise ValueError(
+            f"pv_source must be one of auto / file / pvgis; got {source!r}."
+        )
+    if source == "file":
+        if has_file_data:
+            return "file"
+        raise ValueError("pv_source=file but no pv_kwh/timeseries_path provided.")
+    if source == "pvgis":
+        if has_location:
+            return "pvgis"
+        raise ValueError("pv_source=pvgis but no latitude/longitude provided.")
+    # auto
+    if has_file_data:
+        return "file"
+    if has_location:
+        return "pvgis"
+    raise ValueError(
+        "Provide pv_kwh data (or timeseries_path), or set latitude+longitude "
+        "for PVGIS."
+    )
+
+
+def resolve_pv_source(
+    typed: dict[str, Any], *, base_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Resolve ``typed['ts']['pv_kwh']`` from the configured PV source.
+
+    The single PV-source rule shared by the Excel reader and the
+    structured-config loader: a blank ``pv_source`` maps to ``auto``;
+    ``auto`` uses the ``pv_kwh`` column / ``timeseries_path`` when it carries
+    data and otherwise fetches from ``latitude`` / ``longitude`` via PVGIS.
+    Mutates and returns ``typed`` (``ts`` / ``pv``).
+    """
+    from .io import validate_pv_location_fields
+
+    pv = typed["pv"]
+    ts = typed["ts"]
+    validate_pv_location_fields(pv)
+
+    source = _normalize_pv_source(pv.get("pv_source"))
+    has_location = _pv_has_location(pv)
+    pv_kwh_has_data = _column_has_data(ts, "pv_kwh")
+    override_has_data = _column_has_data(ts, "pv_kwh_override")
+    ts_path = _pv_external_path(pv, base_dir)
+    has_file_data = pv_kwh_has_data or ts_path is not None or override_has_data
+
+    decision = _decide_pv_source(
+        source, has_file_data=has_file_data, has_location=has_location,
+    )
+
+    if decision == "pvgis":
+        if pv_kwh_has_data or override_has_data:
+            logger.warning(
+                "pv_source resolves to PVGIS but the timeseries already "
+                "carries PV data; the location wins and the column is ignored."
+            )
+        _resolve_pvgis(typed)
+        if "pv_kwh_override" in typed["ts"].columns:
+            typed["ts"] = typed["ts"].drop(columns=["pv_kwh_override"])
+        # Record the realised PVGIS yield as the specific production so a
+        # re-read of the materialized workbook does not rescale the fetched
+        # profile to the declared target — the Excel and YAML paths then
+        # resolve to the identical pv_kwh.
+        nameplate = float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0)
+        if nameplate > 0.0:
+            annual = float(typed["ts"]["pv_kwh"].astype(float).sum())
+            typed["pv"]["specific_production_kwh_per_kwp"] = annual / nameplate
+        return typed
+
+    if source == "auto" and has_location:
+        logger.warning(
+            "Both PV column/path data and a latitude/longitude are set; using "
+            "the file PV data (the location is ignored)."
+        )
+    typed["ts"] = _resolve_pv_file_column(
+        ts, pv, ts_path=ts_path,
+        pv_kwh_has_data=pv_kwh_has_data,
+        override_has_data=override_has_data,
+    )
+    return typed
+
+
+def _resolve_pv_file_column(
+    ts: pd.DataFrame,
+    pv: dict[str, Any],
+    *,
+    ts_path: Path | None,
+    pv_kwh_has_data: bool,
+    override_has_data: bool,
+) -> pd.DataFrame:
+    """File-branch PV resolution: source ``pv_kwh`` then rescale to target.
+
+    ``pv_kwh`` is sourced (in priority order) from the column, an external
+    ``timeseries_path`` file, or the deprecated ``pv_kwh_override`` column
+    (fallback only), then rescaled to the
+    ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` target.
+    """
+    from .io import _rescale_pv_to_user_target
+
+    nameplate = float(pv.get("pv_nameplate_kwp", 0.0) or 0.0)
+    sp = float(pv.get("specific_production_kwh_per_kwp", 0.0) or 0.0)
+    has_override_col = "pv_kwh_override" in ts.columns
+    if has_override_col:
+        logger.warning(
+            "pv_kwh_override is deprecated; use the single 'pv_kwh' column. "
+            "It is read only as a fallback when 'pv_kwh' is empty."
+        )
+
+    if pv_kwh_has_data:
+        out = ts.drop(columns=["pv_kwh_override"]) if has_override_col else ts
+        return _rescale_pv_to_user_target(
+            out, pv_nameplate_kwp=nameplate, specific_production_kwh_per_kwp=sp,
+        )
+
+    if ts_path is not None:
+        external = _read_timeseries_file(ts_path)
+        if "pv_kwh" not in external.columns:
+            raise ValueError(
+                f"timeseries_path file has no 'pv_kwh' column: {ts_path}."
+            )
+        if len(external) != len(ts):
+            raise ValueError(
+                f"timeseries_path file has {len(external)} rows but the model "
+                f"grid has {len(ts)}; resample it to match."
+            )
+        out = ts.drop(columns=["pv_kwh_override"]) if has_override_col else ts.copy()
+        out["pv_kwh"] = external["pv_kwh"].astype(float).to_numpy()
+        return _rescale_pv_to_user_target(
+            out, pv_nameplate_kwp=nameplate, specific_production_kwh_per_kwp=sp,
+        )
+
+    if override_has_data:
+        return _apply_override_fallback(ts, nameplate)
+
+    raise ValueError(
+        "pv_source resolves to file but no pv_kwh / timeseries_path data is "
+        "available."
+    )
+
+
+def _apply_override_fallback(
+    ts: pd.DataFrame, nameplate_kwp: float,
+) -> pd.DataFrame:
+    """Use the deprecated ``pv_kwh_override`` column as ``pv_kwh`` verbatim.
+
+    Backward-compatible read for old files: only reached when ``pv_kwh`` is
+    empty.  Partial-NaN overrides raise; a fully-populated override is used
+    as-is (with an implied-specific-production sanity warning).
+    """
+    override = ts["pv_kwh_override"]
+    n_total = len(override)
+    n_null = int(override.isna().sum())
+    if n_null > 0:
+        raise ValueError(
+            f"pv_kwh_override has {n_null} NaN values out of {n_total}. "
+            "Fill every row, or leave the column empty and use 'pv_kwh'."
+        )
+    out = ts.copy()
+    out["pv_kwh"] = override.astype(float)
+    out = out.drop(columns=["pv_kwh_override"])
+    annual_sum = float(override.sum())
+    if nameplate_kwp > 0.0:
+        implied_sp = annual_sum / nameplate_kwp
+        logger.info(
+            "PV column: using deprecated pv_kwh_override verbatim (annual sum "
+            "%.1f kWh, implied specific production %.1f kWh/kWp at "
+            "pv_nameplate_kwp=%.1f).",
+            annual_sum, implied_sp, nameplate_kwp,
+        )
+        if implied_sp < 500.0 or implied_sp > 2500.0:
+            logger.warning(
+                "PV column: implied specific production %.1f kWh/kWp at "
+                "pv_nameplate_kwp=%.1f falls outside the plausible "
+                "500-2500 kWh/kWp band. Check pv_nameplate_kwp.",
+                implied_sp, nameplate_kwp,
+            )
+    else:
+        logger.info(
+            "PV column: using deprecated pv_kwh_override verbatim (annual sum "
+            "%.1f kWh). pv_nameplate_kwp = 0 — no implied SP check.",
+            annual_sum,
+        )
+    return out
 
 
 def materialize_to_xlsx(input_path: str | Path, dst_dir: str | Path) -> Path:
@@ -294,6 +558,24 @@ def _json_type(value: Any) -> str:
     return "string"
 
 
+def _pv_schema_overrides() -> dict[str, Any]:
+    """JSON-Schema property specs for the PVGIS location / geometry keys.
+
+    ``latitude`` / ``longitude`` default to None and ``tilt`` / ``weather_year``
+    accept a number *or* a string token, so the auto-derived single-type specs
+    would be wrong; these explicit specs replace them.
+    """
+    return {
+        "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+        "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+        "tilt": {"description": "degrees in [0, 90], or 'optimal'"},
+        "azimuth": {"type": "number", "minimum": -180, "maximum": 360},
+        "losses_pct": {"type": "number", "minimum": 0, "maximum": 100},
+        "weather_year": {"description": "non-leap calendar year, or 'tmy'"},
+        "timeseries_path": {"type": "string"},
+    }
+
+
 def config_json_schema() -> dict[str, Any]:
     """Emit a JSON Schema (draft 2020-12) describing the config structure."""
     from .io import _ALLOWED_VALUES
@@ -306,6 +588,8 @@ def config_json_schema() -> dict[str, Any]:
             if key in _ALLOWED_VALUES:
                 spec["enum"] = sorted(_ALLOWED_VALUES[key])
             props[key] = spec
+        if section == "pv":
+            props.update(_pv_schema_overrides())
         properties[section] = {
             "type": "object",
             "properties": props,
@@ -360,7 +644,9 @@ def validate_config(
         props = section_schema.get("properties", {})
         for key, item in value.items():
             spec = props.get(key)
-            if spec is None:
+            if spec is None or item is None:
+                # Unknown keys are permitted; a None value means "absent"
+                # (an optional field left blank) and is not type-checked.
                 continue
             if "enum" in spec and item not in spec["enum"]:
                 errors.append(f"{section}.{key}: {item!r} not in {spec['enum']}")

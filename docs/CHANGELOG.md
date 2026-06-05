@@ -10,6 +10,16 @@ compatibility surface is maintained.
 - Co-optimised dispatch of PV + BESS in two modes
   (`self_consumption` and `merchant`) and three asset configurations
   (`hybrid`, `pv_only`, `bess_only`).
+- PV input from a column or a location.  The `timeseries` sheet has a
+  single `pv_kwh` column and the `pv` sheet carries `pv_source`
+  (`auto` | `file` | `pvgis`) plus the PVGIS coordinates / geometry
+  (`latitude`, `longitude`, `tilt`, `azimuth`, `losses_pct`,
+  `weather_year`, `timeseries_path`).  Fill `pv_kwh` to use it (rescaled
+  to the nameplate target), or clear it and set `latitude` / `longitude`
+  to fetch the profile from PVGIS.  One presence-aware rule resolves the
+  source for the Excel workbook and a YAML / JSON config alike; the
+  legacy `pv_kwh_override` column is deprecated but still read as a
+  fallback when `pv_kwh` is empty.
 - Stochastic balancing market participation across FCR, aFRR, and
   mFRR with per-product capacity reservation, expected-value MILP,
   and Monte Carlo realisation.

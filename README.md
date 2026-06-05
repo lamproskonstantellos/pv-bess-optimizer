@@ -84,7 +84,9 @@ inputs and outputs look identical.
 `dam_price_eur_per_mwh`, and the nine optional per-product balancing
 price columns (`fcr_capacity_price_eur_per_mwh`,
 `afrr_up_capacity_price_eur_per_mwh`,
-`afrr_up_activation_price_eur_per_mwh`, etc.).
+`afrr_up_activation_price_eur_per_mwh`, etc.).  `pv_kwh` is the **single**
+PV column: fill it to source PV from the timeseries, or leave it empty and
+set a location on the `pv` sheet to source it from PVGIS instead.
 
 ### `project`
 
@@ -96,8 +98,14 @@ Project-level scalars including `mode`
 
 ### `pv`
 
-`pv_nameplate_kwp`, `specific_production_kwh_per_kwp` (used for the
-PV column rescale), and the degradation coefficients.
+`pv_source` (`auto` | `file` | `pvgis`), the PVGIS location / geometry
+(`latitude`, `longitude`, `tilt`, `azimuth`, `losses_pct`,
+`weather_year`, `timeseries_path`), `pv_nameplate_kwp`,
+`specific_production_kwh_per_kwp` (used for the PV column rescale), and
+the degradation coefficients.  `auto` uses the `pv_kwh` column when it is
+filled and otherwise fetches the profile from the location — so a single
+input file covers both "bring your own PV series" and "just give me a
+location".
 
 ### `bess`
 

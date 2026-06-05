@@ -4,16 +4,19 @@ The schema is **eight sheets**, one logical theme per sheet:
 
 * ``timeseries`` — per-step data with lowercase snake_case column names:
   ``timestamp``, ``load_kwh``, ``pv_kwh``, ``dam_price_eur_per_mwh``,
-  optional ``retail_price_eur_per_mwh``, optional ``pv_kwh_override``.
-  ``pv_kwh_override`` — when populated for every row, the loader uses
-  the column verbatim and bypasses the
-  ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` rescaling.
-  Use this when you have your own 15-min PV timeseries from another
-  model or measurements.
+  optional ``retail_price_eur_per_mwh``.  ``pv_kwh`` is the single PV
+  column: fill it to source PV from the timeseries (rescaled to the
+  ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` target), or
+  leave it empty and set ``latitude`` / ``longitude`` on the ``pv`` sheet
+  to source the profile from PVGIS instead.  The legacy
+  ``pv_kwh_override`` column is deprecated: it is read only as a fallback
+  when ``pv_kwh`` is empty (:func:`pvbess_opt.io_read.resolve_pv_source`).
 * ``project`` — high-level run config (lifecycle horizon, mode,
   settlement, retail tariff, grid export limit, currency / title flags).
-* ``pv`` — PV nameplate, specific production, degradation, CAPEX /
-  DEVEX / OPEX.
+* ``pv`` — PV source switch (``pv_source`` = auto | file | pvgis), PVGIS
+  location / array geometry (``latitude``, ``longitude``, ``tilt``,
+  ``azimuth``, ``losses_pct``, ``weather_year``, ``timeseries_path``),
+  nameplate, specific production, degradation, CAPEX / DEVEX / OPEX.
 * ``bess`` — BESS power and capacity, efficiency, SOC bounds, cycles,
   CAPEX / DEVEX / OPEX, replacement and degradation.
 * ``economics`` — discount rate, inflation indices, aggregator fee,
@@ -100,6 +103,7 @@ __all__ = [
     "make_run_layout",
     "read_inputs",
     "read_workbook",
+    "validate_pv_location_fields",
     "validate_workbook_params",
     "write_assumptions_summary",
     "write_dispatch_artifacts",
@@ -139,7 +143,18 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
 }
 
 PV_SHEET_DEFAULTS: dict[str, Any] = {
-    "pv_source": "file",
+    "pv_source": "auto",
+    # PVGIS location / array geometry — consulted when the PV profile is
+    # fetched by location instead of read from the pv_kwh column.
+    # latitude / longitude / timeseries_path default to None (absent); the
+    # geometry knobs carry PVGIS-sensible defaults.
+    "latitude": None,
+    "longitude": None,
+    "tilt": "optimal",
+    "azimuth": 0.0,
+    "losses_pct": 14.0,
+    "weather_year": 2019,
+    "timeseries_path": None,
     "pv_nameplate_kwp": 0.0,
     "specific_production_kwh_per_kwp": 1500.0,
     "pv_degradation_year1_pct": 2.5,
@@ -334,7 +349,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_daily_scope": frozenset({"none", "year1_only", "all"}),
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
-    "pv_source": frozenset({"file", "pvgis"}),
+    "pv_source": frozenset({"auto", "file", "pvgis"}),
     "debt_repayment": frozenset({"annuity", "linear"}),
 }
 
@@ -388,10 +403,24 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
 )
 
 _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
-    ("pv_source", "file", "file | pvgis",
-     "Where the PV profile comes from. 'file' uses the timeseries "
-     "pv_kwh column (rescaled to nameplate x specific production, or a "
-     "verbatim pv_kwh_override). 'pvgis' fetches it from lat/lon."),
+    ("pv_source", "auto", "enum",
+     "auto | file | pvgis. auto: use pv_kwh if filled, else fetch by "
+     "location."),
+    ("latitude", None, "deg",
+     "PVGIS only: required when pv_kwh is empty."),
+    ("longitude", None, "deg",
+     "PVGIS only: required when pv_kwh is empty."),
+    ("tilt", "optimal", "deg",
+     'PVGIS only: degrees, or "optimal".'),
+    ("azimuth", 0, "deg",
+     "PVGIS only: 0 = south, 90 = west, -90 = east."),
+    ("losses_pct", 14, "%",
+     "PVGIS only: system losses."),
+    ("weather_year", 2019, "year",
+     'PVGIS only: non-leap year for a clean 8760, or "tmy".'),
+    ("timeseries_path", None, "path",
+     "file only: optional external CSV/Parquet instead of the pv_kwh "
+     "column."),
     ("pv_nameplate_kwp", 0, "kWp",
      "PV nameplate capacity. 0 = no PV in this project."),
     ("specific_production_kwh_per_kwp", 1500, "kWh/kWp/yr",
@@ -816,6 +845,60 @@ def _parse_string_enum(
     return token
 
 
+def _parse_pv_tilt(raw: Any, default: Any) -> Any:
+    """Parse ``tilt``: the literal ``optimal`` or a number in degrees."""
+    if raw is None:
+        return default
+    if isinstance(raw, float) and np.isnan(raw):
+        return default
+    if isinstance(raw, str):
+        token = raw.strip().lower()
+        if token == "":
+            return default
+        if token == "optimal":
+            return "optimal"
+    coerced = _coerce(raw, float, default)
+    if coerced is _COERCE_FAILED:
+        logger.warning(
+            "Workbook value for 'tilt' could not be parsed as a number or "
+            "'optimal' (got %r); using default %r.", raw, default,
+        )
+        return default
+    return coerced
+
+
+def _parse_pv_weather_year(raw: Any, default: Any) -> Any:
+    """Parse ``weather_year``: a calendar year or the literal ``tmy``."""
+    if raw is None:
+        return default
+    if isinstance(raw, float) and np.isnan(raw):
+        return default
+    if isinstance(raw, str):
+        token = raw.strip().lower()
+        if token == "":
+            return default
+        if token == "tmy":
+            return "tmy"
+    coerced = _coerce(raw, int, default)
+    if coerced is _COERCE_FAILED:
+        logger.warning(
+            "Workbook value for 'weather_year' could not be parsed as a year "
+            "or 'tmy' (got %r); using default %r.", raw, default,
+        )
+        return default
+    return coerced
+
+
+def _parse_pv_path(raw: Any, default: Any) -> Any:
+    """Parse ``timeseries_path``: a free-form path string (blank → default)."""
+    if raw is None:
+        return default
+    if isinstance(raw, float) and np.isnan(raw):
+        return default
+    text = str(raw).strip()
+    return text if text else default
+
+
 # ---------------------------------------------------------------------------
 # Sheet → flat-dict reduction (skips separator rows)
 # ---------------------------------------------------------------------------
@@ -849,6 +932,12 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         return _parse_string_enum(
             raw, str(default), _ALLOWED_VALUES.get(key, frozenset()), key,
         )
+    if key == "tilt":
+        return _parse_pv_tilt(raw, default)
+    if key == "weather_year":
+        return _parse_pv_weather_year(raw, default)
+    if key == "timeseries_path":
+        return _parse_pv_path(raw, default)
     if key in _INT_KEYS:
         coerced = _coerce(raw, int, default)
         if coerced is _COERCE_FAILED:
@@ -1065,7 +1154,8 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
                 )
             ts[col] = numeric.ffill().bfill()
     # pv_kwh_override deliberately stays out of the ffill/bfill loop so
-    # partial NaN survives long enough for _resolve_pv_column to raise.
+    # partial NaN survives for the resolver's deprecated-fallback check
+    # (pvbess_opt.io_read._apply_override_fallback) to raise on.
     return ts
 
 
@@ -1148,77 +1238,6 @@ def _rescale_pv_to_user_target(
         current_total, target_total, factor,
         pv_nameplate_kwp, specific_production_kwh_per_kwp,
     )
-    return out
-
-
-def _resolve_pv_column(
-    ts: pd.DataFrame,
-    *,
-    pv_nameplate_kwp: float,
-    specific_production_kwh_per_kwp: float,
-) -> pd.DataFrame:
-    """Resolve ``pv_kwh`` from either the override column or rescaling.
-
-    Four cases handled in order:
-
-    1. ``pv_kwh_override`` column absent — fall through to the
-       ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` rescale.
-    2. Column present, all-null — treat as absent and rescale.
-    3. Column present, all non-null — overwrite ``pv_kwh`` with the
-       override values verbatim, drop the override column from the
-       returned frame, log INFO with the annual sum + implied SP.
-    4. Column present, partial NaN — raise ``ValueError`` with a hint.
-    """
-    if "pv_kwh_override" not in ts.columns:
-        return _rescale_pv_to_user_target(
-            ts,
-            pv_nameplate_kwp=pv_nameplate_kwp,
-            specific_production_kwh_per_kwp=specific_production_kwh_per_kwp,
-        )
-    override = ts["pv_kwh_override"]
-    n_total = len(override)
-    n_null = int(override.isna().sum())
-    if n_null == n_total:
-        out = ts.drop(columns=["pv_kwh_override"])
-        return _rescale_pv_to_user_target(
-            out,
-            pv_nameplate_kwp=pv_nameplate_kwp,
-            specific_production_kwh_per_kwp=specific_production_kwh_per_kwp,
-        )
-    if n_null > 0:
-        raise ValueError(
-            f"pv_kwh_override has {n_null} NaN values out of {n_total}. "
-            "Either fill every row (15-min cadence, all 35040 values) "
-            "or leave the column entirely empty — the loader will then "
-            "fall back to pv_kwh × pv_nameplate_kwp × "
-            "specific_production_kwh_per_kwp rescaling."
-        )
-    out = ts.copy()
-    out["pv_kwh"] = override.astype(float)
-    out = out.drop(columns=["pv_kwh_override"])
-    annual_sum = float(override.sum())
-    if pv_nameplate_kwp > 0:
-        implied_sp = annual_sum / pv_nameplate_kwp
-        logger.info(
-            "PV column: using pv_kwh_override verbatim (annual sum "
-            "%.1f kWh, implied specific production %.1f kWh/kWp at "
-            "pv_nameplate_kwp=%.1f). Confirm pv_nameplate_kwp matches "
-            "the asset that produced this series.",
-            annual_sum, implied_sp, pv_nameplate_kwp,
-        )
-        if implied_sp < 500.0 or implied_sp > 2500.0:
-            logger.warning(
-                "PV column: implied specific production %.1f kWh/kWp "
-                "at pv_nameplate_kwp=%.1f falls outside the plausible "
-                "500-2500 kWh/kWp band. Check pv_nameplate_kwp.",
-                implied_sp, pv_nameplate_kwp,
-            )
-    else:
-        logger.info(
-            "PV column: using pv_kwh_override verbatim (annual sum "
-            "%.1f kWh). pv_nameplate_kwp = 0 — no implied SP check.",
-            annual_sum,
-        )
     return out
 
 
@@ -1382,6 +1401,80 @@ _DT_MINUTES_VALID_DIVISORS: tuple[int, ...] = (
 )
 
 
+def _coerce_optional_float(value: Any) -> float | None:
+    """Return ``value`` as a float, or None when blank / non-numeric."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if text == "":
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if np.isnan(result):
+        return None
+    return result
+
+
+def validate_pv_location_fields(pv: dict[str, Any]) -> None:
+    """Range-check the PVGIS location / geometry fields on the ``pv`` sheet.
+
+    Raises ``ValueError`` naming the offending key.  Blank / absent fields
+    pass; whether a field is *required* is decided separately by
+    :func:`pvbess_opt.io_read.resolve_pv_source`.
+    """
+    lat = _coerce_optional_float(pv.get("latitude"))
+    if lat is not None and not (-90.0 <= lat <= 90.0):
+        raise ValueError(f"'latitude' must be in [-90, 90]; got {lat!r}.")
+    lon = _coerce_optional_float(pv.get("longitude"))
+    if lon is not None and not (-180.0 <= lon <= 180.0):
+        raise ValueError(f"'longitude' must be in [-180, 180]; got {lon!r}.")
+
+    tilt = pv.get("tilt")
+    if isinstance(tilt, str) and tilt.strip().lower() == "optimal":
+        pass
+    elif tilt is not None and str(tilt).strip() != "":
+        tilt_f = _coerce_optional_float(tilt)
+        if tilt_f is None:
+            raise ValueError(
+                f"'tilt' must be a number in [0, 90] or 'optimal'; got {tilt!r}."
+            )
+        if not (0.0 <= tilt_f <= 90.0):
+            raise ValueError(
+                f"'tilt' must be in [0, 90] or 'optimal'; got {tilt!r}."
+            )
+
+    azimuth = _coerce_optional_float(pv.get("azimuth"))
+    if azimuth is not None and not (-180.0 <= azimuth <= 360.0):
+        raise ValueError(f"'azimuth' must be in [-180, 360]; got {azimuth!r}.")
+
+    losses = _coerce_optional_float(pv.get("losses_pct"))
+    if losses is not None and not (0.0 <= losses <= 100.0):
+        raise ValueError(f"'losses_pct' must be in [0, 100]; got {losses!r}.")
+
+    weather_year = pv.get("weather_year")
+    if isinstance(weather_year, str) and weather_year.strip().lower() == "tmy":
+        pass
+    elif weather_year is not None and str(weather_year).strip() != "":
+        year_f = _coerce_optional_float(weather_year)
+        if year_f is None:
+            raise ValueError(
+                f"'weather_year' must be a calendar year or 'tmy'; got "
+                f"{weather_year!r}."
+            )
+        if not (1980.0 <= year_f <= 2100.0):
+            raise ValueError(
+                f"'weather_year' must be a plausible year (1980-2100) or "
+                f"'tmy'; got {weather_year!r}."
+            )
+
+
 def validate_workbook_params(
     typed: dict[str, Any], *, dt_minutes: int | None = None,
 ) -> None:
@@ -1402,6 +1495,8 @@ def validate_workbook_params(
     bess = typed.get("bess") or {}
     economics = typed.get("economics") or {}
     balancing = typed.get("balancing") or {}
+
+    validate_pv_location_fields(pv)
 
     def _require_non_negative(section: dict[str, Any], key: str) -> None:
         if key not in section:
@@ -1594,21 +1689,14 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
     )
-    pv_source = str(typed["pv"].get("pv_source", "file")).strip().lower()
-    if pv_source == "pvgis":
-        raise ValueError(
-            "pv_source='pvgis' is resolved by the structured-config loader, "
-            "not the Excel reader. Run a YAML/JSON config "
-            "(pvbess --config run.yaml) so the PV profile is fetched from "
-            "latitude/longitude."
-        )
-    ts = _resolve_pv_column(
-        ts,
-        pv_nameplate_kwp=float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0),
-        specific_production_kwh_per_kwp=float(
-            typed["pv"].get("specific_production_kwh_per_kwp", 0.0) or 0.0,
-        ),
-    )
+    # Single PV-source resolution rule (auto | file | pvgis), shared with
+    # the structured-config loader.  Resolves ts['pv_kwh'] from the column,
+    # an external timeseries_path, or a PVGIS fetch by latitude / longitude.
+    from .io_read import resolve_pv_source
+
+    typed["ts"] = ts
+    resolve_pv_source(typed, base_dir=xlsx_path.parent)
+    ts = typed.pop("ts")
     dt_minutes = detect_timestep_minutes(ts)
     validate_workbook_params(typed, dt_minutes=dt_minutes)
     ts = _apply_balancing_timeseries_fallback(ts, typed["balancing"])

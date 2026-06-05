@@ -48,6 +48,8 @@ def test_project_sheet_keys():
 def test_pv_sheet_keys():
     expected = {
         "pv_source",
+        "latitude", "longitude", "tilt", "azimuth", "losses_pct",
+        "weather_year", "timeseries_path",
         "pv_nameplate_kwp", "specific_production_kwh_per_kwp",
         "pv_degradation_year1_pct", "pv_degradation_annual_pct",
         "capex_pv_eur_per_kw", "devex_pv_eur_per_kw",

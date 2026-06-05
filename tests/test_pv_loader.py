@@ -1,16 +1,17 @@
-"""Loader contracts for the PV column.
+"""Loader contracts for the single ``pv_kwh`` column.
 
 The repo workbook ships with a 1 MW × 1500 kWh/kWp default (1 500 000
-kWh annual).  The loader supports two paths:
+kWh annual).  The loader sources PV as follows:
 
 1. **Default path** — ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp``
    rescales the workbook ``pv_kwh`` column proportionally.  Same shape,
    different magnitude.
-2. **Override path** — if the optional ``pv_kwh_override`` column is
-   present **and complete**, it is used verbatim and the rescaling is
-   skipped.  Partial NaN is rejected.
+2. **Deprecated fallback** — the legacy ``pv_kwh_override`` column is read
+   only when ``pv_kwh`` is empty (so old files keep their data); it is used
+   verbatim, a one-time deprecation warning is emitted, and partial NaN is
+   rejected.  When ``pv_kwh`` is filled the override column is ignored.
 
-These 11 contracts pin the loader's behaviour for both paths.
+These contracts pin the loader's behaviour for both paths.
 """
 
 from __future__ import annotations
@@ -134,10 +135,18 @@ def test_zero_nameplate_skips_rescaling():
 
 
 def _override_workbook(
-    tmp_path: Path, override: np.ndarray, *, pv_kwp: float = 1000.0,
+    tmp_path: Path,
+    override: np.ndarray,
+    *,
+    pv_kwp: float = 1000.0,
+    clear_pv_kwh: bool = False,
 ) -> Path:
     typed = read_workbook(REPO_INPUT_XLSX)
     ts = typed["ts"].copy()
+    if clear_pv_kwh:
+        # Empty the single PV column so the deprecated override is the
+        # only PV data — the §2.4 backward-compatible fallback path.
+        ts["pv_kwh"] = np.nan
     ts["pv_kwh_override"] = override.astype(float)
     typed["ts"] = ts
     typed["pv"]["pv_nameplate_kwp"] = float(pv_kwp)
@@ -146,8 +155,9 @@ def _override_workbook(
     return out
 
 
-def test_loader_uses_pv_kwh_override_when_present(tmp_path):
-    # Build a synthetic override: zero at night, ramped during daylight.
+def test_override_used_as_fallback_when_pv_kwh_empty(tmp_path, caplog):
+    """With pv_kwh empty the deprecated pv_kwh_override is used verbatim and
+    a one-time deprecation warning is emitted."""
     n = 35040
     hour_of_day = (np.arange(n) // 4) % 24
     override = np.where(
@@ -155,13 +165,29 @@ def test_loader_uses_pv_kwh_override_when_present(tmp_path):
         100.0 + 10.0 * (hour_of_day - 6),  # arbitrary deterministic shape
         0.0,
     )
+    out = _override_workbook(tmp_path, override, pv_kwp=1000.0, clear_pv_kwh=True)
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io_read"):
+        loaded = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
+    assert np.allclose(loaded, override)
+    assert any(
+        "pv_kwh_override is deprecated" in r.getMessage() for r in caplog.records
+    )
+
+
+def test_filled_pv_kwh_ignores_override(tmp_path):
+    """When pv_kwh carries data the override column is ignored (pv_kwh wins)
+    and dropped from the loaded frame."""
+    n = 35040
+    override = np.full(n, 999.0)  # would be obvious if it leaked through
+    # clear_pv_kwh defaults to False, so the repo pv_kwh shape stays filled.
     out = _override_workbook(tmp_path, override, pv_kwp=1000.0)
     loaded = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
-    assert np.allclose(loaded, override)
+    assert not np.allclose(loaded, override)
+    assert float(loaded.sum()) == pytest.approx(1000.0 * 1500.0, rel=1e-9)
 
 
 # ---------------------------------------------------------------------------
-# 7. Override bypasses the rescaling pipeline
+# 7. Override fallback bypasses the rescaling pipeline
 # ---------------------------------------------------------------------------
 
 
@@ -169,9 +195,9 @@ def test_loader_skips_rescaling_when_override_used(tmp_path):
     n = 35040
     override = np.full(n, 50.0)  # constant 50 kWh per 15-min step
     annual_sum = float(override.sum())
-    # Doubling nameplate would normally double the annual sum via
-    # rescaling, but override must bypass that path.
-    out = _override_workbook(tmp_path, override, pv_kwp=2000.0)
+    # Used verbatim (no nameplate rescale) when pv_kwh is empty, so doubling
+    # the nameplate must not change the annual sum.
+    out = _override_workbook(tmp_path, override, pv_kwp=2000.0, clear_pv_kwh=True)
     loaded = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
     assert float(loaded.sum()) == pytest.approx(annual_sum, rel=1e-12)
 
@@ -198,7 +224,9 @@ def test_partial_nan_override_raises(tmp_path):
     n = 35040
     override = np.full(n, 50.0)
     override[:n // 2] = np.nan  # half empty, half filled
-    out = _override_workbook(tmp_path, override)
+    # With pv_kwh empty the override is the fallback source; a partial-NaN
+    # fallback is rejected rather than silently producing a garbage profile.
+    out = _override_workbook(tmp_path, override, clear_pv_kwh=True)
     with pytest.raises(ValueError, match="pv_kwh_override has"):
         read_workbook(out)
 
@@ -233,8 +261,8 @@ def test_implausible_specific_production_warns(tmp_path, caplog):
     # 1 MW nameplate with override summing to 4 000 000 kWh ⇒
     # implied SP = 4000 kWh/kWp, well above the 500-2500 band.
     override = np.full(n, 4_000_000.0 / n)
-    out = _override_workbook(tmp_path, override, pv_kwp=1000.0)
-    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
+    out = _override_workbook(tmp_path, override, pv_kwp=1000.0, clear_pv_kwh=True)
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io_read"):
         read_workbook(out)
     warnings = [
         r for r in caplog.records
