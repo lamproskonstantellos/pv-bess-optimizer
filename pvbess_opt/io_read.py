@@ -115,6 +115,22 @@ def _apply_financing_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
         econ["debt_repayment"] = str(fin["repayment"])
 
 
+def _apply_grid_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
+    """Map an optional top-level ``grid:`` block onto economics keys.
+
+    ``co2_intensity`` is kg/MWh (the economics-key unit); ``co2_annual_decline``
+    is a fraction (0..1) mapped to the percentage key.
+    """
+    grid = raw.get("grid")
+    if not isinstance(grid, dict):
+        return
+    econ = typed["economics"]
+    if "co2_intensity" in grid:
+        econ["grid_co2_intensity_kg_per_mwh"] = float(grid["co2_intensity"])
+    if "co2_annual_decline" in grid:
+        econ["grid_co2_annual_decline_pct"] = float(grid["co2_annual_decline"]) * 100.0
+
+
 def load_structured_config(path: str | Path) -> dict[str, Any]:
     """Load a YAML/JSON config into the typed nested dict that
     :func:`pvbess_opt.io.read_workbook` produces."""
@@ -132,6 +148,7 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
         user = {k: v for k, v in user.items() if k != "timeseries_path"}
         typed[section] = {**defaults, **user}
     _apply_financing_block(raw, typed)
+    _apply_grid_block(raw, typed)
     typed["ts"] = _resolve_timeseries(raw, path.parent)
     mip = raw.get("max_injection_profile")
     if mip is not None:

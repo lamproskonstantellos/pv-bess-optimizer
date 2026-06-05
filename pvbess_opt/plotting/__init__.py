@@ -38,6 +38,10 @@ from .daily import (
 from .degradation import (
     plot_soh_trajectory,
 )
+from .emissions import (
+    plot_cfe_duration_curve,
+    plot_energy_sankey,
+)
 from .financial import (
     plot_cumulative_cashflow,
     plot_irr_tornado,
@@ -107,6 +111,7 @@ __all__ = [
     "plot_bess_capacity_vs_activation_split",
     "plot_bess_revenue_by_month",
     "plot_bess_revenue_waterfall",
+    "plot_cfe_duration_curve",
     "plot_cumulative_cashflow",
     "plot_daily_combined",
     "plot_daily_combined_merchant",
@@ -119,6 +124,7 @@ __all__ = [
     "plot_daily_surplus",
     "plot_dam_intraday_heatmap",
     "plot_efficient_frontier",
+    "plot_energy_sankey",
     "plot_foresight_gap_comparison",
     "plot_input_forecast_band",
     "plot_input_seasonal_boxplot",

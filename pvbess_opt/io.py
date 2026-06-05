@@ -192,6 +192,9 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "debt_interest_rate_pct": 5.0,
     "debt_tenor_years": 15,
     "debt_repayment": "annuity",
+    # Grid emissions / 24/7 CFE accounting (off by default: intensity 0).
+    "grid_co2_intensity_kg_per_mwh": 0.0,
+    "grid_co2_annual_decline_pct": 0.0,
 }
 
 BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
@@ -499,6 +502,13 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("debt_repayment", "annuity", "annuity | linear",
      "Repayment profile: annuity (level debt service) or linear "
      "(level principal)."),
+    ("grid_co2_intensity_kg_per_mwh", 0.0, "kg/MWh",
+     "Grid carbon intensity for emissions / 24/7 CFE accounting "
+     "(0 = off, the default; an optional grid_co2_kg_per_mwh time-series "
+     "column overrides this per step). Never affects dispatch or NPV."),
+    ("grid_co2_annual_decline_pct", 0.0, "%",
+     "Annual decline of the grid carbon intensity over the project life "
+     "(grid decarbonisation). 0 = constant intensity."),
 )
 
 _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -1874,6 +1884,7 @@ def write_results_workbook(
     rolling_horizon_compare_mc: pd.DataFrame | None = None,
     degradation: pd.DataFrame | None = None,
     debt_schedule: pd.DataFrame | None = None,
+    emissions: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -1927,5 +1938,7 @@ def write_results_workbook(
             degradation.to_excel(writer, sheet_name="degradation", index=False)
         if debt_schedule is not None and not debt_schedule.empty:
             debt_schedule.to_excel(writer, sheet_name="debt_schedule", index=False)
+        if emissions is not None and not emissions.empty:
+            emissions.to_excel(writer, sheet_name="emissions", index=False)
         style_workbook(writer.book)
     return out_path

@@ -57,6 +57,8 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     "plot_scenario_comparison_bars", "plot_scenario_revenue_bridge",
     # Degradation
     "plot_soh_trajectory",
+    # Emissions / CFE
+    "plot_cfe_duration_curve", "plot_energy_sankey",
 )
 
 

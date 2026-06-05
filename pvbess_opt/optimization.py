@@ -1017,6 +1017,10 @@ def model_to_dataframe(
         res["dam_price_eur_per_mwh"] = ts["dam_price_eur_per_mwh"].values
     if "retail_price_eur_per_mwh" in ts.columns:
         res["retail_price_eur_per_mwh"] = ts["retail_price_eur_per_mwh"].values
+    # Optional per-step grid carbon intensity, echoed for emissions / 24/7
+    # CFE accounting. Absent unless the user supplies the time-series column.
+    if "grid_co2_kg_per_mwh" in ts.columns:
+        res["grid_co2_kg_per_mwh"] = ts["grid_co2_kg_per_mwh"].values
 
     # Balancing reservations (kW per timestep). Only emitted when the
     # MILP carried the balancing block — keeping the dispatch frame

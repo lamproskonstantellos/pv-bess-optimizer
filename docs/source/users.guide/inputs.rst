@@ -180,6 +180,41 @@ mapped onto the ``economics`` keys above::
       tenor_years: 15        # → debt_tenor_years
       repayment: annuity     # → debt_repayment
 
+Grid emissions and 24/7 CFE
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two optional ``economics`` keys add an emissions / carbon-free-energy
+report, off by default so an unconfigured run is unchanged:
+
+* ``grid_co2_intensity_kg_per_mwh`` (default 0) — grid carbon intensity.
+  ``0`` keeps the feature off and suppresses the emissions report.  A
+  per-step ``grid_co2_kg_per_mwh`` column on the ``timeseries`` sheet
+  overrides this with a time-varying intensity (honest 24/7 accounting on
+  a grid whose carbon content moves through the day).
+* ``grid_co2_annual_decline_pct`` (default 0) — annual decline of the grid
+  intensity over the project life, modelling a decarbonising grid; the
+  avoided emissions taper accordingly.
+
+When an intensity is configured the run writes a styled ``emissions``
+sheet to ``03_results.xlsx`` (per project year: the 24/7 CFE score, load,
+carbon-free supply, grid import, clean energy delivered, and avoided /
+induced / net / residual emissions in tonnes CO2e) plus two figures in
+``04_financial_plots/`` — an annual energy-balance Sankey and the
+carbon-free-energy duration curve.  The **24/7 CFE score** is the
+time-coincident match of the load by carbon-free supply (PV direct plus
+the PV-sourced share of battery discharge); grid-charged battery energy is
+not counted as carbon-free, so the score is stricter than a loose annual
+volumetric match.  None of this touches the dispatch or the NPV — it is a
+diagnostic on the solved schedule.
+
+In a YAML / JSON config the same settings can be supplied as a ``grid:``
+block (``co2_intensity`` in kg/MWh, ``co2_annual_decline`` as a fraction)
+mapped onto the ``economics`` keys above::
+
+    grid:
+      co2_intensity: 350       # → grid_co2_intensity_kg_per_mwh
+      co2_annual_decline: 0.02  # → grid_co2_annual_decline_pct = 2
+
 Sheet ``balancing``
 -------------------
 

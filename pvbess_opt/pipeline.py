@@ -42,6 +42,7 @@ from pvbess_opt.economics import (
     derive_monthly_cashflow,
     read_economic_params,
 )
+from pvbess_opt.emissions import build_emissions_report
 from pvbess_opt.io import (
     PROJECT_SHEET_DEFAULTS,
     copy_input_snapshot,
@@ -70,6 +71,7 @@ from pvbess_opt.plotting import (
     plot_bess_capacity_vs_activation_split,
     plot_bess_revenue_by_month,
     plot_bess_revenue_waterfall,
+    plot_cfe_duration_curve,
     plot_cumulative_cashflow,
     plot_daily_combined,
     plot_daily_combined_merchant,
@@ -80,6 +82,7 @@ from pvbess_opt.plotting import (
     plot_daily_soc,
     plot_daily_supply,
     plot_daily_surplus,
+    plot_energy_sankey,
     plot_irr_tornado,
     plot_lcoe_summary,
     plot_lcos_summary,
@@ -683,6 +686,39 @@ def _build_degradation_report(
     )
 
 
+def _build_emissions_report(
+    res: pd.DataFrame, econ: dict[str, Any],
+) -> pd.DataFrame | None:
+    """Post-hoc grid-emissions / 24/7 CFE report from the solved dispatch.
+
+    Returns None unless a grid carbon intensity is configured — a scalar
+    ``grid_co2_intensity_kg_per_mwh`` or a per-step ``grid_co2_kg_per_mwh``
+    dispatch column.  This is a diagnostic only: it never feeds back into the
+    dispatch or the NPV, so an unconfigured run is unchanged.
+    """
+    scalar_ci = float(econ.get("grid_co2_intensity_kg_per_mwh", 0.0) or 0.0)
+    has_series = "grid_co2_kg_per_mwh" in res.columns
+    if scalar_ci <= 0.0 and not has_series:
+        return None
+    return build_emissions_report(
+        res,
+        grid_ci_kg_per_mwh=scalar_ci,
+        grid_ci_annual_decline_pct=float(
+            econ.get("grid_co2_annual_decline_pct", 0.0) or 0.0
+        ),
+        project_years=int(
+            econ.get("project_lifecycle_years",
+                     PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
+            or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+        ),
+        start_year=int(
+            econ.get("project_start_year",
+                     PROJECT_SHEET_DEFAULTS["project_start_year"])
+            or PROJECT_SHEET_DEFAULTS["project_start_year"]
+        ),
+    )
+
+
 def _scenario_slug(params: dict[str, Any]) -> str:
     """Return the ``<mode>[_grid_ch]`` folder slug."""
     mode = resolve_mode(params)
@@ -1059,6 +1095,7 @@ def _run_one(
         )
 
         degradation_df = _build_degradation_report(res, params, econ)
+        emissions_df = _build_emissions_report(res, econ)
 
         write_results_workbook(
             out_dir / "03_results.xlsx",
@@ -1076,11 +1113,22 @@ def _run_one(
             rolling_horizon_compare_mc=rolling_compare_df,
             degradation=degradation_df,
             debt_schedule=bundle.get("debt_schedule"),
+            emissions=emissions_df,
         )
         if degradation_df is not None and not degradation_df.empty:
             plot_soh_trajectory(
                 degradation_df, layout["financial_plots"] / "soh_trajectory.pdf",
             )
+        if emissions_df is not None and not emissions_df.empty:
+            try:
+                plot_energy_sankey(
+                    res, layout["financial_plots"] / "energy_sankey.pdf",
+                )
+                plot_cfe_duration_curve(
+                    res, layout["financial_plots"] / "cfe_duration_curve.pdf",
+                )
+            except Exception:
+                logger.exception("Emissions / CFE plot generation failed")
 
         if bundle.get("yearly_cf") is not None:
             _generate_financial_plots(
