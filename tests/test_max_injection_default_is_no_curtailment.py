@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from pvbess_opt.config import DEFAULT_MAX_INJECTION_PCT_HOURLY
+from pvbess_opt.constants import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from pvbess_opt.max_injection import build_per_step_max_injection_frac
 
 

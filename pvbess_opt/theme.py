@@ -1,4 +1,4 @@
-"""Constants shared across modules: plot labels, colors, IEEE style."""
+"""Theme: plot labels, colours, IEEE matplotlib style, and financial labels."""
 
 from __future__ import annotations
 
@@ -6,20 +6,31 @@ import logging
 import math
 from typing import Any
 
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
 __all__ = [
     "ALL_LABELS",
     "ALPHA_STACK_AREAS",
     "ALPHA_STACK_BARS",
     "BM_COLOURS",
     "COLORS",
-    "DEFAULT_MAX_INJECTION_PCT_HOURLY",
+    "COL_WIDTH_MAX",
+    "COL_WIDTH_MIN",
+    "COL_WIDTH_PADDING",
     "FINANCIAL_COLORS",
     "FINANCIAL_LABELS",
     "FINANCIAL_LABEL_TO_COLOR_KEY",
     "FINANCIAL_LEGEND_ORDER",
+    "HEADER_BORDER",
+    "HEADER_BORDER_HEX",
+    "HEADER_FILL",
+    "HEADER_FILL_HEX",
+    "HEADER_FONT",
+    "HEADER_FONT_HEX",
     "IEEE_RCPARAMS",
     "LEGEND_ORDER",
     "MERCHANT_COLORS",
+    "NOTES_WRAP",
     "UNCERTAINTY_SOURCE_COLORS",
     "XTICK_ROT",
     "apply_financial_legend",
@@ -31,15 +42,30 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# Project-level defaults
+# Excel house style (single source of truth)
 # ---------------------------------------------------------------------------
+#
+# These MIRROR what scripts/polish_input_workbook.py applies to the INPUT
+# workbook and what pvbess_opt.io_style applies to every OUTPUT workbook,
+# so input and output look identical by construction.  No centering and no
+# explicit font name/size — that keeps the input workbook byte-stable.
 
-# Default share of ``p_grid_export_max_kw`` that is available for export,
-# in percent (per hour-of-day).  Applied when the workbook omits the
-# ``max_injection_profile`` sheet.  100.0 means "no curtailment" — the
-# constraint binds only on the regulatory grid-connection nameplate.
-# Users opt in to curtailment by supplying a profile below 100.
-DEFAULT_MAX_INJECTION_PCT_HOURLY: float = 100.0
+HEADER_FILL_HEX: str = "1F3864"      # navy (Excel "Dark Blue 1, Lighter 25%")
+HEADER_FONT_HEX: str = "FFFFFF"      # white
+HEADER_BORDER_HEX: str = "BFBFBF"    # light grey
+
+HEADER_FILL = PatternFill(
+    start_color=HEADER_FILL_HEX, end_color=HEADER_FILL_HEX, fill_type="solid",
+)
+HEADER_FONT = Font(bold=True, color=HEADER_FONT_HEX)
+HEADER_BORDER = Border(bottom=Side(border_style="thin", color=HEADER_BORDER_HEX))
+NOTES_WRAP = Alignment(wrap_text=True, vertical="top")
+
+# AutoFit clamp (characters): keep narrow integer columns readable; cap a
+# long "notes" cell from inflating the column (it gets wrap-text instead).
+COL_WIDTH_MIN: float = 10.0
+COL_WIDTH_MAX: float = 80.0
+COL_WIDTH_PADDING: float = 2.0
 
 # ---------------------------------------------------------------------------
 # Plot labels and colors

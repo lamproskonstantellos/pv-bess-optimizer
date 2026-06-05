@@ -3,7 +3,6 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 results/
-!scripts/audit_runs/results/
 docs/build/
 .venv/
 .DS_Store

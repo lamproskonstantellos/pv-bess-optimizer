@@ -51,6 +51,14 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     # BESS revenue decomposition
     "plot_bess_revenue_waterfall", "plot_bess_capacity_vs_activation_split",
     "plot_bess_revenue_by_month",
+    # Sizing
+    "plot_efficient_frontier", "plot_npv_vs_capacity",
+    # Scenarios
+    "plot_scenario_comparison_bars", "plot_scenario_revenue_bridge",
+    # Degradation
+    "plot_soh_trajectory",
+    # Emissions / CFE
+    "plot_cfe_duration_curve", "plot_energy_sankey",
 )
 
 

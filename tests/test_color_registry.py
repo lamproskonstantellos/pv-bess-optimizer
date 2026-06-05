@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pvbess_opt.config import COLORS, MERCHANT_COLORS
+from pvbess_opt.theme import COLORS, MERCHANT_COLORS
 
 
 def _assert_unique(name: str, registry: dict[str, str]) -> None:

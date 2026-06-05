@@ -35,6 +35,13 @@ from .daily import (
     plot_daily_supply,
     plot_daily_surplus,
 )
+from .degradation import (
+    plot_soh_trajectory,
+)
+from .emissions import (
+    plot_cfe_duration_curve,
+    plot_energy_sankey,
+)
 from .financial import (
     plot_cumulative_cashflow,
     plot_irr_tornado,
@@ -68,6 +75,14 @@ from .monthly import (
     plot_monthly_supply,
     plot_monthly_surplus,
 )
+from .scenarios import (
+    plot_scenario_comparison_bars,
+    plot_scenario_revenue_bridge,
+)
+from .sizing import (
+    plot_efficient_frontier,
+    plot_npv_vs_capacity,
+)
 from .style import (
     apply_ieee_style,
     set_project_mode_label,
@@ -96,6 +111,7 @@ __all__ = [
     "plot_bess_capacity_vs_activation_split",
     "plot_bess_revenue_by_month",
     "plot_bess_revenue_waterfall",
+    "plot_cfe_duration_curve",
     "plot_cumulative_cashflow",
     "plot_daily_combined",
     "plot_daily_combined_merchant",
@@ -107,6 +123,8 @@ __all__ = [
     "plot_daily_supply",
     "plot_daily_surplus",
     "plot_dam_intraday_heatmap",
+    "plot_efficient_frontier",
+    "plot_energy_sankey",
     "plot_foresight_gap_comparison",
     "plot_input_forecast_band",
     "plot_input_seasonal_boxplot",
@@ -124,10 +142,14 @@ __all__ = [
     "plot_monthly_supply",
     "plot_monthly_surplus",
     "plot_npv_tornado",
+    "plot_npv_vs_capacity",
     "plot_npv_waterfall",
     "plot_payback",
     "plot_revenue_stack_yearly",
     "plot_rolling_horizon_distribution",
+    "plot_scenario_comparison_bars",
+    "plot_scenario_revenue_bridge",
+    "plot_soh_trajectory",
     "plot_uncertainty_coverage_by_horizon",
     "plot_uncertainty_crps_timeline",
     "plot_uncertainty_pit_histogram",

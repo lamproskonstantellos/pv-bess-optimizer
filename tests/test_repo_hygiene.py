@@ -1,22 +1,83 @@
-"""Leftover-token audit.
+"""Repository-hygiene audit.
 
-Codifies the forbidden-tokens / required-tokens / files-must-exist
-contract for the current release.  The grep is implemented in pure
-Python so it works offline and on Windows without external tools.
+Combines two evergreen contracts into one file:
 
-Allowed locations for forbidden tokens:
+* **Version-string scan** — no forbidden version / phase / round / bug
+  annotations in any ``.py`` / ``.md`` / ``.rst`` surface (regex scan).
+* **Leftover-token audit** — no forbidden legacy identifiers or version
+  literals in the source tree (literal-token scan), required tokens and
+  files are present, ``inputs/input.xlsx`` loads through the typed
+  loader without legacy-schema warnings and exposes the eight-sheet
+  schema, and the package version equals the README badge.
 
-* This audit file itself.
-* The audit report (``docs/audit_report.md``).
+The grep is implemented in pure Python so it works offline and on
+Windows without external tools.  This file necessarily contains the
+forbidden patterns and tokens as data, so it allow-lists itself in both
+scans (and assembles the release-annotation tokens at runtime so the
+literal strings never appear in the source).
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# ---------------------------------------------------------------------------
+# Version-string regex scan
+# ---------------------------------------------------------------------------
+
+FORBIDDEN = (
+    r"\bv0\.5\b", r"\bv0\.6\b", r"\bv0\.7\b",
+    r"\bv0\.8\.0\b", r"\bv0\.8\.1\b", r"\bv0\.8\.2\b",
+    r"\bv0\.8\.3\b",
+    # Release / phase / round / bug annotations are not allowed in the
+    # evergreen surfaces; describe current behaviour in present tense.
+    # (Patterns that would otherwise match the literal tokens here are
+    # written with escapes or split so this file does not flag itself.)
+    r"\bPhase [1-8]\b",
+    r"\bRound-[1-5]\b",
+    "Bug " "#",
+    r"\bF1[0-2]\b", r"\bF[1-9]\b",
+    r"pre-v0\.8",
+    r"v0\.8 polish",
+    "post-" "DEVEX",
+    "post-" "refactor",
+    "pre-" "refactor",
+)
+SCAN_GLOBS = ("**/*.py", "**/*.md", "**/*.rst")
+ALLOWED_PATHS = {
+    "tests/test_repo_hygiene.py",
+}
+SKIP_DIR_PARTS = {"__pycache__", "build", ".git", "_static", "_templates"}
+
+
+@pytest.mark.parametrize("pattern", FORBIDDEN)
+def test_no_old_version_strings(pattern):
+    hits = []
+    for glob in SCAN_GLOBS:
+        for path in ROOT.glob(glob):
+            rel = path.relative_to(ROOT)
+            if any(part in SKIP_DIR_PARTS for part in rel.parts):
+                continue
+            if str(rel).replace("\\", "/") in ALLOWED_PATHS:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for i, line in enumerate(text.splitlines(), 1):
+                if re.search(pattern, line):
+                    hits.append(f"{rel}:{i}: {line.rstrip()}")
+    assert not hits, (
+        f"Forbidden version string matching {pattern!r}:\n"
+        + "\n".join(hits)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Leftover-token audit
+# ---------------------------------------------------------------------------
 
 # Paths that are scanned by the forbidden-tokens grep.
 SCAN_DIRS: tuple[Path, ...] = (
@@ -31,18 +92,12 @@ SCAN_FILES: tuple[Path, ...] = (
 )
 
 # Files whose legacy-key mentions are intentional (warning path /
-# legacy-test machinery / this audit file).  Paths are stored
-# relative to ROOT for portability.
+# legacy-test machinery / this audit file).  Paths are stored relative to
+# ROOT for portability.
 FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
     Path(p) for p in (
         "tests/test_plot_scopes.py",
-        "tests/test_v0_leftover_audit.py",
-        # The audit reports document the audit findings and are the
-        # surfaces that name the prior tokens they removed.
-        "docs/audit_report.md",
-        "docs/audit_report_phase1.md",
-        "docs/audit_report_v0_9_0.md",
-        "docs/audit_test_index.md",
+        "tests/test_repo_hygiene.py",
     )
 )
 
@@ -50,8 +105,8 @@ FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
 # evergreen surface.  The tokens are assembled at runtime so this source
 # file does not contain (and therefore does not flag) the literal
 # strings.  Finding-number tags are covered by the word-boundary regexes
-# in test_no_historical_version_strings.py; bare letter-plus-digit
-# substrings would clash with hex colour literals such as ``#F57C00``.
+# above; bare letter-plus-digit substrings would clash with hex colour
+# literals such as ``#F57C00``.
 _V08 = "v0.8"
 _RELEASE_ANNOTATION_TOKENS: tuple[str, ...] = (
     *(f"Phase {n}" for n in range(1, 9)),
@@ -163,11 +218,6 @@ def _read_text(path: Path) -> str:
         return ""
 
 
-# ---------------------------------------------------------------------------
-# Forbidden-tokens audit
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("token", FORBIDDEN_TOKENS)
 def test_forbidden_token_returns_zero_hits(token: str) -> None:
     hits: list[str] = []
@@ -186,11 +236,6 @@ def test_forbidden_token_returns_zero_hits(token: str) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Required-tokens audit
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("token", REQUIRED_TOKENS)
 def test_required_token_appears_at_least_once(token: str) -> None:
     found = False
@@ -199,11 +244,6 @@ def test_required_token_appears_at_least_once(token: str) -> None:
             found = True
             break
     assert found, f"Required token {token!r} not found anywhere."
-
-
-# ---------------------------------------------------------------------------
-# Required files exist
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("relpath", REQUIRED_FILES)
@@ -243,8 +283,8 @@ def test_repo_input_xlsx_loads_through_loader_cleanly(caplog):
     )
 
 
-def test_inputs_xlsx_uses_seven_sheet_schema():
-    """inputs/input.xlsx must expose the seven-sheet typed dict."""
+def test_inputs_xlsx_uses_eight_sheet_schema():
+    """inputs/input.xlsx must expose the eight-sheet typed dict."""
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     for section in ("project", "pv", "bess", "economics", "simulation"):

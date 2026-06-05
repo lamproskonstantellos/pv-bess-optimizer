@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..config import COLORS, FINANCIAL_COLORS
+from ..theme import COLORS, FINANCIAL_COLORS
 from ._dates import apply_house_date_axis
 from .style import (
     apply_universal_margins,

@@ -11,15 +11,7 @@ from pvbess_opt.balancing import (
 )
 from pvbess_opt.io import BALANCING_SHEET_DEFAULTS, _validate_balancing_config
 from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
-
-
-def _balancing_on(params: dict, **overrides) -> dict:
-    out = dict(params)
-    bm = dict(BALANCING_SHEET_DEFAULTS, balancing_enabled=True)
-    bm["bm_settlement_minutes"] = int(out.get("dt_minutes", 60))
-    bm.update(overrides)
-    out["balancing"] = bm
-    return out
+from tests._balancing_helpers import _balancing_on
 
 
 def test_invb1_sum_of_shares_capped_at_100_pct():

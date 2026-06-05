@@ -1,6 +1,6 @@
 """Excel input parsing and output writing for the PV+BESS optimizer.
 
-The schema is **seven sheets**, one logical theme per sheet:
+The schema is **eight sheets**, one logical theme per sheet:
 
 * ``timeseries`` — per-step data with lowercase snake_case column names:
   ``timestamp``, ``load_kwh``, ``pv_kwh``, ``dam_price_eur_per_mwh``,
@@ -20,6 +20,9 @@ The schema is **seven sheets**, one logical theme per sheet:
   sensitivity deltas.
 * ``simulation`` — uncertainty (rolling-horizon Monte Carlo) and plot
   scope flags.
+* ``balancing`` — stochastic balancing-market participation
+  (FCR / aFRR / mFRR): per-product capacity shares, acceptance /
+  activation probabilities, fallback prices, and the Monte Carlo seeds.
 * ``max_injection_profile`` — hour-of-day cap profile (24 rows),
   optionally with one column per calendar month, expressing the share
   of ``p_grid_export_max_kw`` available for export.  Missing → fall
@@ -69,15 +72,16 @@ import numpy as np
 import pandas as pd
 
 from .balancing import resolve_balancing_config
-from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOE_LOW_EUR_PER_MWH,
     BENCHMARK_LCOS_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOS_LOW_EUR_PER_MWH,
+    DEFAULT_MAX_INJECTION_PCT_HOURLY,
     DEFAULT_SENSITIVITY_DELTA_PCT,
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
 )
+from .io_style import style_workbook
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +139,7 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
 }
 
 PV_SHEET_DEFAULTS: dict[str, Any] = {
+    "pv_source": "file",
     "pv_nameplate_kwp": 0.0,
     "specific_production_kwh_per_kwp": 1500.0,
     "pv_degradation_year1_pct": 2.5,
@@ -163,6 +168,8 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     # LFP cycle-fade default (matches the canonical workbook row in
     # _BESS_ROWS and the schema default); range 0.005-0.010.
     "bess_degradation_pct_per_cycle": 0.008,
+    # Per-MWh-throughput cycle wear cost in the dispatch objective (0 = off).
+    "bess_wear_cost_eur_per_mwh": 0.0,
 }
 
 ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
@@ -180,6 +187,14 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "sensitivity_opex_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
     "sensitivity_revenue_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
     "sensitivity_discount_rate_delta_pp": DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+    # Project-finance debt layer (all-equity by default: gearing 0).
+    "gearing_pct": 0.0,
+    "debt_interest_rate_pct": 5.0,
+    "debt_tenor_years": 15,
+    "debt_repayment": "annuity",
+    # Grid emissions / 24/7 CFE accounting (off by default: intensity 0).
+    "grid_co2_intensity_kg_per_mwh": 0.0,
+    "grid_co2_annual_decline_pct": 0.0,
 }
 
 BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
@@ -296,6 +311,7 @@ _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
     "project_start_year",
     "settlement_minutes",
+    "debt_tenor_years",
     "bess_replacement_year",
     "uncertainty_n_seeds",
     "uncertainty_window_hours",
@@ -309,6 +325,8 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_daily_scope",
     "plot_monthly_scope",
     "plot_yearly_scope",
+    "pv_source",
+    "debt_repayment",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -316,6 +334,8 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_daily_scope": frozenset({"none", "year1_only", "all"}),
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
+    "pv_source": frozenset({"file", "pvgis"}),
+    "debt_repayment": frozenset({"annuity", "linear"}),
 }
 
 
@@ -368,6 +388,10 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
 )
 
 _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("pv_source", "file", "file | pvgis",
+     "Where the PV profile comes from. 'file' uses the timeseries "
+     "pv_kwh column (rescaled to nameplate x specific production, or a "
+     "verbatim pv_kwh_override). 'pvgis' fetches it from lat/lon."),
     ("pv_nameplate_kwp", 0, "kWp",
      "PV nameplate capacity. 0 = no PV in this project."),
     ("specific_production_kwh_per_kwp", 1500, "kWh/kWp/yr",
@@ -407,6 +431,10 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "If TRUE, force final SOC == initial SOC (closed cycle)."),
     ("max_cycles_per_day", 1.0, "-",
      "Daily equivalent-cycle cap (sum of discharge / capacity)."),
+    ("bess_wear_cost_eur_per_mwh", 0.0, "EUR/MWh",
+     "Cycle wear cost penalised per MWh discharged in the dispatch "
+     "objective (0 = off). Derive from replacement cost / cycle-life / "
+     "usable energy via pvbess_opt.degradation."),
     ("capex_bess_eur_per_kw", 200, "EUR/kW",
      "Per-kW BESS CAPEX (DC + PCS). Set 0 if BESS already exists."),
     ("devex_bess_eur_per_kw", 30, "EUR/kW",
@@ -464,6 +492,23 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("sensitivity_discount_rate_delta_pp", DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP, "pp",
      "Symmetric +/- delta on the discount rate, in percentage points. "
      "NPV tornado only - drops out of IRR tornado by definition."),
+    ("gearing_pct", 0.0, "%",
+     "Debt fraction of the initial investment (0 = all-equity, the "
+     "default; unlevered results are unchanged)."),
+    ("debt_interest_rate_pct", 5.0, "%",
+     "Annual debt interest rate (used only when gearing_pct > 0)."),
+    ("debt_tenor_years", 15, "years",
+     "Debt repayment tenor in years (used only when gearing_pct > 0)."),
+    ("debt_repayment", "annuity", "annuity | linear",
+     "Repayment profile: annuity (level debt service) or linear "
+     "(level principal)."),
+    ("grid_co2_intensity_kg_per_mwh", 0.0, "kg/MWh",
+     "Grid carbon intensity for emissions / 24/7 CFE accounting "
+     "(0 = off, the default; an optional grid_co2_kg_per_mwh time-series "
+     "column overrides this per step). Never affects dispatch or NPV."),
+    ("grid_co2_annual_decline_pct", 0.0, "%",
+     "Annual decline of the grid carbon intensity over the project life "
+     "(grid decarbonisation). 0 = constant intensity."),
 )
 
 _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -599,7 +644,7 @@ _SHEET_ROW_TEMPLATES: dict[
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
 # rows) applied when the workbook omits the max_injection_profile sheet.
-# Single source of truth lives in pvbess_opt.config; re-imported above.
+# Single source of truth lives in pvbess_opt.constants; re-imported above.
 
 
 # ---------------------------------------------------------------------------
@@ -672,8 +717,12 @@ _MONTH_TOKENS: tuple[str, ...] = (
 )
 
 
+# Output-styling contract: every workbook written below passes through
+# pvbess_opt.io_style.style_workbook before save, so all outputs share the
+# input workbook's navy frozen-header house style.  Never save an output
+# sheet unstyled.
 def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
-    """Write a workbook from a typed nested dict (seven-sheet schema)."""
+    """Write a workbook from a typed nested dict (eight-sheet schema)."""
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -701,6 +750,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
+        style_workbook(writer.book)
     return dst
 
 
@@ -1474,7 +1524,7 @@ def _apply_balancing_timeseries_fallback(
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the input workbook and return the typed nested dict."""
     xlsx_path = Path(xlsx_path)
-    sheets = set(pd.ExcelFile(xlsx_path).sheet_names)
+    sheets = {str(name) for name in pd.ExcelFile(xlsx_path).sheet_names}
 
     missing = _V08_REQUIRED_SHEETS - sheets
     if missing:
@@ -1544,6 +1594,14 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
     )
+    pv_source = str(typed["pv"].get("pv_source", "file")).strip().lower()
+    if pv_source == "pvgis":
+        raise ValueError(
+            "pv_source='pvgis' is resolved by the structured-config loader, "
+            "not the Excel reader. Run a YAML/JSON config "
+            "(pvbess --config run.yaml) so the PV profile is fetched from "
+            "latitude/longitude."
+        )
     ts = _resolve_pv_column(
         ts,
         pv_nameplate_kwp=float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0),
@@ -1608,6 +1666,9 @@ def _typed_to_flat(
         "max_cycles_per_day": float(bess["max_cycles_per_day"]),
         "bess_power_kw": bess_power_kw,
         "bess_capacity_kwh": bess_capacity_kwh,
+        "bess_wear_cost_eur_per_mwh": float(
+            bess.get("bess_wear_cost_eur_per_mwh", 0.0) or 0.0
+        ),
         # pv
         "pv_nameplate_kwp": pv_nameplate_kwp,
         # project
@@ -1763,6 +1824,7 @@ def write_dispatch_artifacts(
                 lifetime_df.loc[lifetime_df["calendar_year"] == cy].to_excel(
                     writer, sheet_name=sheet, index=False,
                 )
+            style_workbook(writer.book)
     else:
         if pd.api.types.is_datetime64_any_dtype(res_year1["timestamp"]):
             cal_year = int(
@@ -1772,6 +1834,7 @@ def write_dispatch_artifacts(
             cal_year = int(project_start_year)
         with pd.ExcelWriter(out, engine="openpyxl") as writer:
             res_year1.to_excel(writer, sheet_name=str(cal_year), index=False)
+            style_workbook(writer.book)
 
     return {"hourly_xlsx": out}
 
@@ -1819,6 +1882,9 @@ def write_results_workbook(
     economic_assumptions: dict[str, Any] | None = None,
     rolling_horizon_mc: pd.DataFrame | None = None,
     rolling_horizon_compare_mc: pd.DataFrame | None = None,
+    degradation: pd.DataFrame | None = None,
+    debt_schedule: pd.DataFrame | None = None,
+    emissions: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -1868,4 +1934,11 @@ def write_results_workbook(
             _format_assumptions(economic_assumptions).to_excel(
                 writer, sheet_name="economic_assumptions", index=False,
             )
+        if degradation is not None and not degradation.empty:
+            degradation.to_excel(writer, sheet_name="degradation", index=False)
+        if debt_schedule is not None and not debt_schedule.empty:
+            debt_schedule.to_excel(writer, sheet_name="debt_schedule", index=False)
+        if emissions is not None and not emissions.empty:
+            emissions.to_excel(writer, sheet_name="emissions", index=False)
+        style_workbook(writer.book)
     return out_path

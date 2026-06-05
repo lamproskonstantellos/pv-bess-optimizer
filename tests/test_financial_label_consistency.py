@@ -2,9 +2,9 @@
 
 Centralization contract: every label drawn on a financial /
 lifecycle / uncertainty plot must come from
-:data:`pvbess_opt.config.FINANCIAL_LABELS`, with its colour resolved
-through :func:`pvbess_opt.config.financial_color` and its legend
-order driven by :func:`pvbess_opt.config.apply_financial_legend`.
+:data:`pvbess_opt.theme.FINANCIAL_LABELS`, with its colour resolved
+through :func:`pvbess_opt.theme.financial_color` and its legend
+order driven by :func:`pvbess_opt.theme.apply_financial_legend`.
 
 The pattern mirrors ``ALL_LABELS`` / ``COLORS`` / ``LEGEND_ORDER``
 already used by the energy plots.
@@ -23,14 +23,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import pytest
 
-from pvbess_opt.config import (
-    FINANCIAL_COLORS,
-    FINANCIAL_LABEL_TO_COLOR_KEY,
-    FINANCIAL_LABELS,
-    FINANCIAL_LEGEND_ORDER,
-    apply_financial_legend,
-    financial_color,
-)
 from pvbess_opt.plotting.financial import (
     plot_cumulative_cashflow,
     plot_monthly_cashflow_year1,
@@ -39,6 +31,14 @@ from pvbess_opt.plotting.financial import (
     plot_yearly_cashflow_bars,
 )
 from pvbess_opt.plotting.lifecycle import plot_revenue_stack_yearly
+from pvbess_opt.theme import (
+    FINANCIAL_COLORS,
+    FINANCIAL_LABEL_TO_COLOR_KEY,
+    FINANCIAL_LABELS,
+    FINANCIAL_LEGEND_ORDER,
+    apply_financial_legend,
+    financial_color,
+)
 
 # ---------------------------------------------------------------------------
 # Static contracts
@@ -189,13 +189,13 @@ def test_all_financial_plots_emit_only_canonical_labels(tmp_path, caplog):
         (plot_revenue_stack_yearly, (yc, kpis, tmp_path / "stack.pdf"),
          {"econ": {"retail_inflation_pct": 2.0}}),
     ]
-    with caplog.at_level(logging.WARNING, logger="pvbess_opt.config"):
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.theme"):
         for fn, args, kwargs in plots:
             _render_with_open_figure(fn, *args, **kwargs)
 
     non_canonical = [
         rec for rec in caplog.records
-        if rec.name == "pvbess_opt.config"
+        if rec.name == "pvbess_opt.theme"
         and "Non-canonical financial legend label" in rec.getMessage()
     ]
     assert not non_canonical, (

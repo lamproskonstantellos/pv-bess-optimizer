@@ -1,6 +1,7 @@
-"""Shared numeric constants for the financial / sensitivity model.
+"""Shared numeric constants for the model.
 
 Single source of truth for values consumed by :mod:`pvbess_opt.io`,
+:mod:`pvbess_opt.optimization`, :mod:`pvbess_opt.max_injection`,
 :mod:`pvbess_opt.economics`, :mod:`pvbess_opt.sensitivity` and
 :mod:`pvbess_opt.plotting.lifecycle`.
 """
@@ -12,6 +13,7 @@ __all__ = [
     "BENCHMARK_LCOE_LOW_EUR_PER_MWH",
     "BENCHMARK_LCOS_HIGH_EUR_PER_MWH",
     "BENCHMARK_LCOS_LOW_EUR_PER_MWH",
+    "DEFAULT_MAX_INJECTION_PCT_HOURLY",
     "DEFAULT_SENSITIVITY_DELTA_PCT",
     "DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP",
 ]
@@ -29,3 +31,10 @@ BENCHMARK_LCOS_HIGH_EUR_PER_MWH: float = 274.0
 # points).
 DEFAULT_SENSITIVITY_DELTA_PCT: float = 10.0
 DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP: float = 2.0
+
+# Default share of ``p_grid_export_max_kw`` that is available for export,
+# in percent (per hour-of-day).  Applied when the workbook omits the
+# ``max_injection_profile`` sheet.  100.0 means "no curtailment" — the
+# constraint binds only on the regulatory grid-connection nameplate.
+# Users opt in to curtailment by supplying a profile below 100.
+DEFAULT_MAX_INJECTION_PCT_HOURLY: float = 100.0

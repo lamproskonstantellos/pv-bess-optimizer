@@ -2,18 +2,9 @@
 
 from __future__ import annotations
 
-from pvbess_opt.io import BALANCING_SHEET_DEFAULTS
 from pvbess_opt.optimization import run_scenario
 from pvbess_opt.rolling_horizon import monte_carlo_balancing
-
-
-def _balancing_on(params: dict, **overrides) -> dict:
-    out = dict(params)
-    bm = dict(BALANCING_SHEET_DEFAULTS, balancing_enabled=True)
-    bm["bm_settlement_minutes"] = int(out.get("dt_minutes", 60))
-    bm.update(overrides)
-    out["balancing"] = bm
-    return out
+from tests._balancing_helpers import _balancing_on
 
 
 def test_monte_carlo_returns_quantiles_in_order(short_params, short_ts):

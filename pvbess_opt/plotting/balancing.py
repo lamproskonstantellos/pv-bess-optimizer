@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 from ..balancing import PRODUCTS_ALL
-from ..config import BM_COLOURS
+from ..theme import BM_COLOURS
 from ._currency import euro_axis_formatter, resolve_currency_format
 from .helpers import title_prefix
 from .style import (

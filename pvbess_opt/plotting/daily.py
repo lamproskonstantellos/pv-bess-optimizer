@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..config import FINANCIAL_COLORS, XTICK_ROT
+from ..theme import FINANCIAL_COLORS, XTICK_ROT
 from .helpers import (
     fill_stacked_above,
     line_if_nonzero,

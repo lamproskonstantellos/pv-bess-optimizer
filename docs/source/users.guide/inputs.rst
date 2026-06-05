@@ -1,10 +1,10 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook with **seven sheets**:
+The optimiser consumes a single Excel workbook with **eight sheets**:
 ``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
-``simulation``, ``max_injection_profile``.  All keys use lowercase
-snake_case.
+``simulation``, ``balancing``, ``max_injection_profile``.  All keys use
+lowercase snake_case.
 
 Sheet ``timeseries``
 --------------------
@@ -76,6 +76,9 @@ High-level run configuration:
 Sheet ``pv``
 ------------
 
+* ``pv_source`` — where the PV profile comes from: ``file`` (default,
+  today's behaviour — use the ``timeseries`` ``pv_kwh`` column) or
+  ``pvgis`` (fetch from latitude / longitude via the resource layer).
 * ``pv_nameplate_kwp`` — PV nameplate.  ``0`` ⇒ no PV in this project.
 * ``specific_production_kwh_per_kwp`` — annual specific production
   (informational; the MILP consumes the timeseries directly).
@@ -108,6 +111,21 @@ Sheet ``bess``
   full equivalent cycle, in percent (LFP default 0.008, range
   0.005–0.010; NMC ~0.010–0.020).  Layered additively on the calendar
   fade.  Set to 0 — or omit the row — to use calendar-only fade.
+* ``bess_wear_cost_eur_per_mwh`` — cycle wear cost penalised per MWh
+  discharged in the dispatch objective (default 0 = off).  When set, the
+  optimizer only cycles when the price spread beats the wear cost.  It is
+  a behavioural shadow price: it shapes dispatch but is **not** added to
+  the reported cashflow / NPV (the replacement CAPEX already charges
+  degradation), so the cost is never double-counted.  Derive it from
+  replacement cost / cycle-life / usable energy with
+  :func:`pvbess_opt.degradation.derive_wear_cost_eur_per_mwh`.
+
+Every run also writes a **degradation** report (a styled ``degradation``
+sheet in ``03_results.xlsx`` plus an SOH-trajectory plot): ASTM Rainflow
+cycle counting on the SOC trace gives DoD-weighted equivalent full
+cycles, projected into a state-of-health / capacity-fade trajectory and
+replacement schedule
+(:func:`pvbess_opt.degradation.build_degradation_report`).
 
 Sheet ``economics``
 -------------------
@@ -124,6 +142,78 @@ Sheet ``economics``
   ``sensitivity_opex_delta_pct`` /
   ``sensitivity_revenue_delta_pct`` /
   ``sensitivity_discount_rate_delta_pp`` — tornado configuration.
+
+Debt / equity leverage
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Four optional ``economics`` keys turn the all-equity project into a
+geared one.  They are inert at their defaults, so an unconfigured run
+is bit-identical to the unlevered case:
+
+* ``gearing_pct`` (default 0) — debt as a share of Year-0 CAPEX.
+  ``0`` keeps the project all-equity and suppresses every leverage
+  output.
+* ``debt_interest_rate_pct`` (default 5) — fixed annual rate on the
+  drawn debt.
+* ``debt_tenor_years`` (default 15) — amortisation horizon in years.
+* ``debt_repayment`` ∈ ``annuity | linear`` (default ``annuity``) —
+  ``annuity`` levels the total debt service; ``linear`` levels the
+  principal repayment.  Both fully amortise the loan to a zero closing
+  balance by the end of the tenor.
+
+When ``gearing_pct > 0`` the run reports two leverage KPIs alongside
+the project metrics — ``equity_irr_pct`` (IRR on the equity cashflow
+after debt service) and ``min_dscr`` (the minimum debt-service
+coverage ratio over the tenor) — and writes a styled ``debt_schedule``
+sheet (year, opening / closing balance, interest, principal, debt
+service, equity cashflow, DSCR).  The unlevered metrics
+(``npv_eur``, project ``irr_pct``, LCOE, LCOS, …) are computed from
+the pre-financing cashflow and are unchanged by gearing.
+
+In a YAML / JSON config the same settings can be supplied as a
+``financing:`` block whose keys are expressed as fractions / years and
+mapped onto the ``economics`` keys above::
+
+    financing:
+      gearing: 0.70          # → gearing_pct = 70
+      interest_rate: 0.05    # → debt_interest_rate_pct = 5
+      tenor_years: 15        # → debt_tenor_years
+      repayment: annuity     # → debt_repayment
+
+Grid emissions and 24/7 CFE
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two optional ``economics`` keys add an emissions / carbon-free-energy
+report, off by default so an unconfigured run is unchanged:
+
+* ``grid_co2_intensity_kg_per_mwh`` (default 0) — grid carbon intensity.
+  ``0`` keeps the feature off and suppresses the emissions report.  A
+  per-step ``grid_co2_kg_per_mwh`` column on the ``timeseries`` sheet
+  overrides this with a time-varying intensity (honest 24/7 accounting on
+  a grid whose carbon content moves through the day).
+* ``grid_co2_annual_decline_pct`` (default 0) — annual decline of the grid
+  intensity over the project life, modelling a decarbonising grid; the
+  avoided emissions taper accordingly.
+
+When an intensity is configured the run writes a styled ``emissions``
+sheet to ``03_results.xlsx`` (per project year: the 24/7 CFE score, load,
+carbon-free supply, grid import, clean energy delivered, and avoided /
+induced / net / residual emissions in tonnes CO2e) plus two figures in
+``04_financial_plots/`` — an annual energy-balance Sankey and the
+carbon-free-energy duration curve.  The **24/7 CFE score** is the
+time-coincident match of the load by carbon-free supply (PV direct plus
+the PV-sourced share of battery discharge); grid-charged battery energy is
+not counted as carbon-free, so the score is stricter than a loose annual
+volumetric match.  None of this touches the dispatch or the NPV — it is a
+diagnostic on the solved schedule.
+
+In a YAML / JSON config the same settings can be supplied as a ``grid:``
+block (``co2_intensity`` in kg/MWh, ``co2_annual_decline`` as a fraction)
+mapped onto the ``economics`` keys above::
+
+    grid:
+      co2_intensity: 350       # → grid_co2_intensity_kg_per_mwh
+      co2_annual_decline: 0.02  # → grid_co2_annual_decline_pct = 2
 
 Sheet ``balancing``
 -------------------
@@ -192,3 +282,136 @@ workbook PV column to match the user's ``pv_nameplate_kwp`` ×
 ``specific_production_kwh_per_kwp`` target at run time; every
 per-step ratio is preserved.  See ``inputs/input.xlsx`` for the
 as-shipped nameplate and yield.
+
+PV source and the two ``file`` sub-modes
+----------------------------------------
+
+``pv_source`` makes the PV-profile origin explicit:
+
+* ``file`` (default) — the PV profile is taken from the ``timeseries``
+  sheet, in one of two sub-modes:
+
+  * **absolute** — populate ``pv_kwh_override`` for every row and the
+    loader uses those kWh **verbatim** (your own measured / modelled
+    series).
+  * **rescaled shape** — leave ``pv_kwh_override`` empty and supply a
+    ``pv_kwh`` shape; the loader rescales it so the annual total matches
+    ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` while
+    preserving every per-step ratio
+    (:func:`pvbess_opt.io._rescale_pv_to_user_target`).
+
+* ``pvgis`` — the profile is fetched from latitude / longitude by the
+  resource layer (no PV column needed).
+
+YAML / JSON config
+------------------
+
+Instead of the Excel workbook the optimiser also accepts a YAML or JSON
+config whose sections mirror the eight sheets, with the time-series
+referenced by ``timeseries_path`` (a CSV / Parquet file) rather than a
+35 040-row inline column::
+
+    pv:
+      pv_source: file
+      pv_nameplate_kwp: 15000
+      specific_production_kwh_per_kwp: 1500
+    bess:
+      bess_power_kw: 15000
+      bess_capacity_kwh: 30000
+    timeseries_path: my_timeseries.csv
+
+Run it with ``pvbess --config run.yaml``.  A structured config and the
+equivalent workbook parse to the same typed dict and produce identical
+results.  :func:`pvbess_opt.io_read.config_json_schema` emits a JSON
+Schema for external validation and
+:func:`pvbess_opt.io_read.validate_config` checks a config against it.
+
+PVGIS PV profiles (``pv_source: pvgis``)
+----------------------------------------
+
+In a YAML/JSON config, ``pv_source: pvgis`` fetches the PV profile
+automatically from latitude / longitude — no hand-built ``pv_kwh``
+column::
+
+    pv:
+      pv_source: pvgis
+      pv_nameplate_kwp: 10000     # scaling quantity (= PVGIS peakpower)
+      latitude: 37.98
+      longitude: 23.73
+      tilt: optimal               # or a number in degrees
+      azimuth: 0                  # 0 = south
+      losses_pct: 14
+      weather_year: 2019          # non-leap year for a clean 8760
+      # raddatabase: PVGIS-SARAH3 # optional
+    project:
+      mode: merchant
+    timeseries_path: prices.csv   # timestamp + dam_price (+ load)
+
+The loader fetches a **per-kWp** profile once (PVGIS ``peakpower=1``),
+caches it on disk keyed on the request geometry, scales it by
+``pv_nameplate_kwp``, upsamples it onto the 15-minute grid and writes
+``ts['pv_kwh']``; a second run reuses the cache.  Latitude, longitude and
+``pv_nameplate_kwp`` are required; the rest default as shown.
+
+**Timezone.** PVGIS data is fetched in UTC and shifted by a **fixed**
+``+2`` hours (Europe/Athens standard time, no DST) so the uniform
+35 040-step grid is preserved.  A DST-aware conversion would create
+23h/25h transition days that break that grid; if you need wall-clock DST
+alignment, re-grid the transition days first.
+
+``pv_source: pvgis`` is resolved by the structured-config loader only; an
+Excel workbook with ``pv_source=pvgis`` is rejected with a pointer to use
+a YAML/JSON config.
+
+Capacity sizing sweep (``sizing:`` block)
+-----------------------------------------
+
+Add a ``sizing:`` block to a YAML/JSON config to sweep capacities instead
+of running a single size.  Each axis is an explicit list or a
+``{min, max, step}`` mapping; BESS energy may be given as
+``bess_capacity_kwh`` or ``bess_duration_hours`` (capacity = power x
+duration)::
+
+    sizing:
+      pv_nameplate_kwp: [8000, 10000, 12000]
+      bess_power_kw: [2000, 4000]
+      bess_capacity_kwh: {min: 4000, max: 12000, step: 4000}
+
+``pvbess --config run.yaml`` then re-runs the dispatch solve at every
+``(pv, power, capacity)`` point, ranks an **efficient frontier** by NPV,
+and writes ``sizing.xlsx`` (frontier + marginal value + summary, styled
+like every other workbook) plus two plots: the NPV-vs-IRR frontier
+scatter and the NPV-vs-capacity curve marking the **oversizing
+break-even** — the BESS energy where the marginal value of storage
+(dNPV/dMWh) crosses zero.  With no ``sizing:`` block the run is a single
+size, unchanged.
+
+Scenario batches (``--scenarios``)
+----------------------------------
+
+Run many named variants in one invocation and emit a comparison::
+
+    pvbess inputs/input.xlsx --scenarios examples/scenarios.yaml
+
+The scenarios file lists overrides on the base input; ``inherits`` clones
+another scenario.  Overrides accept the canonical sheet keys or short
+aliases (``pv.nameplate_kwp``, ``bess.power_kw`` ...), plus
+``balancing: on|off`` and ``capex_multiplier``::
+
+    scenarios:
+      - name: "Merchant hybrid"
+        project: { mode: merchant }
+      - name: "Merchant hybrid + balancing"
+        inherits: "Merchant hybrid"
+        balancing: on
+      - name: "Cheap CAPEX case"
+        inherits: "Merchant hybrid"
+        capex_multiplier: 0.8
+
+Each scenario runs through the same path as a standalone run, so its
+results match running it alone.  The batch writes a styled
+``scenario_comparison.xlsx`` (one row per scenario: NPV / IRR / payback /
+LCOE / LCOS + revenue by stream) plus a comparison-bars plot and a
+revenue bridge between the first two scenarios.  Scenarios vary on a
+shared base PV shape (rescaled per nameplate); use separate configs for
+different sites.

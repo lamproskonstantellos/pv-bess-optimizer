@@ -2,8 +2,9 @@
 
 Covers:
 
-* The seven-sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
-  ``economics`` / ``simulation`` / ``max_injection_profile``).
+* The eight-sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
+  ``economics`` / ``simulation`` / ``balancing`` /
+  ``max_injection_profile``).
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
@@ -46,6 +47,7 @@ def test_project_sheet_keys():
 
 def test_pv_sheet_keys():
     expected = {
+        "pv_source",
         "pv_nameplate_kwp", "specific_production_kwh_per_kwp",
         "pv_degradation_year1_pct", "pv_degradation_annual_pct",
         "capex_pv_eur_per_kw", "devex_pv_eur_per_kw",
@@ -64,6 +66,7 @@ def test_bess_sheet_keys():
         "opex_bess_eur_per_kw",
         "bess_replacement_year", "bess_replacement_cost_pct",
         "bess_degradation_annual_pct", "bess_degradation_pct_per_cycle",
+        "bess_wear_cost_eur_per_mwh",
     }
     assert set(BESS_SHEET_DEFAULTS) == expected
 
@@ -80,6 +83,9 @@ def test_economics_sheet_keys():
         "sensitivity_enabled", "sensitivity_capex_delta_pct",
         "sensitivity_opex_delta_pct", "sensitivity_revenue_delta_pct",
         "sensitivity_discount_rate_delta_pp",
+        "gearing_pct", "debt_interest_rate_pct", "debt_tenor_years",
+        "debt_repayment",
+        "grid_co2_intensity_kg_per_mwh", "grid_co2_annual_decline_pct",
     }
     assert set(ECONOMICS_SHEET_DEFAULTS) == expected
 
@@ -100,7 +106,7 @@ def test_simulation_sheet_keys():
 
 
 # ---------------------------------------------------------------------------
-# Repository workbook — seven sheets exposed
+# Repository workbook — eight sheets exposed
 # ---------------------------------------------------------------------------
 
 

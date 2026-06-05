@@ -10,8 +10,11 @@ requires-python = ">=3.11"
 license = { file = "LICENSE" }
 dynamic = ["version", "dependencies"]
 
+[project.scripts]
+pvbess = "pvbess_opt.cli:main"
+
 [tool.setuptools]
-packages = ["pvbess_opt", "pvbess_opt.plotting"]
+packages = ["pvbess_opt", "pvbess_opt.plotting", "pvbess_opt.resource"]
 py-modules = ["main"]
 
 [tool.setuptools.dynamic]
@@ -74,6 +77,18 @@ ignore_missing_imports = true
 module = ["openpyxl.*"]
 ignore_missing_imports = true
 
+# PyYAML ships no type stubs in this project's pinned set; the structured
+# config loader uses yaml.safe_load / safe_dump only.
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true
+
+# requests ships type stubs (types-requests) but they are not in the pinned
+# dev set; the resource layer uses requests.get only.
+[[tool.mypy.overrides]]
+module = ["requests"]
+ignore_missing_imports = true
+
 # Plotting subpackage: matplotlib axes / figure objects flow through
 # nearly every helper, and the matplotlib stubs publish most public
 # methods as returning `Any`.  Annotating every plot function strictly
@@ -111,7 +126,7 @@ disable_error_code = [
 ]
 
 [tool.vulture]
-# The audit threshold (see docs/audit_report.md §2.6): ≥70 % confidence is the gate.
+# The audit threshold: ≥70 % confidence is the gate.
 # Findings below that almost always reflect dataclass fields populated by
 # reflection or pytest fixtures injected by name — both false positives.
 paths = ["pvbess_opt", "scripts", "tests"]

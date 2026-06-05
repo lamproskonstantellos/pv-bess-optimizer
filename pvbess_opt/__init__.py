@@ -34,8 +34,8 @@ Three asset modes are first-class:
                        allow_bess_grid_charging = TRUE).
 
 Highlights:
-    * Seven-sheet input workbook (project / pv / bess / economics /
-      simulation / max_injection_profile / timeseries) — one theme
+    * Eight-sheet input workbook (project / pv / bess / economics /
+      simulation / balancing / max_injection_profile / timeseries) — one theme
       per sheet for human readability.  ``inputs/input.xlsx`` is the
       single source of truth for the PV shape; the loader rescales
       the workbook PV column to the user's nameplate and specific
@@ -50,6 +50,8 @@ Highlights:
       benchmark bands.
 """
 
-__all__ = ["__version__"]
+from .pipeline import Results, RunConfig, run
+
+__all__ = ["Results", "RunConfig", "__version__", "run"]
 
 __version__ = "0.9.0"

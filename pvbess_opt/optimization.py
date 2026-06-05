@@ -77,7 +77,7 @@ from .balancing import (
     resolve_balancing_config,
     resolve_balancing_timeseries,
 )
-from .config import DEFAULT_MAX_INJECTION_PCT_HOURLY
+from .constants import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .kpis import ENERGY_TOLERANCE, _balancing_soc_drift
 from .max_injection import build_per_step_max_injection_frac
 from .modes import resolve_mode
@@ -101,9 +101,10 @@ __all__ = [
 # Set to 0.0 to disable.  NOT a constraint substitute.
 _WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH: float = 1.0e-5
 
-# Optional bonus per discharged MWh.  Default 0 — turn on only when
-# debugging the BESS-utilisation balance versus the curtailment penalty.
-_WEIGHT_CYCLES_TERM_EUR_PER_MWH: float = 0.0
+# Battery wear cost (cycle degradation) is a per-MWh-throughput penalty
+# read from params['bess_wear_cost_eur_per_mwh'] (default 0 = off) and
+# subtracted in the objective; see pvbess_opt.degradation for the
+# calibration helper.
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +259,7 @@ def _resolve_max_injection_per_step(
     profile when the workbook omits the sheet).  This resolver expands
     it to a per-timestep fraction in [0, 1].  When no profile is
     supplied the fallback is the canonical
-    :data:`~pvbess_opt.config.DEFAULT_MAX_INJECTION_PCT_HOURLY` (as a
+    :data:`~pvbess_opt.constants.DEFAULT_MAX_INJECTION_PCT_HOURLY` (as a
     fraction) — matching the loader's default — rather than an
     inconsistent no-cap 1.0.
     """
@@ -431,6 +432,9 @@ def build_model(
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
+    wear_cost_eur_per_mwh = float(
+        params.get("bess_wear_cost_eur_per_mwh", 0.0) or 0.0
+    )
 
     # Per-step export cap derived from the max-injection profile.
     export_cap_kwh_per_step = {
@@ -444,10 +448,11 @@ def build_model(
     m.mode = pyo.Param(initialize=mode, within=pyo.Any, mutable=False)
 
     # --- BESS energy capacity is a parameter, not a decision variable.
-    # e_cap is pinned to bess_capacity_kwh (industry standard for
-    # sizing-as-input projects; matches Gridcog / Aurora Chronos /
-    # HOMER).  When BESS is absent the value is 0 and the SOC pins
-    # below take effect.
+    # e_cap is pinned to bess_capacity_kwh: the MILP optimises *dispatch*
+    # for a given size.  Capacity sizing is handled outside the MILP by
+    # pvbess_opt.sizing, which sweeps (pv_kwp, bess_kw, bess_kwh) points
+    # and re-runs this solve per point to build an efficient frontier.
+    # When BESS is absent the value is 0 and the SOC pins below take effect.
     e_cap_param = bess_capacity_kwh if bess_present else 0.0
     m.soc = pyo.Var(m.T, domain=pyo.NonNegativeReals)
 
@@ -846,10 +851,13 @@ def build_model(
     grid_charge_cost = sum(
         dam_price[t] * m.grid_to_bess[t] / 1000.0 for t in time_index
     )
-    cycles_bonus = _WEIGHT_CYCLES_TERM_EUR_PER_MWH * sum(
+    # Battery wear cost: penalise discharge throughput so the optimizer only
+    # cycles when the spread beats the per-MWh degradation cost.  Default 0
+    # (off).  Shadow price only — not added to the reported cashflow / NPV.
+    wear_cost_term = wear_cost_eur_per_mwh * sum(
         (m.bess_dis_load[t] + m.bess_dis_grid[t]) / 1000.0 for t in time_index
     )
-    profit_eur = avoided_cost + export_revenue - grid_charge_cost + cycles_bonus
+    profit_eur = avoided_cost + export_revenue - grid_charge_cost - wear_cost_term
 
     if balancing_active:
         # Expected capacity revenue across all five products.
@@ -1009,6 +1017,10 @@ def model_to_dataframe(
         res["dam_price_eur_per_mwh"] = ts["dam_price_eur_per_mwh"].values
     if "retail_price_eur_per_mwh" in ts.columns:
         res["retail_price_eur_per_mwh"] = ts["retail_price_eur_per_mwh"].values
+    # Optional per-step grid carbon intensity, echoed for emissions / 24/7
+    # CFE accounting. Absent unless the user supplies the time-series column.
+    if "grid_co2_kg_per_mwh" in ts.columns:
+        res["grid_co2_kg_per_mwh"] = ts["grid_co2_kg_per_mwh"].values
 
     # Balancing reservations (kW per timestep). Only emitted when the
     # MILP carried the balancing block — keeping the dispatch frame
@@ -1085,9 +1097,10 @@ def run_scenario(
 ) -> tuple[pd.DataFrame, str] | tuple[pd.DataFrame, str, pd.DataFrame]:
     """Build, solve and extract dispatch for a single scenario.
 
-    Returns ``(res, resolved_solver_name)``.  ``e_cap`` is a
-    parameter pinned to ``params['bess_capacity_kwh']`` (industry
-    standard for sizing-as-input projects); it is not a decision
+    Returns ``(res, resolved_solver_name)``.  ``e_cap`` is a parameter
+    pinned to ``params['bess_capacity_kwh']``: this solve optimises
+    dispatch for a fixed size.  Capacity sizing is an outer sweep over
+    this solve (see :mod:`pvbess_opt.sizing`); it is not a decision
     variable and is not returned.
 
     When ``return_unrounded`` is True the tuple is extended with a

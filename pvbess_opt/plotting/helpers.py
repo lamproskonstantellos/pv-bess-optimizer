@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..config import ALPHA_STACK_AREAS, ALPHA_STACK_BARS, label_color
+from ..theme import ALPHA_STACK_AREAS, ALPHA_STACK_BARS, label_color
 from .style import get_project_mode_label
 
 __all__ = [

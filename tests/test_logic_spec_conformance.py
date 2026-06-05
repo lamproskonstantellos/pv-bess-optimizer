@@ -23,13 +23,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pvbess_opt.io import BALANCING_SHEET_DEFAULTS
 from pvbess_opt.kpis import ENERGY_TOLERANCE
 from pvbess_opt.optimization import (
     build_model,
     run_scenario,
     verify_dispatch_invariants,
 )
+from tests._balancing_helpers import _balancing_on
 
 ROOT = Path(__file__).resolve().parent.parent
 SELF_CONSUMPTION_SPEC = ROOT / "docs" / "self_consumption_logic_spec.md"
@@ -145,14 +145,6 @@ def _self_consumption_params() -> dict:
         "allow_bess_grid_charging": True,
         "show_titles": False,
     }
-
-
-def _balancing_on(params: dict) -> dict:
-    out = dict(params)
-    bm = dict(BALANCING_SHEET_DEFAULTS, balancing_enabled=True)
-    bm["bm_settlement_minutes"] = int(out.get("dt_minutes", 60))
-    out["balancing"] = bm
-    return out
 
 
 # ---------------------------------------------------------------------------

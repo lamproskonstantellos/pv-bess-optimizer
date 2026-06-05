@@ -26,12 +26,20 @@ Two regulatory regimes are supported:
 Three asset configurations are supported in both regimes: `hybrid`
 (PV + BESS), `pv_only`, and `bess_only`.
 
+**Scope.** This tool optimizes *dispatch* for a **given** PV + BESS size
+and computes the resulting project finances — it does not search the
+capacity space. Full techno-economic sizing tools (HOMER, Gridcog) sweep
+capacities to find an optimum; here the PV nameplate and BESS power and
+capacity are inputs. The market model targets the Greek regulatory
+regimes (self-consumption and merchant day-ahead, with optional
+balancing-market participation).
+
 ## Installation
 
 ```bash
 git clone https://github.com/lamproskonstantellos/pv-bess-optimizer.git
 cd pv-bess-optimizer
-pip install -e .[dev]
+pip install -r requirements/dev.txt
 ```
 
 HiGHS is the default solver (`pip install highspy`).  Gurobi and CBC
@@ -41,7 +49,7 @@ work too — the solver search order is set in
 ## Quickstart
 
 ```bash
-python main.py inputs/input.xlsx --output-dir out/
+python main.py inputs/input.xlsx --outdir results/
 ```
 
 The runner reads the workbook, solves the MILP, computes KPIs and the
@@ -50,21 +58,24 @@ enabled in the `simulation` sheet), exercises the sensitivity tornado
 (when enabled in the `economics` sheet), and writes:
 
 * a multi-sheet results workbook,
-* the IEEE-styled PDF report under `out/03_financial_plots/`,
-* the energy plots under `out/02_energy_plots/`,
-* uncertainty diagnostics under `out/06_uncertainty_plots/`.
+* the IEEE-styled PDF report under `results/<run>/04_financial_plots/`,
+* the energy plots under `results/<run>/05_energy_plots/`,
+* uncertainty diagnostics under `results/<run>/06_uncertainty_plots/`.
 
 Override the workbook value at the CLI:
 
 ```bash
-python main.py inputs/input.xlsx --mode merchant --output-dir out/merchant
+python main.py inputs/input.xlsx --mode merchant --outdir results/merchant
 ```
 
 ## Input workbook reference
 
-The canonical workbook is `inputs/input.xlsx`.  Every sheet's first
-row is the global header accent (bold + light grey fill + thin bottom
-border); no other styling is applied.
+The canonical workbook is `inputs/input.xlsx`.  Every sheet's first row
+is the house header accent — white bold text on a navy `#1F3864` fill
+with a thin `#BFBFBF` bottom border, frozen so it stays visible while
+scrolling, plus AutoFit column widths.  Every workbook the tool *writes*
+shares this exact style (one styler in `pvbess_opt/io_style.py`), so
+inputs and outputs look identical.
 
 ### `timeseries`
 
@@ -163,7 +174,7 @@ distribution of headline KPIs (P10 / P50 / P90 of `profit_total_eur`,
 
 ### PDF report
 
-Generated under `out/03_financial_plots/`:
+Generated under `results/<run>/04_financial_plots/`:
 
 * Yearly revenue stack (PV-load, BESS-load, PV-DAM, BESS-DAM, 5
   balancing products, aggregator fee, grid-charging cost) with net
@@ -184,7 +195,7 @@ Generated under `out/03_financial_plots/`:
 * Balancing reservation profile + Monte Carlo distribution per
   product.
 
-Energy plots under `out/02_energy_plots/`: daily / monthly / yearly
+Energy plots under `results/<run>/05_energy_plots/`: daily / monthly / yearly
 supply, surplus, combined, dispatch, SOC, and revenue, plus the
 merchant trio when the mode is `merchant`.
 
@@ -198,7 +209,7 @@ automatically if installed.
 ### Running tests
 
 ```bash
-pip install -e .[dev]
+pip install -r requirements/dev.txt
 pytest                       # default fast lane (the full fast-lane suite)
 pytest -m slow               # opt-in real-scale workbook suite (minutes wall-clock)
 ```
@@ -212,6 +223,6 @@ labels, `€` in prices, Greek-letter docstring math).
 
 ## Quality
 
-The test-suite audit, with per-file verdicts and the verification
-tests behind each fix, is indexed in
-[`docs/audit_test_index.md`](docs/audit_test_index.md).
+The test suite is the executable specification; see
+[`docs/audit_test_index.md`](docs/audit_test_index.md) for how `tests/`
+is organized and how to run the fast and slow lanes.
