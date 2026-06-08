@@ -27,7 +27,7 @@ from pvbess_opt.io import (
     write_workbook,
 )
 from pvbess_opt.io_read import dump_structured_config, load_structured_config
-from pvbess_opt.optimization import run_scenario
+from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
 
 # Tiny deterministic solves; a 0 gap pins the unique optimum exactly.
 SOLVER_KW = {"solver_name": "highs", "mip_gap": 0.0, "time_limit_seconds": 120}
@@ -220,3 +220,38 @@ def test_io_round_trips_flag_and_frame_has_columns(tmp_path):
     # The dispatch frame contains the new + existing cap columns.
     res, _ = run_scenario(params, ts_loaded, **SOLVER_KW)
     assert {"grid_injection_total_kwh", "grid_export_cap_kwh"} <= set(res.columns)
+
+
+# ---------------------------------------------------------------------------
+# 6. Dispatch invariants hold under BOTH cap modes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("flag", [False, True])
+def test_dispatch_invariants_clean_in_both_cap_modes(flag):
+    """verify_dispatch_invariants must report no violation in either cap mode.
+
+    Regression guard for invariant_7: the strict total-injection cap
+    (grid_cap_includes_load=True) curtails PV while surplus export sits
+    below the per-step cap, so an invariant_7 that measured surplus export
+    instead of the actually-bound total injection would flag a spurious
+    "cap not binding yet curtailing" violation.  The cap is checked on the
+    correct basis (grid_injection_total_kwh), so curtailment with the cap
+    binding is recognised as legitimate.
+    """
+    ts = _peak_ts()  # pv[12]=10, load[12]=4, cap=5, dam>0
+    params = _tiny_params(grid_cap_includes_load=flag)
+    _res, _solver, full = run_scenario(
+        params, ts, return_unrounded=True, **SOLVER_KW,
+    )
+    # The peak step curtails: surplus export (1) < cap (5) under the strict
+    # basis, yet curtailment is correct because total injection (5) == cap.
+    if flag:
+        assert full.loc[12, "pv_curtail_kwh"] == pytest.approx(5.0, abs=1e-4)
+        assert full.loc[12, "grid_injection_total_kwh"] == pytest.approx(
+            5.0, abs=1e-4,
+        )
+    inv = verify_dispatch_invariants(full, params)
+    assert inv["invariant_7_curtail_behavior_kwh"] == pytest.approx(0.0, abs=1e-9)
+    assert inv["invariant_9_pv_load_priority_kwh"] == pytest.approx(0.0, abs=1e-6)
+    assert inv["invariant_1_pv_balance_kwh"] == pytest.approx(0.0, abs=1e-6)
