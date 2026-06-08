@@ -392,13 +392,16 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("allow_bess_grid_charging", False, "bool",
      "If TRUE the BESS may charge from the grid in periods with pv_kwh ~ 0."),
     ("grid_cap_includes_load", False, "bool",
-     "If TRUE, the grid-export cap is applied to TOTAL plant injection (energy "
-     "virtually allocated to the remote load PLUS surplus export), as in a "
-     "Virtual Net-Billing physical injection cap. If FALSE (default), the cap "
-     "applies only to surplus grid export. Strict load priority is never "
-     "relaxed; if the cap cannot accommodate the load-priority injection the run "
-     "fails with a clear infeasibility message. Only affects self_consumption "
-     "mode."),
+     "Sets what the per-step grid-injection cap limits (self_consumption mode "
+     "only). FALSE (default) = PHYSICAL / co-located self-consumption: the load "
+     "is behind the plant meter and served directly, so only the SURPLUS reaches "
+     "the grid and the cap limits surplus export. TRUE = VIRTUAL Net-Billing: the "
+     "load is remote (no physical link to the plant), so the plant injects ALL "
+     "generation into the grid and the offset against the remote load is computed "
+     "each 15-min settlement; the cap then limits TOTAL plant injection (energy "
+     "credited to the remote load PLUS any surplus). Strict load priority is "
+     "never relaxed; if the cap cannot fit the forced injection min(pv, load) "
+     "the run fails with a clear infeasibility error."),
     ("unavailability_pct", 1.0, "%",
      "Annual unavailability (outages / scheduled maintenance) applied as "
      "a post-solve derate on PV generation, BESS discharge, and revenue."),
