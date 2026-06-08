@@ -7,7 +7,7 @@ Combines two evergreen contracts into one file:
 * **Leftover-token audit** — no forbidden legacy identifiers or version
   literals in the source tree (literal-token scan), required tokens and
   files are present, ``inputs/input.xlsx`` loads through the typed
-  loader without legacy-schema warnings and exposes the eight-sheet
+  loader without legacy-schema warnings and exposes the documented
   schema, and the package version equals the README badge.
 
 The grep is implemented in pure Python so it works offline and on

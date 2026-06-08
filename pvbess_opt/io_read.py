@@ -1,6 +1,6 @@
 """Structured (YAML / JSON) config loading + JSON Schema for the optimizer.
 
-The canonical input is the eight-sheet Excel workbook
+The canonical input is the Excel workbook
 (:mod:`pvbess_opt.io`).  This module adds an equivalent machine-friendly
 format: a YAML/JSON config whose sections mirror the workbook sheets, with
 the time-series referenced by ``timeseries_path`` (CSV/Parquet) instead of a

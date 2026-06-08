@@ -159,6 +159,18 @@ the axes, rank an efficient frontier by NPV, and emit `sizing.xlsx` plus
 the frontier / break-even plots.  A YAML / JSON config expresses the same
 sweep as a `sizing:` block.
 
+### `scenarios`
+
+Optional batch comparison, tidy / long (one override per row, grouped by
+`name`; blank `name` cells inherit the row above), gated by an `enabled`
+TRUE / FALSE toggle in the first data row.  Ships **disabled** with a
+worked example.  Each row's `target` is a dotted path (`project.mode`,
+`bess.power_kw`) or a bare special (`balancing`, `capex_multiplier`), and
+`inherits` clones another scenario.  Set `enabled` to `TRUE` to run every
+named variant in one pass and emit a styled `scenario_comparison.xlsx`
+plus comparison plots.  `--scenarios file.yaml` is the config equivalent.
+The `sizing` and `scenarios` sheets are mutually exclusive.
+
 ## Output reference
 
 ### KPIs

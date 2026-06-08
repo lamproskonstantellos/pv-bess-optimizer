@@ -33,6 +33,10 @@ The schema sheets, one logical theme per sheet:
 * ``sizing`` — optional capacity-sweep grid (columnar: one column per
   axis, one value per row) gated by an ``enabled`` TRUE / FALSE toggle.
   Shipped disabled; read by :func:`pvbess_opt.sizing.read_sizing_block`.
+* ``scenarios`` — optional batch comparison (tidy/long: one override row
+  per ``name`` with a dotted ``target``) gated by an ``enabled`` toggle.
+  Shipped disabled; read by
+  :func:`pvbess_opt.scenarios.read_scenarios_block`.
 
 Public loader API
 -----------------
@@ -801,6 +805,61 @@ def _build_sizing_sheet(
     )
 
 
+# ---------------------------------------------------------------------------
+# Optional sweep sheet: scenarios (batch comparison)
+# ---------------------------------------------------------------------------
+
+# Scenarios sheet: tidy / long — one row per override, grouped by ``name``,
+# with an optional ``inherits`` clone reference and a dotted ``target``
+# (e.g. ``project.mode``, ``bess.power_kw``, or the bare specials
+# ``capex_multiplier`` / ``balancing``).  Parsed by
+# pvbess_opt.scenarios._parse_scenarios_sheet and run by run_scenarios.
+# Gated by an ``enabled`` TRUE/FALSE toggle read from the first data row;
+# shipped disabled so a normal run is unaffected.
+SCENARIOS_SHEET_COLUMNS: tuple[str, ...] = (
+    "enabled",
+    "name",
+    "inherits",
+    "target",
+    "value",
+)
+
+# Disabled worked example mirroring examples/scenarios.yaml so the
+# tidy/long format is self-documenting.  A scenario spans the consecutive
+# rows that share its ``name``.
+_SCENARIOS_EXAMPLE_ROWS: tuple[tuple[Any, ...], ...] = (
+    ("FALSE", "Self-consumption hybrid", None, "project.mode", "self_consumption"),
+    (None, "Merchant hybrid", None, "project.mode", "merchant"),
+    (None, "Merchant hybrid + balancing", "Merchant hybrid", "balancing", "on"),
+    (None, "Merchant PV only", "Merchant hybrid", "bess.power_kw", 0),
+    (None, "Merchant PV only", "Merchant hybrid", "bess.capacity_kwh", 0),
+    (None, "Cheap CAPEX (merchant)", "Merchant hybrid", "capex_multiplier", 0.8),
+)
+
+
+def _build_scenarios_sheet(
+    rows: list[dict[str, Any]] | None = None,
+) -> pd.DataFrame:
+    """Render the optional ``scenarios`` batch sheet.
+
+    With no explicit ``rows`` the shipped disabled example is written so the
+    tidy/long format is self-documenting.
+    """
+    if rows:
+        frame = pd.DataFrame(rows)
+        for col in SCENARIOS_SHEET_COLUMNS:
+            if col not in frame.columns:
+                frame[col] = None
+        return frame[list(SCENARIOS_SHEET_COLUMNS)]
+    return pd.DataFrame(
+        [
+            dict(zip(SCENARIOS_SHEET_COLUMNS, r, strict=True))
+            for r in _SCENARIOS_EXAMPLE_ROWS
+        ],
+        columns=list(SCENARIOS_SHEET_COLUMNS),
+    )
+
+
 # Output-styling contract: every workbook written below passes through
 # pvbess_opt.io_style.style_workbook before save, so all outputs share the
 # input workbook's navy frozen-header house style.  Never save an output
@@ -823,6 +882,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         profile = np.full(24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float)
     max_injection_df = _build_max_injection_sheet(profile)
     sizing_df = _build_sizing_sheet(typed.get("sizing"))
+    scenarios_df = _build_scenarios_sheet(typed.get("scenarios"))
 
     with pd.ExcelWriter(dst, engine="openpyxl") as writer:
         typed["ts"].to_excel(writer, sheet_name="timeseries", index=False)
@@ -836,6 +896,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
             writer, sheet_name="max_injection_profile", index=False,
         )
         sizing_df.to_excel(writer, sheet_name="sizing", index=False)
+        scenarios_df.to_excel(writer, sheet_name="scenarios", index=False)
         style_workbook(writer.book)
     return dst
 

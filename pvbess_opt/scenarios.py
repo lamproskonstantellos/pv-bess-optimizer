@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -257,6 +258,100 @@ def read_scenarios_file(path: str | Path) -> list[dict[str, Any]]:
             f"{path}: expected a mapping with a 'scenarios' list."
         )
     return [s for s in raw["scenarios"] if isinstance(s, dict)]
+
+
+def _cell(value: Any) -> Any:
+    """Normalise a sheet cell: blank/NaN to None, numpy scalar to Python."""
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _parse_scenarios_sheet(
+    df: pd.DataFrame,
+) -> tuple[bool, list[dict[str, Any]]]:
+    """Parse the columnar ``scenarios`` sheet into ``(enabled, scenarios)``.
+
+    The sheet is tidy/long: each row is one override.  Consecutive rows
+    that share a ``name`` (blank ``name`` cells inherit the row above) form
+    one scenario.  A dotted ``target`` such as ``project.mode`` nests the
+    ``value`` under that section; a bare ``target`` (``capex_multiplier``,
+    ``balancing``) sets a top-level key.  The ``inherits`` cell clones
+    another scenario.  ``enabled`` is read from the first non-blank cell of
+    the ``enabled`` column.  The returned list matches the shape consumed by
+    :func:`run_scenarios`.
+    """
+    from .io import _parse_bool
+
+    cols = {str(c).strip().lower(): c for c in df.columns}
+
+    def col(row: Any, name: str) -> Any:
+        key = cols.get(name)
+        return _cell(row[key]) if key is not None else None
+
+    enabled = False
+    enabled_key = cols.get("enabled")
+    if enabled_key is not None:
+        nonnull = df[enabled_key].dropna()
+        if not nonnull.empty:
+            enabled = _parse_bool(nonnull.iloc[0], False)
+
+    by_name: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    current: str | None = None
+    for _, row in df.iterrows():
+        name_val = col(row, "name")
+        if name_val is not None and str(name_val).strip():
+            current = str(name_val).strip()
+        if not current:
+            continue
+        if current not in by_name:
+            by_name[current] = {"name": current}
+            order.append(current)
+        scn = by_name[current]
+        inherits = col(row, "inherits")
+        if inherits is not None and str(inherits).strip():
+            scn["inherits"] = str(inherits).strip()
+        target = col(row, "target")
+        if target is None or not str(target).strip():
+            continue
+        target = str(target).strip()
+        value = col(row, "value")
+        if "." in target:
+            section, key = target.split(".", 1)
+            bucket = scn.setdefault(section, {})
+            if isinstance(bucket, dict):
+                bucket[key] = value
+        else:
+            scn[target] = value
+    return enabled, [by_name[name] for name in order]
+
+
+def read_scenarios_block(path: str | Path) -> list[dict[str, Any]] | None:
+    """Return the scenario list from an Excel ``scenarios`` sheet.
+
+    Returns the parsed scenarios when the sheet is present and its
+    ``enabled`` toggle is TRUE, otherwise None (so a normal run proceeds).
+    Non-Excel paths return None — YAML/JSON batches use ``--scenarios`` with
+    :func:`read_scenarios_file`.
+    """
+    path = Path(path)
+    if path.suffix.lower() not in (".xlsx", ".xls") or not path.exists():
+        return None
+    try:
+        sheets = set(pd.ExcelFile(path).sheet_names)
+    except (ValueError, OSError):
+        return None
+    if "scenarios" not in sheets:
+        return None
+    enabled, scenarios = _parse_scenarios_sheet(
+        pd.read_excel(path, sheet_name="scenarios"),
+    )
+    return scenarios if (enabled and scenarios) else None
 
 
 def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResult:

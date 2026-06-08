@@ -37,6 +37,10 @@ compatibility surface is maintained.
   storage and oversizing break-even, driven from the workbook's
   columnar `sizing` sheet (gated by an `enabled` toggle) or a `sizing:`
   config block.
+- Batch scenario comparison (inheritance, per-section overrides, CAPEX
+  multiplier, balancing on/off) driven from the workbook's tidy
+  `scenarios` sheet (gated by an `enabled` toggle) or a `--scenarios`
+  YAML / JSON file.
 
 ### Solver
 

@@ -1,10 +1,12 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook with **eight sheets**:
+The optimiser consumes a single Excel workbook.  Eight core data sheets —
 ``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
-``simulation``, ``balancing``, ``max_injection_profile``.  All keys use
-lowercase snake_case.
+``simulation``, ``balancing``, ``max_injection_profile`` — carry the run,
+plus two optional sweep sheets, ``sizing`` and ``scenarios`` (each gated
+by an ``enabled`` toggle and shipped disabled).  All keys use lowercase
+snake_case.
 
 Sheet ``timeseries``
 --------------------
@@ -362,7 +364,7 @@ YAML / JSON config
 ------------------
 
 Instead of the Excel workbook the optimiser also accepts a YAML or JSON
-config whose sections mirror the eight sheets, with the time-series
+config whose sections mirror the workbook sheets, with the time-series
 referenced by ``timeseries_path`` (a CSV / Parquet file) rather than a
 35 040-row inline column::
 
@@ -463,17 +465,32 @@ break-even** — the BESS energy where the marginal value of storage
 sheet disabled (or no ``sizing:`` block) the run is a single size,
 unchanged.
 
-Scenario batches (``--scenarios``)
-----------------------------------
+Scenario batches (``scenarios`` sheet / ``--scenarios``)
+--------------------------------------------------------
 
-Run many named variants in one invocation and emit a comparison::
+Run many named variants in one invocation and emit a comparison.  The
+Excel workbook carries a ``scenarios`` sheet for this; a YAML / JSON file
+passed with ``--scenarios`` is the equivalent.
 
-    pvbess inputs/input.xlsx --scenarios examples/scenarios.yaml
+In the **Excel workbook** the ``scenarios`` sheet is tidy / long — one
+override per row, grouped by ``name`` (blank ``name`` cells inherit the
+row above) — gated by an ``enabled`` TRUE / FALSE toggle in the first
+data row.  It ships **disabled** with a worked example.  The ``target``
+cell is a dotted path (``project.mode``, ``bess.power_kw`` — short aliases
+such as ``pv.nameplate_kwp`` / ``bess.power_kw`` are accepted) or one of
+the bare specials ``balancing`` (``on`` / ``off``) and
+``capex_multiplier``; ``inherits`` clones another scenario:
 
-The scenarios file lists overrides on the base input; ``inherits`` clones
-another scenario.  Overrides accept the canonical sheet keys or short
-aliases (``pv.nameplate_kwp``, ``bess.power_kw`` ...), plus
-``balancing: on|off`` and ``capex_multiplier``::
+==========  ===========================  =================  ==================  ==================
+``enabled`` ``name``                     ``inherits``       ``target``          ``value``
+==========  ===========================  =================  ==================  ==================
+``TRUE``    Merchant hybrid                                 project.mode        merchant
+            Merchant hybrid + balancing  Merchant hybrid    balancing           on
+            Cheap CAPEX                  Merchant hybrid    capex_multiplier    0.8
+==========  ===========================  =================  ==================  ==================
+
+A **YAML / JSON file** passed with ``pvbess inputs/input.xlsx --scenarios
+examples/scenarios.yaml`` lists the same overrides as nested mappings::
 
     scenarios:
       - name: "Merchant hybrid"
@@ -490,5 +507,6 @@ results match running it alone.  The batch writes a styled
 ``scenario_comparison.xlsx`` (one row per scenario: NPV / IRR / payback /
 LCOE / LCOS + revenue by stream) plus a comparison-bars plot and a
 revenue bridge between the first two scenarios.  Scenarios vary on a
-shared base PV shape (rescaled per nameplate); use separate configs for
-different sites.
+shared base PV profile; use separate inputs for different sites.  The
+``scenarios`` and ``sizing`` sheets are mutually exclusive — enabling both
+raises a clear error.

@@ -2,9 +2,10 @@
 
 Covers:
 
-* The eight-sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
+* The core sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
   ``economics`` / ``simulation`` / ``balancing`` /
-  ``max_injection_profile``).
+  ``max_injection_profile``) plus the optional ``sizing`` / ``scenarios``
+  sweep sheets.
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
@@ -108,7 +109,7 @@ def test_simulation_sheet_keys():
 
 
 # ---------------------------------------------------------------------------
-# Repository workbook — eight sheets exposed
+# Repository workbook — all sheets exposed
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +117,8 @@ def test_all_sheets_present(repo_input_xlsx):
     sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "balancing", "max_injection_profile", "sizing",
+        "simulation", "balancing", "max_injection_profile",
+        "sizing", "scenarios",
     }
 
 

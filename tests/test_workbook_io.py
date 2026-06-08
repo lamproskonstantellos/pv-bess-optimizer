@@ -1,7 +1,7 @@
 """Workbook I/O regression tests for ``inputs/input.xlsx``.
 
 The repo's canonical workbook is also the executable contract for the
-eight-sheet schema. This test loads it, checks every typed key
+documented schema. This test loads it, checks every typed key
 for type and plausible range, locks down ``p_grid_export_max_kw`` to
 the project sheet, walks the timeseries shape, sanity-checks the
 max-injection profile, and finally round-trips the typed dict through
