@@ -89,12 +89,12 @@ def plot_yearly_supply(res: pd.DataFrame, year: int, out_dir: Path) -> None:
             mth["bess_dis_load_kwh"] / 1000.0,
             mth["grid_to_load_kwh"] / 1000.0,
         ],
-        ["PV→Load", "BESS→Load", "Import→Load"],
+        ["PV to load", "BESS to load", "Grid to load"],
     )
     t_pad, y_pad = pad_line_to_bins_end(
         left, width_days, (mth["load_kwh"] / 1000.0).to_numpy(),
     )
-    line_if_nonzero(ax, t_pad, y_pad, "Load (demand)", linewidth=1.5,
+    line_if_nonzero(ax, t_pad, y_pad, "Load demand", linewidth=1.5,
                     step_post=True)
 
     _set_mwh_yaxis(ax, "Energy (MWh/month)")
@@ -124,8 +124,8 @@ def plot_yearly_surplus(res: pd.DataFrame, year: int, out_dir: Path) -> None:
         mth["bess_charge_grid_kwh"] / 1000.0,
     ]
     labels = [
-        "PV→BESS (charge)", "PV→Grid (export)", "PV→Curtailment",
-        "BESS→Grid (export)", "Import→BESS (charge)",
+        "PV to BESS", "PV to grid", "Curtailed PV",
+        "BESS to grid", "Grid to BESS",
     ]
 
     plt.figure(figsize=(7, 4))
@@ -160,7 +160,7 @@ def plot_yearly_combined(res: pd.DataFrame, year: int, out_dir: Path) -> None:
             mth["bess_dis_load_kwh"] / 1000.0,
             mth["grid_to_load_kwh"] / 1000.0,
         ],
-        ["PV→Load", "BESS→Load", "Import→Load"],
+        ["PV to load", "BESS to load", "Grid to load"],
     )
     bar_stacked_bins(
         ax, left, width_days,
@@ -172,15 +172,15 @@ def plot_yearly_combined(res: pd.DataFrame, year: int, out_dir: Path) -> None:
             mth["bess_charge_grid_kwh"] / 1000.0,
         ],
         [
-            "PV→BESS (charge)", "PV→Grid (export)", "PV→Curtailment",
-            "BESS→Grid (export)", "Import→BESS (charge)",
+            "PV to BESS", "PV to grid", "Curtailed PV",
+            "BESS to grid", "Grid to BESS",
         ],
         bottom=(mth["load_kwh"] / 1000.0).to_numpy(),
     )
     t_pad, y_pad = pad_line_to_bins_end(
         left, width_days, (mth["load_kwh"] / 1000.0).to_numpy(),
     )
-    line_if_nonzero(ax, t_pad, y_pad, "Load (demand)", linewidth=1.8,
+    line_if_nonzero(ax, t_pad, y_pad, "Load demand", linewidth=1.8,
                     step_post=True)
 
     _set_mwh_yaxis(ax, "Energy (MWh/month)")
@@ -216,7 +216,7 @@ def plot_yearly_dispatch(res: pd.DataFrame, year: int, out_dir: Path) -> None:
             mth["bess_dis_grid_kwh"] / 1000.0,
             mth["pv_curtail_kwh"] / 1000.0,
         ],
-        ["PV→Grid (export)", "BESS→Grid (export)", "PV→Curtailment"],
+        ["PV to grid", "BESS to grid", "Curtailed PV"],
     )
     bar_stacked_bins(
         ax, left, width_days,
@@ -224,7 +224,7 @@ def plot_yearly_dispatch(res: pd.DataFrame, year: int, out_dir: Path) -> None:
             -(mth["pv_to_bess_kwh"] / 1000.0),
             -(mth["bess_charge_grid_kwh"] / 1000.0),
         ],
-        ["PV→BESS (charge)", "Import→BESS (charge)"],
+        ["PV to BESS", "Grid to BESS"],
     )
     ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
     _set_mwh_yaxis(ax, "Energy (MWh/month)")
@@ -267,8 +267,8 @@ def plot_yearly_combined_merchant(
             mth["bess_charge_grid_kwh"] / 1000.0,
         ],
         [
-            "PV→BESS (charge)", "PV→Grid (export)", "PV→Curtailment",
-            "BESS→Grid (export)", "Import→BESS (charge)",
+            "PV to BESS", "PV to grid", "Curtailed PV",
+            "BESS to grid", "Grid to BESS",
         ],
     )
     t_pad, y_pad = pad_line_to_bins_end(
@@ -419,17 +419,17 @@ def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     pos_labels = []
     if cols["rev_pv"] in monthly.columns:
         pos.append(monthly[cols["rev_pv"]].to_numpy(dtype=float))
-        pos_labels.append("PV→Grid (revenue)")
+        pos_labels.append("Export from PV")
     if cols["rev_bess"] in monthly.columns:
         pos.append(monthly[cols["rev_bess"]].to_numpy(dtype=float))
-        pos_labels.append("BESS→Grid (revenue)")
+        pos_labels.append("Export from BESS")
     if pos:
         bar_stacked_bins(ax, left, width_days, pos, pos_labels)
     if cols["cost_grid"] in monthly.columns:
         bar_stacked_bins(
             ax, left, width_days,
             [-monthly[cols["cost_grid"]].to_numpy(dtype=float)],
-            ["Import→BESS (cost)"],
+            ["Grid-charging cost"],
         )
     ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
     if show_titles():
@@ -461,10 +461,10 @@ def plot_lifetime_summary(
     ax = plt.gca()
     x = yearly_aggregate["calendar_year"].to_numpy(dtype=int)
     for column, color, label in [
-        ("pv_generation_mwh", COLORS["PV→Load"], "PV generation"),
-        ("export_total_mwh", COLORS["BESS→Grid (export)"], "Grid exports"),
-        ("import_to_load_mwh", COLORS["Import→Load"], "Grid imports → load"),
-        ("bess_discharge_mwh", COLORS["BESS→Load"], "BESS discharge"),
+        ("pv_generation_mwh", COLORS["PV to load"], "PV generation"),
+        ("export_total_mwh", COLORS["BESS to grid"], "Total grid export"),
+        ("import_to_load_mwh", COLORS["Grid to load"], "Grid to load"),
+        ("bess_discharge_mwh", COLORS["BESS to load"], "BESS discharge"),
     ]:
         if column in yearly_aggregate.columns:
             ax.plot(

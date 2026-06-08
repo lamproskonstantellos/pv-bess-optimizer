@@ -91,7 +91,7 @@ def plot_input_forecast_band(
     panels = [
         ("dam_price_eur_per_mwh", "DAM (EUR/MWh)", sigma_dam,
          FINANCIAL_COLORS["net"]),
-        ("pv_kwh", "PV (kWh / step)", sigma_pv, COLORS["PV→Load"]),
+        ("pv_kwh", "PV (kWh / step)", sigma_pv, COLORS["PV to load"]),
     ]
     if "load_kwh" in sub.columns:
         panels.append((
@@ -148,7 +148,7 @@ def plot_input_seasonal_boxplot(
 
     panels = [
         ("dam_price_eur_per_mwh", "DAM (EUR/MWh)", FINANCIAL_COLORS["net"]),
-        ("pv_kwh",                "PV (kWh / step)", COLORS["PV→Load"]),
+        ("pv_kwh",                "PV (kWh / step)", COLORS["PV to load"]),
     ]
     if has_load:
         panels.append((
@@ -280,7 +280,7 @@ def _diagnostic_panels(ts: pd.DataFrame, sigmas: dict[str, float]):
     """Return ``[(col, label, sigma, color)]`` for the present sources."""
     panels = [
         ("dam_price_eur_per_mwh", "DAM", sigmas["dam"], FINANCIAL_COLORS["net"]),
-        ("pv_kwh", "PV", sigmas["pv"], COLORS["PV→Load"]),
+        ("pv_kwh", "PV", sigmas["pv"], COLORS["PV to load"]),
     ]
     if "load_kwh" in ts.columns:
         panels.append(("load_kwh", "Load", sigmas["load"], FINANCIAL_COLORS["revenue"]))

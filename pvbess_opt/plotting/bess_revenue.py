@@ -72,9 +72,9 @@ _BESS_DAM_COLOUR = financial_color("Export from BESS")
 _BM_PRODUCTS: tuple[tuple[str, str, str], ...] = (
     ("revenue_bess_fcr_eur", "FCR", "fcr"),
     ("revenue_bess_afrr_up_eur", "aFRR-up", "afrr_up"),
-    ("revenue_bess_afrr_dn_eur", "aFRR-dn", "afrr_dn"),
+    ("revenue_bess_afrr_dn_eur", "aFRR-down", "afrr_dn"),
     ("revenue_bess_mfrr_up_eur", "mFRR-up", "mfrr_up"),
-    ("revenue_bess_mfrr_dn_eur", "mFRR-dn", "mfrr_dn"),
+    ("revenue_bess_mfrr_dn_eur", "mFRR-down", "mfrr_dn"),
 )
 
 
@@ -119,7 +119,7 @@ def plot_bess_revenue_waterfall(
             out_path, "No BESS revenue — waterfall not rendered.",
         )
 
-    labels = [_BESS_DAM_LABEL, *(p[0] for p in products), "Total BESS"]
+    labels = [_BESS_DAM_LABEL, *(p[0] for p in products), "Total BESS revenue"]
     values = [bess_dam, *(p[1] for p in products), 0.0]
     colours = [
         _BESS_DAM_COLOUR,
@@ -181,7 +181,7 @@ def plot_bess_capacity_vs_activation_split(
     """
     out_path = Path(out_path)
     products = ["fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn"]
-    labels = ["FCR", "aFRR-up", "aFRR-dn", "mFRR-up", "mFRR-dn"]
+    labels = ["FCR", "aFRR-up", "aFRR-down", "mFRR-up", "mFRR-down"]
     has_activation = {"fcr": False, "afrr_up": True, "afrr_dn": True,
                       "mfrr_up": True, "mfrr_dn": True}
     cap = [
