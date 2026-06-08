@@ -201,7 +201,7 @@ def test_balancing_bars_track_bm_inflation_not_dam(tmp_path: Path):
     from matplotlib.colors import to_hex
     bm_colors = {
         financial_color(lbl).lower()
-        for lbl in ("FCR", "aFRR-up", "aFRR-dn", "mFRR-up", "mFRR-dn")
+        for lbl in ("FCR", "aFRR-up", "aFRR-down", "mFRR-up", "mFRR-down")
     }
     expected_bm5 = float(
         cf.loc[cf["project_year"] == 5, "balancing_revenue_eur"].iloc[0]

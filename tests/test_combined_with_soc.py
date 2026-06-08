@@ -11,7 +11,7 @@ LEFT, SOC (%) on the RIGHT.  These tests guard:
 * the right axis carries no gridlines;
 * the plot collapses to a single Axes (no ``twinx``) when the BESS is
   absent (every SOC value is zero);
-* the ``Import→BESS (charge)`` label appears in the legend when
+* the ``Grid to BESS`` label appears in the legend when
   grid-charging is active in Self-consumption mode.
 """
 
@@ -185,7 +185,7 @@ def test_self_consumption_combined_with_soc_legend_shows_grid_charge():
     legend = fig.axes[0].get_legend()
     assert legend is not None
     labels = [text.get_text() for text in legend.get_texts()]
-    assert "Import→BESS (charge)" in labels
+    assert "Grid to BESS" in labels
 
 
 # ---------------------------------------------------------------------------

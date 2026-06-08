@@ -1,7 +1,7 @@
 """Regression test: balancing-product labels are canonical.
 
 Previously the five balancing-product bar labels (FCR, aFRR-up,
-aFRR-dn, mFRR-up, mFRR-dn) were absent from
+aFRR-down, mFRR-up, mFRR-down) were absent from
 :data:`pvbess_opt.theme.FINANCIAL_LABELS` and
 :data:`pvbess_opt.theme.FINANCIAL_LEGEND_ORDER`, so every balancing-on
 revenue-stack plot logged a warning per label inside
@@ -28,7 +28,7 @@ from pvbess_opt.theme import (
     financial_color,
 )
 
-BALANCING_LABELS = ("FCR", "aFRR-up", "aFRR-dn", "mFRR-up", "mFRR-dn")
+BALANCING_LABELS = ("FCR", "aFRR-up", "aFRR-down", "mFRR-up", "mFRR-down")
 
 
 def test_balancing_labels_in_canonical_tables():
@@ -53,9 +53,9 @@ def test_balancing_labels_colour_matches_per_product_palette():
     pairs = [
         ("FCR", "fcr"),
         ("aFRR-up", "afrr_up"),
-        ("aFRR-dn", "afrr_dn"),
+        ("aFRR-down", "afrr_dn"),
         ("mFRR-up", "mfrr_up"),
-        ("mFRR-dn", "mfrr_dn"),
+        ("mFRR-down", "mfrr_dn"),
     ]
     for label, product_key in pairs:
         assert financial_color(label).lower() == BM_COLOURS[product_key].lower()

@@ -1,4 +1,4 @@
-"""Net revenue / Real-EUR net lines use a high-contrast colour.
+"""Net revenue / Real net revenue lines use a high-contrast colour.
 
 The dark BESS-export stack (#0D47A1) used to swallow the dark purple
 (#6A1B9A) lines.  A dedicated FINANCIAL_COLORS entry
@@ -103,8 +103,8 @@ def test_net_revenue_line_uses_high_contrast_colour(tmp_path: Path):
             c_hex = to_hex(c).lower()
         if c_hex == target_colour:
             matches.append(line)
-    # The solid "Net revenue" line is mandatory; the dashed Real-EUR
-    # net line appears when retail_inflation_pct > 0.
+    # The solid "Net revenue" line is mandatory; the dashed Real net
+    # revenue line appears when retail_inflation_pct > 0.
     assert len(matches) >= 1
 
 
