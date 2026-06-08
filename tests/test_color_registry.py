@@ -4,7 +4,7 @@ Every plot label must resolve to a colour through ``config.COLORS`` or
 ``config.MERCHANT_COLORS`` — no plotting module is allowed to bake an
 inline hex literal.  Within each registry every label must map to a
 distinct hex value, so two physically different flows never end up
-sharing a colour (the bug that caused PV→Grid and BESS→Grid revenue
+sharing a colour (the bug that caused Export from PV and Export from BESS revenue
 bars to render in the same hue on the daily merchant revenue plot).
 """
 
@@ -36,7 +36,7 @@ def test_no_two_labels_share_a_color():
 
 def test_no_two_merchant_labels_share_a_color():
     """The merchant revenue labels each have a unique colour — the
-    PV→Grid and BESS→Grid revenue bars must not collide."""
+    Export from PV and Export from BESS revenue bars must not collide."""
     _assert_unique("MERCHANT_COLORS", MERCHANT_COLORS)
 
 
@@ -44,9 +44,9 @@ def test_merchant_colors_match_their_energy_counterparts():
     """Each (revenue) / (cost) label shares the energy colour of the
     physical flow it represents, so the financial view of a flow is
     visually consistent with its energy view."""
-    assert MERCHANT_COLORS["PV→Grid (revenue)"] == COLORS["PV→Grid (export)"]
-    assert MERCHANT_COLORS["BESS→Grid (revenue)"] == COLORS["BESS→Grid (export)"]
-    assert MERCHANT_COLORS["Import→BESS (cost)"] == COLORS["Import→BESS (charge)"]
+    assert MERCHANT_COLORS["Export from PV"] == COLORS["PV to grid"]
+    assert MERCHANT_COLORS["Export from BESS"] == COLORS["BESS to grid"]
+    assert MERCHANT_COLORS["Grid-charging cost"] == COLORS["Grid to BESS"]
 
 
 def test_no_inline_colors_in_plotting_modules():

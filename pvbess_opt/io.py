@@ -142,6 +142,7 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "p_grid_export_max_kw": 5000.0,
     "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
+    "grid_cap_includes_load": False,
     "unavailability_pct": 1.0,
     "site_capex_eur": 0.0,
     "site_devex_eur": 0.0,
@@ -318,6 +319,7 @@ for _sheet_name, _sheet_defaults in _SHEET_DEFAULTS.items():
 _BOOL_KEYS: frozenset[str] = frozenset({
     "show_titles",
     "allow_bess_grid_charging",
+    "grid_cap_includes_load",
     "terminal_soc_equal",
     "sensitivity_enabled",
     "uncertainty_enabled",
@@ -389,6 +391,14 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Retail tariff used in self_consumption mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",
      "If TRUE the BESS may charge from the grid in periods with pv_kwh ~ 0."),
+    ("grid_cap_includes_load", False, "bool",
+     "If TRUE, the grid-export cap is applied to TOTAL plant injection (energy "
+     "virtually allocated to the remote load PLUS surplus export), as in a "
+     "Virtual Net-Billing physical injection cap. If FALSE (default), the cap "
+     "applies only to surplus grid export. Strict load priority is never "
+     "relaxed; if the cap cannot accommodate the load-priority injection the run "
+     "fails with a clear infeasibility message. Only affects self_consumption "
+     "mode."),
     ("unavailability_pct", 1.0, "%",
      "Annual unavailability (outages / scheduled maintenance) applied as "
      "a post-solve derate on PV generation, BESS discharge, and revenue."),
@@ -1835,6 +1845,7 @@ def _typed_to_flat(
         "settlement_minutes": int(project["settlement_minutes"]),
         "mode": str(project["mode"]),
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
+        "grid_cap_includes_load": bool(project["grid_cap_includes_load"]),
         "unavailability_pct": float(project["unavailability_pct"]),
         "site_capex_eur": float(project.get("site_capex_eur", 0.0) or 0.0),
         "site_devex_eur": float(project.get("site_devex_eur", 0.0) or 0.0),

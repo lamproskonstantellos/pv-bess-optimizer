@@ -58,6 +58,16 @@ High-level run configuration:
 * ``retail_tariff_eur_per_mwh`` — retail tariff used in self_consumption mode.
 * ``allow_bess_grid_charging`` — TRUE → BESS may charge from grid in
   PV-zero periods.
+* ``grid_cap_includes_load`` (default FALSE) — when TRUE the grid-export
+  cap binds on **total plant injection** (energy virtually allocated to a
+  remote load *plus* surplus export), modelling a Virtual Net-Billing
+  physical injection cap rather than a surplus-export-only cap.  When
+  FALSE (default) the cap applies only to surplus grid export, keeping
+  existing behaviour bit-identical.  Strict load priority is never
+  relaxed: if the per-step cap cannot accommodate the load-priority
+  injection ``min(pv, load)`` the run fails with a clear infeasibility
+  message.  Only affects ``self_consumption`` mode (merchant has no
+  co-located load).
 * ``unavailability_pct`` — annual outage / maintenance factor
   (default 1 %).  Applied as a post-solve derate on PV generation,
   BESS discharge, and revenue.
@@ -424,7 +434,7 @@ yield is kept), so the timeseries must span a whole number of hours
 (e.g. the 35 040-row 15-minute grid).
 
 Capacity sizing sweep (``sizing`` sheet / ``sizing:`` block)
------------------------------------------------------------
+------------------------------------------------------------
 
 Sweep capacities instead of running a single size.  The Excel workbook
 carries a ``sizing`` sheet for this; a YAML / JSON config uses an
@@ -438,13 +448,25 @@ example, so a normal run is untouched until you set ``enabled`` to
 takes precedence over ``bess_duration_hours`` (capacity = power x
 duration) when both columns carry values:
 
-==========  =================  ===============  ===================
-``enabled`` ``pv_nameplate_kwp`` ``bess_power_kw`` ``bess_duration_hours``
-==========  =================  ===============  ===================
-``TRUE``    10000              10000            2
-            15000              15000            4
-            20000              20000
-==========  =================  ===============  ===================
+.. list-table::
+   :header-rows: 1
+
+   * - ``enabled``
+     - ``pv_nameplate_kwp``
+     - ``bess_power_kw``
+     - ``bess_duration_hours``
+   * - ``TRUE``
+     - 10000
+     - 10000
+     - 2
+   * -
+     - 15000
+     - 15000
+     - 4
+   * -
+     - 20000
+     - 20000
+     -
 
 In a **YAML / JSON config** the same sweep is a ``sizing:`` block; each
 axis is an explicit list or a ``{min, max, step}`` mapping::
@@ -481,13 +503,29 @@ such as ``pv.nameplate_kwp`` / ``bess.power_kw`` are accepted) or one of
 the bare specials ``balancing`` (``on`` / ``off``) and
 ``capex_multiplier``; ``inherits`` clones another scenario:
 
-==========  ===========================  =================  ==================  ==================
-``enabled`` ``name``                     ``inherits``       ``target``          ``value``
-==========  ===========================  =================  ==================  ==================
-``TRUE``    Merchant hybrid                                 project.mode        merchant
-            Merchant hybrid + balancing  Merchant hybrid    balancing           on
-            Cheap CAPEX                  Merchant hybrid    capex_multiplier    0.8
-==========  ===========================  =================  ==================  ==================
+.. list-table::
+   :header-rows: 1
+
+   * - ``enabled``
+     - ``name``
+     - ``inherits``
+     - ``target``
+     - ``value``
+   * - ``TRUE``
+     - Merchant hybrid
+     -
+     - project.mode
+     - merchant
+   * -
+     - Merchant hybrid + balancing
+     - Merchant hybrid
+     - balancing
+     - on
+   * -
+     - Cheap CAPEX
+     - Merchant hybrid
+     - capex_multiplier
+     - 0.8
 
 A **YAML / JSON file** passed with ``pvbess inputs/input.xlsx --scenarios
 examples/scenarios.yaml`` lists the same overrides as nested mappings::

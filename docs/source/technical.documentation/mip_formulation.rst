@@ -66,9 +66,37 @@ Static max-injection cap (BOTH modes):
 
 .. math::
 
-   p^{\text{pv→grid}}_t + p^{\text{bess→grid}}_t
-   \le p^{\text{export\_max}} \cdot \Delta t \cdot
+   g_t \le p^{\text{export\_max}} \cdot \Delta t \cdot
        \text{max\_injection\_frac}
+
+The cap basis :math:`g_t` (``grid_injection_total``) is selected by the
+optional ``grid_cap_includes_load`` project input:
+
+* **Default** (``grid_cap_includes_load = FALSE``) — binds on surplus
+  export only,
+
+  .. math::
+
+     g_t = p^{\text{pv→grid}}_t + p^{\text{bess→grid}}_t
+
+  which is bit-for-bit backward compatible with earlier releases.
+
+* **Strict** (``grid_cap_includes_load = TRUE``, ``self_consumption``
+  only) — binds on the **total plant injection** at the connection point,
+
+  .. math::
+
+     g_t = p^{\text{pv→load}}_t + p^{\text{bess→load}}_t
+           + p^{\text{pv→grid}}_t + p^{\text{bess→grid}}_t
+
+  Under Virtual Net-Billing the energy virtually allocated to a remote
+  load is physically injected at the plant connection point too, so the
+  regulatory limit is a **physical plant-injection cap**, not merely a
+  surplus-export cap.  Strict load priority is preserved; a run whose
+  forced injection :math:`\min(\text{pv}_t, l_t)` exceeds the cap at any
+  step is rejected pre-solve.  In ``merchant`` mode there is no
+  co-located load, so :math:`g_t` collapses to surplus export and the
+  flag is a no-op.
 
 In ``self_consumption`` mode additionally:
 

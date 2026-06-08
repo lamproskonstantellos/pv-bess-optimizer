@@ -283,9 +283,9 @@ def plot_revenue_stack_yearly(
     bm_segments = [
         ("revenue_bess_fcr_eur", "FCR", "fcr"),
         ("revenue_bess_afrr_up_eur", "aFRR-up", "afrr_up"),
-        ("revenue_bess_afrr_dn_eur", "aFRR-dn", "afrr_dn"),
+        ("revenue_bess_afrr_dn_eur", "aFRR-down", "afrr_dn"),
         ("revenue_bess_mfrr_up_eur", "mFRR-up", "mfrr_up"),
-        ("revenue_bess_mfrr_dn_eur", "mFRR-dn", "mfrr_dn"),
+        ("revenue_bess_mfrr_dn_eur", "mFRR-down", "mfrr_dn"),
     ]
     bm_arrays: list[tuple[str, str, np.ndarray]] = []
     for kpi_key, label, colour_key in bm_segments:
@@ -336,10 +336,10 @@ def plot_revenue_stack_yearly(
         # markers — standard IEEE convention for "derived" series.
         ax.plot(
             years, real_net,
-            color=financial_color("Real-EUR net (deflated)"),
+            color=financial_color("Real net revenue"),
             linewidth=1.2,
             linestyle="--", marker="", alpha=0.85,
-            label="Real-EUR net (deflated)",
+            label="Real net revenue",
         )
 
     ax.set_xlabel(

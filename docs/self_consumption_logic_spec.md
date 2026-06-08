@@ -64,8 +64,12 @@ when an asset is absent (no-BESS / no-PV branches). The full set in
 | `r_balancing[k, t]`            | NonNegativeReals (only when `balancing_enabled` AND BESS present) | `optimization.py:563` |
 
 The `grid_export_total[t] = pv_to_grid[t] + bess_dis_grid[t]`
-Expression at `optimization.py:516-518` is a derived expression, not a
-variable.
+Expression is a derived expression (the export metric), not a variable.
+The companion `grid_injection_total[t]` Expression is the cap basis used
+by `EXPORT_CAP` (see §3 below): it equals `grid_export_total[t]` by
+default and, when `grid_cap_includes_load = true` in `self_consumption`
+mode, the total plant injection
+`pv_to_load + bess_dis_load + pv_to_grid + bess_dis_grid`.
 
 ## 3. Hard constraints — formal statements
 
@@ -176,14 +180,30 @@ asymmetric (`p_charge_max`, `p_dis_max`) pair is not supported.
 ### EXPORT_CAP(t)
 
 ```
-pv_to_grid[t] + bess_dis_grid[t] ≤ p_export · dt_h · mi_frac[t]
+grid_injection_total[t] ≤ p_export · dt_h · mi_frac[t]
 ```
 
-Implemented at `pvbess_opt/optimization.py:741-744`. Active in
-**both** modes. The cap is applied to the COMBINED export flow per
-`grid_export_total`, not separately to PV and BESS. Merchant mode does
-not skip this constraint — it is the regulatory grid-connection limit
-from MD YPEN/DAPEEK/53563/1556/2023.
+Implemented in `pvbess_opt/optimization.py` (`EXPORT_CAP` over the
+`grid_injection_total` Expression). Active in **both** modes — it is the
+regulatory grid-connection limit from MD YPEN/DAPEEK/53563/1556/2023 and
+merchant mode does not skip it.
+
+What the cap binds on is selected by the optional `grid_cap_includes_load`
+project input:
+
+* **Default** (`grid_cap_includes_load = false`) — binds on surplus
+  export only: `grid_injection_total[t] = pv_to_grid[t] + bess_dis_grid[t]`.
+  This is the historical behaviour and is bit-for-bit backward compatible.
+* **Strict** (`grid_cap_includes_load = true`, `self_consumption` only) —
+  binds on the total plant injection at the connection point:
+  `pv_to_load[t] + bess_dis_load[t] + pv_to_grid[t] + bess_dis_grid[t]`.
+  Under Virtual Net-Billing the energy virtually allocated to the remote
+  load is physically injected at the plant too, so the cap models a
+  physical plant-injection limit, not only a surplus-export limit. Strict
+  load priority is never relaxed; a run where `min(pv, load)` exceeds the
+  per-step cap at any step is rejected pre-solve with a clear error.
+  Merchant mode has no co-located load, so the basis collapses to surplus
+  export and the flag is a no-op.
 
 ### NO_SIM_GRID_IMPORT(t), NO_SIM_GRID_EXPORT(t)
 

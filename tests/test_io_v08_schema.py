@@ -40,6 +40,7 @@ def test_project_sheet_keys():
         "project_lifecycle_years", "project_start_year", "mode",
         "settlement_minutes", "p_grid_export_max_kw",
         "retail_tariff_eur_per_mwh", "allow_bess_grid_charging",
+        "grid_cap_includes_load",
         "unavailability_pct", "site_capex_eur", "site_devex_eur",
         "currency_format", "show_titles",
     }

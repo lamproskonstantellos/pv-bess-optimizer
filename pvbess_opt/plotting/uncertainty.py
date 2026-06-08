@@ -50,7 +50,7 @@ def plot_rolling_horizon_distribution(
     if "source_set" in mc_df.columns:
         plt.figure(figsize=(7, 4))
         ax = plt.gca()
-        fallback_colour = COLORS["BESS→Grid (export)"]
+        fallback_colour = COLORS["BESS to grid"]
         for source_set, group in mc_df.groupby("source_set"):
             profits = group["profit_total_eur"].astype(float).to_numpy()
             colour = UNCERTAINTY_SOURCE_COLORS.get(str(source_set), fallback_colour)
@@ -84,7 +84,7 @@ def plot_rolling_horizon_distribution(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     ax.hist(profits, bins=max(10, len(profits) // 3),
-            color=COLORS["BESS→Grid (export)"],
+            color=COLORS["BESS to grid"],
             edgecolor="black", linewidth=0.4, alpha=0.85)
     ax.axvline(p10, color=FINANCIAL_COLORS["percentile_p10"],
                linewidth=1.0, linestyle=":",
@@ -141,7 +141,7 @@ def plot_foresight_gap_comparison(
     }
     sources = sorted(grouped, key=lambda s: float(np.median(grouped[s])))
     data = [grouped[s] for s in sources]
-    fallback_colour = COLORS["BESS→Grid (export)"]
+    fallback_colour = COLORS["BESS to grid"]
     colours = [UNCERTAINTY_SOURCE_COLORS.get(s, fallback_colour) for s in sources]
 
     plt.figure(figsize=(7, 4))

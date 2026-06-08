@@ -29,6 +29,32 @@ and is **identically enforced in both self_consumption and merchant modes**.  An
 suggestion to remove it from merchant mode is wrong; cite the MD and
 reject.
 
+Optional strict total-injection cap
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default the cap above binds only on **surplus export**
+(``pv_to_grid + bess_dis_grid``).  Under Virtual Net-Billing, however,
+the energy *virtually allocated* to a remote load is **physically
+injected** at the plant connection point too — so the regulatory limit
+can equally be read as a cap on the **total plant injection**, not only
+on surplus export.  Setting the project input
+``grid_cap_includes_load = TRUE`` switches the cap basis to
+
+.. math::
+
+   p^{\text{pv→load}}_t + p^{\text{bess→load}}_t
+   + p^{\text{pv→grid}}_t + p^{\text{bess→grid}}_t
+   \le p^{\text{export\_max}} \cdot \Delta t \cdot
+   \frac{\text{max\_injection\_pct}}{100} \quad \forall t
+
+This only affects ``self_consumption`` mode (merchant has no co-located
+load, so the basis collapses to surplus export).  Strict load priority
+is never relaxed: if the forced injection
+:math:`\min(\text{pv}_t, l_t)` exceeds the per-step cap the run is
+rejected pre-solve with an actionable error.  Leaving the input at its
+default ``FALSE`` keeps the surplus-export cap and is bit-for-bit
+backward compatible.
+
 Settlement period
 -----------------
 

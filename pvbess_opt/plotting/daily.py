@@ -96,12 +96,12 @@ def plot_daily_supply(res: pd.DataFrame, date_str: str, out_dir: Path) -> None:
         df["bess_dis_load_kwh"].to_numpy(),
         df["grid_to_load_kwh"].to_numpy(),
     ]
-    labels = ["PV→Load", "BESS→Load", "Import→Load"]
+    labels = ["PV to load", "BESS to load", "Grid to load"]
     t_pad, ypads = pad_right_to_end(t, series, end)
     plot_stack_filtered(ax, t_pad, ypads, labels, step_post=True)
 
     t_pad, [load_pad] = pad_right_to_end(t, [df["load_kwh"].to_numpy()], end)
-    line_if_nonzero(ax, t_pad, load_pad, "Load (demand)", linewidth=1.5,
+    line_if_nonzero(ax, t_pad, load_pad, "Load demand", linewidth=1.5,
                     step_post=True)
 
     if show_titles():
@@ -135,11 +135,11 @@ def plot_daily_surplus(res: pd.DataFrame, date_str: str, out_dir: Path) -> None:
         df["bess_charge_grid_kwh"].to_numpy(),
     ]
     labels = [
-        "PV→BESS (charge)",
-        "PV→Grid (export)",
-        "PV→Curtailment",
-        "BESS→Grid (export)",
-        "Import→BESS (charge)",
+        "PV to BESS",
+        "PV to grid",
+        "Curtailed PV",
+        "BESS to grid",
+        "Grid to BESS",
     ]
     t_pad, ypads = pad_right_to_end(t, stacks, end)
 
@@ -180,12 +180,12 @@ def plot_daily_combined(
         df["bess_dis_load_kwh"].to_numpy(),
         df["grid_to_load_kwh"].to_numpy(),
     ]
-    supply_labels = ["PV→Load", "BESS→Load", "Import→Load"]
+    supply_labels = ["PV to load", "BESS to load", "Grid to load"]
     t_pad, ypads = pad_right_to_end(t, supply_series, end)
     plot_stack_filtered(ax, t_pad, ypads, supply_labels, step_post=True)
 
     t_pad, [load_pad] = pad_right_to_end(t, [df["load_kwh"].to_numpy()], end)
-    line_if_nonzero(ax, t_pad, load_pad, "Load (demand)", linewidth=1.8,
+    line_if_nonzero(ax, t_pad, load_pad, "Load demand", linewidth=1.8,
                     step_post=True)
 
     surplus_series = [
@@ -196,11 +196,11 @@ def plot_daily_combined(
         df["bess_charge_grid_kwh"].to_numpy(),
     ]
     surplus_labels = [
-        "PV→BESS (charge)",
-        "PV→Grid (export)",
-        "PV→Curtailment",
-        "BESS→Grid (export)",
-        "Import→BESS (charge)",
+        "PV to BESS",
+        "PV to grid",
+        "Curtailed PV",
+        "BESS to grid",
+        "Grid to BESS",
     ]
     t_pad, ypads = pad_right_to_end(t, surplus_series, end)
     fill_stacked_above(ax, t_pad, load_pad, ypads, surplus_labels,
@@ -246,9 +246,9 @@ def plot_daily_dispatch(
         df["pv_curtail_kwh"].to_numpy(),
     ]
     pos_labels = [
-        "PV→Grid (export)",
-        "BESS→Grid (export)",
-        "PV→Curtailment",
+        "PV to grid",
+        "BESS to grid",
+        "Curtailed PV",
     ]
     t_pad, pos_pads = pad_right_to_end(t, pos_series, end)
     plot_stack_filtered(ax, t_pad, pos_pads, pos_labels, step_post=True)
@@ -258,7 +258,7 @@ def plot_daily_dispatch(
         -df["pv_to_bess_kwh"].to_numpy(),
         -df["bess_charge_grid_kwh"].to_numpy(),
     ]
-    neg_labels = ["PV→BESS (charge)", "Import→BESS (charge)"]
+    neg_labels = ["PV to BESS", "Grid to BESS"]
     t_pad, neg_pads = pad_right_to_end(t, neg_series, end)
     plot_stack_filtered(ax, t_pad, neg_pads, neg_labels, step_post=True)
 
@@ -308,11 +308,11 @@ def plot_daily_combined_merchant(
         df["bess_charge_grid_kwh"].to_numpy(),
     ]
     labels = [
-        "PV→BESS (charge)",
-        "PV→Grid (export)",
-        "PV→Curtailment",
-        "BESS→Grid (export)",
-        "Import→BESS (charge)",
+        "PV to BESS",
+        "PV to grid",
+        "Curtailed PV",
+        "BESS to grid",
+        "Grid to BESS",
     ]
     t_pad, ypads = pad_right_to_end(t, series, end)
     plot_stack_filtered(ax, t_pad, ypads, labels, step_post=True)
@@ -486,12 +486,12 @@ def plot_daily_combined_with_soc(
         df["bess_dis_load_kwh"].to_numpy(),
         df["grid_to_load_kwh"].to_numpy(),
     ]
-    supply_labels = ["PV→Load", "BESS→Load", "Import→Load"]
+    supply_labels = ["PV to load", "BESS to load", "Grid to load"]
     t_pad, ypads = pad_right_to_end(t, supply_series, end)
     plot_stack_filtered(ax, t_pad, ypads, supply_labels, step_post=True)
 
     t_pad, [load_pad] = pad_right_to_end(t, [df["load_kwh"].to_numpy()], end)
-    line_if_nonzero(ax, t_pad, load_pad, "Load (demand)", linewidth=1.8,
+    line_if_nonzero(ax, t_pad, load_pad, "Load demand", linewidth=1.8,
                     step_post=True)
 
     surplus_series = [
@@ -502,11 +502,11 @@ def plot_daily_combined_with_soc(
         df["bess_charge_grid_kwh"].to_numpy(),
     ]
     surplus_labels = [
-        "PV→BESS (charge)",
-        "PV→Grid (export)",
-        "PV→Curtailment",
-        "BESS→Grid (export)",
-        "Import→BESS (charge)",
+        "PV to BESS",
+        "PV to grid",
+        "Curtailed PV",
+        "BESS to grid",
+        "Grid to BESS",
     ]
     t_pad, ypads = pad_right_to_end(t, surplus_series, end)
     fill_stacked_above(ax, t_pad, load_pad, ypads, surplus_labels,
@@ -560,11 +560,11 @@ def plot_daily_combined_merchant_with_soc(
         df["bess_charge_grid_kwh"].to_numpy(),
     ]
     labels = [
-        "PV→BESS (charge)",
-        "PV→Grid (export)",
-        "PV→Curtailment",
-        "BESS→Grid (export)",
-        "Import→BESS (charge)",
+        "PV to BESS",
+        "PV to grid",
+        "Curtailed PV",
+        "BESS to grid",
+        "Grid to BESS",
     ]
     t_pad, ypads = pad_right_to_end(t, series, end)
     plot_stack_filtered(ax, t_pad, ypads, labels, step_post=True)
@@ -615,12 +615,12 @@ def plot_daily_revenue(
         t, [rev_pv.to_numpy(), rev_bess.to_numpy()], end,
     )
     plot_stack_filtered(
-        ax, t_pad, pos, ["PV→Grid (revenue)", "BESS→Grid (revenue)"],
+        ax, t_pad, pos, ["Export from PV", "Export from BESS"],
         step_post=True,
     )
     t_pad_n, neg = pad_right_to_end(t, [(-cost_grid).to_numpy()], end)
     plot_stack_filtered(
-        ax, t_pad_n, neg, ["Import→BESS (cost)"], step_post=True,
+        ax, t_pad_n, neg, ["Grid-charging cost"], step_post=True,
     )
     ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
 
