@@ -50,7 +50,7 @@ def test_pv_sheet_keys():
         "pv_source",
         "latitude", "longitude", "tilt", "azimuth", "losses_pct",
         "weather_year", "timeseries_path",
-        "pv_nameplate_kwp", "specific_production_kwh_per_kwp",
+        "pv_nameplate_kwp",
         "pv_degradation_year1_pct", "pv_degradation_annual_pct",
         "capex_pv_eur_per_kw", "devex_pv_eur_per_kw",
         "opex_pv_eur_per_kwp",
@@ -125,8 +125,8 @@ def test_repo_workbook_loads_typed_dict(repo_input_xlsx):
     for section in ("project", "pv", "bess", "economics", "simulation"):
         assert section in typed and isinstance(typed[section], dict)
     assert typed["project"]["mode"] == "self_consumption"
-    # The case-study workbook ships with the canonical 8 MW shape
-    # rescaled to the 15 MW default scenario.
+    # The case-study workbook ships the absolute 15 MW PV profile
+    # (consumed verbatim, no rescale).
     assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(15000.0)
     assert typed["bess"]["bess_power_kw"] == pytest.approx(15000.0)
     assert "max_injection_profile" in typed

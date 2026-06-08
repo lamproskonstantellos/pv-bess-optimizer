@@ -94,8 +94,8 @@ Sheet ``pv``
 * ``timeseries_path`` — file sub-mode: an optional external CSV / Parquet
   whose ``pv_kwh`` column replaces the inline column.
 * ``pv_nameplate_kwp`` — PV nameplate.  ``0`` ⇒ no PV in this project.
-* ``specific_production_kwh_per_kwp`` — annual specific production
-  (informational; the MILP consumes the timeseries directly).
+  The ``pv_kwh`` timeseries is consumed verbatim (absolute kWh per step);
+  nameplate is metadata for per-kW CAPEX / OPEX and the sizing-sweep axis.
 * ``pv_degradation_year1_pct`` — initial light-induced degradation
   (LID) applied at start of Year 2.
 * ``pv_degradation_annual_pct`` — linear PV degradation after Year 1.
@@ -291,11 +291,11 @@ The canonical defaults live in
 :data:`pvbess_opt.io.SIMULATION_SHEET_DEFAULTS`.
 
 The shipped ``inputs/input.xlsx`` is the single source of truth for
-the PV shape: 35 040 fifteen-minute rows.  The loader rescales the
-workbook PV column to match the user's ``pv_nameplate_kwp`` ×
-``specific_production_kwh_per_kwp`` target at run time; every
-per-step ratio is preserved.  See ``inputs/input.xlsx`` for the
-as-shipped nameplate and yield.
+the PV shape: 35 040 fifteen-minute rows.  The ``pv_kwh`` column is the
+absolute PV generation per step and is consumed verbatim;
+``pv_nameplate_kwp`` is metadata (per-kW CAPEX / OPEX and the
+sizing-sweep axis).  See ``inputs/input.xlsx`` for the as-shipped
+nameplate and profile.
 
 PV source and location
 ----------------------
@@ -351,10 +351,9 @@ The empty-and-no-location case and the two explicit mismatches raise a
 clear, actionable error rather than returning a partial profile.
 
 In ``file`` mode the profile is the ``timeseries`` ``pv_kwh`` column (or
-an external ``timeseries_path`` CSV / Parquet), rescaled so the annual
-total matches ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp``
-while every per-step ratio is preserved
-(:func:`pvbess_opt.io._rescale_pv_to_user_target`).  The legacy
+an external ``timeseries_path`` CSV / Parquet), consumed verbatim as the
+absolute PV generation per step (``pv_nameplate_kwp`` is metadata, not a
+rescale target).  The legacy
 ``pv_kwh_override`` column is **deprecated**: it is read only as a
 fallback when ``pv_kwh`` is empty (and emits a one-time deprecation
 warning), so older workbooks keep loading without losing their data.
@@ -370,7 +369,6 @@ referenced by ``timeseries_path`` (a CSV / Parquet file) rather than a
     pv:
       pv_source: file
       pv_nameplate_kwp: 15000
-      specific_production_kwh_per_kwp: 1500
     bess:
       bess_power_kw: 15000
       bess_capacity_kwh: 30000
@@ -419,10 +417,9 @@ alignment, re-grid the transition days first.
 
 From an Excel workbook the same applies: fill ``latitude`` / ``longitude``
 on the ``pv`` sheet and clear the ``pv_kwh`` column.  The fetched profile
-is scaled by ``pv_nameplate_kwp`` (the realised PVGIS yield is kept — it
-is not renormalised to ``specific_production_kwh_per_kwp``), so the
-timeseries must span a whole number of hours (e.g. the 35 040-row
-15-minute grid).
+is scaled by ``pv_nameplate_kwp`` and used verbatim (the realised PVGIS
+yield is kept), so the timeseries must span a whole number of hours
+(e.g. the 35 040-row 15-minute grid).
 
 Capacity sizing sweep (``sizing:`` block)
 -----------------------------------------

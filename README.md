@@ -100,9 +100,10 @@ Project-level scalars including `mode`
 
 `pv_source` (`auto` | `file` | `pvgis`), the PVGIS location / geometry
 (`latitude`, `longitude`, `tilt`, `azimuth`, `losses_pct`,
-`weather_year`, `timeseries_path`), `pv_nameplate_kwp`,
-`specific_production_kwh_per_kwp` (used for the PV column rescale), and
-the degradation coefficients.  `auto` uses the `pv_kwh` column when it is
+`weather_year`, `timeseries_path`), `pv_nameplate_kwp`, and
+the degradation coefficients.  The `pv_kwh` column is consumed verbatim
+(absolute kWh per step); `pv_nameplate_kwp` is metadata for per-kW
+CAPEX / OPEX and the sizing sweep.  `auto` uses the `pv_kwh` column when it is
 filled and otherwise fetches the profile from the location — so a single
 input file covers both "bring your own PV series" and "just give me a
 location".

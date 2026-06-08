@@ -107,7 +107,6 @@ def evaluate_sizing_point(
 ) -> dict[str, float]:
     """Solve one size point and return its frontier row (sizes + KPIs)."""
     from .availability import apply_unavailability_derate
-    from .io import _rescale_pv_to_user_target
     from .kpis import compute_kpis
     from .optimization import run_scenario
     from .pipeline import _build_financials
@@ -118,10 +117,19 @@ def evaluate_sizing_point(
     params["bess_power_kw"] = bess_kw
     params["bess_capacity_kwh"] = bess_kwh
 
-    sp = float(base_pv.get("specific_production_kwh_per_kwp", 0.0) or 0.0)
-    ts_pt = _rescale_pv_to_user_target(
-        base_ts, pv_nameplate_kwp=pv_kwp, specific_production_kwh_per_kwp=sp,
-    )
+    # Scale the resolved base PV profile by the nameplate ratio so the PV-size
+    # axis is physically meaningful.  The base column is the absolute
+    # generation at ``base_pv['pv_nameplate_kwp']``; a point at ``pv_kwp``
+    # scales it linearly (shape preserved).  When the base carries no PV
+    # nameplate there is no shape to scale, so the column passes through.
+    base_nameplate = float(base_pv.get("pv_nameplate_kwp", 0.0) or 0.0)
+    if base_nameplate > 0.0 and "pv_kwh" in base_ts.columns:
+        ts_pt = base_ts.copy()
+        ts_pt["pv_kwh"] = (
+            base_ts["pv_kwh"].astype(float) * (pv_kwp / base_nameplate)
+        )
+    else:
+        ts_pt = base_ts
 
     res, _solver, _res_full = run_scenario(
         params, ts_pt, return_unrounded=True, **solver_opts,

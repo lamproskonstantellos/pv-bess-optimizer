@@ -5,10 +5,10 @@ The schema is **eight sheets**, one logical theme per sheet:
 * ``timeseries`` — per-step data with lowercase snake_case column names:
   ``timestamp``, ``load_kwh``, ``pv_kwh``, ``dam_price_eur_per_mwh``,
   optional ``retail_price_eur_per_mwh``.  ``pv_kwh`` is the single PV
-  column: fill it to source PV from the timeseries (rescaled to the
-  ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` target), or
-  leave it empty and set ``latitude`` / ``longitude`` on the ``pv`` sheet
-  to source the profile from PVGIS instead.  The legacy
+  column: fill it to source PV from the timeseries (consumed verbatim as
+  absolute kWh per step), or leave it empty and set ``latitude`` /
+  ``longitude`` on the ``pv`` sheet to source the profile from PVGIS
+  instead.  The legacy
   ``pv_kwh_override`` column is deprecated: it is read only as a fallback
   when ``pv_kwh`` is empty (:func:`pvbess_opt.io_read.resolve_pv_source`).
 * ``project`` — high-level run config (lifecycle horizon, mode,
@@ -16,7 +16,7 @@ The schema is **eight sheets**, one logical theme per sheet:
 * ``pv`` — PV source switch (``pv_source`` = auto | file | pvgis), PVGIS
   location / array geometry (``latitude``, ``longitude``, ``tilt``,
   ``azimuth``, ``losses_pct``, ``weather_year``, ``timeseries_path``),
-  nameplate, specific production, degradation, CAPEX / DEVEX / OPEX.
+  nameplate, degradation, CAPEX / DEVEX / OPEX.
 * ``bess`` — BESS power and capacity, efficiency, SOC bounds, cycles,
   CAPEX / DEVEX / OPEX, replacement and degradation.
 * ``economics`` — discount rate, inflation indices, aggregator fee,
@@ -156,7 +156,6 @@ PV_SHEET_DEFAULTS: dict[str, Any] = {
     "weather_year": 2019,
     "timeseries_path": None,
     "pv_nameplate_kwp": 0.0,
-    "specific_production_kwh_per_kwp": 1500.0,
     "pv_degradation_year1_pct": 2.5,
     "pv_degradation_annual_pct": 0.55,
     "capex_pv_eur_per_kw": 525.0,
@@ -407,9 +406,11 @@ _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "auto | file | pvgis. auto: use pv_kwh if filled, else fetch by "
      "location."),
     ("latitude", None, "deg",
-     "PVGIS only: required when pv_kwh is empty."),
+     "PVGIS only: required when pv_kwh is empty. Decimal degrees, north "
+     "positive, range -90..90 (e.g. Athens 37.9838, Thessaloniki 40.6401)."),
     ("longitude", None, "deg",
-     "PVGIS only: required when pv_kwh is empty."),
+     "PVGIS only: required when pv_kwh is empty. Decimal degrees, east "
+     "positive, range -180..180 (e.g. Athens 23.7275, Thessaloniki 22.9444)."),
     ("tilt", "optimal", "deg",
      'PVGIS only: degrees, or "optimal".'),
     ("azimuth", 0, "deg",
@@ -422,10 +423,9 @@ _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "file only: optional external CSV/Parquet instead of the pv_kwh "
      "column."),
     ("pv_nameplate_kwp", 0, "kWp",
-     "PV nameplate capacity. 0 = no PV in this project."),
-    ("specific_production_kwh_per_kwp", 1500, "kWh/kWp/yr",
-     "Annual specific production of the PV array. Used for documentation "
-     "and as a sanity check; the MILP consumes the timeseries directly."),
+     "PV nameplate capacity. 0 = no PV in this project. The pv_kwh "
+     "timeseries is consumed verbatim (absolute kWh per step); nameplate "
+     "is metadata used for per-kW CAPEX/OPEX and the sizing sweep axis."),
     ("pv_degradation_year1_pct", 2.5, "%",
      "Initial light-induced degradation (LID) applied at start of Year 2."),
     ("pv_degradation_annual_pct", 0.55, "%",
@@ -1187,58 +1187,6 @@ def detect_timestep_minutes(ts: pd.DataFrame) -> int:
 _V08_REQUIRED_SHEETS: frozenset[str] = frozenset({
     "timeseries", "project", "pv", "bess", "economics", "simulation",
 })
-
-
-# Tolerance for "the workbook PV total already matches the user's
-# pv_nameplate_kwp × specific_production_kwh_per_kwp target" — below
-# this relative threshold the loader does **not** rescale.
-_PV_RESCALE_REL_TOLERANCE: float = 1.0e-12
-
-
-def _rescale_pv_to_user_target(
-    ts: pd.DataFrame,
-    *,
-    pv_nameplate_kwp: float,
-    specific_production_kwh_per_kwp: float,
-) -> pd.DataFrame:
-    """Rescale ``ts['pv_kwh']`` to match the user's
-    ``pv_nameplate_kwp × specific_production_kwh_per_kwp`` target.
-
-    The shape is preserved exactly (multiplicative scaling).  Returns
-    a new DataFrame.  Skipped (pass-through) when:
-
-    * either knob is zero or negative (PV is "absent" or unspecified);
-    * the workbook PV column sums to zero;
-    * the current annual total already matches the target within
-      ``1e-12`` relative.
-    """
-    if "pv_kwh" not in ts.columns:
-        return ts
-    if pv_nameplate_kwp <= 0.0 or specific_production_kwh_per_kwp <= 0.0:
-        return ts
-
-    current_total = float(ts["pv_kwh"].astype(float).sum())
-    if current_total <= 0.0:
-        return ts
-
-    target_total = (
-        float(pv_nameplate_kwp) * float(specific_production_kwh_per_kwp)
-    )
-    rel_diff = abs(current_total - target_total) / max(target_total, 1.0e-9)
-    if rel_diff <= _PV_RESCALE_REL_TOLERANCE:
-        return ts
-
-    factor = target_total / current_total
-    out = ts.copy()
-    out["pv_kwh"] = out["pv_kwh"].astype(float) * factor
-    logger.info(
-        "PV column rescaled: workbook annual %.1f kWh → user target %.1f "
-        "kWh (factor %.6f) from pv_nameplate_kwp=%.1f kWp × "
-        "specific_production=%.4f kWh/kWp.",
-        current_total, target_total, factor,
-        pv_nameplate_kwp, specific_production_kwh_per_kwp,
-    )
-    return out
 
 
 # ---------------------------------------------------------------------------

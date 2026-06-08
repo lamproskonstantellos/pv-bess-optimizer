@@ -14,9 +14,10 @@ compatibility surface is maintained.
   single `pv_kwh` column and the `pv` sheet carries `pv_source`
   (`auto` | `file` | `pvgis`) plus the PVGIS coordinates / geometry
   (`latitude`, `longitude`, `tilt`, `azimuth`, `losses_pct`,
-  `weather_year`, `timeseries_path`).  Fill `pv_kwh` to use it (rescaled
-  to the nameplate target), or clear it and set `latitude` / `longitude`
-  to fetch the profile from PVGIS.  One presence-aware rule resolves the
+  `weather_year`, `timeseries_path`).  Fill `pv_kwh` to use it verbatim
+  (absolute kWh per step; `pv_nameplate_kwp` is metadata), or clear it and
+  set `latitude` / `longitude` to fetch the profile from PVGIS.  One
+  presence-aware rule resolves the
   source for the Excel workbook and a YAML / JSON config alike; the
   legacy `pv_kwh_override` column is deprecated but still read as a
   fallback when `pv_kwh` is empty.

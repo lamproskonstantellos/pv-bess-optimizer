@@ -350,14 +350,9 @@ def resolve_pv_source(
         _resolve_pvgis(typed)
         if "pv_kwh_override" in typed["ts"].columns:
             typed["ts"] = typed["ts"].drop(columns=["pv_kwh_override"])
-        # Record the realised PVGIS yield as the specific production so a
-        # re-read of the materialized workbook does not rescale the fetched
-        # profile to the declared target — the Excel and YAML paths then
-        # resolve to the identical pv_kwh.
-        nameplate = float(typed["pv"].get("pv_nameplate_kwp", 0.0) or 0.0)
-        if nameplate > 0.0:
-            annual = float(typed["ts"]["pv_kwh"].astype(float).sum())
-            typed["pv"]["specific_production_kwh_per_kwp"] = annual / nameplate
+        # The fetched PVGIS profile is already absolute kWh; it is written
+        # into the materialized workbook and re-read verbatim, so the Excel
+        # and YAML paths resolve to the identical pv_kwh.
         return typed
 
     if source == "auto" and has_location:
@@ -381,17 +376,15 @@ def _resolve_pv_file_column(
     pv_kwh_has_data: bool,
     override_has_data: bool,
 ) -> pd.DataFrame:
-    """File-branch PV resolution: source ``pv_kwh`` then rescale to target.
+    """File-branch PV resolution: source ``pv_kwh`` and use it verbatim.
 
     ``pv_kwh`` is sourced (in priority order) from the column, an external
     ``timeseries_path`` file, or the deprecated ``pv_kwh_override`` column
-    (fallback only), then rescaled to the
-    ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` target.
+    (fallback only).  The series is the absolute PV generation per step and
+    is consumed as-is; ``pv_nameplate_kwp`` is metadata (per-kW CAPEX/OPEX
+    and the sizing-sweep axis), not a rescale target.
     """
-    from .io import _rescale_pv_to_user_target
-
     nameplate = float(pv.get("pv_nameplate_kwp", 0.0) or 0.0)
-    sp = float(pv.get("specific_production_kwh_per_kwp", 0.0) or 0.0)
     has_override_col = "pv_kwh_override" in ts.columns
     if has_override_col:
         logger.warning(
@@ -400,10 +393,7 @@ def _resolve_pv_file_column(
         )
 
     if pv_kwh_has_data:
-        out = ts.drop(columns=["pv_kwh_override"]) if has_override_col else ts
-        return _rescale_pv_to_user_target(
-            out, pv_nameplate_kwp=nameplate, specific_production_kwh_per_kwp=sp,
-        )
+        return ts.drop(columns=["pv_kwh_override"]) if has_override_col else ts
 
     if ts_path is not None:
         external = _read_timeseries_file(ts_path)
@@ -418,9 +408,7 @@ def _resolve_pv_file_column(
             )
         out = ts.drop(columns=["pv_kwh_override"]) if has_override_col else ts.copy()
         out["pv_kwh"] = external["pv_kwh"].astype(float).to_numpy()
-        return _rescale_pv_to_user_target(
-            out, pv_nameplate_kwp=nameplate, specific_production_kwh_per_kwp=sp,
-        )
+        return out
 
     if override_has_data:
         return _apply_override_fallback(ts, nameplate)
