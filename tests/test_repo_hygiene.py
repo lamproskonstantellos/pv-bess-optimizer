@@ -283,8 +283,8 @@ def test_repo_input_xlsx_loads_through_loader_cleanly(caplog):
     )
 
 
-def test_inputs_xlsx_uses_eight_sheet_schema():
-    """inputs/input.xlsx must expose the eight-sheet typed dict."""
+def test_inputs_xlsx_uses_documented_sheet_schema():
+    """inputs/input.xlsx must expose the documented typed dict."""
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     for section in ("project", "pv", "bess", "economics", "simulation"):

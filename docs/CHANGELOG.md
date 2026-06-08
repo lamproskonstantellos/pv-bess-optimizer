@@ -33,6 +33,10 @@ compatibility surface is maintained.
 - Rolling-horizon Monte Carlo with log-normal forecast noise on DAM,
   PV, load, and balancing prices.
 - One-at-a-time sensitivity tornado.
+- Capacity sizing sweep with efficient frontier, marginal value of
+  storage and oversizing break-even, driven from the workbook's
+  columnar `sizing` sheet (gated by an `enabled` toggle) or a `sizing:`
+  config block.
 
 ### Solver
 

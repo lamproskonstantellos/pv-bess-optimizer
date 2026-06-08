@@ -148,6 +148,17 @@ Carlo seeds.  See
 [`docs/balancing_market_design.md`](docs/balancing_market_design.md)
 for the design deep-dive.
 
+### `sizing`
+
+Optional capacity-sweep grid, columnar (one column per axis —
+`pv_nameplate_kwp`, `bess_power_kw`, and either `bess_capacity_kwh` or
+`bess_duration_hours` — one value per row), gated by an `enabled`
+TRUE / FALSE toggle in the first data row.  Ships **disabled** with a
+worked example; set `enabled` to `TRUE` to sweep the Cartesian product of
+the axes, rank an efficient frontier by NPV, and emit `sizing.xlsx` plus
+the frontier / break-even plots.  A YAML / JSON config expresses the same
+sweep as a `sizing:` block.
+
 ## Output reference
 
 ### KPIs

@@ -1,6 +1,6 @@
 """Excel input parsing and output writing for the PV+BESS optimizer.
 
-The schema is **eight sheets**, one logical theme per sheet:
+The schema sheets, one logical theme per sheet:
 
 * ``timeseries`` — per-step data with lowercase snake_case column names:
   ``timestamp``, ``load_kwh``, ``pv_kwh``, ``dam_price_eur_per_mwh``,
@@ -30,6 +30,9 @@ The schema is **eight sheets**, one logical theme per sheet:
   optionally with one column per calendar month, expressing the share
   of ``p_grid_export_max_kw`` available for export.  Missing → fall
   back to the no-curtailment default (a flat 100 %) and log INFO.
+* ``sizing`` — optional capacity-sweep grid (columnar: one column per
+  axis, one value per row) gated by an ``enabled`` TRUE / FALSE toggle.
+  Shipped disabled; read by :func:`pvbess_opt.sizing.read_sizing_block`.
 
 Public loader API
 -----------------
@@ -746,12 +749,64 @@ _MONTH_TOKENS: tuple[str, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Optional sweep sheet: sizing (capacity sweep)
+# ---------------------------------------------------------------------------
+
+# Sizing-sweep sheet: one column per grid axis, one value per row, plus an
+# ``enabled`` TRUE/FALSE toggle read from the first data row.  Parsed by
+# pvbess_opt.sizing._parse_sizing_sheet and expanded into the Cartesian
+# product by pvbess_opt.sizing.parse_sizing_grid.  ``bess_capacity_kwh``
+# takes precedence over ``bess_duration_hours`` when both carry values.
+# ``enabled`` = FALSE (the shipped default) leaves a normal single run
+# untouched, so the sweep never fires unless the user opts in.
+SIZING_SHEET_COLUMNS: tuple[str, ...] = (
+    "enabled",
+    "pv_nameplate_kwp",
+    "bess_power_kw",
+    "bess_capacity_kwh",
+    "bess_duration_hours",
+)
+
+# Disabled example grid shipped in the workbook so the columnar format is
+# self-documenting.  Blank cells are skipped; here capacity is left blank so
+# the duration column drives the BESS-energy axis (power x duration).
+_SIZING_EXAMPLE_ROWS: tuple[tuple[Any, ...], ...] = (
+    ("FALSE", 10000.0, 10000.0, None, 2.0),
+    (None, 15000.0, 15000.0, None, 4.0),
+    (None, 20000.0, 20000.0, None, None),
+)
+
+
+def _build_sizing_sheet(
+    rows: list[dict[str, Any]] | None = None,
+) -> pd.DataFrame:
+    """Render the optional ``sizing`` sweep sheet.
+
+    With no explicit ``rows`` the shipped disabled example is written so the
+    columnar format is self-documenting.
+    """
+    if rows:
+        frame = pd.DataFrame(rows)
+        for col in SIZING_SHEET_COLUMNS:
+            if col not in frame.columns:
+                frame[col] = None
+        return frame[list(SIZING_SHEET_COLUMNS)]
+    return pd.DataFrame(
+        [
+            dict(zip(SIZING_SHEET_COLUMNS, r, strict=True))
+            for r in _SIZING_EXAMPLE_ROWS
+        ],
+        columns=list(SIZING_SHEET_COLUMNS),
+    )
+
+
 # Output-styling contract: every workbook written below passes through
 # pvbess_opt.io_style.style_workbook before save, so all outputs share the
 # input workbook's navy frozen-header house style.  Never save an output
 # sheet unstyled.
 def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
-    """Write a workbook from a typed nested dict (eight-sheet schema)."""
+    """Write a workbook from a typed nested dict."""
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -767,6 +822,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     if profile is None:
         profile = np.full(24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float)
     max_injection_df = _build_max_injection_sheet(profile)
+    sizing_df = _build_sizing_sheet(typed.get("sizing"))
 
     with pd.ExcelWriter(dst, engine="openpyxl") as writer:
         typed["ts"].to_excel(writer, sheet_name="timeseries", index=False)
@@ -779,6 +835,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
+        sizing_df.to_excel(writer, sheet_name="sizing", index=False)
         style_workbook(writer.book)
     return dst
 

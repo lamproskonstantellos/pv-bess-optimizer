@@ -285,23 +285,85 @@ def write_sizing_workbook(out_path: str | Path, result: SizingResult) -> Path:
     return out_path
 
 
+def _parse_sizing_sheet(df: pd.DataFrame) -> tuple[bool, dict[str, Any]]:
+    """Parse the optional columnar ``sizing`` sheet into ``(enabled, block)``.
+
+    Each axis column (``pv_nameplate_kwp``, ``bess_power_kw``, and either
+    ``bess_capacity_kwh`` or ``bess_duration_hours``) contributes its
+    non-blank numeric cells as a list; the ``enabled`` toggle is read from
+    the first non-blank cell of the ``enabled`` column.  The returned block
+    is in the shape :func:`parse_sizing_grid` consumes (``bess_capacity_kwh``
+    wins over ``bess_duration_hours`` when both carry values).
+    """
+    from .io import _parse_bool
+
+    cols = {str(c).strip().lower(): c for c in df.columns}
+
+    def axis(name: str) -> list[float]:
+        key = cols.get(name)
+        if key is None:
+            return []
+        series = pd.to_numeric(df[key], errors="coerce").dropna()
+        return [float(x) for x in series.tolist()]
+
+    enabled = False
+    enabled_key = cols.get("enabled")
+    if enabled_key is not None:
+        nonnull = df[enabled_key].dropna()
+        if not nonnull.empty:
+            enabled = _parse_bool(nonnull.iloc[0], False)
+
+    block: dict[str, Any] = {}
+    pv = axis("pv_nameplate_kwp")
+    power = axis("bess_power_kw")
+    if pv:
+        block["pv_nameplate_kwp"] = pv
+    if power:
+        block["bess_power_kw"] = power
+    capacity = axis("bess_capacity_kwh")
+    duration = axis("bess_duration_hours")
+    if capacity:
+        block["bess_capacity_kwh"] = capacity
+    elif duration:
+        block["bess_duration_hours"] = duration
+    return enabled, block
+
+
 def read_sizing_block(path: str | Path) -> dict[str, Any] | None:
-    """Return the ``sizing`` block from a YAML/JSON config, or None."""
+    """Return the sizing-sweep grid for ``path``, or None when not enabled.
+
+    A YAML / JSON config supplies the grid under a ``sizing`` mapping (its
+    presence enables the sweep).  An Excel workbook supplies it on the
+    columnar ``sizing`` sheet, gated by the ``enabled`` TRUE/FALSE toggle.
+    """
     path = Path(path)
     suffix = path.suffix.lower()
-    if suffix not in (".yaml", ".yml", ".json"):
-        return None
-    text = path.read_text(encoding="utf-8")
-    if suffix == ".json":
-        raw = json.loads(text)
-    else:
-        import yaml
+    if suffix in (".yaml", ".yml", ".json"):
+        text = path.read_text(encoding="utf-8")
+        if suffix == ".json":
+            raw = json.loads(text)
+        else:
+            import yaml
 
-        raw = yaml.safe_load(text)
-    if isinstance(raw, dict):
-        block = raw.get("sizing")
-        if isinstance(block, dict):
-            return block
+            raw = yaml.safe_load(text)
+        if isinstance(raw, dict):
+            block = raw.get("sizing")
+            if isinstance(block, dict):
+                return block
+        return None
+    if suffix in (".xlsx", ".xls"):
+        if not path.exists():
+            return None
+        try:
+            sheets = set(pd.ExcelFile(path).sheet_names)
+        except (ValueError, OSError):
+            return None
+        if "sizing" not in sheets:
+            return None
+        enabled, block = _parse_sizing_sheet(
+            pd.read_excel(path, sheet_name="sizing"),
+        )
+        return block if enabled else None
     return None
 
 

@@ -421,28 +421,47 @@ is scaled by ``pv_nameplate_kwp`` and used verbatim (the realised PVGIS
 yield is kept), so the timeseries must span a whole number of hours
 (e.g. the 35 040-row 15-minute grid).
 
-Capacity sizing sweep (``sizing:`` block)
------------------------------------------
+Capacity sizing sweep (``sizing`` sheet / ``sizing:`` block)
+-----------------------------------------------------------
 
-Add a ``sizing:`` block to a YAML/JSON config to sweep capacities instead
-of running a single size.  Each axis is an explicit list or a
-``{min, max, step}`` mapping; BESS energy may be given as
-``bess_capacity_kwh`` or ``bess_duration_hours`` (capacity = power x
-duration)::
+Sweep capacities instead of running a single size.  The Excel workbook
+carries a ``sizing`` sheet for this; a YAML / JSON config uses an
+equivalent ``sizing:`` block.
+
+In the **Excel workbook** the ``sizing`` sheet is columnar — one column
+per grid axis, one value per row — gated by an ``enabled`` TRUE / FALSE
+toggle read from the first data row.  It ships **disabled** with a worked
+example, so a normal run is untouched until you set ``enabled`` to
+``TRUE``.  Leave a cell blank to drop that value; ``bess_capacity_kwh``
+takes precedence over ``bess_duration_hours`` (capacity = power x
+duration) when both columns carry values:
+
+==========  =================  ===============  ===================
+``enabled`` ``pv_nameplate_kwp`` ``bess_power_kw`` ``bess_duration_hours``
+==========  =================  ===============  ===================
+``TRUE``    10000              10000            2
+            15000              15000            4
+            20000              20000
+==========  =================  ===============  ===================
+
+In a **YAML / JSON config** the same sweep is a ``sizing:`` block; each
+axis is an explicit list or a ``{min, max, step}`` mapping::
 
     sizing:
       pv_nameplate_kwp: [8000, 10000, 12000]
       bess_power_kw: [2000, 4000]
       bess_capacity_kwh: {min: 4000, max: 12000, step: 4000}
 
-``pvbess --config run.yaml`` then re-runs the dispatch solve at every
+Either way the optimiser re-runs the dispatch solve at every
 ``(pv, power, capacity)`` point, ranks an **efficient frontier** by NPV,
 and writes ``sizing.xlsx`` (frontier + marginal value + summary, styled
 like every other workbook) plus two plots: the NPV-vs-IRR frontier
 scatter and the NPV-vs-capacity curve marking the **oversizing
 break-even** — the BESS energy where the marginal value of storage
-(dNPV/dMWh) crosses zero.  With no ``sizing:`` block the run is a single
-size, unchanged.
+(dNPV/dMWh) crosses zero.  The PV profile is scaled to each
+``pv_nameplate_kwp`` by the nameplate ratio off the base column.  With the
+sheet disabled (or no ``sizing:`` block) the run is a single size,
+unchanged.
 
 Scenario batches (``--scenarios``)
 ----------------------------------

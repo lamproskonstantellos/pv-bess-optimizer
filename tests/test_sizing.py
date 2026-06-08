@@ -94,6 +94,104 @@ def test_read_sizing_block(tmp_path):
     assert read_sizing_block(tmp_path / "x.xlsx") is None
 
 
+# ---------------------------------------------------------------------------
+# Excel-driven sizing sheet (columnar, gated by an enabled TRUE/FALSE toggle)
+# ---------------------------------------------------------------------------
+
+
+def _minimal_typed_with_sizing(sizing_rows):
+    from pvbess_opt.io import (
+        BESS_SHEET_DEFAULTS,
+        ECONOMICS_SHEET_DEFAULTS,
+        PROJECT_SHEET_DEFAULTS,
+        PV_SHEET_DEFAULTS,
+        SIMULATION_SHEET_DEFAULTS,
+    )
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=24, freq="h"),
+        "pv_kwh": [100.0] * 24,
+        "load_kwh": [50.0] * 24,
+        "dam_price_eur_per_mwh": [80.0] * 24,
+    })
+    typed = {
+        "ts": ts,
+        "project": dict(PROJECT_SHEET_DEFAULTS),
+        "pv": dict(PV_SHEET_DEFAULTS, pv_nameplate_kwp=1000.0),
+        "bess": dict(
+            BESS_SHEET_DEFAULTS, bess_power_kw=500.0, bess_capacity_kwh=2000.0,
+        ),
+        "economics": dict(ECONOMICS_SHEET_DEFAULTS),
+        "simulation": dict(SIMULATION_SHEET_DEFAULTS),
+        "max_injection_profile": np.full(24, 100.0),
+    }
+    if sizing_rows is not None:
+        typed["sizing"] = sizing_rows
+    return typed
+
+
+def test_parse_sizing_sheet_columns_and_enabled():
+    from pvbess_opt.sizing import _parse_sizing_sheet
+    df = pd.DataFrame({
+        "enabled": ["TRUE", None, None],
+        "pv_nameplate_kwp": [1000, 2000, 3000],
+        "bess_power_kw": [500, 1000, None],
+        "bess_capacity_kwh": [None, None, None],
+        "bess_duration_hours": [2, 4, None],
+    })
+    enabled, block = _parse_sizing_sheet(df)
+    assert enabled is True
+    assert block == {
+        "pv_nameplate_kwp": [1000.0, 2000.0, 3000.0],
+        "bess_power_kw": [500.0, 1000.0],
+        "bess_duration_hours": [2.0, 4.0],
+    }
+
+
+def test_parse_sizing_sheet_capacity_wins_over_duration():
+    from pvbess_opt.sizing import _parse_sizing_sheet
+    df = pd.DataFrame({
+        "enabled": ["FALSE", None],
+        "pv_nameplate_kwp": [1000, 2000],
+        "bess_power_kw": [500, 1000],
+        "bess_capacity_kwh": [1000, 4000],
+        "bess_duration_hours": [2, 4],
+    })
+    enabled, block = _parse_sizing_sheet(df)
+    assert enabled is False
+    assert "bess_capacity_kwh" in block
+    assert "bess_duration_hours" not in block
+
+
+def test_read_sizing_block_from_xlsx_gated_by_enabled(tmp_path):
+    from pvbess_opt.io import write_workbook
+    # The shipped default example is disabled -> no sweep.
+    disabled = tmp_path / "disabled.xlsx"
+    write_workbook(_minimal_typed_with_sizing(None), disabled)
+    assert read_sizing_block(disabled) is None
+    # enabled=TRUE on the first row -> the grid is parsed.
+    enabled = tmp_path / "enabled.xlsx"
+    write_workbook(_minimal_typed_with_sizing([
+        {"enabled": "TRUE", "pv_nameplate_kwp": 1000, "bess_power_kw": 500,
+         "bess_duration_hours": 2},
+        {"pv_nameplate_kwp": 2000, "bess_power_kw": 1000,
+         "bess_duration_hours": 4},
+    ]), enabled)
+    block = read_sizing_block(enabled)
+    assert block == {
+        "pv_nameplate_kwp": [1000.0, 2000.0],
+        "bess_power_kw": [500.0, 1000.0],
+        "bess_duration_hours": [2.0, 4.0],
+    }
+    assert len(parse_sizing_grid(block)) == 2 * 2 * 2
+
+
+def test_repo_input_xlsx_ships_disabled_sizing_sheet():
+    sheets = pd.ExcelFile(ROOT / "inputs" / "input.xlsx").sheet_names
+    assert "sizing" in sheets
+    # Shipped disabled, so a normal run is unaffected.
+    assert read_sizing_block(ROOT / "inputs" / "input.xlsx") is None
+
+
 def test_write_sizing_workbook_is_styled(tmp_path):
     frontier = rank_frontier(_synthetic_frontier().assign(
         irr_pct=5.0, simple_payback_years=8.0,

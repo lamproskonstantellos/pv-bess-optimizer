@@ -116,7 +116,7 @@ def test_all_sheets_present(repo_input_xlsx):
     sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "balancing", "max_injection_profile",
+        "simulation", "balancing", "max_injection_profile", "sizing",
     }
 
 
