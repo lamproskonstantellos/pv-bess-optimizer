@@ -72,34 +72,34 @@ COL_WIDTH_PADDING: float = 2.0
 # ---------------------------------------------------------------------------
 
 ALL_LABELS: list[str] = [
-    "Load (demand)",
+    "Load demand",
     "PV generation",
-    "PV→Load",
-    "BESS→Load",
-    "Import→Load",
-    "PV→BESS (charge)",
-    "Import→BESS (charge)",
-    "PV→Grid (export)",
-    "BESS→Grid (export)",
-    "PV→Curtailment",
+    "PV to load",
+    "BESS to load",
+    "Grid to load",
+    "PV to BESS",
+    "Grid to BESS",
+    "PV to grid",
+    "BESS to grid",
+    "Curtailed PV",
 ]
 
 COLORS: dict[str, str] = {
     # Load (priority indicator)
-    "Load (demand)": "#d62728",
+    "Load demand": "#d62728",
     # PV reference line (merchant combined view)
     "PV generation": "#FFB300",
     # PV-origin flows (warm gradient)
-    "PV→Load": "#D2691E",
-    "PV→BESS (charge)": "#DAA520",
-    "PV→Grid (export)": "#C19A6B",
-    "PV→Curtailment": "#3C3C3C",
+    "PV to load": "#D2691E",
+    "PV to BESS": "#DAA520",
+    "PV to grid": "#C19A6B",
+    "Curtailed PV": "#3C3C3C",
     # BESS-origin flows (cool blue)
-    "BESS→Load": "#1C5A8E",
-    "BESS→Grid (export)": "#5B9BD5",
+    "BESS to load": "#1C5A8E",
+    "BESS to grid": "#5B9BD5",
     # Grid-origin flows (slate)
-    "Import→Load": "#607D8B",
-    "Import→BESS (charge)": "#B0BEC5",
+    "Grid to load": "#607D8B",
+    "Grid to BESS": "#B0BEC5",
 }
 
 # ---------------------------------------------------------------------------
@@ -107,11 +107,11 @@ COLORS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 #
 # The daily / monthly / yearly merchant revenue plots draw labels of the
-# form "PV→Grid (revenue)" / "BESS→Grid (revenue)" / "Import→BESS (cost)".
+# form "Export from PV" / "Export from BESS" / "Grid-charging cost".
 # These are a financial view of physical flows already present in the
 # energy stack, so each revenue label shares the hex value of its energy
-# counterpart — a reader who memorised "yellow = PV→Grid in the energy
-# plot" reads "yellow = PV→Grid in the revenue plot" without a second
+# counterpart — a reader who memorised "yellow = PV to grid in the energy
+# plot" reads "yellow = PV to grid in the revenue plot" without a second
 # look.
 #
 # Kept in a separate registry so ``COLORS`` itself stays free of
@@ -119,9 +119,9 @@ COLORS: dict[str, str] = {
 # registries.
 
 MERCHANT_COLORS: dict[str, str] = {
-    "PV→Grid (revenue)":   COLORS["PV→Grid (export)"],
-    "BESS→Grid (revenue)": COLORS["BESS→Grid (export)"],
-    "Import→BESS (cost)":  COLORS["Import→BESS (charge)"],
+    "Export from PV":      COLORS["PV to grid"],
+    "Export from BESS":    COLORS["BESS to grid"],
+    "Grid-charging cost":  COLORS["Grid to BESS"],
 }
 
 
@@ -165,16 +165,16 @@ def label_color(label: str) -> str | None:
 
 
 LEGEND_ORDER: list[str] = [
-    "Load (demand)",
+    "Load demand",
     "PV generation",
-    "PV→Load",
-    "BESS→Load",
-    "PV→BESS (charge)",
-    "PV→Grid (export)",
-    "PV→Curtailment",
-    "BESS→Grid (export)",
-    "Import→Load",
-    "Import→BESS (charge)",
+    "PV to load",
+    "BESS to load",
+    "PV to BESS",
+    "PV to grid",
+    "Curtailed PV",
+    "BESS to grid",
+    "Grid to load",
+    "Grid to BESS",
 ]
 
 # Stack alphas for area / bar plots
@@ -365,7 +365,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Cumulative discounted cash-flow",
     "Cumulative NPV",
     "Net revenue",
-    "Real-EUR net (deflated)",
+    "Real net revenue",
     "Simple payback",
     "Discounted payback",
     # Bar / stack components
@@ -384,9 +384,9 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     # Balancing-product subcomponents (FCR / aFRR / mFRR)
     "FCR",
     "aFRR-up",
-    "aFRR-dn",
+    "aFRR-down",
     "mFRR-up",
-    "mFRR-dn",
+    "mFRR-down",
 )
 
 
@@ -400,7 +400,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Cumulative discounted cash-flow":  "discounted",
     "Cumulative NPV":                   "discounted",
     "Net revenue":                      "net_revenue_line",
-    "Real-EUR net (deflated)":          "net_revenue_line",
+    "Real net revenue":                 "net_revenue_line",
     "Simple payback":                   "net",
     "Discounted payback":               "discounted",
     "Revenue":                          "revenue",
@@ -416,9 +416,9 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Aggregator fee":                   "aggregator_fee",
     "FCR":                              "bm_fcr",
     "aFRR-up":                          "bm_afrr_up",
-    "aFRR-dn":                          "bm_afrr_dn",
+    "aFRR-down":                        "bm_afrr_dn",
     "mFRR-up":                          "bm_mfrr_up",
-    "mFRR-dn":                          "bm_mfrr_dn",
+    "mFRR-down":                        "bm_mfrr_dn",
 }
 
 
@@ -433,7 +433,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Cumulative discounted cash-flow",
     "Cumulative NPV",
     "Net revenue",
-    "Real-EUR net (deflated)",
+    "Real net revenue",
     "Simple payback",
     "Discounted payback",
     # Then bars / stacks, positive flows first
@@ -448,9 +448,9 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.
     "FCR",
     "aFRR-up",
-    "aFRR-dn",
+    "aFRR-down",
     "mFRR-up",
-    "mFRR-dn",
+    "mFRR-down",
     # Negative flows last
     "OPEX",
     "DEVEX",
