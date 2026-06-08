@@ -255,8 +255,8 @@ def plot_monthly_combined_merchant(
     """Monthly merchant-mode combined view.
 
     Daily-aggregated bars stacked as in :func:`plot_daily_combined_merchant`
-    (PV→BESS, PV→Grid, PV→Curtailment, BESS→Grid, Import→BESS), with the
-    PV generation line overlaid as the ceiling.
+    (PV to BESS, PV to grid, Curtailed PV, BESS to grid, Grid to BESS), with
+    the PV generation line overlaid as the ceiling.
 
     Filename: ``monthly_combined_<MM>.pdf``.
     """

@@ -52,7 +52,15 @@ SCAN_GLOBS = ("**/*.py", "**/*.md", "**/*.rst")
 ALLOWED_PATHS = {
     "tests/test_repo_hygiene.py",
 }
-SKIP_DIR_PARTS = {"__pycache__", "build", ".git", "_static", "_templates"}
+SKIP_DIR_PARTS = {
+    "__pycache__", "build", ".git", "_static", "_templates",
+    # Virtual-environment / tooling caches: never project source.  Without
+    # these, a developer's in-tree ``.venv`` makes this whole-tree glob scan
+    # the installed third-party packages and spuriously match the forbidden
+    # patterns inside them (e.g. ``\bF[1-9]\b`` in matplotlib/pyomo).
+    ".venv", "venv", "env", "site-packages", ".tox", ".eggs",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+}
 
 
 @pytest.mark.parametrize("pattern", FORBIDDEN)
