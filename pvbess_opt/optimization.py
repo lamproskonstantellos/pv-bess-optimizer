@@ -340,6 +340,53 @@ def derive_tight_big_m(
 # ---------------------------------------------------------------------------
 
 
+def _validate_strict_injection_cap(
+    ts: pd.DataFrame,
+    pv: dict[int, float],
+    load: dict[int, float],
+    export_cap_kwh_per_step: dict[int, float],
+    time_index: range,
+    *,
+    tol: float = 1e-6,
+) -> None:
+    """Reject an infeasible strict total-injection-cap run before solving.
+
+    In self_consumption + strict mode (``grid_cap_includes_load=True``) the
+    irreducible plant injection at step ``t`` is the load-priority-forced
+    ``pv_to_load[t] = min(pv[t], load[t])``: every other injection term
+    (``bess_dis_load``, ``pv_to_grid``, ``bess_dis_grid``) can be driven to 0
+    and surplus PV curtailed.  The strict cap is therefore feasible iff
+    ``min(pv[t], load[t]) <= export_cap_kwh_per_step[t]`` at every step.
+
+    Raising here keeps strict load priority intact — an over-constrained run
+    fails with an actionable message instead of the solver returning an opaque
+    infeasibility (the hard LOAD_PV_PRIORITY constraint never lets priority be
+    silently relaxed).  A small tolerance absorbs float noise.
+    """
+    timestamps = list(ts["timestamp"])
+    offenders: list[tuple[int, float, float, float]] = []
+    for t in time_index:
+        pv_t = pv[t]
+        load_t = load[t]
+        cap_t = export_cap_kwh_per_step[t]
+        if min(pv_t, load_t) > cap_t + tol:
+            offenders.append((t, pv_t, load_t, cap_t))
+    if not offenders:
+        return
+    preview = "; ".join(
+        f"{timestamps[t]} → min(pv={pv_t:.6g}, load={load_t:.6g})="
+        f"{min(pv_t, load_t):.6g} kWh > cap={cap_t:.6g} kWh"
+        for t, pv_t, load_t, cap_t in offenders[:3]
+    )
+    raise ValueError(
+        "grid_cap_includes_load=True is infeasible with strict load priority "
+        f"at {len(offenders)} step(s): the load-priority injection "
+        "min(pv, load) exceeds the per-step injection cap. "
+        f"First: {preview}. Lower the load, raise p_grid_export_max_kw / "
+        "max_injection_profile, or set grid_cap_includes_load=False."
+    )
+
+
 def build_model(
     params: dict[str, Any],
     ts: pd.DataFrame,
@@ -450,6 +497,12 @@ def build_model(
         t: float(p_export * dt_h * max_injection_per_step[t])
         for t in time_index
     }
+    if strict_injection_cap:
+        # Fail fast (pre-solve) when the strict total-injection cap cannot
+        # honour the forced load-priority injection — never silently relax it.
+        _validate_strict_injection_cap(
+            ts, pv, load, export_cap_kwh_per_step, time_index,
+        )
     big_m = derive_tight_big_m(params, ts, dt_h=dt_h, mode=mode)
 
     m = pyo.ConcreteModel()
@@ -800,8 +853,9 @@ def build_model(
     #     collapses to grid_export_total and the flag is a no-op there.
     #
     # Strict load priority (LOAD_PV_PRIORITY: pv_to_load == min(pv, load)) is
-    # never relaxed; an over-constrained strict run fails (solver infeasibility)
-    # rather than silently relaxing priority.
+    # never relaxed; an over-constrained strict run is rejected pre-solve by
+    # _validate_strict_injection_cap (min(pv, load) > cap at some step), with
+    # solver infeasibility as the backstop — never a silent priority relaxation.
     #
     # The cap is a direct ``<=`` to a constant, so it needs no big-M; M_exp
     # gates the NO_SIM_GRID_EXPORT binary below and is independent of this cap.
