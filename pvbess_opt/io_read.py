@@ -560,6 +560,7 @@ def _pv_schema_overrides() -> dict[str, Any]:
         "azimuth": {"type": "number", "minimum": -180, "maximum": 360},
         "losses_pct": {"type": "number", "minimum": 0, "maximum": 100},
         "weather_year": {"description": "non-leap calendar year, or 'tmy'"},
+        "raddatabase": {"type": "string"},
         "timeseries_path": {"type": "string"},
     }
 

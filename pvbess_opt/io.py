@@ -162,6 +162,7 @@ PV_SHEET_DEFAULTS: dict[str, Any] = {
     "azimuth": 0.0,
     "losses_pct": 14.0,
     "weather_year": 2019,
+    "raddatabase": None,
     "timeseries_path": None,
     "pv_nameplate_kwp": 0.0,
     "pv_degradation_year1_pct": 2.5,
@@ -439,6 +440,10 @@ _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "PVGIS only: system losses."),
     ("weather_year", 2019, "year",
      'PVGIS only: non-leap year for a clean 8760, or "tmy".'),
+    ("raddatabase", None, "enum",
+     "PVGIS only: optional radiation-database override (e.g. "
+     "'PVGIS-SARAH3' or 'PVGIS-ERA5'). Blank = let PVGIS pick the "
+     "regional default for the location."),
     ("timeseries_path", None, "path",
      "file only: optional external CSV/Parquet instead of the pv_kwh "
      "column."),
@@ -1067,7 +1072,9 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         return _parse_pv_tilt(raw, default)
     if key == "weather_year":
         return _parse_pv_weather_year(raw, default)
-    if key == "timeseries_path":
+    if key in ("timeseries_path", "raddatabase"):
+        # Free-form PVGIS strings: a blank cell resolves to the default
+        # (None); a non-blank cell is taken verbatim (stripped).
         return _parse_pv_path(raw, default)
     if key in _INT_KEYS:
         coerced = _coerce(raw, int, default)

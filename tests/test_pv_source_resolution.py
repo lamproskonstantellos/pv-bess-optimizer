@@ -117,6 +117,39 @@ def test_template_timeseries_has_single_pv_column():
     assert "pv_kwh_override" not in ts.columns
 
 
+def test_raddatabase_is_excel_reachable_and_reaches_pvgis(tmp_path, monkeypatch):
+    """The PVGIS radiation-database selector is a first-class pv-sheet input.
+
+    It defaults to None, round-trips through a workbook write/read, the
+    shipped template carries the row, and a value set on the pv sheet
+    actually reaches the PVGIS fetch — closing the Excel/YAML asymmetry
+    where ``raddatabase`` was consumable but not settable from Excel.
+    """
+    # Default is None (absent), and the shipped workbook carries the row.
+    assert PV_SHEET_DEFAULTS["raddatabase"] is None
+    shipped_keys = set(pd.read_excel(REPO_INPUT_XLSX, sheet_name="pv")["key"].dropna())
+    assert "raddatabase" in shipped_keys
+
+    # A value set on the pv sheet round-trips; a blank cell resolves to None.
+    typed = _typed(pv_overrides={"raddatabase": "PVGIS-ERA5"})
+    assert read_workbook(_write(tmp_path, typed))["pv"]["raddatabase"] == "PVGIS-ERA5"
+    assert read_workbook(_write(tmp_path, _typed(), "blank.xlsx"))["pv"][
+        "raddatabase"
+    ] is None
+
+    # An Excel-set value flows through resolve_pv_source into the PVGIS fetch.
+    captured = _mock_pvgis(monkeypatch)
+    typed_pvgis = _typed(
+        pv_kwh="empty",
+        pv_overrides={
+            "pv_source": "pvgis", "latitude": 37.98, "longitude": 23.73,
+            "raddatabase": "PVGIS-SARAH3",
+        },
+    )
+    read_workbook(_write(tmp_path, typed_pvgis, "pvgis.xlsx"))
+    assert captured["opts"].get("raddatabase") == "PVGIS-SARAH3"
+
+
 # ---------------------------------------------------------------------------
 # Resolution table — one test per row (§2.3)
 # ---------------------------------------------------------------------------
