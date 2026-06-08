@@ -58,16 +58,19 @@ High-level run configuration:
 * ``retail_tariff_eur_per_mwh`` — retail tariff used in self_consumption mode.
 * ``allow_bess_grid_charging`` — TRUE → BESS may charge from grid in
   PV-zero periods.
-* ``grid_cap_includes_load`` (default FALSE) — when TRUE the grid-export
-  cap binds on **total plant injection** (energy virtually allocated to a
-  remote load *plus* surplus export), modelling a Virtual Net-Billing
-  physical injection cap rather than a surplus-export-only cap.  When
-  FALSE (default) the cap applies only to surplus grid export, keeping
-  existing behaviour bit-identical.  Strict load priority is never
-  relaxed: if the per-step cap cannot accommodate the load-priority
-  injection ``min(pv, load)`` the run fails with a clear infeasibility
-  message.  Only affects ``self_consumption`` mode (merchant has no
-  co-located load).
+* ``grid_cap_includes_load`` (default FALSE) — sets what the per-step
+  grid-injection cap limits.  **FALSE** (default) models *physical /
+  co-located* self-consumption: the load sits behind the plant meter and
+  is served directly, so only the **surplus** reaches the grid and the cap
+  limits surplus export (bit-identical to earlier behaviour).  **TRUE**
+  models *Virtual Net-Billing*: the load is remote (no physical link to the
+  plant), so the plant injects **all** generation into the grid and the
+  offset against the remote load is computed each 15-minute settlement; the
+  cap then limits the **total plant injection** (energy credited to the
+  remote load plus any surplus).  Strict load priority is never relaxed: if
+  the cap cannot fit the forced injection ``min(pv, load)`` the run fails
+  with a clear infeasibility message.  Only affects ``self_consumption``
+  mode.
 * ``unavailability_pct`` — annual outage / maintenance factor
   (default 1 %).  Applied as a post-solve derate on PV generation,
   BESS discharge, and revenue.
