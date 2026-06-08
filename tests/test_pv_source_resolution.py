@@ -123,11 +123,11 @@ def test_template_timeseries_has_single_pv_column():
 
 
 def test_auto_filled_pv_kwh_uses_file(tmp_path):
-    """auto + pv_kwh data + no location → file (rescaled to the target)."""
+    """auto + pv_kwh data + no location → file (used verbatim)."""
     out = _write(tmp_path, _typed(pv_kwh="filled"))
     loaded = read_workbook(out)
     assert float(loaded["ts"]["pv_kwh"].sum()) == pytest.approx(
-        1000.0 * 1500.0, rel=1e-9,
+        100.0 * HOURS, rel=1e-9,
     )
 
 
@@ -163,7 +163,7 @@ def test_auto_filled_pv_kwh_with_location_warns_and_keeps_file(
         loaded = read_workbook(_write(tmp_path, typed))
     assert "lat" not in cap, "PVGIS must not be fetched when the column wins"
     assert float(loaded["ts"]["pv_kwh"].sum()) == pytest.approx(
-        1000.0 * 1500.0, rel=1e-9,
+        100.0 * HOURS, rel=1e-9,
     )
     assert any("location is ignored" in r.getMessage() for r in caplog.records)
 
@@ -221,9 +221,9 @@ def test_excel_timeseries_path_sources_pv(tmp_path):
         pv_overrides={"timeseries_path": "ext.csv"},
     )
     loaded = read_workbook(_write(tmp_path, typed))
-    # The external column is rescaled to the nameplate × SP target.
+    # The external column is consumed verbatim (no rescale).
     assert float(loaded["ts"]["pv_kwh"].sum()) == pytest.approx(
-        1000.0 * 1500.0, rel=1e-9,
+        7.0 * n, rel=1e-9,
     )
 
 

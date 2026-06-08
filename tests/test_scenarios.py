@@ -105,6 +105,165 @@ def test_read_scenarios_file(tmp_path):
         read_scenarios_file(bad)
 
 
+# ---------------------------------------------------------------------------
+# Excel-driven scenarios sheet (tidy/long, gated by an enabled toggle)
+# ---------------------------------------------------------------------------
+
+
+def _typed_for_write(scenarios=None) -> dict:
+    import numpy as np
+
+    from pvbess_opt.io import (
+        BESS_SHEET_DEFAULTS,
+        ECONOMICS_SHEET_DEFAULTS,
+        PROJECT_SHEET_DEFAULTS,
+        PV_SHEET_DEFAULTS,
+        SIMULATION_SHEET_DEFAULTS,
+    )
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=24, freq="h"),
+        "pv_kwh": [100.0] * 24,
+        "load_kwh": [50.0] * 24,
+        "dam_price_eur_per_mwh": [80.0] * 24,
+    })
+    typed = {
+        "ts": ts,
+        "project": dict(PROJECT_SHEET_DEFAULTS),
+        "pv": dict(PV_SHEET_DEFAULTS, pv_nameplate_kwp=1000.0),
+        "bess": dict(
+            BESS_SHEET_DEFAULTS, bess_power_kw=500.0, bess_capacity_kwh=2000.0,
+        ),
+        "economics": dict(ECONOMICS_SHEET_DEFAULTS),
+        "simulation": dict(SIMULATION_SHEET_DEFAULTS),
+        "max_injection_profile": np.full(24, 100.0),
+    }
+    if scenarios is not None:
+        typed["scenarios"] = scenarios
+    return typed
+
+
+def test_parse_scenarios_sheet_groups_and_nests():
+    from pvbess_opt.scenarios import _parse_scenarios_sheet
+    df = pd.DataFrame({
+        "enabled": ["TRUE", None, None, None],
+        "name": ["A", "B", "B", "C"],
+        "inherits": [None, "A", "A", "A"],
+        "target": [
+            "project.mode", "bess.power_kw", "bess.capacity_kwh",
+            "capex_multiplier",
+        ],
+        "value": ["merchant", 0, 0, 0.8],
+    })
+    enabled, scns = _parse_scenarios_sheet(df)
+    assert enabled is True
+    assert [s["name"] for s in scns] == ["A", "B", "C"]  # order preserved
+    by = {s["name"]: s for s in scns}
+    assert by["A"]["project"] == {"mode": "merchant"}
+    assert by["B"]["inherits"] == "A"
+    assert by["B"]["bess"] == {"power_kw": 0, "capacity_kwh": 0}
+    assert by["C"]["capex_multiplier"] == 0.8
+
+
+def test_parse_scenarios_sheet_disabled_toggle():
+    from pvbess_opt.scenarios import _parse_scenarios_sheet
+    df = pd.DataFrame({
+        "enabled": ["FALSE", None],
+        "name": ["A", "A"],
+        "inherits": [None, None],
+        "target": ["project.mode", "bess.power_kw"],
+        "value": ["merchant", 0],
+    })
+    enabled, scns = _parse_scenarios_sheet(df)
+    assert enabled is False
+    assert len(scns) == 1 and scns[0]["name"] == "A"
+
+
+def test_read_scenarios_block_gated_by_enabled(tmp_path):
+    from pvbess_opt.io import write_workbook
+    from pvbess_opt.scenarios import read_scenarios_block
+    # The shipped default example is disabled -> no batch.
+    disabled = tmp_path / "disabled.xlsx"
+    write_workbook(_typed_for_write(None), disabled)
+    assert read_scenarios_block(disabled) is None
+    # enabled=TRUE on the first row -> the scenarios are parsed.
+    enabled = tmp_path / "enabled.xlsx"
+    write_workbook(_typed_for_write([
+        {"enabled": "TRUE", "name": "Merchant", "target": "project.mode",
+         "value": "merchant"},
+        {"name": "PV only", "inherits": "Merchant", "target": "bess.power_kw",
+         "value": 0},
+    ]), enabled)
+    scns = read_scenarios_block(enabled)
+    assert [s["name"] for s in scns] == ["Merchant", "PV only"]
+    assert scns[0]["project"] == {"mode": "merchant"}
+    assert scns[1]["inherits"] == "Merchant"
+
+
+def test_repo_input_xlsx_ships_disabled_scenarios_sheet():
+    from pvbess_opt.scenarios import read_scenarios_block
+    sheets = pd.ExcelFile(ROOT / "inputs" / "input.xlsx").sheet_names
+    assert "scenarios" in sheets
+    # Shipped disabled, so a normal run is unaffected.
+    assert read_scenarios_block(ROOT / "inputs" / "input.xlsx") is None
+
+
+def test_cli_errors_when_both_sweeps_enabled(tmp_path, monkeypatch):
+    """Enabling the sizing and scenarios sheets together is rejected before
+    any run path executes."""
+    from pvbess_opt import cli
+    from pvbess_opt.io import write_workbook
+
+    called: list[str] = []
+    monkeypatch.setattr(cli, "run", lambda *_a, **_k: called.append("run"))
+    monkeypatch.setattr(
+        cli, "run_sizing", lambda *_a, **_k: called.append("sizing"),
+    )
+    monkeypatch.setattr(
+        cli, "run_scenarios", lambda *_a, **_k: called.append("scenarios"),
+    )
+    typed = _typed_for_write([
+        {"enabled": "TRUE", "name": "M", "target": "project.mode",
+         "value": "merchant"},
+    ])
+    typed["sizing"] = [
+        {"enabled": "TRUE", "pv_nameplate_kwp": 1000, "bess_power_kw": 500,
+         "bess_duration_hours": 2},
+    ]
+    wb = tmp_path / "both.xlsx"
+    write_workbook(typed, wb)
+    assert cli.main([str(wb)]) == 1
+    assert called == []  # guard fires before any run path
+
+
+def test_cli_routes_enabled_scenarios_sheet_to_batch(tmp_path, monkeypatch):
+    """An enabled scenarios sheet (and no sizing) runs the batch path with
+    the parsed scenarios."""
+    from pvbess_opt import cli
+    from pvbess_opt.io import write_workbook
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        cli, "run", lambda *_a, **_k: captured.setdefault("run", True),
+    )
+    monkeypatch.setattr(
+        cli, "run_sizing", lambda *_a, **_k: captured.setdefault("sizing", True),
+    )
+    monkeypatch.setattr(
+        cli, "run_scenarios",
+        lambda _config, scenarios: captured.update(scenarios=scenarios),
+    )
+    wb = tmp_path / "scn.xlsx"
+    write_workbook(_typed_for_write([
+        {"enabled": "TRUE", "name": "Merchant", "target": "project.mode",
+         "value": "merchant"},
+        {"name": "PV only", "inherits": "Merchant", "target": "bess.power_kw",
+         "value": 0},
+    ]), wb)
+    assert cli.main([str(wb)]) == 0
+    assert "run" not in captured and "sizing" not in captured
+    assert [s["name"] for s in captured["scenarios"]] == ["Merchant", "PV only"]
+
+
 def test_comparison_workbook_is_styled(tmp_path):
     comp = pd.DataFrame(
         [

@@ -13,7 +13,11 @@ import sys
 from pathlib import Path
 
 from pvbess_opt.pipeline import RunConfig, run
-from pvbess_opt.scenarios import read_scenarios_file, run_scenarios
+from pvbess_opt.scenarios import (
+    read_scenarios_block,
+    read_scenarios_file,
+    run_scenarios,
+)
 from pvbess_opt.sizing import read_sizing_block, run_sizing
 
 logger = logging.getLogger("pvbess_opt.cli")
@@ -125,8 +129,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         sizing_block = read_sizing_block(input_path)
+        sheet_scenarios = read_scenarios_block(input_path)
+        if sheet_scenarios and sizing_block and not args.scenarios:
+            raise ValueError(
+                "Both the 'sizing' and 'scenarios' sheets are enabled; "
+                "enable only one (set the other's 'enabled' cell to FALSE)."
+            )
         if args.scenarios:
             run_scenarios(config, read_scenarios_file(args.scenarios))
+        elif sheet_scenarios:
+            run_scenarios(config, sheet_scenarios)
         elif sizing_block:
             run_sizing(config, sizing_block)
         else:

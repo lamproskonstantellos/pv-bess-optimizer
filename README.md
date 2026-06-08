@@ -100,9 +100,10 @@ Project-level scalars including `mode`
 
 `pv_source` (`auto` | `file` | `pvgis`), the PVGIS location / geometry
 (`latitude`, `longitude`, `tilt`, `azimuth`, `losses_pct`,
-`weather_year`, `timeseries_path`), `pv_nameplate_kwp`,
-`specific_production_kwh_per_kwp` (used for the PV column rescale), and
-the degradation coefficients.  `auto` uses the `pv_kwh` column when it is
+`weather_year`, `timeseries_path`), `pv_nameplate_kwp`, and
+the degradation coefficients.  The `pv_kwh` column is consumed verbatim
+(absolute kWh per step); `pv_nameplate_kwp` is metadata for per-kW
+CAPEX / OPEX and the sizing sweep.  `auto` uses the `pv_kwh` column when it is
 filled and otherwise fetches the profile from the location — so a single
 input file covers both "bring your own PV series" and "just give me a
 location".
@@ -146,6 +147,29 @@ safety buffer, a balancing-revenue inflation rate, and the two Monte
 Carlo seeds.  See
 [`docs/balancing_market_design.md`](docs/balancing_market_design.md)
 for the design deep-dive.
+
+### `sizing`
+
+Optional capacity-sweep grid, columnar (one column per axis —
+`pv_nameplate_kwp`, `bess_power_kw`, and either `bess_capacity_kwh` or
+`bess_duration_hours` — one value per row), gated by an `enabled`
+TRUE / FALSE toggle in the first data row.  Ships **disabled** with a
+worked example; set `enabled` to `TRUE` to sweep the Cartesian product of
+the axes, rank an efficient frontier by NPV, and emit `sizing.xlsx` plus
+the frontier / break-even plots.  A YAML / JSON config expresses the same
+sweep as a `sizing:` block.
+
+### `scenarios`
+
+Optional batch comparison, tidy / long (one override per row, grouped by
+`name`; blank `name` cells inherit the row above), gated by an `enabled`
+TRUE / FALSE toggle in the first data row.  Ships **disabled** with a
+worked example.  Each row's `target` is a dotted path (`project.mode`,
+`bess.power_kw`) or a bare special (`balancing`, `capex_multiplier`), and
+`inherits` clones another scenario.  Set `enabled` to `TRUE` to run every
+named variant in one pass and emit a styled `scenario_comparison.xlsx`
+plus comparison plots.  `--scenarios file.yaml` is the config equivalent.
+The `sizing` and `scenarios` sheets are mutually exclusive.
 
 ## Output reference
 

@@ -1,10 +1,12 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook with **eight sheets**:
+The optimiser consumes a single Excel workbook.  Eight core data sheets —
 ``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
-``simulation``, ``balancing``, ``max_injection_profile``.  All keys use
-lowercase snake_case.
+``simulation``, ``balancing``, ``max_injection_profile`` — carry the run,
+plus two optional sweep sheets, ``sizing`` and ``scenarios`` (each gated
+by an ``enabled`` toggle and shipped disabled).  All keys use lowercase
+snake_case.
 
 Sheet ``timeseries``
 --------------------
@@ -94,8 +96,8 @@ Sheet ``pv``
 * ``timeseries_path`` — file sub-mode: an optional external CSV / Parquet
   whose ``pv_kwh`` column replaces the inline column.
 * ``pv_nameplate_kwp`` — PV nameplate.  ``0`` ⇒ no PV in this project.
-* ``specific_production_kwh_per_kwp`` — annual specific production
-  (informational; the MILP consumes the timeseries directly).
+  The ``pv_kwh`` timeseries is consumed verbatim (absolute kWh per step);
+  nameplate is metadata for per-kW CAPEX / OPEX and the sizing-sweep axis.
 * ``pv_degradation_year1_pct`` — initial light-induced degradation
   (LID) applied at start of Year 2.
 * ``pv_degradation_annual_pct`` — linear PV degradation after Year 1.
@@ -291,11 +293,11 @@ The canonical defaults live in
 :data:`pvbess_opt.io.SIMULATION_SHEET_DEFAULTS`.
 
 The shipped ``inputs/input.xlsx`` is the single source of truth for
-the PV shape: 35 040 fifteen-minute rows.  The loader rescales the
-workbook PV column to match the user's ``pv_nameplate_kwp`` ×
-``specific_production_kwh_per_kwp`` target at run time; every
-per-step ratio is preserved.  See ``inputs/input.xlsx`` for the
-as-shipped nameplate and yield.
+the PV shape: 35 040 fifteen-minute rows.  The ``pv_kwh`` column is the
+absolute PV generation per step and is consumed verbatim;
+``pv_nameplate_kwp`` is metadata (per-kW CAPEX / OPEX and the
+sizing-sweep axis).  See ``inputs/input.xlsx`` for the as-shipped
+nameplate and profile.
 
 PV source and location
 ----------------------
@@ -351,10 +353,9 @@ The empty-and-no-location case and the two explicit mismatches raise a
 clear, actionable error rather than returning a partial profile.
 
 In ``file`` mode the profile is the ``timeseries`` ``pv_kwh`` column (or
-an external ``timeseries_path`` CSV / Parquet), rescaled so the annual
-total matches ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp``
-while every per-step ratio is preserved
-(:func:`pvbess_opt.io._rescale_pv_to_user_target`).  The legacy
+an external ``timeseries_path`` CSV / Parquet), consumed verbatim as the
+absolute PV generation per step (``pv_nameplate_kwp`` is metadata, not a
+rescale target).  The legacy
 ``pv_kwh_override`` column is **deprecated**: it is read only as a
 fallback when ``pv_kwh`` is empty (and emits a one-time deprecation
 warning), so older workbooks keep loading without losing their data.
@@ -363,14 +364,13 @@ YAML / JSON config
 ------------------
 
 Instead of the Excel workbook the optimiser also accepts a YAML or JSON
-config whose sections mirror the eight sheets, with the time-series
+config whose sections mirror the workbook sheets, with the time-series
 referenced by ``timeseries_path`` (a CSV / Parquet file) rather than a
 35 040-row inline column::
 
     pv:
       pv_source: file
       pv_nameplate_kwp: 15000
-      specific_production_kwh_per_kwp: 1500
     bess:
       bess_power_kw: 15000
       bess_capacity_kwh: 30000
@@ -419,45 +419,78 @@ alignment, re-grid the transition days first.
 
 From an Excel workbook the same applies: fill ``latitude`` / ``longitude``
 on the ``pv`` sheet and clear the ``pv_kwh`` column.  The fetched profile
-is scaled by ``pv_nameplate_kwp`` (the realised PVGIS yield is kept — it
-is not renormalised to ``specific_production_kwh_per_kwp``), so the
-timeseries must span a whole number of hours (e.g. the 35 040-row
-15-minute grid).
+is scaled by ``pv_nameplate_kwp`` and used verbatim (the realised PVGIS
+yield is kept), so the timeseries must span a whole number of hours
+(e.g. the 35 040-row 15-minute grid).
 
-Capacity sizing sweep (``sizing:`` block)
------------------------------------------
+Capacity sizing sweep (``sizing`` sheet / ``sizing:`` block)
+-----------------------------------------------------------
 
-Add a ``sizing:`` block to a YAML/JSON config to sweep capacities instead
-of running a single size.  Each axis is an explicit list or a
-``{min, max, step}`` mapping; BESS energy may be given as
-``bess_capacity_kwh`` or ``bess_duration_hours`` (capacity = power x
-duration)::
+Sweep capacities instead of running a single size.  The Excel workbook
+carries a ``sizing`` sheet for this; a YAML / JSON config uses an
+equivalent ``sizing:`` block.
+
+In the **Excel workbook** the ``sizing`` sheet is columnar — one column
+per grid axis, one value per row — gated by an ``enabled`` TRUE / FALSE
+toggle read from the first data row.  It ships **disabled** with a worked
+example, so a normal run is untouched until you set ``enabled`` to
+``TRUE``.  Leave a cell blank to drop that value; ``bess_capacity_kwh``
+takes precedence over ``bess_duration_hours`` (capacity = power x
+duration) when both columns carry values:
+
+==========  =================  ===============  ===================
+``enabled`` ``pv_nameplate_kwp`` ``bess_power_kw`` ``bess_duration_hours``
+==========  =================  ===============  ===================
+``TRUE``    10000              10000            2
+            15000              15000            4
+            20000              20000
+==========  =================  ===============  ===================
+
+In a **YAML / JSON config** the same sweep is a ``sizing:`` block; each
+axis is an explicit list or a ``{min, max, step}`` mapping::
 
     sizing:
       pv_nameplate_kwp: [8000, 10000, 12000]
       bess_power_kw: [2000, 4000]
       bess_capacity_kwh: {min: 4000, max: 12000, step: 4000}
 
-``pvbess --config run.yaml`` then re-runs the dispatch solve at every
+Either way the optimiser re-runs the dispatch solve at every
 ``(pv, power, capacity)`` point, ranks an **efficient frontier** by NPV,
 and writes ``sizing.xlsx`` (frontier + marginal value + summary, styled
 like every other workbook) plus two plots: the NPV-vs-IRR frontier
 scatter and the NPV-vs-capacity curve marking the **oversizing
 break-even** — the BESS energy where the marginal value of storage
-(dNPV/dMWh) crosses zero.  With no ``sizing:`` block the run is a single
-size, unchanged.
+(dNPV/dMWh) crosses zero.  The PV profile is scaled to each
+``pv_nameplate_kwp`` by the nameplate ratio off the base column.  With the
+sheet disabled (or no ``sizing:`` block) the run is a single size,
+unchanged.
 
-Scenario batches (``--scenarios``)
-----------------------------------
+Scenario batches (``scenarios`` sheet / ``--scenarios``)
+--------------------------------------------------------
 
-Run many named variants in one invocation and emit a comparison::
+Run many named variants in one invocation and emit a comparison.  The
+Excel workbook carries a ``scenarios`` sheet for this; a YAML / JSON file
+passed with ``--scenarios`` is the equivalent.
 
-    pvbess inputs/input.xlsx --scenarios examples/scenarios.yaml
+In the **Excel workbook** the ``scenarios`` sheet is tidy / long — one
+override per row, grouped by ``name`` (blank ``name`` cells inherit the
+row above) — gated by an ``enabled`` TRUE / FALSE toggle in the first
+data row.  It ships **disabled** with a worked example.  The ``target``
+cell is a dotted path (``project.mode``, ``bess.power_kw`` — short aliases
+such as ``pv.nameplate_kwp`` / ``bess.power_kw`` are accepted) or one of
+the bare specials ``balancing`` (``on`` / ``off``) and
+``capex_multiplier``; ``inherits`` clones another scenario:
 
-The scenarios file lists overrides on the base input; ``inherits`` clones
-another scenario.  Overrides accept the canonical sheet keys or short
-aliases (``pv.nameplate_kwp``, ``bess.power_kw`` ...), plus
-``balancing: on|off`` and ``capex_multiplier``::
+==========  ===========================  =================  ==================  ==================
+``enabled`` ``name``                     ``inherits``       ``target``          ``value``
+==========  ===========================  =================  ==================  ==================
+``TRUE``    Merchant hybrid                                 project.mode        merchant
+            Merchant hybrid + balancing  Merchant hybrid    balancing           on
+            Cheap CAPEX                  Merchant hybrid    capex_multiplier    0.8
+==========  ===========================  =================  ==================  ==================
+
+A **YAML / JSON file** passed with ``pvbess inputs/input.xlsx --scenarios
+examples/scenarios.yaml`` lists the same overrides as nested mappings::
 
     scenarios:
       - name: "Merchant hybrid"
@@ -474,5 +507,6 @@ results match running it alone.  The batch writes a styled
 ``scenario_comparison.xlsx`` (one row per scenario: NPV / IRR / payback /
 LCOE / LCOS + revenue by stream) plus a comparison-bars plot and a
 revenue bridge between the first two scenarios.  Scenarios vary on a
-shared base PV shape (rescaled per nameplate); use separate configs for
-different sites.
+shared base PV profile; use separate inputs for different sites.  The
+``scenarios`` and ``sizing`` sheets are mutually exclusive — enabling both
+raises a clear error.

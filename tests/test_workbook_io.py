@@ -1,7 +1,7 @@
 """Workbook I/O regression tests for ``inputs/input.xlsx``.
 
 The repo's canonical workbook is also the executable contract for the
-eight-sheet schema. This test loads it, checks every typed key
+documented schema. This test loads it, checks every typed key
 for type and plausible range, locks down ``p_grid_export_max_kw`` to
 the project sheet, walks the timeseries shape, sanity-checks the
 max-injection profile, and finally round-trips the typed dict through
@@ -47,7 +47,6 @@ _PROJECT_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {
 
 _PV_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {
     "pv_nameplate_kwp": (float, 0.0, None),
-    "specific_production_kwh_per_kwp": (float, 0.0, None),
     "pv_degradation_year1_pct": (float, 0.0, 100.0),
     "pv_degradation_annual_pct": (float, 0.0, 100.0),
     "capex_pv_eur_per_kw": (float, 0.0, None),

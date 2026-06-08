@@ -32,6 +32,7 @@ def test_repo_input_xlsx_has_all_sheets():
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
         "simulation", "balancing", "max_injection_profile",
+        "sizing", "scenarios",
     }
 
 

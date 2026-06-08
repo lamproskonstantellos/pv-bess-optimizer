@@ -2,9 +2,10 @@
 
 Covers:
 
-* The eight-sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
+* The core sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
   ``economics`` / ``simulation`` / ``balancing`` /
-  ``max_injection_profile``).
+  ``max_injection_profile``) plus the optional ``sizing`` / ``scenarios``
+  sweep sheets.
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
@@ -50,7 +51,7 @@ def test_pv_sheet_keys():
         "pv_source",
         "latitude", "longitude", "tilt", "azimuth", "losses_pct",
         "weather_year", "timeseries_path",
-        "pv_nameplate_kwp", "specific_production_kwh_per_kwp",
+        "pv_nameplate_kwp",
         "pv_degradation_year1_pct", "pv_degradation_annual_pct",
         "capex_pv_eur_per_kw", "devex_pv_eur_per_kw",
         "opex_pv_eur_per_kwp",
@@ -108,7 +109,7 @@ def test_simulation_sheet_keys():
 
 
 # ---------------------------------------------------------------------------
-# Repository workbook — eight sheets exposed
+# Repository workbook — all sheets exposed
 # ---------------------------------------------------------------------------
 
 
@@ -117,6 +118,7 @@ def test_all_sheets_present(repo_input_xlsx):
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
         "simulation", "balancing", "max_injection_profile",
+        "sizing", "scenarios",
     }
 
 
@@ -125,8 +127,8 @@ def test_repo_workbook_loads_typed_dict(repo_input_xlsx):
     for section in ("project", "pv", "bess", "economics", "simulation"):
         assert section in typed and isinstance(typed[section], dict)
     assert typed["project"]["mode"] == "self_consumption"
-    # The case-study workbook ships with the canonical 8 MW shape
-    # rescaled to the 15 MW default scenario.
+    # The case-study workbook ships the absolute 15 MW PV profile
+    # (consumed verbatim, no rescale).
     assert typed["pv"]["pv_nameplate_kwp"] == pytest.approx(15000.0)
     assert typed["bess"]["bess_power_kw"] == pytest.approx(15000.0)
     assert "max_injection_profile" in typed

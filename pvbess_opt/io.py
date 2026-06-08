@@ -1,14 +1,14 @@
 """Excel input parsing and output writing for the PV+BESS optimizer.
 
-The schema is **eight sheets**, one logical theme per sheet:
+The schema sheets, one logical theme per sheet:
 
 * ``timeseries`` — per-step data with lowercase snake_case column names:
   ``timestamp``, ``load_kwh``, ``pv_kwh``, ``dam_price_eur_per_mwh``,
   optional ``retail_price_eur_per_mwh``.  ``pv_kwh`` is the single PV
-  column: fill it to source PV from the timeseries (rescaled to the
-  ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp`` target), or
-  leave it empty and set ``latitude`` / ``longitude`` on the ``pv`` sheet
-  to source the profile from PVGIS instead.  The legacy
+  column: fill it to source PV from the timeseries (consumed verbatim as
+  absolute kWh per step), or leave it empty and set ``latitude`` /
+  ``longitude`` on the ``pv`` sheet to source the profile from PVGIS
+  instead.  The legacy
   ``pv_kwh_override`` column is deprecated: it is read only as a fallback
   when ``pv_kwh`` is empty (:func:`pvbess_opt.io_read.resolve_pv_source`).
 * ``project`` — high-level run config (lifecycle horizon, mode,
@@ -16,7 +16,7 @@ The schema is **eight sheets**, one logical theme per sheet:
 * ``pv`` — PV source switch (``pv_source`` = auto | file | pvgis), PVGIS
   location / array geometry (``latitude``, ``longitude``, ``tilt``,
   ``azimuth``, ``losses_pct``, ``weather_year``, ``timeseries_path``),
-  nameplate, specific production, degradation, CAPEX / DEVEX / OPEX.
+  nameplate, degradation, CAPEX / DEVEX / OPEX.
 * ``bess`` — BESS power and capacity, efficiency, SOC bounds, cycles,
   CAPEX / DEVEX / OPEX, replacement and degradation.
 * ``economics`` — discount rate, inflation indices, aggregator fee,
@@ -30,6 +30,13 @@ The schema is **eight sheets**, one logical theme per sheet:
   optionally with one column per calendar month, expressing the share
   of ``p_grid_export_max_kw`` available for export.  Missing → fall
   back to the no-curtailment default (a flat 100 %) and log INFO.
+* ``sizing`` — optional capacity-sweep grid (columnar: one column per
+  axis, one value per row) gated by an ``enabled`` TRUE / FALSE toggle.
+  Shipped disabled; read by :func:`pvbess_opt.sizing.read_sizing_block`.
+* ``scenarios`` — optional batch comparison (tidy/long: one override row
+  per ``name`` with a dotted ``target``) gated by an ``enabled`` toggle.
+  Shipped disabled; read by
+  :func:`pvbess_opt.scenarios.read_scenarios_block`.
 
 Public loader API
 -----------------
@@ -156,7 +163,6 @@ PV_SHEET_DEFAULTS: dict[str, Any] = {
     "weather_year": 2019,
     "timeseries_path": None,
     "pv_nameplate_kwp": 0.0,
-    "specific_production_kwh_per_kwp": 1500.0,
     "pv_degradation_year1_pct": 2.5,
     "pv_degradation_annual_pct": 0.55,
     "capex_pv_eur_per_kw": 525.0,
@@ -407,9 +413,11 @@ _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "auto | file | pvgis. auto: use pv_kwh if filled, else fetch by "
      "location."),
     ("latitude", None, "deg",
-     "PVGIS only: required when pv_kwh is empty."),
+     "PVGIS only: required when pv_kwh is empty. Decimal degrees, north "
+     "positive, range -90..90 (e.g. Athens 37.9838, Thessaloniki 40.6401)."),
     ("longitude", None, "deg",
-     "PVGIS only: required when pv_kwh is empty."),
+     "PVGIS only: required when pv_kwh is empty. Decimal degrees, east "
+     "positive, range -180..180 (e.g. Athens 23.7275, Thessaloniki 22.9444)."),
     ("tilt", "optimal", "deg",
      'PVGIS only: degrees, or "optimal".'),
     ("azimuth", 0, "deg",
@@ -422,10 +430,9 @@ _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "file only: optional external CSV/Parquet instead of the pv_kwh "
      "column."),
     ("pv_nameplate_kwp", 0, "kWp",
-     "PV nameplate capacity. 0 = no PV in this project."),
-    ("specific_production_kwh_per_kwp", 1500, "kWh/kWp/yr",
-     "Annual specific production of the PV array. Used for documentation "
-     "and as a sanity check; the MILP consumes the timeseries directly."),
+     "PV nameplate capacity. 0 = no PV in this project. The pv_kwh "
+     "timeseries is consumed verbatim (absolute kWh per step); nameplate "
+     "is metadata used for per-kW CAPEX/OPEX and the sizing sweep axis."),
     ("pv_degradation_year1_pct", 2.5, "%",
      "Initial light-induced degradation (LID) applied at start of Year 2."),
     ("pv_degradation_annual_pct", 0.55, "%",
@@ -746,12 +753,119 @@ _MONTH_TOKENS: tuple[str, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Optional sweep sheet: sizing (capacity sweep)
+# ---------------------------------------------------------------------------
+
+# Sizing-sweep sheet: one column per grid axis, one value per row, plus an
+# ``enabled`` TRUE/FALSE toggle read from the first data row.  Parsed by
+# pvbess_opt.sizing._parse_sizing_sheet and expanded into the Cartesian
+# product by pvbess_opt.sizing.parse_sizing_grid.  ``bess_capacity_kwh``
+# takes precedence over ``bess_duration_hours`` when both carry values.
+# ``enabled`` = FALSE (the shipped default) leaves a normal single run
+# untouched, so the sweep never fires unless the user opts in.
+SIZING_SHEET_COLUMNS: tuple[str, ...] = (
+    "enabled",
+    "pv_nameplate_kwp",
+    "bess_power_kw",
+    "bess_capacity_kwh",
+    "bess_duration_hours",
+)
+
+# Disabled example grid shipped in the workbook so the columnar format is
+# self-documenting.  Blank cells are skipped; here capacity is left blank so
+# the duration column drives the BESS-energy axis (power x duration).
+_SIZING_EXAMPLE_ROWS: tuple[tuple[Any, ...], ...] = (
+    ("FALSE", 10000.0, 10000.0, None, 2.0),
+    (None, 15000.0, 15000.0, None, 4.0),
+    (None, 20000.0, 20000.0, None, None),
+)
+
+
+def _build_sizing_sheet(
+    rows: list[dict[str, Any]] | None = None,
+) -> pd.DataFrame:
+    """Render the optional ``sizing`` sweep sheet.
+
+    With no explicit ``rows`` the shipped disabled example is written so the
+    columnar format is self-documenting.
+    """
+    if rows:
+        frame = pd.DataFrame(rows)
+        for col in SIZING_SHEET_COLUMNS:
+            if col not in frame.columns:
+                frame[col] = None
+        return frame[list(SIZING_SHEET_COLUMNS)]
+    return pd.DataFrame(
+        [
+            dict(zip(SIZING_SHEET_COLUMNS, r, strict=True))
+            for r in _SIZING_EXAMPLE_ROWS
+        ],
+        columns=list(SIZING_SHEET_COLUMNS),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Optional sweep sheet: scenarios (batch comparison)
+# ---------------------------------------------------------------------------
+
+# Scenarios sheet: tidy / long — one row per override, grouped by ``name``,
+# with an optional ``inherits`` clone reference and a dotted ``target``
+# (e.g. ``project.mode``, ``bess.power_kw``, or the bare specials
+# ``capex_multiplier`` / ``balancing``).  Parsed by
+# pvbess_opt.scenarios._parse_scenarios_sheet and run by run_scenarios.
+# Gated by an ``enabled`` TRUE/FALSE toggle read from the first data row;
+# shipped disabled so a normal run is unaffected.
+SCENARIOS_SHEET_COLUMNS: tuple[str, ...] = (
+    "enabled",
+    "name",
+    "inherits",
+    "target",
+    "value",
+)
+
+# Disabled worked example mirroring examples/scenarios.yaml so the
+# tidy/long format is self-documenting.  A scenario spans the consecutive
+# rows that share its ``name``.
+_SCENARIOS_EXAMPLE_ROWS: tuple[tuple[Any, ...], ...] = (
+    ("FALSE", "Self-consumption hybrid", None, "project.mode", "self_consumption"),
+    (None, "Merchant hybrid", None, "project.mode", "merchant"),
+    (None, "Merchant hybrid + balancing", "Merchant hybrid", "balancing", "on"),
+    (None, "Merchant PV only", "Merchant hybrid", "bess.power_kw", 0),
+    (None, "Merchant PV only", "Merchant hybrid", "bess.capacity_kwh", 0),
+    (None, "Cheap CAPEX (merchant)", "Merchant hybrid", "capex_multiplier", 0.8),
+)
+
+
+def _build_scenarios_sheet(
+    rows: list[dict[str, Any]] | None = None,
+) -> pd.DataFrame:
+    """Render the optional ``scenarios`` batch sheet.
+
+    With no explicit ``rows`` the shipped disabled example is written so the
+    tidy/long format is self-documenting.
+    """
+    if rows:
+        frame = pd.DataFrame(rows)
+        for col in SCENARIOS_SHEET_COLUMNS:
+            if col not in frame.columns:
+                frame[col] = None
+        return frame[list(SCENARIOS_SHEET_COLUMNS)]
+    return pd.DataFrame(
+        [
+            dict(zip(SCENARIOS_SHEET_COLUMNS, r, strict=True))
+            for r in _SCENARIOS_EXAMPLE_ROWS
+        ],
+        columns=list(SCENARIOS_SHEET_COLUMNS),
+    )
+
+
 # Output-styling contract: every workbook written below passes through
 # pvbess_opt.io_style.style_workbook before save, so all outputs share the
 # input workbook's navy frozen-header house style.  Never save an output
 # sheet unstyled.
 def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
-    """Write a workbook from a typed nested dict (eight-sheet schema)."""
+    """Write a workbook from a typed nested dict."""
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -767,6 +881,8 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     if profile is None:
         profile = np.full(24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float)
     max_injection_df = _build_max_injection_sheet(profile)
+    sizing_df = _build_sizing_sheet(typed.get("sizing"))
+    scenarios_df = _build_scenarios_sheet(typed.get("scenarios"))
 
     with pd.ExcelWriter(dst, engine="openpyxl") as writer:
         typed["ts"].to_excel(writer, sheet_name="timeseries", index=False)
@@ -779,6 +895,8 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
+        sizing_df.to_excel(writer, sheet_name="sizing", index=False)
+        scenarios_df.to_excel(writer, sheet_name="scenarios", index=False)
         style_workbook(writer.book)
     return dst
 
@@ -1187,58 +1305,6 @@ def detect_timestep_minutes(ts: pd.DataFrame) -> int:
 _V08_REQUIRED_SHEETS: frozenset[str] = frozenset({
     "timeseries", "project", "pv", "bess", "economics", "simulation",
 })
-
-
-# Tolerance for "the workbook PV total already matches the user's
-# pv_nameplate_kwp × specific_production_kwh_per_kwp target" — below
-# this relative threshold the loader does **not** rescale.
-_PV_RESCALE_REL_TOLERANCE: float = 1.0e-12
-
-
-def _rescale_pv_to_user_target(
-    ts: pd.DataFrame,
-    *,
-    pv_nameplate_kwp: float,
-    specific_production_kwh_per_kwp: float,
-) -> pd.DataFrame:
-    """Rescale ``ts['pv_kwh']`` to match the user's
-    ``pv_nameplate_kwp × specific_production_kwh_per_kwp`` target.
-
-    The shape is preserved exactly (multiplicative scaling).  Returns
-    a new DataFrame.  Skipped (pass-through) when:
-
-    * either knob is zero or negative (PV is "absent" or unspecified);
-    * the workbook PV column sums to zero;
-    * the current annual total already matches the target within
-      ``1e-12`` relative.
-    """
-    if "pv_kwh" not in ts.columns:
-        return ts
-    if pv_nameplate_kwp <= 0.0 or specific_production_kwh_per_kwp <= 0.0:
-        return ts
-
-    current_total = float(ts["pv_kwh"].astype(float).sum())
-    if current_total <= 0.0:
-        return ts
-
-    target_total = (
-        float(pv_nameplate_kwp) * float(specific_production_kwh_per_kwp)
-    )
-    rel_diff = abs(current_total - target_total) / max(target_total, 1.0e-9)
-    if rel_diff <= _PV_RESCALE_REL_TOLERANCE:
-        return ts
-
-    factor = target_total / current_total
-    out = ts.copy()
-    out["pv_kwh"] = out["pv_kwh"].astype(float) * factor
-    logger.info(
-        "PV column rescaled: workbook annual %.1f kWh → user target %.1f "
-        "kWh (factor %.6f) from pv_nameplate_kwp=%.1f kWp × "
-        "specific_production=%.4f kWh/kWp.",
-        current_total, target_total, factor,
-        pv_nameplate_kwp, specific_production_kwh_per_kwp,
-    )
-    return out
 
 
 # ---------------------------------------------------------------------------

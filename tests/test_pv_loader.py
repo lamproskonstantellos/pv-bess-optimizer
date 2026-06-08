@@ -1,11 +1,11 @@
 """Loader contracts for the single ``pv_kwh`` column.
 
-The repo workbook ships with a 1 MW × 1500 kWh/kWp default (1 500 000
-kWh annual).  The loader sources PV as follows:
+The loader sources PV as follows:
 
-1. **Default path** — ``pv_nameplate_kwp`` × ``specific_production_kwh_per_kwp``
-   rescales the workbook ``pv_kwh`` column proportionally.  Same shape,
-   different magnitude.
+1. **File path** — the ``pv_kwh`` column (or an external ``timeseries_path``)
+   is consumed **verbatim** as absolute kWh per step.  ``pv_nameplate_kwp``
+   is metadata (per-kW CAPEX / OPEX and the sizing-sweep axis), never a
+   rescale target.
 2. **Deprecated fallback** — the legacy ``pv_kwh_override`` column is read
    only when ``pv_kwh`` is empty (so old files keep their data); it is used
    verbatim, a one-time deprecation warning is emitted, and partial NaN is
@@ -23,114 +23,44 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pvbess_opt.io import (
-    _rescale_pv_to_user_target,
-    read_workbook,
-    write_workbook,
-)
+from pvbess_opt.io import read_workbook, write_workbook
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO_INPUT_XLSX = ROOT / "inputs" / "input.xlsx"
 
 
-# ---------------------------------------------------------------------------
-# 1. Default pass-through — workbook ships at its declared target so the
-#    loader must NOT touch pv_kwh.
-# ---------------------------------------------------------------------------
-
-
-def test_default_workbook_rescales_canonical_shape():
-    """The canonical workbook ships a 1 MW PV shape; the 15 MW default
-    nameplate rescales it by a constant factor 15 with shape preserved."""
-    raw_ts = pd.read_excel(REPO_INPUT_XLSX, sheet_name="timeseries")
-    typed = read_workbook(REPO_INPUT_XLSX)
-    raw_pv = raw_ts["pv_kwh"].to_numpy(dtype=float)
-    loaded_pv = typed["ts"]["pv_kwh"].to_numpy(dtype=float)
-    nonzero = raw_pv > 1.0e-9
-    ratios = loaded_pv[nonzero] / raw_pv[nonzero]
-    assert ratios.std() < 1.0e-9
-    assert float(np.mean(ratios)) == pytest.approx(15.0, rel=1e-9)
-
-
-# ---------------------------------------------------------------------------
-# 2-3. Rescaling on user-supplied nameplate / specific production
-# ---------------------------------------------------------------------------
-
-
-def _user_workbook(
-    tmp_path: Path, *, pv_kwp: float, sp: float,
-) -> Path:
-    typed = read_workbook(REPO_INPUT_XLSX)
-    typed["pv"]["pv_nameplate_kwp"] = float(pv_kwp)
-    typed["pv"]["specific_production_kwh_per_kwp"] = float(sp)
-    out = tmp_path / "user.xlsx"
-    write_workbook(typed, out)
-    return out
-
-
-def test_loader_rescales_to_user_nameplate_only(tmp_path):
-    raw_pv = pd.read_excel(
+def _repo_pv_kwh() -> np.ndarray:
+    """The pv_kwh column as stored in the repo workbook (absolute kWh)."""
+    return pd.read_excel(
         REPO_INPUT_XLSX, sheet_name="timeseries",
     )["pv_kwh"].to_numpy(dtype=float)
-    out = _user_workbook(tmp_path, pv_kwp=2000.0, sp=1500.0)
-    pv = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
-    assert float(pv.sum()) == pytest.approx(2000.0 * 1500.0, rel=1e-9)
-    # Shape preserved: ratio of any two non-zero indices is unchanged.
-    nonzero = raw_pv > 1.0e-9
-    ratios = pv[nonzero] / raw_pv[nonzero]
-    assert ratios.std() < 1.0e-9
-
-
-def test_loader_rescales_to_user_specific_production_only(tmp_path):
-    out = _user_workbook(tmp_path, pv_kwp=1000.0, sp=1600.0)
-    pv = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
-    assert float(pv.sum()) == pytest.approx(1000.0 * 1600.0, rel=1e-9)
 
 
 # ---------------------------------------------------------------------------
-# 4. Loader logs the rescale factor only when rescaling actually fires
+# 1. File path — the pv_kwh column is used verbatim (no nameplate rescale).
 # ---------------------------------------------------------------------------
 
 
-def test_loader_logs_rescale_factor_only_on_rescale(tmp_path, caplog):
-    # A workbook whose nameplate × specific production already matches
-    # its timeseries annual total must not trigger rescaling.
-    out_default = _user_workbook(tmp_path, pv_kwp=15000.0, sp=1500.0)
-    with caplog.at_level(logging.INFO, logger="pvbess_opt.io"):
-        read_workbook(out_default)
-    rescaled = [r for r in caplog.records if "rescaled" in r.getMessage()]
-    assert not rescaled, "matched workbook unexpectedly triggered rescaling"
+def test_default_workbook_pv_used_verbatim():
+    """The canonical workbook's pv_kwh column is loaded unchanged."""
+    typed = read_workbook(REPO_INPUT_XLSX)
+    loaded = typed["ts"]["pv_kwh"].to_numpy(dtype=float)
+    assert np.allclose(loaded, _repo_pv_kwh(), rtol=0.0, atol=1e-6)
 
-    caplog.clear()
-    out = _user_workbook(tmp_path, pv_kwp=2000.0, sp=1600.0)
-    with caplog.at_level(logging.INFO, logger="pvbess_opt.io"):
-        read_workbook(out)
-    rescaled = [r for r in caplog.records if "rescaled" in r.getMessage()]
-    assert len(rescaled) == 1
-    msg = rescaled[0].getMessage()
-    assert "2000.0 kWp" in msg
-    assert "1600.0000 kWh/kWp" in msg
+
+def test_nameplate_does_not_rescale_pv(tmp_path):
+    """Changing pv_nameplate_kwp must not touch the pv_kwh magnitude."""
+    typed = read_workbook(REPO_INPUT_XLSX)
+    # An arbitrary nameplate unrelated to the column's annual energy.
+    typed["pv"]["pv_nameplate_kwp"] = 999.0
+    out = tmp_path / "renamed.xlsx"
+    write_workbook(typed, out)
+    loaded = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
+    assert np.allclose(loaded, _repo_pv_kwh(), rtol=0.0, atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
-# 5. Zero nameplate skips rescaling
-# ---------------------------------------------------------------------------
-
-
-def test_zero_nameplate_skips_rescaling():
-    ts = pd.DataFrame({
-        "timestamp": pd.date_range("2026-01-01", periods=4, freq="h"),
-        "pv_kwh": [10.0, 20.0, 30.0, 40.0],
-        "load_kwh": [1.0] * 4,
-    })
-    out = _rescale_pv_to_user_target(
-        ts, pv_nameplate_kwp=0.0, specific_production_kwh_per_kwp=1500.0,
-    )
-    assert (out["pv_kwh"].to_numpy() == ts["pv_kwh"].to_numpy()).all()
-
-
-# ---------------------------------------------------------------------------
-# 6. Override column used verbatim when fully populated
+# 2. Deprecated pv_kwh_override fallback (verbatim, only when pv_kwh empty)
 # ---------------------------------------------------------------------------
 
 
@@ -145,7 +75,7 @@ def _override_workbook(
     ts = typed["ts"].copy()
     if clear_pv_kwh:
         # Empty the single PV column so the deprecated override is the
-        # only PV data — the §2.4 backward-compatible fallback path.
+        # only PV data — the backward-compatible fallback path.
         ts["pv_kwh"] = np.nan
     ts["pv_kwh_override"] = override.astype(float)
     typed["ts"] = ts
@@ -175,35 +105,35 @@ def test_override_used_as_fallback_when_pv_kwh_empty(tmp_path, caplog):
 
 
 def test_filled_pv_kwh_ignores_override(tmp_path):
-    """When pv_kwh carries data the override column is ignored (pv_kwh wins)
-    and dropped from the loaded frame."""
+    """When pv_kwh carries data the override column is ignored (pv_kwh wins
+    verbatim) and dropped from the loaded frame."""
     n = 35040
     override = np.full(n, 999.0)  # would be obvious if it leaked through
     # clear_pv_kwh defaults to False, so the repo pv_kwh shape stays filled.
     out = _override_workbook(tmp_path, override, pv_kwp=1000.0)
     loaded = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
     assert not np.allclose(loaded, override)
-    assert float(loaded.sum()) == pytest.approx(1000.0 * 1500.0, rel=1e-9)
+    assert np.allclose(loaded, _repo_pv_kwh(), rtol=0.0, atol=1e-6)
 
 
 # ---------------------------------------------------------------------------
-# 7. Override fallback bypasses the rescaling pipeline
+# 3. Override is verbatim — nameplate never changes its magnitude
 # ---------------------------------------------------------------------------
 
 
-def test_loader_skips_rescaling_when_override_used(tmp_path):
+def test_override_verbatim_independent_of_nameplate(tmp_path):
     n = 35040
     override = np.full(n, 50.0)  # constant 50 kWh per 15-min step
     annual_sum = float(override.sum())
-    # Used verbatim (no nameplate rescale) when pv_kwh is empty, so doubling
-    # the nameplate must not change the annual sum.
+    # Used verbatim when pv_kwh is empty, so doubling the nameplate must not
+    # change the annual sum.
     out = _override_workbook(tmp_path, override, pv_kwp=2000.0, clear_pv_kwh=True)
     loaded = read_workbook(out)["ts"]["pv_kwh"].to_numpy(dtype=float)
     assert float(loaded.sum()) == pytest.approx(annual_sum, rel=1e-12)
 
 
 # ---------------------------------------------------------------------------
-# 8. Override column is dropped from the loaded frame
+# 4. Override column is dropped from the loaded frame
 # ---------------------------------------------------------------------------
 
 
@@ -216,7 +146,7 @@ def test_loader_drops_override_column_after_use(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 9. Partial NaN override raises
+# 5. Partial NaN override raises
 # ---------------------------------------------------------------------------
 
 
@@ -232,27 +162,24 @@ def test_partial_nan_override_raises(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 10. All-NaN override falls back to the rescaling path
+# 6. All-NaN override falls back to the pv_kwh column (verbatim)
 # ---------------------------------------------------------------------------
 
 
-def test_all_nan_override_falls_back_to_rescaling(tmp_path):
+def test_all_nan_override_falls_back_to_pv_column(tmp_path):
     n = 35040
     override = np.full(n, np.nan)
     out = _override_workbook(tmp_path, override, pv_kwp=1000.0)
     typed = read_workbook(out)
-    # pv_kwh equals the workbook's default (rescale factor 1.0) and the
+    # pv_kwh equals the workbook's stored column (used verbatim) and the
     # override column has been stripped from the frame.
-    raw_pv = pd.read_excel(
-        REPO_INPUT_XLSX, sheet_name="timeseries",
-    )["pv_kwh"].to_numpy(dtype=float)
     loaded = typed["ts"]["pv_kwh"].to_numpy(dtype=float)
-    assert float(np.abs(loaded - raw_pv).max()) < 1.0e-9
+    assert np.allclose(loaded, _repo_pv_kwh(), rtol=0.0, atol=1e-6)
     assert "pv_kwh_override" not in typed["ts"].columns
 
 
 # ---------------------------------------------------------------------------
-# 11. Implausible implied specific production emits WARNING
+# 7. Implausible implied specific production emits WARNING (override path)
 # ---------------------------------------------------------------------------
 
 

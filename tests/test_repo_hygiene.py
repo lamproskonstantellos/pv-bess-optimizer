@@ -7,7 +7,7 @@ Combines two evergreen contracts into one file:
 * **Leftover-token audit** — no forbidden legacy identifiers or version
   literals in the source tree (literal-token scan), required tokens and
   files are present, ``inputs/input.xlsx`` loads through the typed
-  loader without legacy-schema warnings and exposes the eight-sheet
+  loader without legacy-schema warnings and exposes the documented
   schema, and the package version equals the README badge.
 
 The grep is implemented in pure Python so it works offline and on
@@ -283,8 +283,8 @@ def test_repo_input_xlsx_loads_through_loader_cleanly(caplog):
     )
 
 
-def test_inputs_xlsx_uses_eight_sheet_schema():
-    """inputs/input.xlsx must expose the eight-sheet typed dict."""
+def test_inputs_xlsx_uses_documented_sheet_schema():
+    """inputs/input.xlsx must expose the documented typed dict."""
     from pvbess_opt.io import read_workbook
     typed = read_workbook(ROOT / "inputs" / "input.xlsx")
     for section in ("project", "pv", "bess", "economics", "simulation"):
