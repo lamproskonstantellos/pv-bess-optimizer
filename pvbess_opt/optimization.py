@@ -31,6 +31,8 @@ limit (the asymmetric p_charge_max / p_dis_max pair is not supported):
 
 * ``M_imp = (load_max + bess_power_kw × dt_h) × 1.001``
 * ``M_exp = p_grid_export_max × dt_h × max_injection_frac × 1.001``
+  (gates the no-simultaneous grid-export binary only; the per-step
+  injection cap is a direct ``<=`` to a constant and needs no big-M)
 * ``M_charge = bess_power_kw × dt_h × 1.001`` (only when grid-charging)
 * ``M_pv = max(pv_kwh) × 1.001`` (only when grid-charging)
 
@@ -390,6 +392,13 @@ def build_model(
     allow_grid_charge = (
         bool(params.get("allow_bess_grid_charging", False)) and bess_present
     )
+    # Optional strict grid cap: when grid_cap_includes_load is set, the export
+    # cap binds on TOTAL plant injection (load-serving flows plus surplus
+    # export) instead of surplus export alone — a Virtual Net-Billing physical
+    # injection cap.  It only takes effect in self_consumption mode (merchant
+    # has no co-located load, so the basis collapses to surplus export).
+    cap_includes_load = bool(params.get("grid_cap_includes_load", False))
+    strict_injection_cap = cap_includes_load and mode == "self_consumption"
 
     if pd.api.types.is_datetime64_any_dtype(ts["timestamp"]):
         day_labels = ts["timestamp"].dt.date.tolist()
@@ -540,6 +549,22 @@ def build_model(
     m.grid_export_total = pyo.Expression(
         m.T, rule=lambda m, t: m.pv_to_grid[t] + m.bess_dis_grid[t],
     )
+
+    # Cap basis for EXPORT_CAP (see the comment block above the constraint).
+    # Defined unconditionally so the expression — and the
+    # grid_injection_total_kwh output column — always exist; the rule chooses
+    # what the cap binds on.  Default: equals grid_export_total (surplus
+    # export).  Strict (self_consumption + grid_cap_includes_load): the total
+    # plant injection at the connection point.
+    def _cap_basis_rule(m, t):
+        if strict_injection_cap:
+            return (
+                m.pv_to_load[t] + m.bess_dis_load[t]
+                + m.pv_to_grid[t] + m.bess_dis_grid[t]
+            )
+        return m.grid_export_total[t]
+
+    m.grid_injection_total = pyo.Expression(m.T, rule=_cap_basis_rule)
 
     # --- PV split (always active) ----------------------------------------
     m.PV_SPLIT = pyo.Constraint(
@@ -753,18 +778,36 @@ def build_model(
     # --- Hourly max-injection cap (HARD constraint, BOTH modes) ----------
     # Section 8 of the Self-consumption spec — regulatory grid-connection limit.
     # Applies in self_consumption AND merchant modes. Cap may vary by hour-of-day
-    # (and optionally by month) via the ``max_injection_profile`` sheet.
+    # (and optionally by month) via the ``max_injection_profile`` sheet.  The
+    # per-step cap is p_grid_export_max_kw × dt_h × max_injection_per_step[t]:
+    # ``p_grid_export_max_kw`` is the nameplate grid-connection limit and
+    # ``max_injection_profile`` is the per-hour share of that limit available
+    # for injection.
     #
-    # Project-wide combined export: the total grid_export at step t is the
-    # sum of pv_to_grid[t] and bess_dis_grid[t]. The per-step cap is the
-    # product of p_grid_export_max_kw, dt_h, and max_injection_per_step[t]
-    # and applies to that COMBINED flow — not separately to PV exports
-    # or to BESS-discharge exports. ``p_grid_export_max_kw`` is the
-    # nameplate grid-connection limit; ``max_injection_profile`` is the
-    # per-hour share of that limit actually available for export.
+    # What the cap binds on is grid_injection_total (the single cap basis built
+    # above), which depends on grid_cap_includes_load:
+    #
+    #   * Default (False) — binds on SURPLUS EXPORT only: grid_injection_total
+    #     == grid_export_total == pv_to_grid + bess_dis_grid.  A pure
+    #     surplus-export connection limit; 100% backward compatible.
+    #
+    #   * Strict (True, self_consumption only) — binds on TOTAL PLANT INJECTION
+    #     at the connection point: pv_to_load + bess_dis_load + pv_to_grid +
+    #     bess_dis_grid.  Under Virtual Net-Billing the energy "virtually
+    #     allocated" to a remote load is physically injected at the plant too,
+    #     so the regulatory limit is a physical plant-injection cap, not merely
+    #     a surplus-export cap.  Merchant has no co-located load, so the basis
+    #     collapses to grid_export_total and the flag is a no-op there.
+    #
+    # Strict load priority (LOAD_PV_PRIORITY: pv_to_load == min(pv, load)) is
+    # never relaxed; an over-constrained strict run fails (solver infeasibility)
+    # rather than silently relaxing priority.
+    #
+    # The cap is a direct ``<=`` to a constant, so it needs no big-M; M_exp
+    # gates the NO_SIM_GRID_EXPORT binary below and is independent of this cap.
     m.EXPORT_CAP = pyo.Constraint(
         m.T,
-        rule=lambda m, t: m.grid_export_total[t] <= export_cap_kwh_per_step[t],
+        rule=lambda m, t: m.grid_injection_total[t] <= export_cap_kwh_per_step[t],
     )
 
     # --- self_consumption-only constraints --------------------------------------------
@@ -1006,6 +1049,12 @@ def model_to_dataframe(
         pyo.value(model.grid_export_total[t]) for t in time_index
     ]
     res["grid_export_cap_kwh"] = export_cap_kwh_per_step
+    # Actual quantity the EXPORT_CAP binds on.  Equals grid_export_total_kwh in
+    # the default mode; equals total plant injection (load-serving flows plus
+    # surplus export) under grid_cap_includes_load in self_consumption mode.
+    res["grid_injection_total_kwh"] = [
+        pyo.value(model.grid_injection_total[t]) for t in time_index
+    ]
 
     res["soc_kwh"] = [pyo.value(model.soc[t]) for t in time_index]
     if bess_capacity_kwh > 1e-9:
