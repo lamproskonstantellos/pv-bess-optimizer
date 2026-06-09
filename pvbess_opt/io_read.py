@@ -161,6 +161,12 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
     mip = raw.get("max_injection_profile")
     if mip is not None:
         typed["max_injection_profile"] = np.asarray(mip, dtype=float)
+    for _src in ("pv", "bess"):
+        _mip_src = raw.get(f"max_injection_profile_{_src}")
+        if _mip_src is not None:
+            typed[f"max_injection_profile_{_src}"] = np.asarray(
+                _mip_src, dtype=float,
+            )
     resolve_pv_source(typed, base_dir=path.parent)
     return typed
 
@@ -519,6 +525,12 @@ def dump_structured_config(
     mip = typed.get("max_injection_profile")
     if mip is not None:
         out["max_injection_profile"] = np.asarray(mip, dtype=float).tolist()
+    for _src in ("pv", "bess"):
+        _mip_src = typed.get(f"max_injection_profile_{_src}")
+        if _mip_src is not None:
+            out[f"max_injection_profile_{_src}"] = np.asarray(
+                _mip_src, dtype=float,
+            ).tolist()
 
     if config_path.suffix.lower() == ".json":
         config_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
@@ -586,6 +598,8 @@ def config_json_schema() -> dict[str, Any]:
         }
     properties["timeseries_path"] = {"type": "string"}
     properties["max_injection_profile"] = {"type": "array"}
+    properties["max_injection_profile_pv"] = {"type": "array"}
+    properties["max_injection_profile_bess"] = {"type": "array"}
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "pvbess-optimizer configuration",

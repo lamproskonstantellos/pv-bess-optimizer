@@ -48,12 +48,32 @@ on surplus export.  Setting the project input
    \frac{\text{max\_injection\_pct}}{100} \quad \forall t
 
 This only affects ``self_consumption`` mode (merchant has no co-located
-load, so the basis collapses to surplus export).  Strict load priority
-is never relaxed: if the forced injection
-:math:`\min(\text{pv}_t, l_t)` exceeds the per-step cap the run is
-rejected pre-solve with an actionable error.  Leaving the input at its
-default ``FALSE`` keeps the surplus-export cap and is bit-for-bit
-backward compatible.
+load, so the basis collapses to surplus export).  Load priority stays
+strict but shares the cap: its floor becomes
+:math:`\min(\text{pv}_t, l_t, \text{cap}_t)`, so the load takes all
+available injection capacity before any surplus export.  When the cap
+cannot fit the full load the uncovered remainder is served from the grid
+at the retail tariff and surplus PV is curtailed — the run is never
+infeasible, it degrades to the maximum feasible coverage.  Leaving the
+input at its default ``FALSE`` keeps the surplus-export cap and is
+bit-for-bit backward compatible.
+
+Per-source injection sub-caps
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The cap can additionally be split by origin via two optional inputs,
+``max_injection_profile_pv`` and ``max_injection_profile_bess``, on the
+same ``p_grid_export_max_kw`` nameplate.  Each binds the corresponding
+origin's injection — PV (``pv→load`` + ``pv→grid``) and BESS
+(``bess→load`` + ``bess→grid``) — at
+:math:`p^{\text{export\_max}} \cdot \Delta t \cdot \text{mi\_pct}_{\text{src}}/100`,
+with the load-serving terms counted only under
+``grid_cap_includes_load = TRUE`` (surplus export alone otherwise).  Each
+sub-cap is attached only when its profile is supplied, applies in both
+``self_consumption`` and ``merchant`` modes, and is layered on top of the
+combined cap, which continues to bound the total injection.  Under the
+strict cap the load-priority floor tightens to
+:math:`\min(\text{pv}_t, l_t, \text{cap}_t, \text{cap}^{\text{pv}}_t)`.
 
 Settlement period
 -----------------

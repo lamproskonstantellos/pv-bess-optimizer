@@ -67,10 +67,12 @@ High-level run configuration:
   plant), so the plant injects **all** generation into the grid and the
   offset against the remote load is computed each 15-minute settlement; the
   cap then limits the **total plant injection** (energy credited to the
-  remote load plus any surplus).  Strict load priority is never relaxed: if
-  the cap cannot fit the forced injection ``min(pv, load)`` the run fails
-  with a clear infeasibility message.  Only affects ``self_consumption``
-  mode.
+  remote load plus any surplus).  Load priority stays strict but is bounded
+  by the cap: the load takes all available injection capacity before any
+  surplus export (floor ``min(pv, load, cap)``), and when the cap cannot fit
+  the full load the uncovered remainder is bought at the retail tariff while
+  surplus PV is curtailed — the run is never infeasible.  Only affects
+  ``self_consumption`` mode.
 * ``unavailability_pct`` — annual outage / maintenance factor
   (default 1 %).  Applied as a post-solve derate on PV generation,
   BESS discharge, and revenue.
@@ -297,6 +299,25 @@ Hour-of-day cap profile expressing the share of
 If the sheet is missing the loader logs an INFO message and falls
 back to a flat 100 % cap (no curtailment).  Curtailed energy is
 reported as an output (``pv_curtail_kwh`` / ``pv_energy_curtailed_mwh``).
+
+Optional per-source sub-cap sheets
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two optional sheets, ``max_injection_profile_pv`` and
+``max_injection_profile_bess``, carry the identical hour-of-day schema
+(24 × 1 or 24 × 13) and split the injection cap by origin: the PV sheet
+limits PV-originated injection, the BESS sheet limits battery-originated
+injection, each as a share of the **same** ``p_grid_export_max_kw``.  They
+bind *on top of* the combined ``max_injection_profile`` cap, so PV plus
+BESS injection together still cannot exceed the connection nameplate.
+Either sheet may be omitted — an absent sheet means no sub-cap for that
+source (only the combined cap binds), so existing workbooks are unaffected.
+
+Under ``grid_cap_includes_load = TRUE`` (Virtual Net-Billing) the sub-cap
+counts the load-serving flow too, so e.g. ``max_injection_profile_bess``
+= 0 at midday forbids the battery from discharging at all in those hours;
+under the default co-located cap it limits only the surplus exported to the
+grid.  Both apply in ``self_consumption`` and ``merchant`` modes.
 
 The canonical defaults live in
 :data:`pvbess_opt.io.PROJECT_SHEET_DEFAULTS`,
