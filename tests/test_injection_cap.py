@@ -27,7 +27,11 @@ from pvbess_opt.io import (
     write_workbook,
 )
 from pvbess_opt.io_read import dump_structured_config, load_structured_config
-from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
+from pvbess_opt.optimization import (
+    build_model,
+    run_scenario,
+    verify_dispatch_invariants,
+)
 
 # Tiny deterministic solves; a 0 gap pins the unique optimum exactly.
 SOLVER_KW = {"solver_name": "highs", "mip_gap": 0.0, "time_limit_seconds": 120}
@@ -337,3 +341,106 @@ def test_per_source_profiles_absent_default_to_none(tmp_path):
     params, _ts = read_inputs(xlsx)
     assert params["max_injection_profile_pv"] is None
     assert params["max_injection_profile_bess"] is None
+
+
+# ---------------------------------------------------------------------------
+# 8. Per-source caps drive dispatch across every mode / billing combination
+# ---------------------------------------------------------------------------
+
+
+def test_pv_sub_cap_strict_self_consumption_reduces_offset():
+    """VNB + PV sub-cap: pv_to_load is pinned to the PV sub-cap floor, the
+    uncovered load is grid-served, and the surplus PV is curtailed."""
+    ts = _peak_ts()  # pv[12]=10, load[12]=4, cap_total = 5
+    mi_pv = np.full(24, 100.0)
+    mi_pv[12] = 60.0  # cap_pv[12] = 5 * 0.60 = 3
+    params = _tiny_params(grid_cap_includes_load=True)
+    params["max_injection_profile_pv"] = mi_pv
+    res, _ = run_scenario(params, ts, **SOLVER_KW)
+    assert res.loc[12, "pv_to_load_kwh"] == pytest.approx(3.0, abs=1e-4)
+    assert res.loc[12, "pv_to_grid_kwh"] == pytest.approx(0.0, abs=1e-4)
+    assert res.loc[12, "grid_to_load_kwh"] == pytest.approx(1.0, abs=1e-4)
+    assert res.loc[12, "pv_curtail_kwh"] == pytest.approx(7.0, abs=1e-4)
+    # The combined cap is still honoured.
+    assert res.loc[12, "grid_injection_total_kwh"] <= 5.0 + 1e-6
+    # Without the PV sub-cap the same VNB case offsets the full load (4).
+    res0, _ = run_scenario(
+        _tiny_params(grid_cap_includes_load=True), ts, **SOLVER_KW,
+    )
+    assert res0.loc[12, "pv_to_load_kwh"] == pytest.approx(4.0, abs=1e-4)
+
+
+def test_pv_sub_cap_default_self_consumption_limits_surplus():
+    """Net billing + PV sub-cap: the full load is still covered (load-serving
+    flow is behind the meter); only the PV surplus export is capped."""
+    ts = _peak_ts()  # pv[12]=10, load[12]=4
+    mi_pv = np.full(24, 100.0)
+    mi_pv[12] = 60.0  # cap_pv[12] = 3
+    params = _tiny_params(grid_cap_includes_load=False)
+    params["max_injection_profile_pv"] = mi_pv
+    res, _ = run_scenario(params, ts, **SOLVER_KW)
+    assert res.loc[12, "pv_to_load_kwh"] == pytest.approx(4.0, abs=1e-4)
+    assert res.loc[12, "pv_to_grid_kwh"] == pytest.approx(3.0, abs=1e-4)
+    assert res.loc[12, "pv_curtail_kwh"] == pytest.approx(3.0, abs=1e-4)
+
+
+def test_pv_sub_cap_merchant_limits_export():
+    """Merchant + PV sub-cap: the surplus export is capped by the PV sub-cap."""
+    ts = _peak_ts()  # pv[12]=10 (load ignored in merchant)
+    mi_pv = np.full(24, 100.0)
+    mi_pv[12] = 40.0  # cap_pv[12] = 5 * 0.40 = 2
+    params = _tiny_params(mode="merchant")
+    params["max_injection_profile_pv"] = mi_pv
+    res, _ = run_scenario(params, ts, **SOLVER_KW)
+    assert res.loc[12, "pv_to_grid_kwh"] == pytest.approx(2.0, abs=1e-4)
+    assert res.loc[12, "pv_curtail_kwh"] == pytest.approx(8.0, abs=1e-4)
+
+
+def test_bess_sub_cap_blocks_discharge_in_strict_mode():
+    """VNB + BESS sub-cap = 0%: the battery cannot inject (discharge) that
+    hour, so the load is grid-served — the 'battery 0% midday' case."""
+    pv = [10.0, 0.0]
+    load = [0.0, 4.0]
+    ts = _tiny_ts(pv, load)  # 2 hourly steps from 00:00 -> hour-of-day 0, 1
+    params = _tiny_params(
+        grid_cap_includes_load=True,
+        bess_power_kw=5.0,
+        bess_capacity_kwh=10.0,
+        efficiency_charge=1.0,
+        efficiency_discharge=1.0,
+        soc_min_frac=0.0,
+        soc_max_frac=1.0,
+        initial_soc_frac=0.0,
+        terminal_soc_equal=False,
+        max_cycles_per_day=10.0,
+    )
+    # Battery free to discharge -> serves the hour-1 load from storage.
+    res_free, _ = run_scenario(params, ts, **SOLVER_KW)
+    assert res_free.loc[1, "bess_dis_load_kwh"] == pytest.approx(4.0, abs=1e-4)
+    assert res_free.loc[1, "grid_to_load_kwh"] == pytest.approx(0.0, abs=1e-4)
+    # Battery blocked at hour 1 (mi_bess = 0 %) -> no discharge at all; grid serves.
+    mi_bess = np.full(24, 100.0)
+    mi_bess[1] = 0.0
+    params_blocked = dict(params)
+    params_blocked["max_injection_profile_bess"] = mi_bess
+    res_blk, _ = run_scenario(params_blocked, ts, **SOLVER_KW)
+    assert res_blk.loc[1, "bess_dis_load_kwh"] == pytest.approx(0.0, abs=1e-4)
+    assert res_blk.loc[1, "bess_dis_grid_kwh"] == pytest.approx(0.0, abs=1e-4)
+    assert res_blk.loc[1, "grid_to_load_kwh"] == pytest.approx(4.0, abs=1e-4)
+
+
+def test_per_source_constraints_attached_only_when_profiles_present():
+    """EXPORT_CAP_PV / EXPORT_CAP_BESS attach only when their profile is given;
+    the combined EXPORT_CAP is always present."""
+    ts = _peak_ts()
+    m0 = build_model(_tiny_params(), ts)
+    assert hasattr(m0, "EXPORT_CAP")
+    assert not hasattr(m0, "EXPORT_CAP_PV")
+    assert not hasattr(m0, "EXPORT_CAP_BESS")
+    params = _tiny_params()
+    params["max_injection_profile_pv"] = np.full(24, 70.0)
+    params["max_injection_profile_bess"] = np.full(24, 50.0)
+    m1 = build_model(params, ts)
+    assert hasattr(m1, "EXPORT_CAP")
+    assert hasattr(m1, "EXPORT_CAP_PV")
+    assert hasattr(m1, "EXPORT_CAP_BESS")

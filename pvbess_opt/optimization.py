@@ -273,6 +273,21 @@ def _resolve_max_injection_per_step(
     )
 
 
+def _resolve_optional_max_injection_per_step(
+    params: dict[str, Any], ts: pd.DataFrame, key: str,
+) -> np.ndarray | None:
+    """Per-step fraction for an optional per-source max-injection profile.
+
+    Returns ``None`` when the profile is absent — no sub-cap for that source,
+    only the combined cap binds.  Unlike the combined resolver there is no
+    default profile: omission means an unconstrained sub-cap.
+    """
+    profile = params.get(key)
+    if profile is None or "timestamp" not in ts.columns:
+        return None
+    return build_per_step_max_injection_frac(ts["timestamp"], profile)
+
+
 # ---------------------------------------------------------------------------
 # Balancing-market resolvers (shared between build_model and model_to_dataframe)
 # ---------------------------------------------------------------------------
@@ -450,6 +465,33 @@ def build_model(
         t: float(p_export * dt_h * max_injection_per_step[t])
         for t in time_index
     }
+    # Optional per-source sub-caps (PV-origin / BESS-origin injection).  Same
+    # p_export * dt_h * profile basis as the combined cap, on the same
+    # connection nameplate; ``None`` means no sub-cap for that source.
+    max_injection_pv_per_step = _resolve_optional_max_injection_per_step(
+        params, ts, "max_injection_profile_pv",
+    )
+    max_injection_bess_per_step = _resolve_optional_max_injection_per_step(
+        params, ts, "max_injection_profile_bess",
+    )
+    export_cap_pv_kwh_per_step = (
+        {t: float(p_export * dt_h * max_injection_pv_per_step[t]) for t in time_index}
+        if max_injection_pv_per_step is not None else None
+    )
+    export_cap_bess_kwh_per_step = (
+        {t: float(p_export * dt_h * max_injection_bess_per_step[t]) for t in time_index}
+        if max_injection_bess_per_step is not None else None
+    )
+    # In strict mode the PV load-serving flow is bounded by BOTH the combined
+    # cap and (when present) the PV sub-cap, so the load-priority floor uses
+    # the tighter of the two.
+    if export_cap_pv_kwh_per_step is not None:
+        strict_floor_cap_kwh_per_step = {
+            t: min(export_cap_kwh_per_step[t], export_cap_pv_kwh_per_step[t])
+            for t in time_index
+        }
+    else:
+        strict_floor_cap_kwh_per_step = export_cap_kwh_per_step
     big_m = derive_tight_big_m(params, ts, dt_h=dt_h, mode=mode)
 
     m = pyo.ConcreteModel()
@@ -603,7 +645,7 @@ def build_model(
         # alone, so the floor stays min(pv, load).
         if strict_injection_cap:
             pv_load_priority = {
-                t: min(pv[t], load[t], export_cap_kwh_per_step[t])
+                t: min(pv[t], load[t], strict_floor_cap_kwh_per_step[t])
                 for t in time_index
             }
         else:
@@ -832,6 +874,36 @@ def build_model(
         m.T,
         rule=lambda m, t: m.grid_injection_total[t] <= export_cap_kwh_per_step[t],
     )
+
+    # Optional per-source injection sub-caps.  The basis mirrors the combined
+    # cap split by origin: strict mode counts the load-serving flow too, while
+    # the default / merchant basis is surplus export only.  Active in BOTH
+    # modes (merchant pins the load-serving flows to 0, so the basis collapses
+    # to surplus).  Each constraint is attached only when its profile is given.
+    if export_cap_pv_kwh_per_step is not None:
+        def _pv_injection_basis(m, t):
+            if strict_injection_cap:
+                return m.pv_to_load[t] + m.pv_to_grid[t]
+            return m.pv_to_grid[t]
+        m.pv_injection_total = pyo.Expression(m.T, rule=_pv_injection_basis)
+        m.EXPORT_CAP_PV = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.pv_injection_total[t] <= export_cap_pv_kwh_per_step[t]
+            ),
+        )
+    if export_cap_bess_kwh_per_step is not None:
+        def _bess_injection_basis(m, t):
+            if strict_injection_cap:
+                return m.bess_dis_load[t] + m.bess_dis_grid[t]
+            return m.bess_dis_grid[t]
+        m.bess_injection_total = pyo.Expression(m.T, rule=_bess_injection_basis)
+        m.EXPORT_CAP_BESS = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.bess_injection_total[t] <= export_cap_bess_kwh_per_step[t]
+            ),
+        )
 
     # --- self_consumption-only constraints --------------------------------------------
     # Merchant mode intentionally omits the no-simultaneous-grid-IO
