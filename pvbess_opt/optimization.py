@@ -1150,6 +1150,19 @@ def model_to_dataframe(
     res["grid_injection_total_kwh"] = [
         pyo.value(model.grid_injection_total[t]) for t in time_index
     ]
+    # Per-source injection caps — present only when the optional profile was
+    # supplied.  Surfaced for transparency and consumed by the invariant
+    # checks (the PV sub-cap can bind PV injection / the priority floor).
+    mi_pv = _resolve_optional_max_injection_per_step(
+        params, ts, "max_injection_profile_pv",
+    )
+    if mi_pv is not None:
+        res["grid_export_cap_pv_kwh"] = p_export * dt_h * mi_pv
+    mi_bess = _resolve_optional_max_injection_per_step(
+        params, ts, "max_injection_profile_bess",
+    )
+    if mi_bess is not None:
+        res["grid_export_cap_bess_kwh"] = p_export * dt_h * mi_bess
 
     res["soc_kwh"] = [pyo.value(model.soc[t]) for t in time_index]
     if bess_capacity_kwh > 1e-9:
@@ -1550,7 +1563,9 @@ def verify_dispatch_invariants(
     # spurious "not binding" residual in the strict mode, where the cap is hit
     # by the total injection while surplus export still sits below it.
     # grid_injection_total_kwh == grid_export_total_kwh in the default mode, so
-    # the default-mode result is unchanged.
+    # the default-mode result is unchanged.  A PV sub-cap can also bind PV
+    # injection while the combined cap still has slack, so curtailment is
+    # legitimate when EITHER cap is binding.
     if "grid_export_cap_kwh" in res.columns:
         cap = res["grid_export_cap_kwh"].to_numpy(dtype=float)
     else:
@@ -1559,11 +1574,16 @@ def verify_dispatch_invariants(
         cap_basis = res["grid_injection_total_kwh"].to_numpy(dtype=float)
     else:
         cap_basis = pv_to_grid + bess_dis_grid
-    cap_residual = cap - cap_basis
-    not_binding_violation = float(
-        ((cap_residual > tol_kwh) & (pv_curtail > tol_kwh)).astype(float).sum()
-    )
-    inv_7 = not_binding_violation
+    pv_can_inject_more = (cap - cap_basis) > tol_kwh
+    if "grid_export_cap_pv_kwh" in res.columns:
+        cap_pv = res["grid_export_cap_pv_kwh"].to_numpy(dtype=float)
+        strict_cap = (
+            mode == "self_consumption"
+            and bool(params.get("grid_cap_includes_load", False))
+        )
+        pv_injection = pv_to_load + pv_to_grid if strict_cap else pv_to_grid
+        pv_can_inject_more = pv_can_inject_more & ((cap_pv - pv_injection) > tol_kwh)
+    inv_7 = float(((pv_can_inject_more) & (pv_curtail > tol_kwh)).astype(float).sum())
 
     if params.get("terminal_soc_equal", True):
         if len(soc):
@@ -1582,12 +1602,17 @@ def verify_dispatch_invariants(
 
     # Invariant 9 — Section 2 of the spec: pv_to_load == its priority floor.
     # Default mode: min(pv, load).  Strict total-injection cap
-    # (grid_cap_includes_load): min(pv, load, cap) — load priority is still
-    # exact, but bounded by the per-step injection cap it must share.
+    # (grid_cap_includes_load): min(pv, load, cap_total, cap_pv) — load
+    # priority is still exact, but bounded by the combined cap and (when
+    # supplied) the PV sub-cap it must share.
     if mode == "self_consumption" and len(pv):
         strict_cap = bool(params.get("grid_cap_includes_load", False))
         if strict_cap and "grid_export_cap_kwh" in res.columns:
             cap_inj = res["grid_export_cap_kwh"].to_numpy(dtype=float)
+            if "grid_export_cap_pv_kwh" in res.columns:
+                cap_inj = np.minimum(
+                    cap_inj, res["grid_export_cap_pv_kwh"].to_numpy(dtype=float),
+                )
             pv_load_priority = np.minimum(np.minimum(pv, load), cap_inj)
         else:
             pv_load_priority = np.minimum(pv, load)

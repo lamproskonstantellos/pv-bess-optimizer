@@ -444,3 +444,29 @@ def test_per_source_constraints_attached_only_when_profiles_present():
     assert hasattr(m1, "EXPORT_CAP")
     assert hasattr(m1, "EXPORT_CAP_PV")
     assert hasattr(m1, "EXPORT_CAP_BESS")
+
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_invariants_clean_with_binding_pv_sub_cap(flag):
+    """invariant_7 (curtail) and invariant_9 (priority floor) stay clean when a
+    PV sub-cap binds tighter than the combined cap, in BOTH billing modes.
+
+    Regression guard: the priority floor and the curtail-vs-cap check must
+    both recognise the PV sub-cap, otherwise a strict run with a binding
+    sub-cap trips a spurious invariant violation (fatal under --strict).
+    """
+    ts = _peak_ts()  # pv[12]=10, load[12]=4, cap_total = 5
+    mi_pv = np.full(24, 100.0)
+    mi_pv[12] = 60.0  # cap_pv[12] = 3 < cap_total = 5
+    params = _tiny_params(grid_cap_includes_load=flag)
+    params["max_injection_profile_pv"] = mi_pv
+    _res, _solver, full = run_scenario(
+        params, ts, return_unrounded=True, **SOLVER_KW,
+    )
+    # The PV sub-cap is surfaced for the checks.
+    assert "grid_export_cap_pv_kwh" in full.columns
+    inv = verify_dispatch_invariants(full, params)
+    assert inv["invariant_7_curtail_behavior_kwh"] == pytest.approx(0.0, abs=1e-9)
+    assert inv["invariant_9_pv_load_priority_kwh"] == pytest.approx(0.0, abs=1e-6)
+    assert inv["invariant_1_pv_balance_kwh"] == pytest.approx(0.0, abs=1e-6)
+    assert inv["invariant_2_load_balance_kwh"] == pytest.approx(0.0, abs=1e-6)
