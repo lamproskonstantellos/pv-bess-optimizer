@@ -653,18 +653,26 @@ def _build_financials(
 
 def _build_degradation_report(
     res: pd.DataFrame, params: dict[str, Any], econ: dict[str, Any],
+    kpis: dict[str, Any] | None = None,
 ) -> pd.DataFrame | None:
-    """Post-hoc Rainflow SOH / capacity-fade report from the SOC trace.
+    """Post-hoc SOH / capacity-fade report from the SOC trace.
 
     Returns None when there is no BESS or no SOC trace.  This is a
     diagnostic — it does not feed back into the NPV (the replacement CAPEX
     in the finance layer already charges degradation), so the wear cost is
-    never double-counted.
+    never double-counted.  The SOH curve uses the same calendar-plus-cycle
+    fade model as the finance layer, fed the same Year-1 discharge throughput
+    (``bess_total_discharge_mwh`` from the derated KPI dict), so it agrees
+    with ``bess_factor`` / the cashflow.
     """
     if float(params.get("bess_capacity_kwh", 0.0) or 0.0) <= 0.0:
         return None
     if "soc_kwh" not in res.columns:
         return None
+    year1_discharge_mwh = (
+        float(kpis.get("bess_total_discharge_mwh", 0.0) or 0.0)
+        if kpis is not None else None
+    )
     return build_degradation_report(
         res["soc_kwh"],
         capacity_kwh=float(params.get("bess_capacity_kwh", 0.0) or 0.0),
@@ -673,6 +681,10 @@ def _build_degradation_report(
         degradation_pct_per_cycle=float(
             econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
         ),
+        degradation_annual_pct=float(
+            econ.get("bess_degradation_annual_pct", 0.0) or 0.0
+        ),
+        year1_discharge_mwh=year1_discharge_mwh,
         project_years=int(
             econ.get("project_lifecycle_years",
                      PROJECT_SHEET_DEFAULTS["project_lifecycle_years"])
@@ -683,6 +695,7 @@ def _build_degradation_report(
                      PROJECT_SHEET_DEFAULTS["project_start_year"])
             or PROJECT_SHEET_DEFAULTS["project_start_year"]
         ),
+        replacement_year=int(econ.get("bess_replacement_year", 0) or 0),
     )
 
 
@@ -1094,7 +1107,7 @@ def _run_one(
             ),
         )
 
-        degradation_df = _build_degradation_report(res, params, econ)
+        degradation_df = _build_degradation_report(res, params, econ, kpis)
         emissions_df = _build_emissions_report(res, econ)
 
         write_results_workbook(
