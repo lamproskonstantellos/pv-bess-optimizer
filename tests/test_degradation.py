@@ -68,6 +68,41 @@ def test_build_degradation_report_fades_and_replaces():
     assert (report["soh_pct"] >= 0.0).all()
 
 
+def test_scheduled_replacement_resets_soh_even_when_above_eol():
+    # Light cycling: SOH never reaches the 80 % end-of-life threshold within
+    # the horizon, yet a scheduled replacement must still reset the curve in
+    # its year (mirrors the finance layer charging the replacement CAPEX).
+    soc = np.append(np.tile([0.0, 1000.0], 10), 0.0)  # 10 full cycles, closed
+    report = build_degradation_report(
+        soc,
+        capacity_kwh=1000.0, soc_min_frac=0.0, soc_max_frac=1.0,
+        degradation_pct_per_cycle=0.1, project_years=8, start_year=2026,
+        replacement_year=4,
+    )
+    # 10 cycles x 0.1 % = 1 %/yr -> SOH stays well above 80 % all horizon,
+    # so without the scheduled reset there would be no replacement at all.
+    repl_years = report.loc[report["replacement"], "project_year"].tolist()
+    assert repl_years == [4]
+    # The replacement year shows a fresh battery, then it fades again.
+    assert report.loc[report["project_year"] == 3, "soh_pct"].iloc[0] == pytest.approx(97.0)
+    assert report.loc[report["project_year"] == 4, "soh_pct"].iloc[0] == pytest.approx(100.0)
+    assert report.loc[report["project_year"] == 5, "soh_pct"].iloc[0] == pytest.approx(99.0)
+
+
+def test_scheduled_replacement_takes_precedence_over_eol_threshold():
+    # Heavy cycling would cross the 80 % threshold early, but a configured
+    # replacement year governs the single reset instead of the threshold.
+    soc = np.append(np.tile([0.0, 1000.0], 50), 0.0)  # 50 full cycles, closed
+    report = build_degradation_report(
+        soc,
+        capacity_kwh=1000.0, soc_min_frac=0.0, soc_max_frac=1.0,
+        degradation_pct_per_cycle=0.1, project_years=10, start_year=2026,
+        replacement_year=6,
+    )
+    repl_years = report.loc[report["replacement"], "project_year"].tolist()
+    assert repl_years == [6]
+
+
 def test_degradation_report_none_without_bess():
     report = build_degradation_report(
         [0.0, 0.0], capacity_kwh=0.0, soc_min_frac=0.0, soc_max_frac=1.0,

@@ -102,26 +102,45 @@ def build_degradation_report(
     project_years: int,
     start_year: int,
     end_of_life_soh_pct: float = 80.0,
+    replacement_year: int = 0,
 ) -> pd.DataFrame:
     """Project the SOH / capacity-fade trajectory and replacement schedule.
 
-    Counts the Year-1 equivalent full cycles from the SOC trace (Rainflow),
-    applies ``degradation_pct_per_cycle`` per year, and flags the first year
-    SOH falls to ``end_of_life_soh_pct`` (where capacity resets).
+    Counts the Year-1 equivalent full cycles from the SOC trace (Rainflow)
+    and applies ``degradation_pct_per_cycle`` per year.  The capacity resets
+    to a fresh 100 % SOH on a replacement, governed by:
+
+    * **A scheduled replacement** -- when ``replacement_year > 0`` the curve
+      resets in that project year and degrades fresh from there.  This
+      mirrors the finance layer (``_bess_factor`` resets the BESS capacity
+      fade at ``bess_replacement_year`` and the cashflow charges the
+      replacement CAPEX in the same year), so the SOH plot stays consistent
+      with the dispatch/NPV regardless of how lightly the battery cycles.
+    * **End of life** -- when no replacement year is configured
+      (``replacement_year <= 0``) the curve resets the first year SOH falls
+      to ``end_of_life_soh_pct`` instead.
     """
     usable_kwh = float(capacity_kwh) * (float(soc_max_frac) - float(soc_min_frac))
     efc_year = equivalent_full_cycles(soc_kwh, usable_kwh)
+    scheduled_year = int(replacement_year or 0)
     rows: list[dict[str, Any]] = []
     cum_fade = 0.0
     for i in range(max(int(project_years), 0)):
+        year = i + 1
         cum_fade += efc_year * float(degradation_pct_per_cycle)
         soh = max(0.0, 100.0 - cum_fade)
-        replaced = soh <= float(end_of_life_soh_pct)
+        # A configured scheduled replacement is authoritative and takes
+        # precedence over the end-of-life threshold; only fall back to the
+        # threshold when no replacement year is set.
+        if scheduled_year > 0:
+            replaced = year == scheduled_year
+        else:
+            replaced = soh <= float(end_of_life_soh_pct)
         if replaced:
             cum_fade = 0.0
             soh = 100.0
         rows.append({
-            "project_year": i + 1,
+            "project_year": year,
             "calendar_year": int(start_year) + i,
             "equivalent_full_cycles": round(efc_year, 4),
             "soh_pct": round(soh, 4),

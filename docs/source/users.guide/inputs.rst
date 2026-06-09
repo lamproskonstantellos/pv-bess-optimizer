@@ -156,7 +156,13 @@ sheet in ``03_results.xlsx`` plus an SOH-trajectory plot): ASTM Rainflow
 cycle counting on the SOC trace gives DoD-weighted equivalent full
 cycles, projected into a state-of-health / capacity-fade trajectory and
 replacement schedule
-(:func:`pvbess_opt.degradation.build_degradation_report`).
+(:func:`pvbess_opt.degradation.build_degradation_report`).  The SOH curve
+resets to a fresh battery in the scheduled ``bess_replacement_year`` when
+one is set — matching the finance layer, which resets the BESS capacity
+fade and charges the replacement CAPEX in the same year — so the plot is
+consistent with the cashflow regardless of how lightly the battery
+cycles.  When no replacement year is configured the curve instead resets
+the first year SOH falls to its end-of-life threshold (80 %).
 
 Sheet ``economics``
 -------------------

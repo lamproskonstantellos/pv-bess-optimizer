@@ -683,6 +683,7 @@ def _build_degradation_report(
                      PROJECT_SHEET_DEFAULTS["project_start_year"])
             or PROJECT_SHEET_DEFAULTS["project_start_year"]
         ),
+        replacement_year=int(econ.get("bess_replacement_year", 0) or 0),
     )
 
 
