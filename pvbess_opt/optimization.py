@@ -1501,13 +1501,24 @@ def verify_dispatch_invariants(
         inv_6 = 0.0
 
     # Invariant 7 — curtail behavior, checked in BOTH modes per spec:
-    # cap not binding ⇒ curtail = 0.  Cap is per-step.
+    # cap not binding ⇒ curtail = 0.  Cap is per-step.  The residual must be
+    # measured against the quantity the EXPORT_CAP actually binds on, i.e.
+    # grid_injection_total: surplus export (pv_to_grid + bess_dis_grid) in the
+    # default mode, but TOTAL plant injection (load-serving flows plus surplus)
+    # under grid_cap_includes_load.  Using surplus export alone would report a
+    # spurious "not binding" residual in the strict mode, where the cap is hit
+    # by the total injection while surplus export still sits below it.
+    # grid_injection_total_kwh == grid_export_total_kwh in the default mode, so
+    # the default-mode result is unchanged.
     if "grid_export_cap_kwh" in res.columns:
         cap = res["grid_export_cap_kwh"].to_numpy(dtype=float)
     else:
         cap = np.zeros_like(pv_to_grid)
-    export = pv_to_grid + bess_dis_grid
-    cap_residual = cap - export
+    if "grid_injection_total_kwh" in res.columns:
+        cap_basis = res["grid_injection_total_kwh"].to_numpy(dtype=float)
+    else:
+        cap_basis = pv_to_grid + bess_dis_grid
+    cap_residual = cap - cap_basis
     not_binding_violation = float(
         ((cap_residual > tol_kwh) & (pv_curtail > tol_kwh)).astype(float).sum()
     )
