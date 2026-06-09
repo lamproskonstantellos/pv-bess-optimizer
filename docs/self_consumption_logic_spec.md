@@ -103,8 +103,8 @@ pins the three load-coverage flows to zero
 
 ```
 pv_to_load[t] ≥ floor[t]
-  floor[t] = min(pv[t], load[t])                          [default]
-  floor[t] = min(pv[t], load[t], p_export·dt_h·mi_frac[t]) [grid_cap_includes_load]
+  floor[t] = min(pv[t], load[t])                            [default]
+  floor[t] = min(pv[t], load[t], cap_total[t], cap_pv[t])   [grid_cap_includes_load]
 ```
 
 Combined with `PV_SPLIT` and `LOAD_BAL` this forces `pv_to_load[t] ==
@@ -114,9 +114,10 @@ load-serving flow sits behind the meter and never crosses the capped
 connection point. Under the strict total-injection cap
 (`grid_cap_includes_load = true`) that flow is itself injected and so is
 bound by the per-step cap, so the floor drops to `min(pv[t], load[t],
-cap[t])`. Load priority therefore stays exact and absolute over surplus
-export, but is bounded by the injection the cap physically admits; the
-uncovered remainder is served by `grid_to_load` (retail). Active in
+cap_total[t], cap_pv[t])` — the combined cap and, when supplied, the PV
+sub-cap (`cap_pv`). Load priority therefore stays exact and absolute over
+surplus export, but is bounded by the injection the cap physically admits;
+the uncovered remainder is served by `grid_to_load` (retail). Active in
 `self_consumption` only.
 
 ### LOAD_PRIORITY_SLACK_DEF(t)
@@ -217,6 +218,25 @@ project input:
   infeasible, it degrades to the maximum feasible coverage. Merchant mode
   has no co-located load, so the basis collapses to surplus export and the
   flag is a no-op.
+
+**Optional per-source sub-caps.** Two optional inputs add per-origin
+injection limits on the same connection nameplate, on top of the combined
+cap:
+
+```
+EXPORT_CAP_PV(t):   pv_injection[t]   ≤ p_export · dt_h · mi_pv_frac[t]
+EXPORT_CAP_BESS(t): bess_injection[t] ≤ p_export · dt_h · mi_bess_frac[t]
+```
+
+`pv_injection` / `bess_injection` mirror the combined basis split by
+origin: `pv_to_load + pv_to_grid` / `bess_dis_load + bess_dis_grid` under
+the strict cap, and `pv_to_grid` / `bess_dis_grid` (surplus only)
+otherwise. The fractions come from the optional `max_injection_profile_pv`
+/ `max_injection_profile_bess` workbook sheets; each constraint is attached
+only when its profile is supplied, and both apply in `self_consumption` and
+`merchant` modes. The combined `EXPORT_CAP` still binds, so PV and BESS
+injection together never exceed the connection nameplate even when each
+sub-cap is individually higher.
 
 ### NO_SIM_GRID_IMPORT(t), NO_SIM_GRID_EXPORT(t)
 

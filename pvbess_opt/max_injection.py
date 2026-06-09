@@ -6,6 +6,11 @@ as a percent per hour-of-day, optionally per calendar month.  This is
 the input the user controls directly; the curtailed MWh appears in
 the outputs.
 
+Two optional sibling sheets, ``max_injection_profile_pv`` and
+``max_injection_profile_bess``, use the identical schema to cap PV- and
+BESS-originated injection separately on the same nameplate; they are
+expanded to per-step fractions by this same helper.
+
 Two supported shapes (auto-detected by the loader in
 :mod:`pvbess_opt.io`):
 

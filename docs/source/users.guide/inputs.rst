@@ -300,6 +300,25 @@ If the sheet is missing the loader logs an INFO message and falls
 back to a flat 100 % cap (no curtailment).  Curtailed energy is
 reported as an output (``pv_curtail_kwh`` / ``pv_energy_curtailed_mwh``).
 
+Optional per-source sub-cap sheets
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two optional sheets, ``max_injection_profile_pv`` and
+``max_injection_profile_bess``, carry the identical hour-of-day schema
+(24 × 1 or 24 × 13) and split the injection cap by origin: the PV sheet
+limits PV-originated injection, the BESS sheet limits battery-originated
+injection, each as a share of the **same** ``p_grid_export_max_kw``.  They
+bind *on top of* the combined ``max_injection_profile`` cap, so PV plus
+BESS injection together still cannot exceed the connection nameplate.
+Either sheet may be omitted — an absent sheet means no sub-cap for that
+source (only the combined cap binds), so existing workbooks are unaffected.
+
+Under ``grid_cap_includes_load = TRUE`` (Virtual Net-Billing) the sub-cap
+counts the load-serving flow too, so e.g. ``max_injection_profile_bess``
+= 0 at midday forbids the battery from discharging at all in those hours;
+under the default co-located cap it limits only the surplus exported to the
+grid.  Both apply in ``self_consumption`` and ``merchant`` modes.
+
 The canonical defaults live in
 :data:`pvbess_opt.io.PROJECT_SHEET_DEFAULTS`,
 :data:`pvbess_opt.io.PV_SHEET_DEFAULTS`,

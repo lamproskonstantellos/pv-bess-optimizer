@@ -58,6 +58,23 @@ infeasible, it degrades to the maximum feasible coverage.  Leaving the
 input at its default ``FALSE`` keeps the surplus-export cap and is
 bit-for-bit backward compatible.
 
+Per-source injection sub-caps
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The cap can additionally be split by origin via two optional inputs,
+``max_injection_profile_pv`` and ``max_injection_profile_bess``, on the
+same ``p_grid_export_max_kw`` nameplate.  Each binds the corresponding
+origin's injection — PV (``pv→load`` + ``pv→grid``) and BESS
+(``bess→load`` + ``bess→grid``) — at
+:math:`p^{\text{export\_max}} \cdot \Delta t \cdot \text{mi\_pct}_{\text{src}}/100`,
+with the load-serving terms counted only under
+``grid_cap_includes_load = TRUE`` (surplus export alone otherwise).  Each
+sub-cap is attached only when its profile is supplied, applies in both
+``self_consumption`` and ``merchant`` modes, and is layered on top of the
+combined cap, which continues to bound the total injection.  Under the
+strict cap the load-priority floor tightens to
+:math:`\min(\text{pv}_t, l_t, \text{cap}_t, \text{cap}^{\text{pv}}_t)`.
+
 Settlement period
 -----------------
 
