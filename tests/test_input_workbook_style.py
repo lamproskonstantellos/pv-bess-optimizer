@@ -55,7 +55,8 @@ def test_no_amber_fills_anywhere(workbook):
 
 @pytest.mark.parametrize("sheet_name", [
     "timeseries", "project", "pv", "bess", "economics",
-    "simulation", "max_injection_profile", "balancing",
+    "simulation", "max_injection_profile",
+    "max_injection_profile_pv", "max_injection_profile_bess", "balancing",
 ])
 def test_header_row_has_global_accent(workbook, sheet_name):
     """Row 1 of every sheet is bold + white + filled navy ``1F3864``."""
@@ -84,7 +85,8 @@ def test_header_row_has_global_accent(workbook, sheet_name):
 
 @pytest.mark.parametrize("sheet_name", [
     "timeseries", "project", "pv", "bess", "economics",
-    "simulation", "max_injection_profile", "balancing",
+    "simulation", "max_injection_profile",
+    "max_injection_profile_pv", "max_injection_profile_bess", "balancing",
 ])
 def test_header_row_is_frozen(workbook, sheet_name):
     """Every sheet freezes its header row via ``freeze_panes = 'A2'``."""
@@ -96,7 +98,8 @@ def test_header_row_is_frozen(workbook, sheet_name):
 
 @pytest.mark.parametrize("sheet_name", [
     "timeseries", "project", "pv", "bess", "economics",
-    "simulation", "max_injection_profile", "balancing",
+    "simulation", "max_injection_profile",
+    "max_injection_profile_pv", "max_injection_profile_bess", "balancing",
 ])
 def test_non_header_rows_carry_no_persistent_fill(workbook, sheet_name):
     """Data rows (row >= 2) carry no per-cell solid fill."""
