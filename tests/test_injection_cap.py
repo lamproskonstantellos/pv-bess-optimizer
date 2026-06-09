@@ -282,3 +282,58 @@ def test_dispatch_invariants_clean_in_both_cap_modes(flag):
     assert inv["invariant_7_curtail_behavior_kwh"] == pytest.approx(0.0, abs=1e-9)
     assert inv["invariant_9_pv_load_priority_kwh"] == pytest.approx(0.0, abs=1e-6)
     assert inv["invariant_1_pv_balance_kwh"] == pytest.approx(0.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# 7. Per-source injection sub-caps round-trip through every IO path
+# ---------------------------------------------------------------------------
+
+
+def test_per_source_injection_profiles_round_trip(tmp_path):
+    """max_injection_profile_pv / _bess survive workbook + structured-config IO
+    and reach the dispatch params."""
+    mi_pv = np.full(24, 70.0, dtype=float)
+    mi_bess = np.full(24, 100.0, dtype=float)
+    mi_bess[10:15] = 0.0  # battery blocked from injecting midday
+    typed = _typed_with_flag(True)
+    typed["max_injection_profile_pv"] = mi_pv
+    typed["max_injection_profile_bess"] = mi_bess
+
+    # Workbook write -> the two optional sheets appear and round-trip.
+    xlsx = tmp_path / "per_source.xlsx"
+    write_workbook(typed, xlsx)
+    sheet_names = set(pd.ExcelFile(xlsx).sheet_names)
+    assert {"max_injection_profile_pv", "max_injection_profile_bess"} <= sheet_names
+    back = read_workbook(xlsx)
+    np.testing.assert_allclose(np.asarray(back["max_injection_profile_pv"]), mi_pv)
+    np.testing.assert_allclose(np.asarray(back["max_injection_profile_bess"]), mi_bess)
+
+    # read_inputs carries them into the flat dispatch params.
+    params, _ts = read_inputs(xlsx)
+    np.testing.assert_allclose(np.asarray(params["max_injection_profile_pv"]), mi_pv)
+    np.testing.assert_allclose(
+        np.asarray(params["max_injection_profile_bess"]), mi_bess,
+    )
+
+    # YAML/JSON structured config round-trips them too.
+    cfg = tmp_path / "per_source.yaml"
+    dump_structured_config(typed, cfg)
+    loaded = load_structured_config(cfg)
+    np.testing.assert_allclose(np.asarray(loaded["max_injection_profile_pv"]), mi_pv)
+    np.testing.assert_allclose(
+        np.asarray(loaded["max_injection_profile_bess"]), mi_bess,
+    )
+
+
+def test_per_source_profiles_absent_default_to_none(tmp_path):
+    """A workbook without the per-source sheets yields None sub-caps (the
+    single combined cap still applies, exactly as before)."""
+    typed = _typed_with_flag(True)  # no per-source profiles set
+    xlsx = tmp_path / "no_per_source.xlsx"
+    write_workbook(typed, xlsx)
+    sheet_names = set(pd.ExcelFile(xlsx).sheet_names)
+    assert "max_injection_profile_pv" not in sheet_names
+    assert "max_injection_profile_bess" not in sheet_names
+    params, _ts = read_inputs(xlsx)
+    assert params["max_injection_profile_pv"] is None
+    assert params["max_injection_profile_bess"] is None

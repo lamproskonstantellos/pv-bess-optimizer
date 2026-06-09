@@ -53,6 +53,8 @@ Public loader API
          "economics":          {...},
          "simulation":         {...},
          "max_injection_profile": np.ndarray,  # shape (24,) or (24, 12)
+         "max_injection_profile_pv": np.ndarray | None,    # optional sub-cap
+         "max_injection_profile_bess": np.ndarray | None,  # optional sub-cap
          "dt_minutes": int,                # auto-detected from the timeseries
      }
 
@@ -913,6 +915,14 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
+        for _src in ("pv", "bess"):
+            _src_profile = typed.get(f"max_injection_profile_{_src}")
+            if _src_profile is not None:
+                _build_max_injection_sheet(_src_profile).to_excel(
+                    writer,
+                    sheet_name=f"max_injection_profile_{_src}",
+                    index=False,
+                )
         sizing_df.to_excel(writer, sheet_name="sizing", index=False)
         scenarios_df.to_excel(writer, sheet_name="scenarios", index=False)
         style_workbook(writer.book)
@@ -1246,17 +1256,40 @@ def _extract_profile(
     )
 
 
-def _parse_max_injection_profile_sheet(df: pd.DataFrame) -> np.ndarray:
-    """Parse the new-schema ``max_injection_profile`` sheet.
+def _parse_max_injection_profile_sheet(
+    df: pd.DataFrame, *, sheet_name: str = "max_injection_profile",
+) -> np.ndarray:
+    """Parse a max-injection profile sheet (combined or per-source).
 
     Returns a (24,) or (24, 12) array of percent-of-grid-export values.
+    The optional per-source sheets (``max_injection_profile_pv`` /
+    ``max_injection_profile_bess``) share the identical column schema.
     """
-    df_norm = _normalise_hourly_profile_frame(df, sheet_name="max_injection_profile")
+    df_norm = _normalise_hourly_profile_frame(df, sheet_name=sheet_name)
     return _extract_profile(
         df_norm,
         scalar_col="max_injection_pct",
         monthly_prefix="max_injection_pct",
     )
+
+
+def _read_optional_injection_profile(
+    xlsx_path: Path, sheets: set[str], sheet_name: str,
+) -> np.ndarray | None:
+    """Read an optional per-source max-injection sheet, or None if absent.
+
+    Per-source sub-caps are opt-in: a workbook that omits the sheet keeps
+    the single combined cap and behaves exactly as before.
+    """
+    if sheet_name not in sheets:
+        return None
+    try:
+        return _parse_max_injection_profile_sheet(
+            pd.read_excel(xlsx_path, sheet_name=sheet_name),
+            sheet_name=sheet_name,
+        )
+    except ValueError as exc:
+        raise ValueError(f"{sheet_name}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1770,6 +1803,13 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             24, DEFAULT_MAX_INJECTION_PCT_HOURLY, dtype=float,
         )
 
+    profile_pv = _read_optional_injection_profile(
+        xlsx_path, sheets, "max_injection_profile_pv",
+    )
+    profile_bess = _read_optional_injection_profile(
+        xlsx_path, sheets, "max_injection_profile_bess",
+    )
+
     mode = str(typed["project"]["mode"]).lower()
     ts = _normalise_timeseries(
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
@@ -1789,6 +1829,8 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     out: dict[str, Any] = {
         "ts": ts,
         "max_injection_profile": profile,
+        "max_injection_profile_pv": profile_pv,
+        "max_injection_profile_bess": profile_bess,
         "dt_minutes": dt_minutes,
     }
     out.update(typed)
@@ -1864,6 +1906,11 @@ def _typed_to_flat(
         # p_grid_export_max_kw.  Expanded to a per-step array by the
         # max-injection helper module before entering the MILP.
         "max_injection_profile": typed.get("max_injection_profile"),
+        # Optional per-source injection sub-caps (PV-origin and BESS-origin
+        # injection), same (24,) / (24, 12) percent shape.  None => no sub-cap
+        # for that source (only the combined cap binds, exactly as before).
+        "max_injection_profile_pv": typed.get("max_injection_profile_pv"),
+        "max_injection_profile_bess": typed.get("max_injection_profile_bess"),
         # Balancing-market section, forwarded as a nested dict so the
         # MILP, KPI, lifetime and Monte Carlo paths can opt in without
         # changing the flat-params contract.
@@ -1966,9 +2013,13 @@ def write_assumptions_summary(
     for key in sorted(params):
         if key.startswith("_"):
             continue
-        # Hide the array-valued max_injection_profile from the snapshot —
-        # it's already in the workbook's max_injection_profile sheet.
-        if key == "max_injection_profile":
+        # Hide the array-valued max-injection profiles from the snapshot —
+        # they're already in the workbook's max_injection_profile* sheets.
+        if key in (
+            "max_injection_profile",
+            "max_injection_profile_pv",
+            "max_injection_profile_bess",
+        ):
             continue
         lines.append(f"  {key} = {params[key]!r}")
     lines.append("")
