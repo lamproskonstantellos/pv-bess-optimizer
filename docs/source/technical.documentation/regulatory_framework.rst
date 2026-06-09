@@ -48,12 +48,15 @@ on surplus export.  Setting the project input
    \frac{\text{max\_injection\_pct}}{100} \quad \forall t
 
 This only affects ``self_consumption`` mode (merchant has no co-located
-load, so the basis collapses to surplus export).  Strict load priority
-is never relaxed: if the forced injection
-:math:`\min(\text{pv}_t, l_t)` exceeds the per-step cap the run is
-rejected pre-solve with an actionable error.  Leaving the input at its
-default ``FALSE`` keeps the surplus-export cap and is bit-for-bit
-backward compatible.
+load, so the basis collapses to surplus export).  Load priority stays
+strict but shares the cap: its floor becomes
+:math:`\min(\text{pv}_t, l_t, \text{cap}_t)`, so the load takes all
+available injection capacity before any surplus export.  When the cap
+cannot fit the full load the uncovered remainder is served from the grid
+at the retail tariff and surplus PV is curtailed — the run is never
+infeasible, it degrades to the maximum feasible coverage.  Leaving the
+input at its default ``FALSE`` keeps the surplus-export cap and is
+bit-for-bit backward compatible.
 
 Settlement period
 -----------------

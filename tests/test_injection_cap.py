@@ -173,26 +173,53 @@ def test_strict_changes_split_but_preserves_priority():
 
 
 # ---------------------------------------------------------------------------
-# 4. Infeasibility: strict cap cannot honour the forced load-priority injection
+# 4. Partial offset: strict cap below the load degrades coverage, never fails
 # ---------------------------------------------------------------------------
 
 
-def test_strict_infeasible_raises_and_flag_false_solves():
+def test_strict_partial_offset_when_cap_below_load():
+    """Strict cap smaller than the load: load priority degrades to the cap.
+
+    Under ``grid_cap_includes_load=True`` the load-serving flow is itself
+    injected and so is bound by the per-step cap.  When the cap cannot fit the
+    full load the run is NOT infeasible: ``pv_to_load`` is pinned to the cap
+    (the load takes all injection capacity, before any surplus export), the
+    uncovered load is bought at retail, and the surplus PV is curtailed.
+    """
     # min(pv, load) = 6 > cap = 5 at the peak step.
     pv = [0.0] * 24
     load = [0.0] * 24
     pv[12] = 8.0
     load[12] = 6.0
     ts = _tiny_ts(pv, load)
-    # Flag True must fail clearly (ValueError from the validator; RuntimeError
-    # if it somehow reached the solver — either is acceptable).
-    with pytest.raises((ValueError, RuntimeError)):
-        run_scenario(_tiny_params(grid_cap_includes_load=True), ts, **SOLVER_KW)
-    # The same case with the flag False solves and never relaxes priority.
-    res, _ = run_scenario(
+    # Flag True now SOLVES with partial offset: load takes the whole cap (5),
+    # the remaining 1 kWh of load is grid-served, surplus PV (8-5=3) curtailed,
+    # and no export is possible because the cap is full of load-serving flow.
+    res_t, _ = run_scenario(
+        _tiny_params(grid_cap_includes_load=True), ts, **SOLVER_KW,
+    )
+    assert res_t.loc[12, "pv_to_load_kwh"] == pytest.approx(5.0, abs=1e-4)
+    assert res_t.loc[12, "grid_to_load_kwh"] == pytest.approx(1.0, abs=1e-4)
+    assert res_t.loc[12, "pv_to_grid_kwh"] == pytest.approx(0.0, abs=1e-4)
+    assert res_t.loc[12, "pv_curtail_kwh"] == pytest.approx(3.0, abs=1e-4)
+    assert res_t.loc[12, "grid_injection_total_kwh"] == pytest.approx(5.0, abs=1e-4)
+    # Flag False covers the FULL load (the load-serving flow does not cross the
+    # cap) and exports the 2 kWh surplus below the 5 kWh surplus-export cap.
+    res_f, _ = run_scenario(
         _tiny_params(grid_cap_includes_load=False), ts, **SOLVER_KW,
     )
-    assert res.loc[12, "pv_to_load_kwh"] == pytest.approx(6.0, abs=1e-4)
+    assert res_f.loc[12, "pv_to_load_kwh"] == pytest.approx(6.0, abs=1e-4)
+    assert res_f.loc[12, "pv_to_grid_kwh"] == pytest.approx(2.0, abs=1e-4)
+    # Dispatch invariants stay clean under partial offset: invariant 9 uses the
+    # cap-bounded floor min(pv, load, cap), so the pinned pv_to_load matches it.
+    params_t = _tiny_params(grid_cap_includes_load=True)
+    _r, _s, full = run_scenario(
+        params_t, ts, return_unrounded=True, **SOLVER_KW,
+    )
+    inv = verify_dispatch_invariants(full, params_t)
+    assert inv["invariant_9_pv_load_priority_kwh"] == pytest.approx(0.0, abs=1e-6)
+    assert inv["invariant_2_load_balance_kwh"] == pytest.approx(0.0, abs=1e-6)
+    assert inv["invariant_7_curtail_behavior_kwh"] == pytest.approx(0.0, abs=1e-9)
 
 
 # ---------------------------------------------------------------------------

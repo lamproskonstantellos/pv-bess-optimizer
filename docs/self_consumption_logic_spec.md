@@ -102,13 +102,22 @@ pins the three load-coverage flows to zero
 ### LOAD_PV_PRIORITY(t)
 
 ```
-pv_to_load[t] ≥ min(pv[t], load[t])
+pv_to_load[t] ≥ floor[t]
+  floor[t] = min(pv[t], load[t])                          [default]
+  floor[t] = min(pv[t], load[t], p_export·dt_h·mi_frac[t]) [grid_cap_includes_load]
 ```
 
-Implemented at `pvbess_opt/optimization.py:538-547`. Combined with
-`PV_SPLIT` and `LOAD_BAL` this forces `pv_to_load[t] == min(pv[t],
-load[t])` exactly — the Section 2 hard load-coverage priority from the
-MD spec. Active in `self_consumption` only.
+Combined with `PV_SPLIT` and `LOAD_BAL` this forces `pv_to_load[t] ==
+floor[t]` exactly — the Section 2 hard load-coverage priority from the MD
+spec. In the default mode the floor is `min(pv[t], load[t])`: the
+load-serving flow sits behind the meter and never crosses the capped
+connection point. Under the strict total-injection cap
+(`grid_cap_includes_load = true`) that flow is itself injected and so is
+bound by the per-step cap, so the floor drops to `min(pv[t], load[t],
+cap[t])`. Load priority therefore stays exact and absolute over surplus
+export, but is bounded by the injection the cap physically admits; the
+uncovered remainder is served by `grid_to_load` (retail). Active in
+`self_consumption` only.
 
 ### LOAD_PRIORITY_SLACK_DEF(t)
 
@@ -199,11 +208,15 @@ project input:
   `pv_to_load[t] + bess_dis_load[t] + pv_to_grid[t] + bess_dis_grid[t]`.
   Under Virtual Net-Billing the energy virtually allocated to the remote
   load is physically injected at the plant too, so the cap models a
-  physical plant-injection limit, not only a surplus-export limit. Strict
-  load priority is never relaxed; a run where `min(pv, load)` exceeds the
-  per-step cap at any step is rejected pre-solve with a clear error.
-  Merchant mode has no co-located load, so the basis collapses to surplus
-  export and the flag is a no-op.
+  physical plant-injection limit, not only a surplus-export limit. Load
+  priority stays strict but shares the cap: `LOAD_PV_PRIORITY` lowers its
+  floor to `min(pv, load, cap)`, so the load takes all available injection
+  capacity before any surplus export. When the cap cannot fit the full
+  load the uncovered remainder is met by `grid_to_load` at the retail
+  tariff while surplus PV is curtailed / stored — the run is never
+  infeasible, it degrades to the maximum feasible coverage. Merchant mode
+  has no co-located load, so the basis collapses to surplus export and the
+  flag is a no-op.
 
 ### NO_SIM_GRID_IMPORT(t), NO_SIM_GRID_EXPORT(t)
 
@@ -357,10 +370,12 @@ the design. Source: `optimization.py:1180-1191`.
 ### invariant_9_pv_load_priority_kwh
 
 ```
-max_t  | pv_to_load[t] − min(pv[t], load[t]) |
+max_t  | pv_to_load[t] − min(pv[t], load[t]) |          [default]
+max_t  | pv_to_load[t] − min(pv[t], load[t], cap[t]) |  [grid_cap_includes_load]
 ```
 
-Active in `self_consumption` only. Source: `optimization.py:1208-1213`.
+Active in `self_consumption` only. The priority floor is bounded by the
+per-step injection cap under the strict total-injection mode.
 
 ## 6. Mode-specific exclusions
 
