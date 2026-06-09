@@ -152,17 +152,23 @@ Sheet ``bess``
   :func:`pvbess_opt.degradation.derive_wear_cost_eur_per_mwh`.
 
 Every run also writes a **degradation** report (a styled ``degradation``
-sheet in ``03_results.xlsx`` plus an SOH-trajectory plot): ASTM Rainflow
-cycle counting on the SOC trace gives DoD-weighted equivalent full
-cycles, projected into a state-of-health / capacity-fade trajectory and
-replacement schedule
-(:func:`pvbess_opt.degradation.build_degradation_report`).  The SOH curve
-resets to a fresh battery in the scheduled ``bess_replacement_year`` when
-one is set — matching the finance layer, which resets the BESS capacity
-fade and charges the replacement CAPEX in the same year — so the plot is
-consistent with the cashflow regardless of how lightly the battery
-cycles.  When no replacement year is configured the curve instead resets
-the first year SOH falls to its end-of-life threshold (80 %).
+sheet in ``03_results.xlsx`` plus an SOH-trajectory plot)
+(:func:`pvbess_opt.degradation.build_degradation_report`).  The
+state-of-health curve uses the **same calendar-plus-cycle fade model as
+the finance layer** (:func:`pvbess_opt.lifetime._bess_factor`): the
+multiplicative ``bess_degradation_annual_pct`` calendar fade minus the
+additive ``bess_degradation_pct_per_cycle`` cycle fade, fed the same
+Year-1 discharge throughput.  The plotted SOH therefore equals the
+``bess_factor`` that scales dispatch / revenue, so it agrees with the
+cashflow and the ``bess_total_fade_pct_y_final`` KPI.  The DoD-weighted
+ASTM Rainflow ``equivalent_full_cycles`` from the SOC trace is reported
+alongside as a diagnostic column.  The curve resets to a fresh battery in
+the scheduled ``bess_replacement_year`` when one is set — matching the
+finance layer, which resets the capacity fade and charges the replacement
+CAPEX in the same year — so the plot is consistent with the cashflow
+regardless of how lightly the battery cycles.  When no replacement year is
+configured the pack is instead swapped the first year SOH falls to its
+end-of-life threshold (80 %).
 
 Sheet ``economics``
 -------------------
