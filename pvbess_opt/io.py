@@ -67,10 +67,6 @@ Mode-specific timeseries semantics
 * In ``self_consumption`` mode the ``load_kwh`` column is required; missing → ValueError.
 * In ``merchant`` mode ``load_kwh`` is optional — if present, the loader
   logs an INFO message and the optimizer pins all load-coverage flows to 0.
-
-Removed keys
---------------------
-
 """
 
 from __future__ import annotations
@@ -402,9 +398,12 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "load is remote (no physical link to the plant), so the plant injects ALL "
      "generation into the grid and the offset against the remote load is computed "
      "each 15-min settlement; the cap then limits TOTAL plant injection (energy "
-     "credited to the remote load PLUS any surplus). Strict load priority is "
-     "never relaxed; if the cap cannot fit the forced injection min(pv, load) "
-     "the run fails with a clear infeasibility error."),
+     "credited to the remote load PLUS any surplus). Load priority stays "
+     "strict but shares the cap: its floor becomes min(pv, load, cap), so the "
+     "load takes all available injection capacity before any surplus export. "
+     "When the cap cannot fit the full load the uncovered remainder is grid-"
+     "served at the retail tariff and surplus PV is curtailed — the run is "
+     "never infeasible, it degrades to the maximum feasible coverage."),
     ("unavailability_pct", 1.0, "%",
      "Annual unavailability (outages / scheduled maintenance) applied as "
      "a post-solve derate on PV generation, BESS discharge, and revenue."),
