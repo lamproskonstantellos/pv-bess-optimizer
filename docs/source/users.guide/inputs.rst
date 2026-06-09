@@ -67,10 +67,12 @@ High-level run configuration:
   plant), so the plant injects **all** generation into the grid and the
   offset against the remote load is computed each 15-minute settlement; the
   cap then limits the **total plant injection** (energy credited to the
-  remote load plus any surplus).  Strict load priority is never relaxed: if
-  the cap cannot fit the forced injection ``min(pv, load)`` the run fails
-  with a clear infeasibility message.  Only affects ``self_consumption``
-  mode.
+  remote load plus any surplus).  Load priority stays strict but is bounded
+  by the cap: the load takes all available injection capacity before any
+  surplus export (floor ``min(pv, load, cap)``), and when the cap cannot fit
+  the full load the uncovered remainder is bought at the retail tariff while
+  surplus PV is curtailed — the run is never infeasible.  Only affects
+  ``self_consumption`` mode.
 * ``unavailability_pct`` — annual outage / maintenance factor
   (default 1 %).  Applied as a post-solve derate on PV generation,
   BESS discharge, and revenue.

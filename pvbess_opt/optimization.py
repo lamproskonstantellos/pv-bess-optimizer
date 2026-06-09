@@ -340,53 +340,6 @@ def derive_tight_big_m(
 # ---------------------------------------------------------------------------
 
 
-def _validate_strict_injection_cap(
-    ts: pd.DataFrame,
-    pv: dict[int, float],
-    load: dict[int, float],
-    export_cap_kwh_per_step: dict[int, float],
-    time_index: range,
-    *,
-    tol: float = 1e-6,
-) -> None:
-    """Reject an infeasible strict total-injection-cap run before solving.
-
-    In self_consumption + strict mode (``grid_cap_includes_load=True``) the
-    irreducible plant injection at step ``t`` is the load-priority-forced
-    ``pv_to_load[t] = min(pv[t], load[t])``: every other injection term
-    (``bess_dis_load``, ``pv_to_grid``, ``bess_dis_grid``) can be driven to 0
-    and surplus PV curtailed.  The strict cap is therefore feasible iff
-    ``min(pv[t], load[t]) <= export_cap_kwh_per_step[t]`` at every step.
-
-    Raising here keeps strict load priority intact — an over-constrained run
-    fails with an actionable message instead of the solver returning an opaque
-    infeasibility (the hard LOAD_PV_PRIORITY constraint never lets priority be
-    silently relaxed).  A small tolerance absorbs float noise.
-    """
-    timestamps = list(ts["timestamp"])
-    offenders: list[tuple[int, float, float, float]] = []
-    for t in time_index:
-        pv_t = pv[t]
-        load_t = load[t]
-        cap_t = export_cap_kwh_per_step[t]
-        if min(pv_t, load_t) > cap_t + tol:
-            offenders.append((t, pv_t, load_t, cap_t))
-    if not offenders:
-        return
-    preview = "; ".join(
-        f"{timestamps[t]} → min(pv={pv_t:.6g}, load={load_t:.6g})="
-        f"{min(pv_t, load_t):.6g} kWh > cap={cap_t:.6g} kWh"
-        for t, pv_t, load_t, cap_t in offenders[:3]
-    )
-    raise ValueError(
-        "grid_cap_includes_load=True is infeasible with strict load priority "
-        f"at {len(offenders)} step(s): the load-priority injection "
-        "min(pv, load) exceeds the per-step injection cap. "
-        f"First: {preview}. Lower the load, raise p_grid_export_max_kw / "
-        "max_injection_profile, or set grid_cap_includes_load=False."
-    )
-
-
 def build_model(
     params: dict[str, Any],
     ts: pd.DataFrame,
@@ -497,12 +450,6 @@ def build_model(
         t: float(p_export * dt_h * max_injection_per_step[t])
         for t in time_index
     }
-    if strict_injection_cap:
-        # Fail fast (pre-solve) when the strict total-injection cap cannot
-        # honour the forced load-priority injection — never silently relax it.
-        _validate_strict_injection_cap(
-            ts, pv, load, export_cap_kwh_per_step, time_index,
-        )
     big_m = derive_tight_big_m(params, ts, dt_h=dt_h, mode=mode)
 
     m = pyo.ConcreteModel()
@@ -642,7 +589,25 @@ def build_model(
         # Combined with PV_SPLIT and LOAD_BAL this forces
         # pv_to_load[t] == min(pv[t], load[t]) exactly.  BESS-before-Grid
         # for the residual remains emergent through retail > DAM economics.
-        pv_load_priority = {t: min(pv[t], load[t]) for t in time_index}
+        #
+        # Under the strict total-injection cap (grid_cap_includes_load=True) the
+        # load-serving flow is itself injected at the connection point, so it is
+        # bound by the per-step cap.  The priority floor becomes the largest
+        # coverage the cap physically admits, min(pv, load, cap): load still
+        # takes ABSOLUTE precedence over surplus export for the scarce injection
+        # capacity — EXPORT_CAP then pins pv_to_load to exactly this floor when
+        # the cap binds (no export possible until the load floor is served) —
+        # but the model no longer demands an injection the cap cannot make.  The
+        # uncovered remainder is met by grid_to_load (retail) and the surplus PV
+        # is curtailed / stored.  In the default mode the cap binds on surplus
+        # alone, so the floor stays min(pv, load).
+        if strict_injection_cap:
+            pv_load_priority = {
+                t: min(pv[t], load[t], export_cap_kwh_per_step[t])
+                for t in time_index
+            }
+        else:
+            pv_load_priority = {t: min(pv[t], load[t]) for t in time_index}
         m.LOAD_PV_PRIORITY = pyo.Constraint(
             m.T,
             rule=lambda m, t: m.pv_to_load[t] >= pv_load_priority[t],
@@ -852,10 +817,14 @@ def build_model(
     #     a surplus-export cap.  Merchant has no co-located load, so the basis
     #     collapses to grid_export_total and the flag is a no-op there.
     #
-    # Strict load priority (LOAD_PV_PRIORITY: pv_to_load == min(pv, load)) is
-    # never relaxed; an over-constrained strict run is rejected pre-solve by
-    # _validate_strict_injection_cap (min(pv, load) > cap at some step), with
-    # solver infeasibility as the backstop — never a silent priority relaxation.
+    # Load priority stays strict.  LOAD_PV_PRIORITY pins pv_to_load to its floor
+    # min(pv, load) (default) or min(pv, load, cap) (strict total-injection
+    # cap).  In strict mode the load-serving injection competes with surplus
+    # export for the same cap and wins: EXPORT_CAP plus the floor force the load
+    # to take all available injection capacity before any export, the uncovered
+    # remainder falling to grid_to_load (retail).  Priority is never traded for
+    # market revenue; it is only ever bounded by the physical injection cap, so
+    # no strict run is infeasible — it degrades to the maximum feasible coverage.
     #
     # The cap is a direct ``<=`` to a constant, so it needs no big-M; M_exp
     # gates the NO_SIM_GRID_EXPORT binary below and is independent of this cap.
@@ -1539,9 +1508,17 @@ def verify_dispatch_invariants(
     else:
         inv_8 = 0.0
 
-    # Invariant 9 — Section 2 of the spec: pv_to_load == min(pv, load).
+    # Invariant 9 — Section 2 of the spec: pv_to_load == its priority floor.
+    # Default mode: min(pv, load).  Strict total-injection cap
+    # (grid_cap_includes_load): min(pv, load, cap) — load priority is still
+    # exact, but bounded by the per-step injection cap it must share.
     if mode == "self_consumption" and len(pv):
-        pv_load_priority = np.minimum(pv, load)
+        strict_cap = bool(params.get("grid_cap_includes_load", False))
+        if strict_cap and "grid_export_cap_kwh" in res.columns:
+            cap_inj = res["grid_export_cap_kwh"].to_numpy(dtype=float)
+            pv_load_priority = np.minimum(np.minimum(pv, load), cap_inj)
+        else:
+            pv_load_priority = np.minimum(pv, load)
         inv_9 = float(abs(pv_to_load - pv_load_priority).max())
     else:
         inv_9 = 0.0
