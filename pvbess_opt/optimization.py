@@ -1583,7 +1583,23 @@ def verify_dispatch_invariants(
         )
         pv_injection = pv_to_load + pv_to_grid if strict_cap else pv_to_grid
         pv_can_inject_more = pv_can_inject_more & ((cap_pv - pv_injection) > tol_kwh)
-    inv_7 = float(((pv_can_inject_more) & (pv_curtail > tol_kwh)).astype(float).sum())
+    # Curtailment with cap headroom is only anomalous when injecting the
+    # curtailed PV would have been profitable.  At a non-positive DAM export
+    # price the optimizer curtails surplus PV rather than export at a loss
+    # (the curtail tie-breaker resolves the zero-price tie toward export, so a
+    # real solve only curtails with headroom when the price is strictly
+    # negative); that curtailment is the profit-maximising optimum, not a
+    # violation.  Only a strictly positive export price makes idle cap
+    # headroom an unambiguous "lazy curtailment" defect.  When the DAM column
+    # is absent there is no export revenue, so no curtailment can be anomalous.
+    if "dam_price_eur_per_mwh" in res.columns:
+        export_profitable = res["dam_price_eur_per_mwh"].to_numpy(dtype=float) > 0.0
+    else:
+        export_profitable = np.zeros_like(pv_curtail, dtype=bool)
+    inv_7 = float(
+        (pv_can_inject_more & (pv_curtail > tol_kwh) & export_profitable)
+        .astype(float).sum()
+    )
 
     if params.get("terminal_soc_equal", True):
         if len(soc):

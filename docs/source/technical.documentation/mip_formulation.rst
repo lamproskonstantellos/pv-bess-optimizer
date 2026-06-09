@@ -92,9 +92,13 @@ optional ``grid_cap_includes_load`` project input:
   Under Virtual Net-Billing the energy virtually allocated to a remote
   load is physically injected at the plant connection point too, so the
   regulatory limit is a **physical plant-injection cap**, not merely a
-  surplus-export cap.  Strict load priority is preserved; a run whose
-  forced injection :math:`\min(\text{pv}_t, l_t)` exceeds the cap at any
-  step is rejected pre-solve.  In ``merchant`` mode there is no
+  surplus-export cap.  Load priority stays strict but shares the cap: its
+  floor becomes :math:`\min(\text{pv}_t, l_t, \text{cap}_t)`, so the load
+  takes all available injection capacity before any surplus export.  When
+  the cap cannot fit the full load the uncovered remainder is grid-served
+  at the retail tariff and surplus PV is curtailed — the run is never
+  infeasible, it degrades to the maximum feasible coverage.  In
+  ``merchant`` mode there is no
   co-located load, so :math:`g_t` collapses to surplus export and the
   flag is a no-op.
 

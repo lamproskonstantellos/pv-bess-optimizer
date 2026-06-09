@@ -372,11 +372,19 @@ count_t  ((export[t] > tol) AND (grid_to_load[t] > tol))
 ### invariant_7_curtail_behavior_kwh
 
 ```
-count_t  ((cap[t] − export[t] > tol) AND (pv_curtail[t] > tol))
+count_t  ((cap[t] − cap_basis[t] > tol) AND (pv_curtail[t] > tol)
+          AND (dam[t] > 0))
 ```
 
-The cap-not-binding ⇒ curtail-zero rule, checked in both modes per
-the design. Source: `optimization.py:1180-1191`.
+The cap-not-binding ⇒ curtail-zero rule, checked in both modes.
+`cap_basis[t]` is `grid_injection_total[t]` (surplus export by default;
+total plant injection under `grid_cap_includes_load`), and when a PV
+sub-cap is supplied the headroom test additionally requires the PV
+sub-cap to have room. The `dam[t] > 0` gate is mandatory: curtailing
+surplus PV is the profit-maximising choice when the export price is
+non-positive (the optimizer never exports at a loss), so a curtailment
+with cap headroom is anomalous **only** when exporting would have been
+profitable. Source: `optimization.py` (`invariant_7`).
 
 ### invariant_8_soc_closed_cycle_kwh
 
