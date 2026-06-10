@@ -62,6 +62,9 @@ def test_run_returns_populated_results(tmp_path):
     assert "profit_total_eur" in result.kpis
     assert result.out_dir.exists()
     assert (result.out_dir / "03_results.xlsx").exists()
+    # The advertised output layout: SUMMARY.md digest + run log.
+    assert (result.out_dir / "00_summary" / "SUMMARY.md").exists()
+    assert (result.out_dir / "00_summary" / "run_log.txt").exists()
     # Public Results contract: the financial bundle is surfaced too.
     assert result.financial_kpis is not None
     assert result.yearly_cashflow is not None

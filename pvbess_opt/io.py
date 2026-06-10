@@ -113,6 +113,7 @@ __all__ = [
     "write_assumptions_summary",
     "write_dispatch_artifacts",
     "write_results_workbook",
+    "write_summary_md",
     "write_workbook",
 ]
 
@@ -2034,6 +2035,111 @@ def write_assumptions_summary(
     return out_path
 
 
+_SUMMARY_YEAR1_KEYS: tuple[tuple[str, str], ...] = (
+    ("profit_total_eur", "Year-1 profit [EUR]"),
+    ("pv_generation_mwh", "PV generation [MWh]"),
+    ("bess_total_discharge_mwh", "BESS discharge [MWh]"),
+    ("system_total_export_mwh", "Grid export [MWh]"),
+    ("system_total_import_mwh", "Grid import [MWh]"),
+    ("pv_energy_curtailed_mwh", "PV curtailed [MWh]"),
+    ("bess_equivalent_cycles_per_day", "BESS cycles per day"),
+    ("system_pv_self_consumption_frac", "PV self-consumption [-]"),
+    ("system_load_green_coverage_frac", "Green load coverage [-]"),
+)
+
+_SUMMARY_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
+    ("npv_eur", "NPV [EUR]"),
+    ("irr_pct", "IRR [%]"),
+    ("roi_pct", "ROI [%]"),
+    ("bcr", "Benefit-cost ratio [-]"),
+    ("simple_payback_years", "Simple payback [years]"),
+    ("discounted_payback_years", "Discounted payback [years]"),
+    ("lcoe_eur_per_mwh", "LCOE [EUR/MWh]"),
+    ("lcos_eur_per_mwh", "LCOS [EUR/MWh]"),
+    ("total_capex_eur", "Total CAPEX [EUR]"),
+    ("total_devex_eur", "Total DEVEX [EUR]"),
+    ("bess_lifetime_cycles", "BESS lifetime cycles [-]"),
+)
+
+
+def _summary_fmt(value: Any) -> str:
+    """Human format for a SUMMARY.md value cell."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, float) and np.isnan(value):
+        return "n/a"
+    if abs(value) >= 1000:
+        return f"{value:,.0f}"
+    return f"{value:,.4g}"
+
+
+def write_summary_md(
+    out_path: Path,
+    *,
+    kpis_year1: dict[str, Any],
+    financial_kpis: dict[str, Any] | None,
+    params: dict[str, Any],
+    solver_name: str | None = None,
+) -> Path:
+    """Write the ``00_summary/SUMMARY.md`` headline digest.
+
+    A short, human-first markdown digest of the run: mode / asset
+    configuration, headline Year-1 KPIs, and the financial KPIs.  Full
+    detail lives in ``03_results.xlsx``; this file is the at-a-glance
+    entry point the output layout advertises.
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines: list[str] = ["# Run summary", ""]
+    mode = str(params.get("mode", "")) or "self_consumption"
+    pv_kwp = float(params.get("pv_nameplate_kwp", 0.0) or 0.0)
+    bess_kw = float(params.get("bess_power_kw", 0.0) or 0.0)
+    bess_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
+    lines.append(f"- Mode: `{mode}`")
+    lines.append(
+        f"- Assets: PV {pv_kwp:,.0f} kWp | BESS {bess_kw:,.0f} kW / "
+        f"{bess_kwh:,.0f} kWh"
+    )
+    lines.append(
+        "- Grid charging: "
+        f"{'on' if params.get('allow_bess_grid_charging') else 'off'}"
+    )
+    if solver_name:
+        lines.append(f"- Solver: `{solver_name}`")
+    lines.append("")
+
+    lines.append("## Year-1 dispatch KPIs")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("| --- | ---: |")
+    for key, label in _SUMMARY_YEAR1_KEYS:
+        if key in kpis_year1:
+            lines.append(f"| {label} | {_summary_fmt(kpis_year1[key])} |")
+    lines.append("")
+
+    if financial_kpis:
+        lines.append("## Financial KPIs (project lifetime)")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("| --- | ---: |")
+        for key, label in _SUMMARY_FINANCIAL_KEYS:
+            if key in financial_kpis:
+                lines.append(
+                    f"| {label} | {_summary_fmt(financial_kpis[key])} |"
+                )
+        lines.append("")
+
+    lines.append("## Where to look next")
+    lines.append("")
+    lines.append("- `03_results.xlsx` — KPIs, cashflows, sensitivity, lifetime")
+    lines.append("- `02_dispatch/dispatch_hourly.xlsx` — per-step dispatch")
+    lines.append("- `04_financial_plots/` and `05_energy_plots/` — figures")
+    lines.append("- `00_summary/run_log.txt` — full run log")
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out_path
+
+
 def write_dispatch_artifacts(
     dispatch_dir: Path,
     res_year1: pd.DataFrame,
@@ -2096,6 +2202,23 @@ def _flatten_kpis_for_sheet(kpis: dict[str, Any]) -> dict[str, Any]:
     return flat
 
 
+def _scalar_metric_rows(kpis: dict[str, Any]) -> list[tuple[str, Any]]:
+    """Rows for a ``metric``/``value`` sheet — scalar values only.
+
+    Sequence-valued KPI entries (e.g. ``lifetime_bm_revenue_eur_per_year``,
+    a per-year list kept on the dict for API consumers) would otherwise be
+    written as a Python ``repr`` string crammed into one Excel cell.  The
+    same numbers already live as proper columns in their dedicated sheets
+    (``cashflow_yearly['balancing_revenue_eur']``), so the metric/value
+    sheets drop them.
+    """
+    return [
+        (key, value)
+        for key, value in kpis.items()
+        if not isinstance(value, (list, tuple, np.ndarray))
+    ]
+
+
 def write_results_workbook(
     out_path: Path,
     res_year1: pd.DataFrame,
@@ -2120,7 +2243,7 @@ def write_results_workbook(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         pd.DataFrame(
-            list(_flatten_kpis_for_sheet(kpis_year1).items()),
+            _scalar_metric_rows(_flatten_kpis_for_sheet(kpis_year1)),
             columns=["metric", "value"],
         ).to_excel(writer, sheet_name="kpis_year1", index=False)
         if kpis_monthly_year1 is not None and not kpis_monthly_year1.empty:
@@ -2138,7 +2261,8 @@ def write_results_workbook(
             monthly_cf.to_excel(writer, sheet_name="cashflow_monthly", index=False)
         if financial_kpis:
             pd.DataFrame(
-                list(financial_kpis.items()), columns=["metric", "value"],
+                _scalar_metric_rows(financial_kpis),
+                columns=["metric", "value"],
             ).to_excel(writer, sheet_name="financial_kpis", index=False)
         if sensitivity is not None and not sensitivity.empty:
             sensitivity.to_excel(

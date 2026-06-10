@@ -51,6 +51,7 @@ from pvbess_opt.io import (
     write_assumptions_summary,
     write_dispatch_artifacts,
     write_results_workbook,
+    write_summary_md,
 )
 from pvbess_opt.io_read import is_structured_config, materialize_to_xlsx
 from pvbess_opt.kpis import (
@@ -1128,6 +1129,14 @@ def _run_one(
             debt_schedule=bundle.get("debt_schedule"),
             emissions=emissions_df,
         )
+        write_summary_md(
+            layout["summary"] / "SUMMARY.md",
+            kpis_year1=kpis,
+            financial_kpis=bundle.get("fin_kpis"),
+            params=params,
+            solver_name=resolved_solver,
+        )
+
         if degradation_df is not None and not degradation_df.empty:
             plot_soh_trajectory(
                 degradation_df, layout["financial_plots"] / "soh_trajectory.pdf",
