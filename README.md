@@ -269,6 +269,12 @@ lockstep:
   degradation factor 1.0.  Escalation indices use `(1 + i)^(y-1)`;
   discounting uses `1/(1+r)^y` (end-of-year), refined to end-of-month
   `1/(1+r)^((y-1)+m/12)` on the monthly sheet.
+* **Investment outlays** — `initial_investment_eur` is the Year-0
+  outlay (per-asset CAPEX + DEVEX + site lump sums) and matches the
+  Year-0 bar in the plots; `total_capex_eur` / `total_capex_devex_eur`
+  are lifecycle totals that also include the scheduled BESS replacement
+  CAPEX.  `roi_pct` = operating net cashflow (Years 1..N) over
+  `|initial_investment_eur|`.
 * **Degradation** — PV: Year-2 LID then linear; BESS: multiplicative
   calendar fade minus additive cycle fade, optional scheduled
   replacement (fade reset + replacement CAPEX in the same year).  One

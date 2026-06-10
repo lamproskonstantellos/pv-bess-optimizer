@@ -119,11 +119,15 @@ Headline financial KPIs returned by
 
 * ``npv_eur``
 * ``irr_pct``
-* ``roi_pct``
+* ``roi_pct`` — sum of operating net cashflow (Years 1..N) over the
+  initial investment ``|Year-0 CAPEX + DEVEX|``
 * ``bcr``
 * ``simple_payback_years``
 * ``discounted_payback_years``
-* ``total_capex_eur``
+* ``initial_investment_eur`` — the Year-0 outlay only (per-asset CAPEX
+  + DEVEX + site lump sums); matches the Year-0 bar in the plots
+* ``total_capex_eur`` — lifecycle total; includes the BESS replacement
+  CAPEX when ``bess_replacement_year > 0``
 * ``total_opex_eur_lifecycle``
 * ``total_revenue_eur_lifecycle``
 * ``project_start_year`` / ``project_end_year``

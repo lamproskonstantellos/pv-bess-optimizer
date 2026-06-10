@@ -5,6 +5,26 @@
 Feature-complete pre-release.  No prior versions have shipped; no
 compatibility surface is maintained.
 
+### Changed (financial reporting consistency)
+
+- New `initial_investment_eur` KPI: the Year-0 CAPEX + DEVEX outlay
+  (matching the Year-0 bar in the plots).  The lifecycle
+  `total_capex_eur` / `total_capex_devex_eur` are now documented as
+  replacement-inclusive.
+- `roi_pct` switched to the standard total-return form: operating net
+  cashflow (Years 1..N) over `|initial_investment_eur|` — previously
+  the denominator was Year-0 CAPEX alone, excluding DEVEX.  Reported
+  ROI values change accordingly.
+- The NPV/IRR tornado CAPEX driver value now reports the Year-0 outlay
+  (the perturbation still scales the replacement CAPEX row by the same
+  factor), so the bar-end EUR labels agree with the other charts.
+- `plot_yearly_cashflow_bars` / `plot_npv_waterfall` stack every
+  negative segment cumulatively; previously a BESS replacement year
+  painted the CAPEX bar over the OPEX bar, hiding it.
+- EUR axis ticks escalate decimal precision automatically on narrow
+  axes; the rolling-horizon Monte-Carlo profit histogram no longer
+  renders every tick as the same rounded label.
+
 ### Fixed (pre-publication audit)
 
 - Monthly / quarterly cashflow discounting now uses the end-of-month
