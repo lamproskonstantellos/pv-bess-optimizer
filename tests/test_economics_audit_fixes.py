@@ -179,6 +179,22 @@ def test_read_economic_params_carries_balancing_keys(repo_input_xlsx):
     assert "balancing_enabled" in econ
 
 
+def test_lcoe_audit_log_silent_without_lcoe_inputs(caplog):
+    """compute_financial_kpis must not emit the '[LCOE/LCOS audit]' line
+    when called without capacities/lifetime_yearly (the sensitivity
+    perturbations) — previously every perturbed scenario logged a
+    misleading 'LCOE = n/a' line."""
+    import logging
+
+    from pvbess_opt.economics import compute_financial_kpis
+
+    econ = _econ()
+    ycf = build_yearly_cashflow(_kpis(), econ, _CAPS)
+    with caplog.at_level(logging.INFO, logger="pvbess_opt.economics"):
+        compute_financial_kpis(ycf, econ)
+    assert not any("[LCOE/LCOS audit]" in r.message for r in caplog.records)
+
+
 def test_bm_inflation_from_workbook_indexes_balancing_revenue(repo_input_xlsx):
     """End-to-end: the workbook's bm_inflation_pct must index the
     balancing revenue lines in the multi-year cashflow."""

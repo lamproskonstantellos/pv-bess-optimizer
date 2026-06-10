@@ -1276,29 +1276,33 @@ def compute_financial_kpis(
 
     # ---- LCOE / LCOS audit log --------------------------------------------
     # Single INFO line so the run_log.txt records the headline cost
-    # numbers next to the Lazard 2024 reference bands.
-    lcoe_bench_low = float(econ.get(
-        "benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH))
-    lcoe_bench_high = float(econ.get(
-        "benchmark_lcoe_high_eur_per_mwh", BENCHMARK_LCOE_HIGH_EUR_PER_MWH))
-    lcos_bench_low = float(econ.get(
-        "benchmark_lcos_low_eur_per_mwh", BENCHMARK_LCOS_LOW_EUR_PER_MWH))
-    lcos_bench_high = float(econ.get(
-        "benchmark_lcos_high_eur_per_mwh", BENCHMARK_LCOS_HIGH_EUR_PER_MWH))
-    lcoe_val = extras.get("lcoe_eur_per_mwh", float("nan"))
-    lcos_val = extras.get("lcos_eur_per_mwh", float("nan"))
-    cycles_val = extras.get("bess_lifetime_cycles", float("nan"))
+    # numbers next to the Lazard 2024 reference bands.  Emitted only when
+    # the LCOE/LCOS inputs were supplied: the sensitivity perturbations
+    # call this function without capacities/lifetime_yearly, and logging
+    # "LCOE = n/a" once per perturbed scenario was misleading noise.
+    if capacities is not None and lifetime_yearly is not None:
+        lcoe_bench_low = float(econ.get(
+            "benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH))
+        lcoe_bench_high = float(econ.get(
+            "benchmark_lcoe_high_eur_per_mwh", BENCHMARK_LCOE_HIGH_EUR_PER_MWH))
+        lcos_bench_low = float(econ.get(
+            "benchmark_lcos_low_eur_per_mwh", BENCHMARK_LCOS_LOW_EUR_PER_MWH))
+        lcos_bench_high = float(econ.get(
+            "benchmark_lcos_high_eur_per_mwh", BENCHMARK_LCOS_HIGH_EUR_PER_MWH))
+        lcoe_val = extras.get("lcoe_eur_per_mwh", float("nan"))
+        lcos_val = extras.get("lcos_eur_per_mwh", float("nan"))
+        cycles_val = extras.get("bess_lifetime_cycles", float("nan"))
 
-    def _fmt(v: float) -> str:
-        return "n/a" if np.isnan(v) else f"{v:.1f}"
+        def _fmt(v: float) -> str:
+            return "n/a" if np.isnan(v) else f"{v:.1f}"
 
-    logger.info(
-        "[LCOE/LCOS audit] LCOE = %s EUR/MWh (Lazard: %.0f-%.0f) | "
-        "LCOS = %s EUR/MWh (Lazard: %.0f-%.0f) | bess_lifetime_cycles = %s",
-        _fmt(lcoe_val), lcoe_bench_low, lcoe_bench_high,
-        _fmt(lcos_val), lcos_bench_low, lcos_bench_high,
-        "n/a" if np.isnan(cycles_val) else f"{cycles_val:.0f}",
-    )
+        logger.info(
+            "[LCOE/LCOS audit] LCOE = %s EUR/MWh (Lazard: %.0f-%.0f) | "
+            "LCOS = %s EUR/MWh (Lazard: %.0f-%.0f) | bess_lifetime_cycles = %s",
+            _fmt(lcoe_val), lcoe_bench_low, lcoe_bench_high,
+            _fmt(lcos_val), lcos_bench_low, lcos_bench_high,
+            "n/a" if np.isnan(cycles_val) else f"{cycles_val:.0f}",
+        )
 
     # ---- Site-wide lump-sum CAPEX/DEVEX audit -----------------------------
     site_capex = float(econ.get("site_capex_eur", 0.0) or 0.0)
