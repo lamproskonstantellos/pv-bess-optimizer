@@ -66,6 +66,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .availability import availability_factor
 from .constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOE_LOW_EUR_PER_MWH,
@@ -265,16 +266,20 @@ def build_debt_schedule(
 
 
 def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
-    """Read the project / pv / bess / economics / simulation sheets.
+    """Read the project / pv / bess / economics / simulation / balancing sheets.
 
-    Returns a single flat dict combining every key from the five
+    Returns a single flat dict combining every key from the six
     parameter sheets — the financial helpers downstream expect a flat
     mapping (e.g. ``econ['discount_rate_pct']``,
-    ``econ['capex_pv_eur_per_kw']``).
+    ``econ['capex_pv_eur_per_kw']``, ``econ['bm_inflation_pct']``).
+    Key names are unique across sheets by construction
+    (:data:`pvbess_opt.io._KEY_TO_SHEET`), so the flat merge is lossless.
     """
     typed = read_workbook(xlsx_path)
     merged: dict[str, Any] = {}
-    for section in ("project", "pv", "bess", "economics", "simulation"):
+    for section in (
+        "project", "pv", "bess", "economics", "simulation", "balancing",
+    ):
         merged.update(typed[section])
     return merged
 
@@ -612,7 +617,10 @@ def derive_monthly_cashflow(
       — period descriptors. ``period`` is the month (1..12) or quarter
       (1..4) and ``period_type`` is ``"month"`` or ``"quarter"``.
     * ``pv_production_mwh`` — Year-1 monthly PV energy scaled by the
-      year's PV degradation factor.
+      year's PV degradation factor and derated by the availability
+      factor, so the per-year sums reconcile with
+      ``kpis_year1['pv_generation_mwh']`` and the
+      ``lifetime_dispatch_yearly`` sheet (both derated upstream).
     * ``revenue_eur`` — DAM + retail revenue net of the aggregator fee
       (matches ``yearly_cf['revenue_eur']`` in scope). Balancing is not
       included here; it is surfaced in its own column so callers can
@@ -636,7 +644,10 @@ def derive_monthly_cashflow(
       + opex_eur``. Sums to ``yearly_cf['net_cashflow_eur']`` row-for-
       row in any operating year without replacement / devex events.
     * ``discounted_cf_eur`` — ``net_cashflow_eur`` discounted at
-      ``econ['discount_rate_pct']`` to the start of the project.
+      ``econ['discount_rate_pct']`` to the start of the project,
+      end-of-month convention: month ``m`` of year ``y`` lands at
+      ``t = (y - 1) + m/12`` years, so December of year ``y`` carries
+      exactly the yearly row's ``1/(1+r)^y`` factor.
 
     The quarterly frame carries the same columns aggregated by
     ``period = ((month - 1) // 3) + 1``.
@@ -703,7 +714,13 @@ def derive_monthly_cashflow(
     )
     monthly_opex_y1 = pd.Series(yearly_y1_opex / 12.0, index=range(1, 13), dtype=float)
 
-    monthly_pv_mwh_y1 = monthly_pv_kwh_y1 / 1000.0
+    # Derate the physical PV column by the availability factor so the
+    # monthly sheet reconciles with kpis_year1['pv_generation_mwh'] and
+    # the lifetime_dispatch_yearly sheet (both already derated upstream).
+    avail_factor = availability_factor(
+        float(econ.get("unavailability_pct", 0.0) or 0.0)
+    )
+    monthly_pv_mwh_y1 = monthly_pv_kwh_y1 / 1000.0 * avail_factor
 
     # Per-month balancing share — aggregate reservation kW across every
     # balancing product, group by month, normalize.  Falls back to a
@@ -788,7 +805,11 @@ def derive_monthly_cashflow(
             balancing_m = float(balancing_share.loc[m]) * balancing_y
             fee_m = float(fee_share.loc[m]) * fee_y
             net_m = rev_m + balancing_m + opex_m
-            t_years = float(y) + (m - 1) / 12.0
+            # End-of-month discounting: month m of year y lands at
+            # (y - 1) + m/12, so December of year y discounts exactly like
+            # the end-of-year yearly row (1 / (1+r)^y) and earlier months
+            # discount less — the months of year y occur DURING year y.
+            t_years = float(y) - 1.0 + m / 12.0
             disc_factor = 1.0 / (1.0 + discount_rate) ** t_years
             rows.append(
                 {
