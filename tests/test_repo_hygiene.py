@@ -60,6 +60,8 @@ SKIP_DIR_PARTS = {
     # patterns inside them (e.g. ``\bF[1-9]\b`` in matplotlib/pyomo).
     ".venv", "venv", "env", "site-packages", ".tox", ".eggs",
     ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    # Gitignored developer workspaces / run outputs: not project source.
+    "scratch", "results",
 }
 
 
