@@ -46,7 +46,10 @@ References for default values
 * PV CAPEX ~525 EUR/kWp (utility-scale ground mount, 2024) — IRENA
   *Renewable Power Generation Costs in 2023* (2024).
 * BESS CAPEX ~200 EUR/kW power block (DC + PCS, EU-utility, 2024) —
-  Lazard *Levelized Cost of Storage v9* (2024).
+  Lazard *Levelized Cost of Storage v9* (2024).  Note: the Lazard LCOS
+  benchmark band assumes the FULL installed cost (roughly
+  duration_h x 215-315 EUR/kWh); supply ``capex_bess_eur_per_kw`` on
+  that basis when comparing LCOS against the band.
 * PV degradation 2.5% Year-1 LID + 0.55%/yr linear — Tier-1 module
   warranty terms (Jinko / LONGi / Trina, 25-year linear ≤ 0.55%/yr).
 * BESS degradation 2%/yr linear (LFP, ~80% capacity at 10y) — typical

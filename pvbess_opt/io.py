@@ -491,7 +491,11 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "objective (0 = off). Derive from replacement cost / cycle-life / "
      "usable energy via pvbess_opt.degradation."),
     ("capex_bess_eur_per_kw", 200, "EUR/kW",
-     "Per-kW BESS CAPEX (DC + PCS). Set 0 if BESS already exists."),
+     "Per-kW BESS CAPEX. Set 0 if BESS already exists. For an LCOS "
+     "comparable to the Lazard benchmark band, use the FULL installed "
+     "cost per kW = duration_h x EUR/kWh (e.g. a 4-hour system at "
+     "250 EUR/kWh -> 1000 EUR/kW); a power-block-only figure (~200, "
+     "DC + PCS) understates LCOS against that band."),
     ("devex_bess_eur_per_kw", 30, "EUR/kW",
      "Per-kW BESS DEVEX (development / permitting). Paid in Year 0."),
     ("opex_bess_eur_per_kw", 14, "EUR/kW/yr",
