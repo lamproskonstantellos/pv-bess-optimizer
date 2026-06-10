@@ -13,15 +13,14 @@ incurred only when the BESS imports energy that it later re-exports for
 arbitrage.  Two consequences flow from that:
 
 1. **Cashflow construction** -- `pvbess_opt.economics.build_yearly_cashflow`
-   (see the `_has_breakdown` branch around `pvbess_opt/economics.py:271-274`)
-   computes
+   (the `_has_breakdown` branch) computes
    ```
    rev1_dam_bess = profit_export_from_bess_eur - expense_charge_bess_grid_eur
    ```
    and degrades the result on `bess_factor` (the BESS capacity-fade curve),
    never on `pv_factor`.
 2. **Lifetime aggregation** -- `pvbess_opt.lifetime.build_lifetime_dispatch`
-   (see `_BESS_REVENUE_COLUMNS` at `pvbess_opt/lifetime.py:86-90`) treats
+   (via the `_BESS_REVENUE_COLUMNS` tuple) treats
    `expense_charge_bess_grid_eur` as a BESS-side column and scales it on
    `bess_factor` for every project year past Year 1.
 
@@ -58,8 +57,8 @@ full-precision dispatch when the per-step energy-balance check
 (`verify_energy_balance`) needs to avoid round(4) accumulation, and read
 the rounded frame for downstream display.
 
-The KPI-aggregation step (`_compute_balancing_kpis` at
-`pvbess_opt/kpis.py:631`) operates on the rounded frame by design: the
+The KPI-aggregation step (`_compute_balancing_kpis` in
+`pvbess_opt/kpis.py`) operates on the rounded frame by design: the
 4-dp rounding is intentional for headline KPI display.
 
 ## Lifetime aggregates exclude balancing revenue

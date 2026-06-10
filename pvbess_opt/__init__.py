@@ -34,12 +34,14 @@ Three asset modes are first-class:
                        allow_bess_grid_charging = TRUE).
 
 Highlights:
-    * Eight-sheet input workbook (project / pv / bess / economics /
-      simulation / balancing / max_injection_profile / timeseries) — one theme
-      per sheet for human readability.  ``inputs/input.xlsx`` is the
-      single source of truth for the PV shape; the loader rescales
-      the workbook PV column to the user's nameplate and specific
-      production at run time, preserving every per-step ratio.
+    * Themed input workbook (timeseries / project / pv / bess /
+      economics / simulation / balancing / max_injection_profile, plus
+      optional per-source injection caps and the sizing / scenarios
+      sweep sheets) — one theme per sheet for human readability.  The
+      ``pv_kwh`` column is consumed verbatim (absolute kWh per step);
+      ``pv_nameplate_kwp`` is metadata for per-kW CAPEX/OPEX and the
+      sizing sweep, never a rescale target.  Alternatively the PV
+      profile can be fetched from PVGIS by latitude / longitude.
     * Symmetric BESS power limit (bess_power_kw) and pinned energy
       capacity (bess_capacity_kwh).  e_cap is not a decision variable.
     * Hour-of-day max-injection cap profile (optional monthly axis).

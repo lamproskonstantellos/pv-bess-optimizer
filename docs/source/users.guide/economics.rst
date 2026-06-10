@@ -7,14 +7,17 @@ The ``economics`` sheet drives the project-finance pipeline:
   ``project_start_year - 1``); operating Years 1..N cover
   ``project_start_year .. project_start_year + N - 1``.
 * **OPEX** scales by ``(1 + opex_inflation_pct/100)^(y-1)``.
-* **Revenue** uses the Year-1 ``profit_total_eur`` from the dispatch
-  KPIs as the base.  Revenue is split into a retail-indexed stream
-  (load offset / PPA) and a DAM-indexed stream (wholesale exports);
-  each is scaled by the PV degradation curve and its own inflation
-  rate:
-  ``rev_retail_y = rev_retail_1 * pv_factor * (1 + retail_infl)^(y-1)``
-  and
-  ``rev_dam_y = rev_dam_1 * pv_factor * (1 + dam_infl)^(y-1)``.
+* **Revenue** uses the Year-1 per-stream KPI breakdown as the base.
+  Revenue is split into a retail-indexed stream (load offset / PPA) and
+  a DAM-indexed stream (wholesale exports); within each stream the
+  PV-origin component degrades on the PV curve and the BESS-origin
+  component on the BESS capacity-fade curve, then the stream's own
+  inflation index applies:
+  ``rev_retail_y = (retail_pv_1 * pv_factor + retail_bess_1 *
+  bess_factor) * (1 + retail_infl)^(y-1)`` and
+  ``rev_dam_y = (dam_pv_1 * pv_factor + dam_bess_1 * bess_factor) *
+  (1 + dam_infl)^(y-1)`` — the grid-charging expense is bundled into
+  the BESS-DAM component by convention (``pvbess_opt/conventions.md``).
 * **BESS replacement** is optional (``bess_replacement_year > 0``).
 
 BESS capacity fade — calendar plus cycle
