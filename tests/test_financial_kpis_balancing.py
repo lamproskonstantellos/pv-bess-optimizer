@@ -139,6 +139,8 @@ def test_irr_is_a_root_of_npv():
 
 
 def test_roi_matches_cashflow_definition():
+    """ROI = operating net cashflow over the initial investment
+    |Year-0 CAPEX + DEVEX| — the standard total-return form."""
     econ, caps = _econ(), _capacities()
     cf = build_yearly_cashflow(_year1_kpis_balancing_on(), econ, caps)
     fin = compute_financial_kpis(cf, econ)
@@ -146,15 +148,12 @@ def test_roi_matches_cashflow_definition():
     devex_y0 = float(cf.loc[cf["project_year"] == 0, "devex_eur"].iloc[0])
     op_net = float(cf.loc[cf["project_year"] >= 1, "net_cashflow_eur"].sum())
     expected_roi = op_net / abs(capex_y0 + devex_y0) * 100.0
-    # The implementation uses |capex_y0| only (DEVEX lives in its own
-    # row by build convention).  Recompute against the implementation's
-    # exact denominator.
-    expected_roi_impl = op_net / abs(capex_y0) * 100.0
-    assert fin["roi_pct"] == pytest.approx(expected_roi_impl, rel=1e-6)
-    # Sanity: both conventions are within an order of magnitude — the
-    # capex_y0 row already aggregates per-asset CAPEX + the site lump
-    # sum (DEVEX flows through devex_eur).
-    assert abs(expected_roi - expected_roi_impl) < abs(expected_roi_impl)
+    assert fin["roi_pct"] == pytest.approx(expected_roi, rel=1e-6)
+    # The denominator is surfaced as its own KPI and equals the Year-0
+    # row exactly (replacement CAPEX excluded).
+    assert fin["initial_investment_eur"] == pytest.approx(
+        capex_y0 + devex_y0, abs=0.01,
+    )
 
 
 # ---------------------------------------------------------------------------

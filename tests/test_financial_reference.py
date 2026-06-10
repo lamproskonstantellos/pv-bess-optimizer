@@ -22,7 +22,8 @@ Hand-derived rows (gross = retail + dam, net = 0.9*gross + opex):
     NPV  = -675 000 + 250 000/1.1 + 245 646.5/1.21 + 243 456.6516/1.331
          = -61 801.05
     IRR  = 4.6988 %   (unique sign change)
-    ROI  = (250 000 + 245 646.5 + 243 456.6516)/610 000 = 121.1645 %
+    ROI  = (250 000 + 245 646.5 + 243 456.6516)/675 000 = 109.4968 %
+           (denominator = |Year-0 CAPEX + DEVEX| = initial investment)
     BCR  = 613 198.949/675 000 = 0.9084
     simple payback    = 2 + 179 353.5/243 456.6516 = 2.7367
     discounted payback: never crosses (NPV < 0) -> NaN
@@ -143,7 +144,8 @@ def test_reference_headline_kpis_to_the_cent():
     fin = _fin_kpis(_econ())
     assert fin["npv_eur"] == pytest.approx(-61_801.05, abs=0.01)
     assert fin["irr_pct"] == pytest.approx(4.6988, abs=5e-4)
-    assert fin["roi_pct"] == pytest.approx(121.1645, abs=5e-4)
+    assert fin["roi_pct"] == pytest.approx(109.4968, abs=5e-4)
+    assert fin["initial_investment_eur"] == pytest.approx(-675_000.0, abs=0.01)
     assert fin["bcr"] == pytest.approx(0.9084, abs=5e-4)
     assert fin["simple_payback_years"] == pytest.approx(2.7367, abs=5e-4)
     assert np.isnan(fin["discounted_payback_years"])  # NPV < 0: no crossing
@@ -180,6 +182,43 @@ def test_reference_with_replacement_capex_and_lcos():
     assert fin["lcos_eur_per_mwh"] == pytest.approx(
         (disc_capex + disc_opex) / disc_mwh, abs=5e-4,
     )
+
+
+def test_initial_investment_vs_lifecycle_capex_totals():
+    """initial_investment_eur is the Year-0 row only; the lifecycle
+    total_capex_devex_eur exceeds it by exactly the replacement CAPEX
+    (replacement_pct x BESS CAPEX) when a replacement is scheduled, and
+    coincides with it when none is."""
+    # No replacement: the two coincide.
+    fin0 = _fin_kpis(_econ(bess_replacement_year=0))
+    assert fin0["initial_investment_eur"] == pytest.approx(-675_000.0, abs=0.01)
+    assert fin0["total_capex_devex_eur"] == pytest.approx(
+        fin0["initial_investment_eur"], abs=0.01,
+    )
+
+    # Replacement in year 2 at 50 % of the 100 000 BESS CAPEX: the
+    # lifecycle total carries the extra -50 000; Year 0 is unchanged.
+    fin_r = _fin_kpis(_econ(bess_replacement_year=2))
+    assert fin_r["initial_investment_eur"] == pytest.approx(-675_000.0, abs=0.01)
+    repl = -(200.0 * 500.0) * 0.50
+    assert fin_r["total_capex_devex_eur"] == pytest.approx(
+        fin_r["initial_investment_eur"] + repl, abs=0.01,
+    )
+    # ROI's denominator is the Year-0 outlay in BOTH runs (never the
+    # lifecycle total): recompute each numerator from its cashflow and
+    # divide by the same 675 000.  Note the replacement run's numerator
+    # differs by more than the bare -50 000 CAPEX because the factor
+    # reset also lifts years 2..3 BESS revenue.
+    for repl_year, fin in ((0, fin0), (2, fin_r)):
+        cf = build_yearly_cashflow(
+            _KPIS, _econ(bess_replacement_year=repl_year), _CAPS,
+        )
+        op_net = float(
+            cf.loc[cf["project_year"] >= 1, "net_cashflow_eur"].sum()
+        )
+        assert fin["roi_pct"] == pytest.approx(
+            op_net / 675_000.0 * 100.0, abs=5e-4,
+        )
 
 
 def test_lcoe_lcos_exclude_site_lump_sums():

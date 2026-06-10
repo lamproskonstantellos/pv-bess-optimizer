@@ -147,9 +147,12 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
 def _scale_capex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     """Scale CAPEX and DEVEX by the same factor.
 
-    The CAPEX driver represents the full Year-0 outlay — per-asset CAPEX
-    plus per-asset DEVEX plus the site-wide lump sum — so a single factor
-    scales the whole ``capex_eur`` / ``devex_eur`` Year-0 rows together.
+    Scales EVERY ``capex_eur`` / ``devex_eur`` row: the Year-0 outlay
+    (per-asset CAPEX + per-asset DEVEX + the site-wide lump sum) and any
+    BESS replacement CAPEX in its scheduled year — the replacement is a
+    percentage of the same unit cost, so a +/-X % CAPEX world moves it
+    by the same factor.  The driver VALUE reported on the tornado is the
+    Year-0 outlay only (see ``run_sensitivity_analysis``).
     """
     df = yearly_cf.copy()
     df["capex_eur"] = df["capex_eur"].astype(float) * float(factor)
@@ -324,20 +327,31 @@ def run_sensitivity_analysis(
 ) -> pd.DataFrame:
     """Run the four-driver tornado sensitivity around the base case.
 
-    The CAPEX driver scales the whole Year-0 outlay — per-asset CAPEX,
-    per-asset DEVEX, and the site-wide lump sum (``site_capex_eur`` /
-    ``site_devex_eur``) all live inside the ``capex_eur`` / ``devex_eur``
-    columns — so a +/-X % CAPEX scenario moves the lump sum too.
+    The CAPEX driver perturbs every ``capex_eur`` / ``devex_eur`` row —
+    the Year-0 outlay (per-asset CAPEX, per-asset DEVEX, the site-wide
+    lump sum) AND the scheduled BESS replacement CAPEX, which is a
+    percentage of the same unit cost.  The driver VALUE recorded for the
+    tornado annotations is the Year-0 outlay only, so the EUR labels
+    agree with the Year-0 stack in the other charts and with the
+    ``initial_investment_eur`` KPI.
     """
     variables = variables_for_npv_sensitivity(econ)
     rows: list[dict[str, Any]] = []
 
     base_yearly_cf = build_yearly_cashflow(year1_kpis, econ, capacities)
-    # The CAPEX driver is the full Year-0 outlay: CAPEX + DEVEX + site
-    # lump sum.
-    base_capex_total = float(base_yearly_cf["capex_eur"].sum())
+    # The CAPEX driver VALUE shown on the tornado is the Year-0 outlay
+    # (per-asset CAPEX + DEVEX + site lump sum) so the EUR labels agree
+    # with the Year-0 stack in the other financial charts and with the
+    # initial_investment_eur KPI.  The +/-delta perturbation itself
+    # still scales every capex_eur row — the replacement CAPEX is a
+    # percentage of the same unit cost, so a +/-X % CAPEX world moves
+    # it by the same factor (see _scale_capex).
+    _y0_mask = base_yearly_cf["project_year"] == 0
+    base_capex_total = float(base_yearly_cf.loc[_y0_mask, "capex_eur"].sum())
     if "devex_eur" in base_yearly_cf.columns:
-        base_capex_total += float(base_yearly_cf["devex_eur"].sum())
+        base_capex_total += float(
+            base_yearly_cf.loc[_y0_mask, "devex_eur"].sum()
+        )
     base_opex_total = float(
         base_yearly_cf.loc[
             base_yearly_cf["project_year"] >= 1, "opex_eur"
