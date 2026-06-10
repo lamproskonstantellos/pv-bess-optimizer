@@ -210,14 +210,16 @@ def plot_yearly_cashflow_bars(
            edgecolor="black", linewidth=0.4, label="Revenue")
     ax.bar(years, opex, width=width, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
-    # Stack DEVEX at the bottom of the negative Year-0 stack and put CAPEX
-    # on top of it so both segments remain visually identifiable.  Without
-    # the ``bottom=devex`` arg matplotlib overlays the CAPEX bar on the
-    # DEVEX bar at the same x and the smaller DEVEX segment disappears
-    # inside the CAPEX block.
-    ax.bar(years, devex, width=width, color=financial_color("DEVEX"),
+    # Stack EVERY negative segment: DEVEX below OPEX, CAPEX below both.
+    # Without a cumulative ``bottom`` matplotlib overlays same-x bars and
+    # the smaller segment disappears inside the larger block — Year 0
+    # would hide DEVEX inside CAPEX, and a BESS replacement year (where
+    # OPEX and CAPEX are both non-zero while DEVEX is 0) would hide OPEX
+    # entirely and understate the year's visible outflow.
+    ax.bar(years, devex, width=width, bottom=opex,
+           color=financial_color("DEVEX"),
            edgecolor="black", linewidth=0.4, label="DEVEX")
-    ax.bar(years, capex, width=width, bottom=devex,
+    ax.bar(years, capex, width=width, bottom=opex + devex,
            color=financial_color("CAPEX"),
            edgecolor="black", linewidth=0.4, label="CAPEX")
     ax.plot(years, net, color=financial_color("Net cash-flow"), linewidth=1.5,
@@ -289,16 +291,17 @@ def plot_npv_waterfall(
         color=financial_color("OPEX"), edgecolor="black",
         linewidth=0.4, label="OPEX",
     )
-    # DEVEX at the bottom of the Year-0 negative stack, CAPEX on top of
-    # it — mirrors the placement in plot_yearly_cashflow_bars so the
-    # smaller DEVEX segment stays visible.
+    # Stack every negative segment (DEVEX below OPEX, CAPEX below both)
+    # — mirrors plot_yearly_cashflow_bars so the smaller segments stay
+    # visible in Year 0 AND in a BESS replacement year, where OPEX and
+    # CAPEX coexist and an un-stacked CAPEX bar would paint over OPEX.
     ax.bar(
-        years, devex_disc, width=width,
+        years, devex_disc, width=width, bottom=opex_disc,
         color=financial_color("DEVEX"), edgecolor="black",
         linewidth=0.4, label="DEVEX",
     )
     ax.bar(
-        years, capex_disc, width=width, bottom=devex_disc,
+        years, capex_disc, width=width, bottom=opex_disc + devex_disc,
         color=financial_color("CAPEX"), edgecolor="black",
         linewidth=0.4, label="CAPEX",
     )
