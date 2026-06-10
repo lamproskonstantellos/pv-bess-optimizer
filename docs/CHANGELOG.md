@@ -5,6 +5,32 @@
 Feature-complete pre-release.  No prior versions have shipped; no
 compatibility surface is maintained.
 
+### Fixed (pre-publication audit)
+
+- Monthly / quarterly cashflow discounting now uses the end-of-month
+  convention `t = (y - 1) + m/12`; previously every month was
+  discounted 11/12 of a year too late, so the monthly DCF summed below
+  the yearly DCF.
+- `pv_production_mwh` on the monthly / quarterly cashflow sheets is now
+  availability-derated, reconciling with `kpis_year1` and the
+  `lifetime_dispatch_yearly` sheet.
+- `read_economic_params` now merges the `balancing` sheet, so the
+  workbook's `bm_inflation_pct` (default 2 %/yr) actually indexes the
+  balancing revenue lines in the lifetime cashflow (it was silently 0).
+- The advertised `00_summary/SUMMARY.md` digest is now written on every
+  run.
+- Sequence-valued KPI entries are no longer crammed into single cells
+  of the `kpis_year1` / `financial_kpis` sheets; the per-year balancing
+  revenue lives in `cashflow_yearly['balancing_revenue_eur']`.
+- The `[LCOE/LCOS audit]` log line is emitted once per run instead of
+  once per sensitivity perturbation.
+- Documentation corrections: package docstring no longer claims the PV
+  column is rescaled to the nameplate; README points at
+  `choose_solver` / `monte_carlo_rolling`; the economics guide states
+  the per-origin (PV vs BESS) revenue degradation split; the BESS CAPEX
+  note spells out the full-installed-cost basis required for
+  Lazard-comparable LCOS.
+
 ### Capabilities
 
 - Co-optimised dispatch of PV + BESS in two modes
