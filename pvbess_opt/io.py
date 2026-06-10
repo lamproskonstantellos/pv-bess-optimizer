@@ -2056,7 +2056,8 @@ _SUMMARY_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("discounted_payback_years", "Discounted payback [years]"),
     ("lcoe_eur_per_mwh", "LCOE [EUR/MWh]"),
     ("lcos_eur_per_mwh", "LCOS [EUR/MWh]"),
-    ("total_capex_eur", "Total CAPEX [EUR]"),
+    ("initial_investment_eur", "Initial investment, Year 0 [EUR]"),
+    ("total_capex_eur", "Total CAPEX incl. replacement [EUR]"),
     ("total_devex_eur", "Total DEVEX [EUR]"),
     ("bess_lifetime_cycles", "BESS lifetime cycles [-]"),
 )

@@ -885,7 +885,18 @@ def compute_financial_kpis(
     NPV / IRR / ROI / BCR / payback read ``net_cashflow_eur`` and
     ``discounted_cf_eur`` directly, so any site-wide lump-sum CAPEX/DEVEX
     folded into the Year-0 ``capex_eur`` / ``devex_eur`` rows by
-    :func:`build_yearly_cashflow` is reflected automatically.  Balancing
+    :func:`build_yearly_cashflow` is reflected automatically.
+
+    Investment-outlay conventions:
+
+    * ``initial_investment_eur`` — the Year-0 outlay only (per-asset
+      CAPEX + DEVEX + site lump sums, signed negative).  This matches
+      the Year-0 bar in the financial plots.
+    * ``total_capex_eur`` / ``total_capex_devex_eur`` — lifecycle
+      totals; with a scheduled BESS replacement these also include the
+      replacement CAPEX charged in ``bess_replacement_year``.
+    * ``roi_pct`` — sum of operating net cashflow (Years 1..N) over
+      ``|initial_investment_eur|``.  Balancing
     revenue enters NPV / IRR / ROI / BCR / payback the same way — via
     ``balancing_revenue_eur`` in the yearly cashflow, which is included
     in ``net_cashflow_eur`` by :func:`build_yearly_cashflow` — so all
@@ -912,7 +923,17 @@ def compute_financial_kpis(
 
     capex_y0 = float(df.loc[df[project_year_col] == 0, "capex_eur"].iloc[0]) \
         if (df[project_year_col] == 0).any() else 0.0
-    capex_abs = abs(float(capex_y0))
+    devex_y0 = (
+        float(df.loc[df[project_year_col] == 0, "devex_eur"].iloc[0])
+        if "devex_eur" in df.columns and (df[project_year_col] == 0).any()
+        else 0.0
+    )
+    # The Year-0 outlay (per-asset CAPEX + DEVEX + site lump sums) — the
+    # number that matches the Year-0 bar in the financial plots.  It
+    # deliberately EXCLUDES the BESS replacement CAPEX charged later in
+    # the horizon; the lifecycle totals below include it.
+    initial_investment_eur = capex_y0 + devex_y0
+    investment_abs = abs(float(initial_investment_eur))
 
     npv = float(df["discounted_cf_eur"].sum())
 
@@ -923,8 +944,11 @@ def compute_financial_kpis(
     equity_irr_pct, min_dscr = _leverage_kpis(cf_array, econ)
 
     after_y0_cf = df.loc[after_y0_mask, "net_cashflow_eur"]
-    if capex_abs > 1e-9:
-        roi_pct = float(after_y0_cf.sum()) / capex_abs * 100.0
+    # ROI = sum of operating net cashflow (Years 1..N, replacement CAPEX
+    # included via the net) over the initial investment |Year-0 CAPEX +
+    # DEVEX| — the standard total-return-on-initial-investment form.
+    if investment_abs > 1e-9:
+        roi_pct = float(after_y0_cf.sum()) / investment_abs * 100.0
     else:
         roi_pct = float("nan")
 
@@ -947,6 +971,10 @@ def compute_financial_kpis(
         df["discounted_cf_eur"].to_numpy(dtype=float),
     )
 
+    # Lifecycle totals: ``capex_eur`` is summed over ALL years, so with a
+    # scheduled BESS replacement these include the replacement CAPEX and
+    # exceed the Year-0 outlay (``initial_investment_eur``) by exactly
+    # ``bess_replacement_cost_pct`` x BESS CAPEX.
     total_capex_eur = float(df["capex_eur"].sum()) if "capex_eur" in df.columns \
         else float(capex_y0)
     total_devex_eur = (
@@ -1245,6 +1273,7 @@ def compute_financial_kpis(
         "min_dscr": (
             float("nan") if np.isnan(min_dscr) else float(round(min_dscr, 4))
         ),
+        "initial_investment_eur": float(round(initial_investment_eur, 2)),
         "total_capex_eur": float(round(total_capex_eur, 2)),
         "total_devex_eur": float(round(total_devex_eur, 2)),
         "total_capex_devex_eur": float(round(total_capex_devex_eur, 2)),
