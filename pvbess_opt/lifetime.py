@@ -83,6 +83,10 @@ _BESS_ORIGIN_COLUMNS: tuple[str, ...] = (
 _PV_REVENUE_COLUMNS: tuple[str, ...] = (
     "profit_load_from_pv_eur",
     "profit_export_from_pv_eur",
+    # PPA contract leg + covered-volume DAM value: both ride on PV
+    # export, so they degrade on the PV production factor.
+    "revenue_pv_ppa_eur",
+    "ppa_covered_dam_value_eur",
 )
 _BESS_REVENUE_COLUMNS: tuple[str, ...] = (
     "profit_load_from_bess_eur",

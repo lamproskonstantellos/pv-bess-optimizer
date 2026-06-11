@@ -416,16 +416,21 @@ def build_yearly_cashflow(
         revenue_1_dam = rev1_dam_pv + rev1_dam_bess
         revenue_1_gross = revenue_1_retail + revenue_1_dam
         # Reconciliation guard — when the KPI dict carries
-        # profit_total_eur it should equal retail + DAM within rounding.
+        # profit_total_eur it should equal retail + DAM (+ the PPA
+        # contract leg, which compute_kpis folds into the total) within
+        # rounding.
         if "profit_total_eur" in year1_kpis:
             profit_total = float(year1_kpis["profit_total_eur"] or 0.0)
-            if abs(profit_total - revenue_1_gross) > max(
+            split_total = revenue_1_gross + float(
+                year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0
+            )
+            if abs(profit_total - split_total) > max(
                 1.0, abs(profit_total) * 1e-6,
             ):
                 logger.warning(
                     "Year-1 revenue split drift: profit_total_eur=%.2f vs "
-                    "retail+dam=%.2f. Using component sum.",
-                    profit_total, revenue_1_gross,
+                    "retail+dam+ppa=%.2f. Using component sum.",
+                    profit_total, split_total,
                 )
     else:
         # When year1_kpis carries only profit_total_eur with no
@@ -472,6 +477,32 @@ def build_yearly_cashflow(
         year1_kpis.get("bm_total_activation_revenue_eur", 0.0) or 0.0
     )
 
+    # PPA stream (docs/ppa_design.md).  Year-1 bases come from the KPI
+    # dict (already availability-derated): the contract leg
+    # ``revenue_pv_ppa_eur`` and the covered volume's counterfactual DAM
+    # value.  The strike leg escalates at the contract's own
+    # ``ppa_inflation_pct``; the CfD's DAM leg at ``dam_inflation_pct``;
+    # and after ``ppa_term_years`` the stream ends — under physical
+    # settlement the covered volume's DAM value then rejoins the DAM
+    # revenue stream (market revenue: the aggregator fee applies to it).
+    ppa_enabled = bool(econ.get("ppa_enabled", False))
+    ppa_settlement = (
+        str(econ.get("ppa_settlement", "physical") or "physical")
+        .strip().lower()
+    )
+    ppa_term = int(econ.get("ppa_term_years", 0) or 0)
+    ppa_infl = float(econ.get("ppa_inflation_pct", 0.0) or 0.0) / 100.0
+    rev1_ppa = float(year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0)
+    ppa_covered_dam_1 = float(
+        year1_kpis.get("ppa_covered_dam_value_eur", 0.0) or 0.0
+    )
+    if ppa_settlement == "cfd":
+        # The CfD leg is (strike - DAM) x covered, so the strike-only
+        # leg reconstructs as contract leg + covered DAM value.
+        ppa_strike_value_1 = rev1_ppa + ppa_covered_dam_1
+    else:
+        ppa_strike_value_1 = rev1_ppa
+
     bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
     bess_repl_cost_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
 
@@ -499,6 +530,7 @@ def build_yearly_cashflow(
             aggregator_fee_y = 0.0
             balancing_capacity_y = 0.0
             balancing_activation_y = 0.0
+            ppa_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -525,6 +557,28 @@ def build_yearly_cashflow(
             revenue_dam_y = (
                 rev1_dam_pv * pv_factor + rev1_dam_bess * bess_factor
             ) * (1.0 + dam_infl) ** (y - 1)
+            # PPA stream: in-term contract leg, or the post-term
+            # physical reversion of the covered volume to the DAM
+            # stream (where the fee below applies to it).
+            if ppa_enabled and y <= ppa_term:
+                strike_leg = (
+                    ppa_strike_value_1 * pv_factor
+                    * (1.0 + ppa_infl) ** (y - 1)
+                )
+                if ppa_settlement == "cfd":
+                    ppa_y = strike_leg - (
+                        ppa_covered_dam_1 * pv_factor
+                        * (1.0 + dam_infl) ** (y - 1)
+                    )
+                else:
+                    ppa_y = strike_leg
+            else:
+                ppa_y = 0.0
+                if ppa_enabled and ppa_settlement != "cfd":
+                    revenue_dam_y += (
+                        ppa_covered_dam_1 * pv_factor
+                        * (1.0 + dam_infl) ** (y - 1)
+                    )
             revenue_gross_y = revenue_retail_y + revenue_dam_y
             # The aggregator fee is by spec a non-negative deduction
             # (BSPs charge a positive fraction of gross revenue, never
@@ -563,9 +617,11 @@ def build_yearly_cashflow(
         # side; the existing aggregator fee already covers DAM/retail
         # streams, so we do not derate balancing revenue by it (industry
         # convention: BSPs typically settle ancillary services directly
-        # with the TSO, not through the same aggregator).
+        # with the TSO, not through the same aggregator).  The PPA
+        # stream follows the same convention while under contract — a
+        # bilateral offtake settles directly with the offtaker.
         net_cf = (
-            revenue_net_y + balancing_revenue_y
+            revenue_net_y + balancing_revenue_y + ppa_y
             + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -582,6 +638,7 @@ def build_yearly_cashflow(
                 "balancing_capacity_revenue_eur": float(balancing_capacity_y),
                 "balancing_activation_revenue_eur": float(balancing_activation_y),
                 "balancing_revenue_eur": float(balancing_revenue_y),
+                "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
                 "devex_eur": float(devex_y),
@@ -769,6 +826,26 @@ def derive_monthly_cashflow(
             1.0 / 12.0, index=range(1, 13), dtype=float,
         )
 
+    # Per-month PPA share — weighted by the magnitude of the Year-1
+    # per-step contract-leg column when present (mirrors the balancing
+    # reservation weighting; magnitudes keep the weights stable when a
+    # CfD leg flips sign across months), flat 1/12 otherwise.  The
+    # shares sum to one, so monthly sums reconcile to the yearly column
+    # exactly either way.
+    if "revenue_pv_ppa_eur" in res.columns:
+        monthly_ppa_abs = (
+            res["revenue_pv_ppa_eur"].abs().groupby(month_idx).sum()
+            .reindex(range(1, 13), fill_value=0.0)
+            .astype(float)
+        )
+        ppa_abs_sum = float(monthly_ppa_abs.sum())
+        if ppa_abs_sum > 1e-9:
+            ppa_share = monthly_ppa_abs / ppa_abs_sum
+        else:
+            ppa_share = pd.Series(1.0 / 12.0, index=range(1, 13), dtype=float)
+    else:
+        ppa_share = pd.Series(1.0 / 12.0, index=range(1, 13), dtype=float)
+
     # Aggregator-fee share — proportional to the monthly post-fee
     # ``revenue_eur`` so each month carries its slice of the fee that
     # has already been deducted from ``revenue_eur``.
@@ -780,6 +857,7 @@ def derive_monthly_cashflow(
 
     has_balancing_col = "balancing_revenue_eur" in yearly_cf.columns
     has_fee_col = "aggregator_fee_eur" in yearly_cf.columns
+    has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
 
@@ -799,6 +877,10 @@ def derive_monthly_cashflow(
         fee_y = (
             float(yearly_indexed.loc[y, "aggregator_fee_eur"])
             if has_fee_col else 0.0
+        )
+        ppa_y = (
+            float(yearly_indexed.loc[y, "ppa_revenue_eur"])
+            if has_ppa_col else 0.0
         )
         capex_y = (
             float(yearly_indexed.loc[y, "capex_eur"]) if has_capex_col else 0.0
@@ -821,13 +903,14 @@ def derive_monthly_cashflow(
             opex_m = float(monthly_opex_y1.loc[m]) * opex_scale
             pv_mwh_m = float(monthly_pv_mwh_y1.loc[m]) * pv_factor
             balancing_m = float(balancing_share.loc[m]) * balancing_y
+            ppa_m = float(ppa_share.loc[m]) * ppa_y
             fee_m = float(fee_share.loc[m]) * fee_y
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
             capex_m = capex_y if m == 12 else 0.0
             devex_m = devex_y if m == 12 else 0.0
-            net_m = rev_m + balancing_m + opex_m + capex_m + devex_m
+            net_m = rev_m + balancing_m + ppa_m + opex_m + capex_m + devex_m
             # End-of-month discounting: month m of year y lands at
             # (y - 1) + m/12, so December of year y discounts exactly like
             # the end-of-year yearly row (1 / (1+r)^y) and earlier months
@@ -843,6 +926,7 @@ def derive_monthly_cashflow(
                     "pv_production_mwh": float(pv_mwh_m),
                     "revenue_eur": float(rev_m),
                     "balancing_revenue_eur": float(balancing_m),
+                    "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
                     "capex_eur": float(capex_m),
@@ -857,7 +941,7 @@ def derive_monthly_cashflow(
     monthly_columns = [
         "project_year", "calendar_year", "period",
         "period_type", "pv_production_mwh", "revenue_eur",
-        "balancing_revenue_eur", "aggregator_fee_eur",
+        "balancing_revenue_eur", "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
     ]
@@ -873,7 +957,8 @@ def derive_monthly_cashflow(
             )[
                 [
                     "pv_production_mwh", "revenue_eur",
-                    "balancing_revenue_eur", "aggregator_fee_eur",
+                    "balancing_revenue_eur", "ppa_revenue_eur",
+                    "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
                 ]
@@ -1029,6 +1114,10 @@ def compute_financial_kpis(
     total_balancing_activation_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_activation_revenue_eur"].sum())
         if "balancing_activation_revenue_eur" in df.columns else 0.0
+    )
+    total_ppa_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "ppa_revenue_eur"].sum())
+        if "ppa_revenue_eur" in df.columns else 0.0
     )
 
     if "calendar_year" in df.columns and (df["project_year"] >= 1).any():
@@ -1322,6 +1411,9 @@ def compute_financial_kpis(
         )),
         "lifetime_bm_activation_revenue_total_eur": float(round(
             total_balancing_activation_revenue_eur_lifecycle, 2,
+        )),
+        "lifetime_ppa_revenue_total_eur": float(round(
+            total_ppa_revenue_eur_lifecycle, 2,
         )),
         "capex_year": int(capex_year),
         "project_start_year": int(project_start_year),

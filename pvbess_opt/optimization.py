@@ -83,6 +83,7 @@ from .constants import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .kpis import ENERGY_TOLERANCE, _balancing_soc_drift
 from .max_injection import build_per_step_max_injection_frac
 from .modes import resolve_mode
+from .ppa import resolve_ppa_config
 from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
@@ -1006,21 +1007,38 @@ def build_model(
         m.pv_curtail[t] for t in time_index
     )
 
+    # Pay-as-produced PPA: the covered share s of PV export earns the
+    # contract strike instead of (physical) or on top of (CfD) the DAM,
+    # and both settlements total (1-s)·DAM + s·strike per exported kWh —
+    # one effective PV-export price serves both.  This deliberately lets
+    # covered PV keep exporting through negative-DAM hours while the
+    # uncovered share curtails (the documented behaviour of
+    # generation-settled as-produced contracts; see docs/ppa_design.md).
+    ppa_cfg = resolve_ppa_config(params.get("ppa"))
+    if ppa_cfg.active and pv_present:
+        s_ppa = ppa_cfg.share_frac
+        strike = float(ppa_cfg.ppa_price_eur_per_mwh)
+        pv_export_price = {
+            t: (1.0 - s_ppa) * dam_price[t] + s_ppa * strike
+            for t in time_index
+        }
+    else:
+        pv_export_price = dam_price
+
     if mode == "self_consumption":
         avoided_cost = sum(
             retail_price[t] * (m.pv_to_load[t] + m.bess_dis_load[t]) / 1000.0
             for t in time_index
         )
-        export_revenue = sum(
-            dam_price[t] * (m.pv_to_grid[t] + m.bess_dis_grid[t]) / 1000.0
-            for t in time_index
-        )
     else:  # merchant
         avoided_cost = 0.0
-        export_revenue = sum(
-            dam_price[t] * (m.pv_to_grid[t] + m.bess_dis_grid[t]) / 1000.0
-            for t in time_index
-        )
+    export_revenue = sum(
+        (
+            pv_export_price[t] * m.pv_to_grid[t]
+            + dam_price[t] * m.bess_dis_grid[t]
+        ) / 1000.0
+        for t in time_index
+    )
 
     grid_charge_cost = sum(
         dam_price[t] * m.grid_to_bess[t] / 1000.0 for t in time_index
