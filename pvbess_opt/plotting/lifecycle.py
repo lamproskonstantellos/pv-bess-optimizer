@@ -289,7 +289,7 @@ def plot_revenue_stack_yearly(
     # canonical revenue aggregates in ``year1_kpis``; subsequent years
     # scale by the BESS capacity-fade factor indexed by the balancing
     # inflation rate, which is the same growth ``build_yearly_cashflow``
-    # applies to ``balancing_revenue_eur`` (economics.py:407-412).
+    # applies to the cashflow's ``balancing_revenue_eur`` rows.
     # Previously this used ``dam_ratio``, which drove the bars to zero
     # for self-consumption projects (Year-1 DAM revenue = 0) and drifted
     # against the net line whenever ``bm_inflation_pct`` differed from

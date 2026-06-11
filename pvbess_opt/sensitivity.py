@@ -78,7 +78,11 @@ _DRIVER_TYPE_BY_VARIABLE: dict[str, str] = {
 def variables_for_npv_sensitivity(
     econ: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Return the four canonical NPV-sensitivity variables."""
+    """Return the canonical NPV-sensitivity variables.
+
+    Four always (CAPEX, OPEX, Revenue, DiscountRate) plus the optional
+    PPA-price driver when a PPA contract is enabled.
+    """
     capex_d = float(
         econ.get("sensitivity_capex_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT)
     ) / 100.0
@@ -268,7 +272,7 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     # Re-split the (possibly clamped) fee across the retail/DAM streams in
     # proportion to their gross contribution so the per-stream net columns
     # still sum to revenue_eur once the gross<0 clamp has zeroed the fee --
-    # mirrors build_yearly_cashflow (economics.py:419-430, same 1e-12
+    # mirrors build_yearly_cashflow's per-stream fee split (same 1e-12
     # zero-gross threshold).
     has_streams = (
         "revenue_retail_eur" in df.columns

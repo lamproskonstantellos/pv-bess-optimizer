@@ -563,8 +563,9 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("opex_inflation_pct", 1.0, "%",
      "Annual OPEX escalation rate."),
     ("retail_inflation_pct", 0.0, "%",
-     "Annual indexation of retail tariff / PPA revenue (load-coverage). "
-     "0 = no indexation."),
+     "Annual indexation of the retail tariff (load-coverage revenue). "
+     "0 = no indexation. The PPA stream has its own knob "
+     "(ppa_inflation_pct on the ppa sheet)."),
     ("dam_inflation_pct", 0.0, "%",
      "Annual indexation of wholesale DAM revenue (exports). Default 0 "
      "since DAM prices are driven by gas/CO2/RES penetration, not CPI. "

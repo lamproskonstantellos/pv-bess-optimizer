@@ -550,7 +550,8 @@ def build_yearly_cashflow(
                     year1_discharge_mwh * bess_factor / capacity_mwh
                 )
             # Degrade PV-origin revenue on pv_factor and BESS-origin
-            # revenue on bess_factor, mirroring lifetime.py:248-251 so the
+            # revenue on bess_factor, mirroring build_lifetime_dispatch's
+            # per-year factor loop so the
             # two sheets in 03_results.xlsx agree.  Inflation is applied
             # per stream (retail vs DAM index).
             revenue_retail_y = (

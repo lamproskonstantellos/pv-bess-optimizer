@@ -1411,7 +1411,7 @@ def _balancing_invariants(
     bess_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
     # Strict key access — the MILP build path uses params["soc_min_frac"]
     # / params["soc_max_frac"] directly, so the loader always populates
-    # both keys (io.py:1490-1491).  A silent .get fallback here would let
+    # both keys (io._typed_to_flat).  A silent .get fallback here would let
     # a hand-built ``params`` dict bypass the invariant check that build
     # would have rejected with KeyError.  Pass-2 P2.4.
     soc_min = float(params["soc_min_frac"]) * bess_kwh

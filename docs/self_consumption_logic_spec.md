@@ -25,6 +25,12 @@ The notation throughout:
 * `M_imp`, `M_exp`, `M_charge`, `M_pv` — tight big-Ms returned by
   `derive_tight_big_m` in `pvbess_opt/optimization.py:286-315`.
 
+> **Line references.** The `file.py:NN` references below are indicative
+> of the audited revision; lines drift as the code evolves. The NAMED
+> symbols (constraints, variables, functions) are the stable anchors —
+> `tests/test_logic_spec_conformance.py` asserts they exist on a built
+> model, so the documented contract cannot silently drift from the code.
+
 ## 1. Scope
 
 Implementation of the Greek "self-consumption" regulatory regime per

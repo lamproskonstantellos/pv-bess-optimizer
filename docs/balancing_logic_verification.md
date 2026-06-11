@@ -9,6 +9,12 @@ asserts that every named symbol exists on a balancing-enabled Pyomo
 model, so the documented contract cannot drift from the code without
 breaking CI.
 
+> **Line references.** The `file.py:NN` references below are indicative
+> of the audited revision; lines drift as the code evolves. The NAMED
+> symbols (constraints, variables, functions) are the stable anchors —
+> `tests/test_logic_spec_conformance.py` asserts they exist on a built
+> model, so the documented contract cannot silently drift from the code.
+
 The notation used below:
 
 * `r[k, t]` — per-product, per-step reservation in kW.
