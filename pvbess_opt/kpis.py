@@ -46,6 +46,7 @@ from .balancing import (
     resolve_balancing_config,
 )
 from .modes import resolve_mode
+from .ppa import resolve_ppa_config
 from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
@@ -265,9 +266,23 @@ def add_economic_columns(
 
     * ``profit_load_from_pv_eur``        — retail × pv_to_load / 1000.
     * ``profit_load_from_bess_eur``      — retail × bess_dis_load / 1000.
-    * ``profit_export_from_pv_eur``      — DAM × pv_to_grid / 1000.
+    * ``profit_export_from_pv_eur``      — DAM × pv_to_grid / 1000
+      (under a physical PPA: DAM × the UNCOVERED share only).
     * ``profit_export_from_bess_eur``    — DAM × bess_dis_grid / 1000.
     * ``expense_charge_bess_grid_eur``   — DAM × bess_charge_grid / 1000.
+
+    When a pay-as-produced PPA is active (``params['ppa']`` — see
+    :mod:`pvbess_opt.ppa` and ``docs/ppa_design.md``) two further
+    columns are written; they are absent otherwise so disabled runs
+    stay bit-identical:
+
+    * ``revenue_pv_ppa_eur`` — the contract leg on the covered share of
+      PV export: ``covered × strike`` under physical settlement,
+      ``covered × (strike − DAM)`` under CfD (negative when DAM exceeds
+      the strike).
+    * ``ppa_covered_dam_value_eur`` — the counterfactual DAM value of
+      the covered volume (``covered × DAM``), carried for the
+      multi-year cashflow's post-term reversion.
     """
     retail_default = float(params.get("retail_tariff_eur_per_mwh", 0.0) or 0.0)
     if "retail_price_eur_per_mwh" in res.columns:
@@ -294,19 +309,40 @@ def add_economic_columns(
     res["expense_charge_bess_grid_eur"] = (
         res["bess_charge_grid_kwh"].fillna(0.0) / 1000.0 * dam_series
     )
+
+    ppa_cfg = resolve_ppa_config(params.get("ppa"))
+    if ppa_cfg.active:
+        share = ppa_cfg.share_frac
+        strike = float(ppa_cfg.ppa_price_eur_per_mwh)
+        covered_mwh = share * res["pv_to_grid_kwh"] / 1000.0
+        res["ppa_covered_dam_value_eur"] = covered_mwh * dam_series
+        if ppa_cfg.ppa_settlement == "physical":
+            # The covered volume is paid the strike and never touches
+            # the DAM; the market column keeps the uncovered share only.
+            res["revenue_pv_ppa_eur"] = covered_mwh * strike
+            res["profit_export_from_pv_eur"] = (
+                (1.0 - share) * res["pv_to_grid_kwh"] / 1000.0 * dam_series
+            )
+        else:  # cfd — two-way settlement on top of full DAM exposure.
+            res["revenue_pv_ppa_eur"] = covered_mwh * (strike - dam_series)
     return res
 
 
 # Per-step EUR columns that :func:`add_economic_columns` (called inside
 # :func:`compute_kpis`) writes onto the dispatch frame.  The downstream
 # financial pipeline reads these; running it before ``compute_kpis`` would
-# otherwise silently default revenue to zero.
+# otherwise silently default revenue to zero.  The two PPA columns are
+# written only when a pay-as-produced contract is active (disabled runs
+# stay bit-identical); the five DAM/retail columns are always written
+# together.
 ECONOMIC_COLUMNS: tuple[str, ...] = (
     "profit_load_from_pv_eur",
     "profit_load_from_bess_eur",
     "profit_export_from_pv_eur",
     "profit_export_from_bess_eur",
     "expense_charge_bess_grid_eur",
+    "revenue_pv_ppa_eur",
+    "ppa_covered_dam_value_eur",
 )
 
 
@@ -431,9 +467,20 @@ def compute_kpis(
     profit_export_pv = float(res["profit_export_from_pv_eur"].sum())
     profit_export_bess = float(res["profit_export_from_bess_eur"].sum())
     expense_charge_grid = float(res["expense_charge_bess_grid_eur"].sum())
+    # PPA contract leg (0.0 when no pay-as-produced contract is active —
+    # the columns are then absent by design).
+    revenue_ppa = (
+        float(res["revenue_pv_ppa_eur"].sum())
+        if "revenue_pv_ppa_eur" in res.columns else 0.0
+    )
+    ppa_covered_dam_value = (
+        float(res["ppa_covered_dam_value_eur"].sum())
+        if "ppa_covered_dam_value_eur" in res.columns else 0.0
+    )
     profit_total = (
         profit_load_pv + profit_load_bess + profit_export_pv + profit_export_bess
         - expense_charge_grid
+        + revenue_ppa
     )
 
     initial_soc_pct = params["initial_soc_frac"] * 100.0
@@ -482,6 +529,11 @@ def compute_kpis(
         "profit_export_from_pv_eur": round(profit_export_pv, 2),
         "profit_export_from_bess_eur": round(profit_export_bess, 2),
         "expense_charge_bess_grid_eur": round(expense_charge_grid, 2),
+        # PPA contract leg + the covered volume's counterfactual DAM
+        # value (both 0.0 without an active contract; always emitted so
+        # the dict shape stays stable for downstream consumers).
+        "revenue_pv_ppa_eur": round(revenue_ppa, 2),
+        "ppa_covered_dam_value_eur": round(ppa_covered_dam_value, 2),
         "profit_total_eur": round(profit_total, 2),
     }
 
@@ -540,10 +592,13 @@ def compute_kpis(
 def _compute_canonical_revenue_aggregates(
     kpis: dict[str, Any], mode: str,
 ) -> dict[str, float]:
-    """Return the 8 canonical revenue aggregate keys used by the
-    financial-plot stack and the BESS-revenue waterfall / split plots.
+    """Return 8 of the 9 canonical revenue aggregate keys used by the
+    financial-plot stack and the BESS-revenue waterfall / split plots
+    (the ninth, ``revenue_pv_ppa_eur``, is summed directly from its
+    per-step column in :func:`compute_kpis`).
 
-    * ``revenue_pv_dam_eur``        — PV → DAM exports.
+    * ``revenue_pv_dam_eur``        — PV → DAM exports (under a
+      physical PPA: the uncovered share only).
     * ``revenue_bess_dam_eur``      — BESS-DAM arbitrage net of the
       grid-charging expense.
     * ``revenue_self_consumption_eur`` — load coverage from PV-direct

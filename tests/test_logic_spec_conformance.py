@@ -136,7 +136,6 @@ def _self_consumption_params() -> dict:
         "bess_power_kw": 5000.0,
         "bess_capacity_kwh": 20000.0,
         "retail_tariff_eur_per_mwh": 120.0,
-        "settlement_minutes": 15,
         "mode": "self_consumption",
         # Conformance fixture enables grid charging so the optional
         # GRID_CHARGE_GATE / GRID_CHG_PV_GATE constraints documented in

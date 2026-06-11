@@ -33,9 +33,11 @@ __all__ = [
     "apply_ieee_style",
     "apply_legend",
     "apply_universal_margins",
+    "attach_legend_clear_of_data",
     "empty_placeholder",
     "get_project_mode_label",
     "get_scenario_label",
+    "legend_overlaps_data",
     "reserve_legend_headroom",
     "save_figure",
     "save_figure_daily",
@@ -153,6 +155,18 @@ def apply_legend(
     handles, labels = ax.get_legend_handles_labels()
     if not labels:
         return
+    # Dedup repeated labels — a mixed-sign stream (e.g. a CfD PPA leg)
+    # is drawn as separate positive and negative stacks sharing one
+    # label; the legend shows it once (first handle wins).
+    seen: set[str] = set()
+    deduped = []
+    for handle, lab in zip(handles, labels, strict=False):
+        if lab in seen:
+            continue
+        seen.add(lab)
+        deduped.append((handle, lab))
+    handles = [h for h, _ in deduped]
+    labels = [lab for _, lab in deduped]
 
     if plot_type == "daily":
         y_offset = -0.20
@@ -370,6 +384,160 @@ def reserve_legend_headroom(
             ax.set_ylim(ymin - frac * span, ymax)
 
     ax._legend_headroom_applied = True
+
+
+# ---------------------------------------------------------------------------
+# Measured legend placement
+# ---------------------------------------------------------------------------
+#
+# ``reserve_legend_headroom`` above reserves a FIXED fraction and hopes the
+# drawn legend fits.  The two helpers below close the loop: they measure the
+# rendered legend's bounding box against every data artist in display space
+# and grow the axis until the two no longer intersect.  Used by the
+# uncertainty-plot family, whose dense panels (forecast bands, coverage
+# lines, PIT histograms) routinely outgrow any fixed margin.
+
+
+def _is_decorator_line(line) -> bool:
+    """True for axhline / axvline-style reference lines.
+
+    A decorator line spans the full axis, so its vertices inevitably
+    cross any legend corner — overlap with it is not a readability
+    defect.  Detected as a Line2D whose finite data points share a
+    single x (vertical) or a single y (horizontal) value.
+    """
+    xs = np.asarray(line.get_xdata(), dtype=float)
+    ys = np.asarray(line.get_ydata(), dtype=float)
+    finite = np.isfinite(xs) & np.isfinite(ys)
+    xs, ys = xs[finite], ys[finite]
+    if xs.size <= 1:
+        return True
+    return bool(np.all(xs == xs[0]) or np.all(ys == ys[0]))
+
+
+def legend_overlaps_data(ax, renderer=None) -> list[str]:
+    """Return human-readable overlap issues between the legend and data.
+
+    Measures the DRAWN legend bounding box against, in display space:
+
+    * every bar patch in the axis' containers,
+    * every non-decorator ``Line2D``'s vertices,
+    * every filled polygon's path vertices (``fill_between``),
+    * every scatter collection's offsets.
+
+    An empty list means the legend sits clear of the data.  Decorator
+    lines (``axhline`` / ``axvline``) are skipped — they span the whole
+    axis by construction.
+    """
+    fig = ax.figure
+    if renderer is None:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+    legend = ax.get_legend()
+    if legend is None:
+        return []
+    lbox = legend.get_window_extent(renderer=renderer)
+
+    def _points_inside(points: np.ndarray) -> bool:
+        if points.size == 0:
+            return False
+        inside_x = (points[:, 0] >= lbox.x0) & (points[:, 0] <= lbox.x1)
+        inside_y = (points[:, 1] >= lbox.y0) & (points[:, 1] <= lbox.y1)
+        return bool(np.any(inside_x & inside_y))
+
+    issues: list[str] = []
+
+    for cont in ax.containers:
+        for patch in getattr(cont, "patches", []) or []:
+            try:
+                pbox = patch.get_window_extent(renderer=renderer)
+            except (AttributeError, RuntimeError):
+                continue
+            if lbox.overlaps(pbox):
+                issues.append("legend overlaps a bar patch")
+                break
+
+    for line in ax.lines:
+        if _is_decorator_line(line):
+            continue
+        xs = np.asarray(line.get_xdata(), dtype=float)
+        ys = np.asarray(line.get_ydata(), dtype=float)
+        finite = np.isfinite(xs) & np.isfinite(ys)
+        if not np.any(finite):
+            continue
+        pts = ax.transData.transform(
+            np.column_stack([xs[finite], ys[finite]])
+        )
+        if _points_inside(pts):
+            issues.append(
+                f"legend overlaps line {line.get_label()!r}"
+            )
+
+    for coll in ax.collections:
+        offsets = getattr(coll, "get_offsets", lambda: np.empty((0, 2)))()
+        offsets = np.asarray(offsets, dtype=float)
+        if offsets.size:
+            pts = coll.get_offset_transform().transform(offsets)
+            if _points_inside(pts):
+                issues.append("legend overlaps a scatter collection")
+                continue
+        try:
+            paths = coll.get_paths()
+        except (AttributeError, TypeError):
+            continue
+        tr = coll.get_transform()
+        for path in paths:
+            verts = np.asarray(path.vertices, dtype=float)
+            finite = np.all(np.isfinite(verts), axis=1)
+            if not np.any(finite):
+                continue
+            if _points_inside(tr.transform(verts[finite])):
+                issues.append("legend overlaps a filled region")
+                break
+
+    return issues
+
+
+def attach_legend_clear_of_data(
+    ax,
+    *,
+    step_frac: float = 0.08,
+    max_steps: int = 12,
+    tick_ceiling: float | None = None,
+    **legend_kwargs,
+) -> None:
+    """Attach the legend, then grow the top y-limit until the DRAWN
+    legend no longer intersects any data artist.
+
+    The measured replacement for :func:`reserve_legend_headroom` in the
+    uncertainty-plot family: instead of reserving a fixed margin and
+    hoping, the loop renders, measures via :func:`legend_overlaps_data`,
+    and raises ``ymax`` by ``step_frac`` of the entry span per iteration
+    (bounded by ``max_steps``) until the legend sits in clear space.
+
+    ``tick_ceiling`` keeps intentional axis semantics: a probability
+    axis may grow headroom above 1.0, but its ticks are pruned back to
+    end at the ceiling so the scale still reads 0..1.
+
+    Call as the LAST axis-mutating step — after the data, grids, and
+    :func:`apply_universal_margins` — so the measured geometry is final.
+    """
+    _handles, labels = ax.get_legend_handles_labels()
+    if not labels:
+        return
+    ax.legend(**legend_kwargs)
+    ymin, ymax = ax.get_ylim()
+    span = ymax - ymin
+    if span > 0:
+        for _ in range(max_steps):
+            if not legend_overlaps_data(ax):
+                break
+            ymax += step_frac * span
+            ax.set_ylim(ymin, ymax)
+    if tick_ceiling is not None:
+        ax.set_yticks([
+            t for t in ax.get_yticks() if t <= tick_ceiling + 1e-9
+        ])
 
 
 # ---------------------------------------------------------------------------

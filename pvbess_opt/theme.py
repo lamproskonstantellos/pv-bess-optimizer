@@ -23,6 +23,7 @@ __all__ = [
     "FINANCIAL_LEGEND_ORDER",
     "HEADER_BORDER",
     "HEADER_BORDER_HEX",
+    "HEADER_CENTER",
     "HEADER_FILL",
     "HEADER_FILL_HEX",
     "HEADER_FONT",
@@ -60,6 +61,11 @@ HEADER_FILL = PatternFill(
 HEADER_FONT = Font(bold=True, color=HEADER_FONT_HEX)
 HEADER_BORDER = Border(bottom=Side(border_style="thin", color=HEADER_BORDER_HEX))
 NOTES_WRAP = Alignment(wrap_text=True, vertical="top")
+# Centered header variant — applied by scripts/polish_input_workbook.py to
+# the per-asset max-injection sheets only (their short numeric columns read
+# better centered); the general house style leaves headers at the Excel
+# default alignment.
+HEADER_CENTER = Alignment(horizontal="center")
 
 # AutoFit clamp (characters): keep narrow integer columns readable; cap a
 # long "notes" cell from inflating the column (it gets wrap-text instead).
@@ -122,6 +128,10 @@ MERCHANT_COLORS: dict[str, str] = {
     "Export from PV":      COLORS["PV to grid"],
     "Export from BESS":    COLORS["BESS to grid"],
     "Grid-charging cost":  COLORS["Grid to BESS"],
+    # PPA contract leg in the per-step revenue views — same hex as the
+    # financial-plot "PPA revenue" so the stream reads identically
+    # across both plot families.
+    "PPA revenue":         "#5D4037",
 }
 
 
@@ -269,6 +279,9 @@ FINANCIAL_COLORS: dict[str, str] = {
     "export_from_bess": "#0D47A1",  # Material blue 900
     "grid_charge_cost": "#D32F2F",  # Material red 700 (negative stack)
     "aggregator_fee":   "#AD1457",  # Material pink 800 (deduction tone)
+    # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
+    # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
+    "ppa_revenue":      "#5D4037",  # Material brown 700
     # Aggregate balancing-revenue marker used by plots that surface the
     # FCR / aFRR / mFRR products as a single roll-up (e.g. the Year-1
     # monthly cash-flow stack).  Distinct from every per-product hex.
@@ -379,6 +392,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Load from BESS",
     "Export from PV",
     "Export from BESS",
+    "PPA revenue",
     "Grid-charging cost",
     "Aggregator fee",
     # Balancing-product subcomponents (FCR / aFRR / mFRR)
@@ -412,6 +426,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Load from BESS":                   "load_from_bess",
     "Export from PV":                   "export_from_pv",
     "Export from BESS":                 "export_from_bess",
+    "PPA revenue":                      "ppa_revenue",
     "Grid-charging cost":               "grid_charge_cost",
     "Aggregator fee":                   "aggregator_fee",
     "FCR":                              "bm_fcr",
@@ -443,6 +458,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Load from BESS",
     "Export from PV",
     "Export from BESS",
+    "PPA revenue",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.

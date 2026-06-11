@@ -66,7 +66,6 @@ def _short_params(mode: str = "self_consumption") -> dict:
         "bess_power_kw": 5000.0,
         "bess_capacity_kwh": 20000.0,
         "retail_tariff_eur_per_mwh": 120.0,
-        "settlement_minutes": 15,
         "mode": mode,
         "allow_bess_grid_charging": False,
         "show_titles": False,

@@ -61,19 +61,79 @@ The KPI-aggregation step (`_compute_balancing_kpis` in
 `pvbess_opt/kpis.py`) operates on the rounded frame by design: the
 4-dp rounding is intentional for headline KPI display.
 
-## Lifetime aggregates exclude balancing revenue
+## Lifetime aggregates are pre-fee gross and exclude balancing revenue
 
 `aggregate_lifetime_to_yearly` (`pvbess_opt/lifetime.py`) returns a
-DataFrame whose revenue column is named `revenue_eur_dam_retail`.  It
-is the per-step DAM + retail aggregate (matching the cashflow's
-`revenue_eur` column scope) and **deliberately excludes balancing
-revenue**: balancing settles per window via reservation × probability
-× price, not per step, and pulling it into the per-step physics frame
-would require restructuring the lifetime data model.
+DataFrame whose revenue column is named `revenue_eur_dam_retail`.  Its
+scope, exactly:
+
+1. **Pre-fee gross** — per-step DAM + retail revenue minus the
+   grid-charging expense, at the dispatch prices.  The aggregator fee
+   is a project-level deduction applied only in the cashflow, so the
+   reconciliation is `revenue_eur_dam_retail == revenue_eur -
+   aggregator_fee_eur` (fee signed negative) whenever
+   `retail_inflation_pct` and `dam_inflation_pct` are zero; with
+   indexation on, the cashflow escalates per stream while the lifetime
+   frame stays at Year-1 prices by construction.
+2. **Excludes balancing revenue**: balancing settles per window via
+   reservation × probability × price, not per step, and pulling it
+   into the per-step physics frame would require restructuring the
+   lifetime data model.
 
 For total project revenue including balancing, use the cashflow
 DataFrame: `cashflow_yearly['revenue_eur'] +
 cashflow_yearly['balancing_revenue_eur']`.
+
+## Perfect-foresight benchmark and the MC ensemble share one scope
+
+The rolling-horizon Monte Carlo compares each seed's realised profit
+against the perfect-foresight benchmark.  Both sides MUST share the
+headline-KPI scope, or the comparison silently biases:
+
+1. **Unavailability derate** — `pvbess_opt.rolling_horizon.
+   rolling_horizon_dispatch` applies `apply_unavailability_derate`
+   (using `params['unavailability_pct']`) to its returned KPIs, exactly
+   as `pipeline._run_one` derates the Year-1 KPI dict it draws
+   `pf_profit_eur` from.  `foresight_gap_pct = 100 * (1 - rh/pf)` is
+   then derate-invariant.  Never compare a raw seed profit against the
+   derated benchmark: with the default 1 % unavailability that alone
+   pushes the gap ~1 pp negative ("imperfect foresight beats perfect
+   foresight"), which is impossible.
+2. **Year-close SOC condition** — when `terminal_soc_equal` is true the
+   benchmark must return the battery to its initial SOC.  The rolling
+   horizon enforces the same condition by pinning the post-final-step
+   SOC of every window that reaches the end of the horizon to the
+   year-initial SOC (`terminal_soc_target_kwh` in `build_model`).
+   Without it the last window drains the battery for profit the
+   benchmark is not allowed to take.
+
+With both rules in place every seed's stitched dispatch is feasible for
+the perfect-foresight MILP, so `seed profit <= pf profit` up to the
+solver's `mip_gap` slack and the PF marker sits at or above the upper
+tail of the Monte Carlo histogram.
+
+## PPA stream scope
+
+The pay-as-produced PPA (`docs/ppa_design.md`) keeps one scope across
+every consumer:
+
+1. **Per-step columns** — `revenue_pv_ppa_eur` (contract leg) and
+   `ppa_covered_dam_value_eur` (covered volume's counterfactual DAM
+   value) are written by `add_economic_columns` only when a contract is
+   active; both are PV-origin (`pv_factor` in the lifetime frame) and
+   in the availability-derate list (derate exactly once).
+2. **Profit / KPIs** — `profit_total_eur` includes the contract leg;
+   `revenue_pv_ppa_eur` is the ninth canonical revenue aggregate.
+3. **Cashflow** — `ppa_revenue_eur` is its own column (like
+   `balancing_revenue_eur`): the strike leg escalates on
+   `ppa_inflation_pct`, the CfD's DAM leg on `dam_inflation_pct`, the
+   stream ends after `ppa_term_years`, and physical settlement then
+   reverts the covered DAM value into the DAM revenue stream where the
+   aggregator fee applies to it as market revenue.  While under
+   contract the stream carries NO aggregator fee (bilateral offtake —
+   mirrors the balancing/TSO convention) and stays out of LCOE/LCOS
+   (revenue-agnostic Lazard metrics) and out of the lifetime frame's
+   `revenue_eur_dam_retail` (per-step DAM+retail scope).
 
 ## Default inflation: balancing tracks CPI, DAM is held nominal
 

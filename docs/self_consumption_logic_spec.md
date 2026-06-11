@@ -25,6 +25,12 @@ The notation throughout:
 * `M_imp`, `M_exp`, `M_charge`, `M_pv` — tight big-Ms returned by
   `derive_tight_big_m` in `pvbess_opt/optimization.py:286-315`.
 
+> **Line references.** The `file.py:NN` references below are indicative
+> of the audited revision; lines drift as the code evolves. The NAMED
+> symbols (constraints, variables, functions) are the stable anchors —
+> `tests/test_logic_spec_conformance.py` asserts they exist on a built
+> model, so the documented contract cannot silently drift from the code.
+
 ## 1. Scope
 
 Implementation of the Greek "self-consumption" regulatory regime per
@@ -35,9 +41,10 @@ co-located load with a behind-the-meter PV array and an optional BESS:
 * Surplus PV / BESS energy may be exported to the DAM under the
   combined per-step cap derived from `p_grid_export_max_kw` and the
   `max_injection_profile` sheet.
-* Settlement is 15-minute by default (`settlement_minutes = 15`); the
-  optimization timestep is auto-detected from the timeseries cadence
-  (`pvbess_opt/io.py:detect_timestep_minutes`).
+* Settlement is 15-minute under the regulation; the optimization
+  timestep is auto-detected from the timeseries cadence
+  (`pvbess_opt/io.py:detect_timestep_minutes`), so the canonical
+  workbook ships a 15-minute grid.
 
 ## 2. Decision variables
 

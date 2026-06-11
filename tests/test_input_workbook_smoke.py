@@ -31,7 +31,7 @@ def test_repo_input_xlsx_has_all_sheets():
     sheets = pd.ExcelFile(ROOT / "inputs" / "input.xlsx").sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "balancing", "max_injection_profile",
+        "simulation", "balancing", "ppa", "max_injection_profile",
         "max_injection_profile_pv", "max_injection_profile_bess",
         "sizing", "scenarios",
     }

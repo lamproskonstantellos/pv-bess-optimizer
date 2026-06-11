@@ -21,6 +21,11 @@ in order:
    header (white bold font, thin ``#BFBFBF`` bottom border), AutoFit
    column widths, and wrap-text on the ``notes`` column.  The same styler
    runs on every output workbook, so input and output look identical.
+5. Center-align the header row of the per-asset max-injection sheets
+   (``max_injection_profile_pv`` / ``max_injection_profile_bess``) —
+   their short numeric columns read better with centered headers.  The
+   general house style deliberately leaves header alignment at the
+   Excel default (see :mod:`pvbess_opt.io_style`).
 """
 
 from __future__ import annotations
@@ -35,13 +40,20 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from pvbess_opt.io import _SHEET_ROW_TEMPLATES
 from pvbess_opt.io_style import style_worksheet
+from pvbess_opt.theme import HEADER_CENTER
 
 AMBER_FILL_HEXES: frozenset[str] = frozenset({
     "FFF2CC", "00FFF2CC",
 })
 
 _PARAMETER_SHEETS: tuple[str, ...] = (
-    "project", "pv", "bess", "economics", "simulation", "balancing",
+    "project", "pv", "bess", "economics", "simulation", "balancing", "ppa",
+)
+
+# Sheets whose header row is center-aligned on top of the house style.
+_CENTERED_HEADER_SHEETS: tuple[str, ...] = (
+    "max_injection_profile_pv",
+    "max_injection_profile_bess",
 )
 
 logger = logging.getLogger(__name__)
@@ -129,16 +141,20 @@ def _sync_pv_sheet(ws: Worksheet) -> int:
 
 
 def _rebuild_parameter_notes(ws: Worksheet, sheet_name: str) -> int:
-    """Overwrite the ``notes`` column from :data:`_SHEET_ROW_TEMPLATES`.
+    """Migrate a parameter sheet to the canonical row template.
 
-    The header row (row 1) carries the column names ``key | value | unit
-    | notes`` written by :func:`pvbess_opt.io.write_workbook`. We locate
-    the ``notes`` column from the header, build a ``key -> notes`` map
-    from the row template, and rewrite every matching body cell. Keys
-    not present in the template are left untouched; unknown sheets are
-    a no-op.
+    Three operations against :data:`_SHEET_ROW_TEMPLATES`:
+
+    * rewrite the ``notes`` column of every key the template knows, so
+      wording changes in the typed dict reach the workbook;
+    * DROP rows whose key has been removed from the schema (the loader
+      already warns-and-ignores them; carrying them in the shipped
+      workbook would advertise dead knobs);
+    * APPEND rows for template keys the sheet does not carry yet, with
+      their default value / unit / notes.
 
     Returns the number of cells rewritten so the caller can log it.
+    Unknown sheets are a no-op.
     """
     template = _SHEET_ROW_TEMPLATES.get(sheet_name)
     if template is None:
@@ -150,12 +166,36 @@ def _rebuild_parameter_notes(ws: Worksheet, sheet_name: str) -> int:
         (c for v, c in header if isinstance(v, str) and v.strip().lower() == "key"),
         None,
     )
+    value_col = next(
+        (c for v, c in header if isinstance(v, str) and v.strip().lower() == "value"),
+        None,
+    )
+    unit_col = next(
+        (c for v, c in header if isinstance(v, str) and v.strip().lower() == "unit"),
+        None,
+    )
     notes_col = next(
         (c for v, c in header if isinstance(v, str) and v.strip().lower() == "notes"),
         None,
     )
     if key_col is None or notes_col is None:
         return 0
+
+    # Drop rows whose key left the schema (bottom-up so indices hold).
+    seen_keys: set[str] = set()
+    for row in reversed(list(ws.iter_rows(min_row=2, max_row=ws.max_row))):
+        key_cell = row[key_col - 1]
+        if not isinstance(key_cell.value, str) or not key_cell.value.strip():
+            continue
+        key = key_cell.value.strip()
+        if key not in notes_by_key:
+            logger.info(
+                "%s: dropping removed schema key %r (row %d).",
+                sheet_name, key, key_cell.row,
+            )
+            ws.delete_rows(key_cell.row, 1)
+            continue
+        seen_keys.add(key)
 
     rewritten = 0
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
@@ -170,7 +210,64 @@ def _rebuild_parameter_notes(ws: Worksheet, sheet_name: str) -> int:
         if notes_cell.value != new_notes:
             notes_cell.value = new_notes
         rewritten += 1
+
+    # Append template keys the sheet does not carry yet.
+    if value_col is not None and unit_col is not None:
+        next_row = ws.max_row + 1
+        for key, default, unit, notes in template:
+            if key in seen_keys:
+                continue
+            logger.info(
+                "%s: appending new schema key %r with its default %r.",
+                sheet_name, key, default,
+            )
+            ws.cell(row=next_row, column=key_col).value = key
+            ws.cell(row=next_row, column=value_col).value = default
+            ws.cell(row=next_row, column=unit_col).value = unit
+            ws.cell(row=next_row, column=notes_col).value = notes
+            next_row += 1
+            rewritten += 1
     return rewritten
+
+
+def _center_header_row(ws: Worksheet) -> None:
+    """Center-align every populated header cell of ``ws`` (row 1)."""
+    for cell in ws[1]:
+        if cell.value is not None:
+            cell.alignment = HEADER_CENTER
+
+
+def _ensure_parameter_sheets(wb) -> None:
+    """Create any canonical parameter sheet the workbook does not carry.
+
+    The schema-migration counterpart of the drop/append logic in
+    :func:`_rebuild_parameter_notes`: a NEW sheet (e.g. ``ppa``) is
+    created with the ``key | value | unit | notes`` header and its
+    template rows, placed after the last existing parameter sheet so
+    the workbook keeps its canonical ordering.
+    """
+    for sheet_name in _PARAMETER_SHEETS:
+        if sheet_name in wb.sheetnames:
+            continue
+        template = _SHEET_ROW_TEMPLATES.get(sheet_name)
+        if template is None:
+            continue
+        anchor = max(
+            (
+                wb.sheetnames.index(existing)
+                for existing in _PARAMETER_SHEETS
+                if existing in wb.sheetnames
+            ),
+            default=len(wb.sheetnames) - 1,
+        )
+        logger.info(
+            "creating missing parameter sheet %r with %d template rows.",
+            sheet_name, len(template),
+        )
+        ws = wb.create_sheet(sheet_name, index=anchor + 1)
+        ws.append(["key", "value", "unit", "notes"])
+        for key, default, unit, notes in template:
+            ws.append([key, default, unit, notes])
 
 
 def polish_workbook(path: Path) -> dict[str, int]:
@@ -183,6 +280,7 @@ def polish_workbook(path: Path) -> dict[str, int]:
     wb = load_workbook(path)
     if "timeseries" in wb.sheetnames:
         _drop_legacy_pv_override(wb["timeseries"])
+    _ensure_parameter_sheets(wb)
     cleared_by_sheet: dict[str, int] = {}
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
@@ -192,6 +290,8 @@ def polish_workbook(path: Path) -> dict[str, int]:
         elif sheet_name in _PARAMETER_SHEETS:
             _rebuild_parameter_notes(ws, sheet_name)
         style_worksheet(ws)
+        if sheet_name in _CENTERED_HEADER_SHEETS:
+            _center_header_row(ws)
     wb.save(path)
     return cleared_by_sheet
 

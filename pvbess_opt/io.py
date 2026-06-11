@@ -99,6 +99,7 @@ __all__ = [
     "ECONOMICS_SHEET_DEFAULTS",
     "FALSY",
     "LAYOUT_SUBDIRS",
+    "PPA_SHEET_DEFAULTS",
     "PROJECT_SHEET_DEFAULTS",
     "PV_SHEET_DEFAULTS",
     "SIMULATION_SHEET_DEFAULTS",
@@ -137,7 +138,6 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "project_lifecycle_years": 20,
     "project_start_year": 2026,
     "mode": "self_consumption",
-    "settlement_minutes": 15,
     "p_grid_export_max_kw": 5000.0,
     "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
@@ -190,6 +190,9 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     # LFP cycle-fade default (matches the canonical workbook row in
     # _BESS_ROWS and the schema default); range 0.005-0.010.
     "bess_degradation_pct_per_cycle": 0.008,
+    # End-of-life SOH threshold (%) for the diagnostic replacement
+    # schedule when no bess_replacement_year is set.
+    "bess_eol_soh_pct": 80.0,
     # Per-MWh-throughput cycle wear cost in the dispatch objective (0 = off).
     "bess_wear_cost_eur_per_mwh": 0.0,
 }
@@ -209,6 +212,8 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "sensitivity_opex_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
     "sensitivity_revenue_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
     "sensitivity_discount_rate_delta_pp": DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+    # PPA-strike tornado driver (active only when a PPA contract is on).
+    "sensitivity_ppa_price_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
     # Project-finance debt layer (all-equity by default: gearing 0).
     "gearing_pct": 0.0,
     "debt_interest_rate_pct": 5.0,
@@ -274,8 +279,35 @@ BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
     # capacity and activation prices around the deterministic schedule.
     "bm_price_sigma_capacity_pct": 25.0,
     "bm_price_sigma_activation_pct": 35.0,
+    # Number of Monte Carlo scenarios realised post-solve for the
+    # balancing-revenue distribution (P10/P50/P90 + histogram).
+    "bm_mc_scenarios": 200,
     # Default Monte Carlo seed for the balancing realisation.
     "bm_random_seed": 1729,
+}
+
+PPA_SHEET_DEFAULTS: dict[str, Any] = {
+    # Master switch — when False the engine, KPIs and outputs are
+    # bit-identical to a workbook without the sheet.
+    "ppa_enabled": False,
+    # Contract structure.  'pay_as_produced' is the implemented
+    # envelope; 'baseload' is reserved (designed in docs/ppa_design.md,
+    # rejected by validation with guidance until shortfall pricing
+    # lands).
+    "ppa_structure": "pay_as_produced",
+    # Settlement decomposition: 'physical' (sleeved — the covered
+    # volume is paid the strike and never touches the DAM) or 'cfd'
+    # (full DAM exposure plus a two-way strike-minus-DAM leg).
+    "ppa_settlement": "physical",
+    # Contract strike (EUR/MWh) on the covered volume.
+    "ppa_price_eur_per_mwh": 65.0,
+    # Covered share of the PV EXPORT (pro-rata per step).
+    "ppa_volume_share_pct": 100.0,
+    # Operating years 1..term under contract; the covered volume
+    # reverts to the DAM afterwards.
+    "ppa_term_years": 10,
+    # Yearly indexation of the contract strike ((1+i)^(y-1)).
+    "ppa_inflation_pct": 0.0,
 }
 
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
@@ -304,6 +336,7 @@ _SHEET_DEFAULTS: dict[str, dict[str, Any]] = {
     "economics": ECONOMICS_SHEET_DEFAULTS,
     "simulation": SIMULATION_SHEET_DEFAULTS,
     "balancing": BALANCING_SHEET_DEFAULTS,
+    "ppa": PPA_SHEET_DEFAULTS,
 }
 
 _KEY_TO_SHEET: dict[str, str] = {}
@@ -329,18 +362,20 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "uncertainty_load_enabled",
     "uncertainty_diagnostics_enabled",
     "balancing_enabled",
+    "ppa_enabled",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
     "project_start_year",
-    "settlement_minutes",
     "debt_tenor_years",
     "bess_replacement_year",
     "uncertainty_n_seeds",
     "uncertainty_window_hours",
     "uncertainty_commit_hours",
     "bm_settlement_minutes",
+    "bm_mc_scenarios",
     "bm_random_seed",
+    "ppa_term_years",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -350,6 +385,8 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_yearly_scope",
     "pv_source",
     "debt_repayment",
+    "ppa_structure",
+    "ppa_settlement",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -359,6 +396,10 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
     "pv_source": frozenset({"auto", "file", "pvgis"}),
     "debt_repayment": frozenset({"annuity", "linear"}),
+    # 'baseload' parses (so old workbooks load) but validation rejects
+    # it with guidance while only pay_as_produced is implemented.
+    "ppa_structure": frozenset({"pay_as_produced", "baseload"}),
+    "ppa_settlement": frozenset({"physical", "cfd"}),
 }
 
 
@@ -381,9 +422,6 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "PV / BESS dispatch entirely to the DAM. The per-step max-injection "
      "export cap (p_grid_export_max_kw x max_injection_profile) applies "
      "unconditionally in BOTH modes — curtailment is never skipped."),
-    ("settlement_minutes", 15, "int",
-     "Greek Self-consumption settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
-     "Currently informational; the MILP timestep is auto-detected."),
     ("p_grid_export_max_kw", 5000, "kW",
      "Max grid export (kW). Leave empty or use 'inf' / 'unlimited' / "
      "'disabled' to remove cap; no injection limit is applied."),
@@ -511,6 +549,12 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Cycle-based BESS capacity fade per full equivalent cycle, in "
      "percent. LFP default 0.008 (range 0.005-0.010). Set to 0 to "
      "disable cycle aging (calendar-only mode)."),
+    ("bess_eol_soh_pct", 80.0, "%",
+     "End-of-life state-of-health threshold for the SOH diagnostic: "
+     "when no bess_replacement_year is scheduled, the degradation "
+     "report swaps in a fresh pack the first year SOH falls to this "
+     "level. Diagnostic only — the cashflow charges replacement CAPEX "
+     "only for a scheduled bess_replacement_year."),
 )
 
 _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -519,8 +563,9 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("opex_inflation_pct", 1.0, "%",
      "Annual OPEX escalation rate."),
     ("retail_inflation_pct", 0.0, "%",
-     "Annual indexation of retail tariff / PPA revenue (load-coverage). "
-     "0 = no indexation."),
+     "Annual indexation of the retail tariff (load-coverage revenue). "
+     "0 = no indexation. The PPA stream has its own knob "
+     "(ppa_inflation_pct on the ppa sheet)."),
     ("dam_inflation_pct", 0.0, "%",
      "Annual indexation of wholesale DAM revenue (exports). Default 0 "
      "since DAM prices are driven by gas/CO2/RES penetration, not CPI. "
@@ -552,6 +597,10 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("sensitivity_discount_rate_delta_pp", DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP, "pp",
      "Symmetric +/- delta on the discount rate, in percentage points. "
      "NPV tornado only - drops out of IRR tornado by definition."),
+    ("sensitivity_ppa_price_delta_pct", DEFAULT_SENSITIVITY_DELTA_PCT, "%",
+     "Symmetric +/- delta on the PPA strike. The driver appears in the "
+     "tornado only when the ppa sheet's contract is enabled and the "
+     "Year-1 PPA stream is non-zero."),
     ("gearing_pct", 0.0, "%",
      "Debt fraction of the initial investment (0 = all-equity, the "
      "default; unlevered results are unchanged)."),
@@ -686,8 +735,47 @@ _BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Log-normal sigma for Monte Carlo perturbation of capacity prices."),
     ("bm_price_sigma_activation_pct", 35.0, "%",
      "Log-normal sigma for Monte Carlo perturbation of activation prices."),
+    ("bm_mc_scenarios", 200, "int",
+     "Number of Monte Carlo scenarios realised post-solve for the "
+     "balancing-revenue distribution (P10/P50/P90 KPIs and the "
+     "balancing_mc_distribution plot)."),
     ("bm_random_seed", 1729, "int",
      "Default seed for the balancing Monte Carlo realisation."),
+)
+
+
+_PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("ppa_enabled", False, "bool",
+     "Master switch for the pay-as-produced PPA contract. When FALSE "
+     "the dispatch, KPIs and outputs are bit-identical to a workbook "
+     "without the sheet. See docs/ppa_design.md."),
+    ("ppa_structure", "pay_as_produced", "enum",
+     "Contract structure. 'pay_as_produced' (as-generated offtake on a "
+     "share of the PV export) is the implemented envelope; 'baseload' "
+     "is reserved for a future shaped profile and is rejected with "
+     "guidance while unimplemented."),
+    ("ppa_settlement", "physical", "enum",
+     "physical | cfd. physical (sleeved): the covered volume is paid "
+     "the strike and never touches the DAM. cfd: all PV export sells "
+     "at DAM and the covered volume adds a two-way strike-minus-DAM "
+     "leg (negative when DAM exceeds the strike). Both total share x "
+     "export x strike on the covered volume, so dispatch is identical "
+     "and only the revenue decomposition differs."),
+    ("ppa_price_eur_per_mwh", 65.0, "EUR/MWh",
+     "Contract strike on the covered volume."),
+    ("ppa_volume_share_pct", 100.0, "%",
+     "Covered share of the PV EXPORT, applied pro-rata per step "
+     "(self-consumed PV is settled at retail and is not offtake "
+     "volume; BESS export is not covered)."),
+    ("ppa_term_years", 10, "years",
+     "Operating years 1..term under contract. After the term the "
+     "stream ends; under physical settlement the covered volume's DAM "
+     "value rejoins the DAM revenue stream (where the aggregator fee "
+     "applies to it as market revenue)."),
+    ("ppa_inflation_pct", 0.0, "%",
+     "Yearly indexation of the contract strike ((1+i)^(y-1)). "
+     "Independent of retail_inflation_pct (CPI-linked tariffs) and "
+     "dam_inflation_pct (wholesale view)."),
 )
 
 
@@ -700,6 +788,7 @@ _SHEET_ROW_TEMPLATES: dict[
     "economics": _ECONOMICS_ROWS,
     "simulation": _SIMULATION_ROWS,
     "balancing": _BALANCING_ROWS,
+    "ppa": _PPA_ROWS,
 }
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
@@ -858,6 +947,8 @@ _SCENARIOS_EXAMPLE_ROWS: tuple[tuple[Any, ...], ...] = (
     (None, "Merchant PV only", "Merchant hybrid", "bess.power_kw", 0),
     (None, "Merchant PV only", "Merchant hybrid", "bess.capacity_kwh", 0),
     (None, "Cheap CAPEX (merchant)", "Merchant hybrid", "capex_multiplier", 0.8),
+    (None, "Merchant hybrid + PPA", "Merchant hybrid", "ppa.ppa_enabled", "TRUE"),
+    (None, "Merchant hybrid + PPA", "Merchant hybrid", "ppa.ppa_volume_share_pct", 80),
 )
 
 
@@ -900,6 +991,8 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     simulation_df = _build_kv_sheet(typed["simulation"], _SIMULATION_ROWS)
     balancing_section = typed.get("balancing") or dict(BALANCING_SHEET_DEFAULTS)
     balancing_df = _build_kv_sheet(balancing_section, _BALANCING_ROWS)
+    ppa_section = typed.get("ppa") or dict(PPA_SHEET_DEFAULTS)
+    ppa_df = _build_kv_sheet(ppa_section, _PPA_ROWS)
 
     profile = typed.get("max_injection_profile")
     if profile is None:
@@ -916,6 +1009,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         economics_df.to_excel(writer, sheet_name="economics", index=False)
         simulation_df.to_excel(writer, sheet_name="simulation", index=False)
         balancing_df.to_excel(writer, sheet_name="balancing", index=False)
+        ppa_df.to_excel(writer, sheet_name="ppa", index=False)
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
@@ -1518,6 +1612,56 @@ def _validate_balancing_config(
             f"[0, 50]; got {headroom!r}."
         )
 
+    mc_scenarios = int(balancing.get("bm_mc_scenarios", 200) or 0)
+    if mc_scenarios < 1:
+        raise ValueError(
+            "balancing sheet key 'bm_mc_scenarios' must be a positive "
+            f"integer; got {mc_scenarios!r}."
+        )
+
+
+def _validate_ppa_config(ppa: dict[str, Any]) -> None:
+    """Validate the ``ppa`` sheet (skipped when the contract is disabled).
+
+    The structure enum accepts ``baseload`` at parse time so old
+    workbooks load, but an ENABLED baseload contract is rejected here
+    with guidance — the shaped profile is designed (docs/ppa_design.md)
+    and deliberately not implemented yet.
+    """
+    if not bool(ppa.get("ppa_enabled", False)):
+        return
+
+    structure = str(ppa.get("ppa_structure", "pay_as_produced") or "").lower()
+    if structure == "baseload":
+        raise ValueError(
+            "ppa_structure='baseload' is designed but not implemented "
+            "(it needs shortfall-pricing rules — see docs/ppa_design.md). "
+            "Use ppa_structure='pay_as_produced' or disable the contract."
+        )
+    if structure not in ("pay_as_produced",):
+        raise ValueError(
+            f"ppa_structure must be 'pay_as_produced'; got {structure!r}."
+        )
+
+    share = float(ppa.get("ppa_volume_share_pct", 0.0) or 0.0)
+    if not (0.0 <= share <= 100.0):
+        raise ValueError(
+            f"'ppa_volume_share_pct' must be in [0, 100]; got {share!r}."
+        )
+
+    price = float(ppa.get("ppa_price_eur_per_mwh", 0.0) or 0.0)
+    if price < 0.0:
+        raise ValueError(
+            f"'ppa_price_eur_per_mwh' must be non-negative; got {price!r}."
+        )
+
+    term = int(ppa.get("ppa_term_years", 0) or 0)
+    if term < 1:
+        raise ValueError(
+            "'ppa_term_years' must be >= 1 when the contract is enabled; "
+            f"got {term!r}."
+        )
+
 
 _DT_MINUTES_VALID_DIVISORS: tuple[int, ...] = (
     1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60,
@@ -1618,8 +1762,10 @@ def validate_workbook_params(
     bess = typed.get("bess") or {}
     economics = typed.get("economics") or {}
     balancing = typed.get("balancing") or {}
+    ppa = typed.get("ppa") or {}
 
     validate_pv_location_fields(pv)
+    _validate_ppa_config(ppa)
 
     def _require_non_negative(section: dict[str, Any], key: str) -> None:
         if key not in section:
@@ -1675,6 +1821,13 @@ def validate_workbook_params(
         if not (0.0 < value <= 1.0):
             raise ValueError(
                 f"{key!r} must be in (0, 1]; got {value!r}."
+            )
+
+    if "bess_eol_soh_pct" in bess:
+        eol = float(bess["bess_eol_soh_pct"] or 0.0)
+        if not (0.0 < eol <= 100.0):
+            raise ValueError(
+                f"'bess_eol_soh_pct' must be in (0, 100]; got {eol!r}."
             )
 
     if dt_minutes is not None:
@@ -1779,6 +1932,16 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         typed["balancing"] = _parse_kv_sheet("balancing", balancing_flat)
     else:
         typed["balancing"] = dict(BALANCING_SHEET_DEFAULTS)
+
+    # Optional ``ppa`` sheet — same master-switch pattern: absent means
+    # the contract is disabled and the run is bit-identical to before.
+    if "ppa" in sheets:
+        ppa_flat = _flat_dict_from_sheet(
+            pd.read_excel(xlsx_path, sheet_name="ppa"),
+        )
+        typed["ppa"] = _parse_kv_sheet("ppa", ppa_flat)
+    else:
+        typed["ppa"] = dict(PPA_SHEET_DEFAULTS)
 
     # A finite grid-export cap must be strictly positive.  An empty cell
     # or an 'unlimited' token resolves to float('inf') (cap disabled).
@@ -1898,7 +2061,6 @@ def _typed_to_flat(
         # to API consumers), so they are retained intentionally.
         "grid_export_unlimited": grid_export_unlimited,
         "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
-        "settlement_minutes": int(project["settlement_minutes"]),
         "mode": str(project["mode"]),
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
         "grid_cap_includes_load": bool(project["grid_cap_includes_load"]),
@@ -1921,6 +2083,9 @@ def _typed_to_flat(
         "balancing": dict(
             typed.get("balancing") or BALANCING_SHEET_DEFAULTS,
         ),
+        # PPA contract section — same nested-dict pattern; consumed by
+        # the MILP objective and the per-step EUR columns.
+        "ppa": dict(typed.get("ppa") or PPA_SHEET_DEFAULTS),
         # simulation
         "plot_daily_scope": str(sim["plot_daily_scope"]),
         "plot_monthly_scope": str(sim["plot_monthly_scope"]),
@@ -2062,6 +2227,13 @@ _SUMMARY_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("bess_lifetime_cycles", "BESS lifetime cycles [-]"),
 )
 
+# Optional revenue-stream totals: rendered only when the stream is
+# non-zero so a run without the feature keeps a noise-free digest.
+_SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
+    ("lifetime_ppa_revenue_total_eur", "Lifetime PPA revenue [EUR]"),
+    ("lifetime_bm_revenue_total_eur", "Lifetime balancing revenue [EUR]"),
+)
+
 
 def _summary_fmt(value: Any) -> str:
     """Human format for a SUMMARY.md value cell."""
@@ -2129,6 +2301,10 @@ def write_summary_md(
                 lines.append(
                     f"| {label} | {_summary_fmt(financial_kpis[key])} |"
                 )
+        for key, label in _SUMMARY_OPTIONAL_FINANCIAL_KEYS:
+            value = financial_kpis.get(key)
+            if isinstance(value, (int, float)) and abs(float(value)) > 1e-9:
+                lines.append(f"| {label} | {_summary_fmt(value)} |")
         lines.append("")
 
     lines.append("## Where to look next")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -9,10 +10,10 @@ import numpy as np
 import pandas as pd
 
 from ..theme import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
-from ._currency import euro_axis_formatter
+from ._currency import euro_axis_formatter, format_eur_adaptive
 from .style import (
     apply_universal_margins,
-    reserve_legend_headroom,
+    attach_legend_clear_of_data,
     save_figure,
     show_titles,
 )
@@ -24,6 +25,19 @@ __all__ = [
     "plot_foresight_gap_comparison",
     "plot_rolling_horizon_distribution",
 ]
+
+
+def _legend_resolution(values: list[float]) -> float:
+    """Smallest pairwise gap between the quoted legend values.
+
+    Drives :func:`format_eur_adaptive` so P10 / P50 / P90 / PF legend
+    entries stay distinct on narrow ensembles — the same escalation rule
+    the EUR axis formatter applies to its ticks, keeping annotation
+    units consistent with the axis.
+    """
+    finite = sorted(v for v in values if v is not None and np.isfinite(v))
+    gaps = [b - a for a, b in pairwise(finite) if b > a]
+    return min(gaps) if gaps else 0.0
 
 
 def plot_rolling_horizon_distribution(
@@ -51,35 +65,58 @@ def plot_rolling_horizon_distribution(
         plt.figure(figsize=(7, 4))
         ax = plt.gca()
         fallback_colour = COLORS["BESS to grid"]
+        medians = [
+            float(np.median(g["profit_total_eur"].astype(float)))
+            for _s, g in mc_df.groupby("source_set")
+        ]
+        if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
+            medians.append(float(pf_profit_eur))
+        resolution = _legend_resolution(medians)
         for source_set, group in mc_df.groupby("source_set"):
             profits = group["profit_total_eur"].astype(float).to_numpy()
             colour = UNCERTAINTY_SOURCE_COLORS.get(str(source_set), fallback_colour)
+            p50_label = format_eur_adaptive(
+                float(np.median(profits)),
+                resolution=resolution, format_mode=currency_format,
+            )
             ax.hist(
                 profits,
                 bins=max(10, len(profits) // 3),
                 color=colour, edgecolor="black", linewidth=0.4,
                 alpha=0.45,
-                label=f"{source_set} (P50 = {np.median(profits):,.0f})",
+                label=f"{source_set} (P50 = {p50_label})",
             )
         if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
+            pf_label = format_eur_adaptive(
+                float(pf_profit_eur),
+                resolution=resolution, format_mode=currency_format,
+            )
             ax.axvline(
                 float(pf_profit_eur), color="black", linewidth=1.0,
                 linestyle="-.",
-                label=f"Perfect-foresight = {float(pf_profit_eur):,.0f}",
+                label=f"Perfect-foresight = {pf_label}",
             )
         ax.set_xlabel("Profit (EUR)")
         ax.set_ylabel("Frequency (seeds)")
         ax.xaxis.set_major_formatter(euro_axis_formatter(currency_format))
         if show_titles():
             ax.set_title("Rolling-horizon MC profit distribution by source set")
-        reserve_legend_headroom(ax, loc="best")
-        ax.legend(loc="best", framealpha=0.9, fontsize=7)
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
         apply_universal_margins(ax, skip_y=True)
+        attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
         return save_figure(out_path)
 
     profits = mc_df["profit_total_eur"].astype(float).to_numpy()
     p10, p50, p90 = np.percentile(profits, [10, 50, 90])
+    quoted = [float(p10), float(p50), float(p90)]
+    if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
+        quoted.append(float(pf_profit_eur))
+    resolution = _legend_resolution(quoted)
+
+    def _q(value: float) -> str:
+        return format_eur_adaptive(
+            value, resolution=resolution, format_mode=currency_format,
+        )
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -88,19 +125,19 @@ def plot_rolling_horizon_distribution(
             edgecolor="black", linewidth=0.4, alpha=0.85)
     ax.axvline(p10, color=FINANCIAL_COLORS["percentile_p10"],
                linewidth=1.0, linestyle=":",
-               label=f"P10 = {p10:,.0f}")
+               label=f"P10 = {_q(float(p10))}")
     ax.axvline(p50, color=FINANCIAL_COLORS["percentile_p50"],
                linewidth=1.2, linestyle="--",
-               label=f"P50 = {p50:,.0f}")
+               label=f"P50 = {_q(float(p50))}")
     ax.axvline(p90, color=FINANCIAL_COLORS["percentile_p90"],
                linewidth=1.0, linestyle=":",
-               label=f"P90 = {p90:,.0f}")
+               label=f"P90 = {_q(float(p90))}")
     if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
         ax.axvline(
             float(pf_profit_eur),
             color=FINANCIAL_COLORS["perfect_foresight"], linewidth=1.0,
             linestyle="-.",
-            label=f"Perfect-foresight = {float(pf_profit_eur):,.0f}",
+            label=f"Perfect-foresight = {_q(float(pf_profit_eur))}",
         )
 
     ax.set_xlabel("Profit (EUR)")
@@ -108,10 +145,9 @@ def plot_rolling_horizon_distribution(
     ax.xaxis.set_major_formatter(euro_axis_formatter(currency_format))
     if show_titles():
         ax.set_title("Rolling-horizon Monte Carlo profit distribution")
-    reserve_legend_headroom(ax, loc="best")
-    ax.legend(loc="best", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
+    attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
     return save_figure(out_path)
 
 

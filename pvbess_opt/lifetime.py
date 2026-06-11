@@ -83,6 +83,10 @@ _BESS_ORIGIN_COLUMNS: tuple[str, ...] = (
 _PV_REVENUE_COLUMNS: tuple[str, ...] = (
     "profit_load_from_pv_eur",
     "profit_export_from_pv_eur",
+    # PPA contract leg + covered-volume DAM value: both ride on PV
+    # export, so they degrade on the PV production factor.
+    "revenue_pv_ppa_eur",
+    "ppa_covered_dam_value_eur",
 )
 _BESS_REVENUE_COLUMNS: tuple[str, ...] = (
     "profit_load_from_bess_eur",
@@ -298,14 +302,20 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
     ``build_lifetime_dispatch`` to be present; raises rather than
     silently aggregating zero revenue.
 
-    ``revenue_eur_dam_retail`` is the per-step DAM + retail post-fee
-    aggregate (matching the cashflow's ``revenue_eur`` column).  It
-    deliberately **excludes** balancing revenue — the lifetime frame
-    is per-step physics, while balancing settles per window via
-    reservation × probability × price (see
-    :func:`pvbess_opt.economics.build_yearly_cashflow`).  Callers that
-    want a true project-total revenue should add
-    ``cashflow_yearly['balancing_revenue_eur']`` to this column.
+    ``revenue_eur_dam_retail`` is the per-step DAM + retail **gross**
+    aggregate — revenue at the dispatch prices minus the grid-charging
+    expense, BEFORE the aggregator fee (the fee is a project-level
+    deduction applied only in the cashflow).  It reconciles against the
+    cashflow as ``revenue_eur - aggregator_fee_eur`` (the fee column is
+    signed negative) whenever ``retail_inflation_pct`` and
+    ``dam_inflation_pct`` are zero; with non-zero indexation the
+    cashflow escalates per stream while this frame stays at Year-1
+    prices by construction.  It also deliberately **excludes**
+    balancing revenue — the lifetime frame is per-step physics, while
+    balancing settles per window via reservation × probability × price
+    (see :func:`pvbess_opt.economics.build_yearly_cashflow`).  Callers
+    that want a true project-total revenue should use the cashflow
+    columns.
     """
     if lifetime_df.empty:
         return pd.DataFrame(

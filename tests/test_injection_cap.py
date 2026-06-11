@@ -53,7 +53,6 @@ def _tiny_params(**overrides):
         "bess_power_kw": 0.0,          # no BESS keeps the algebra clean
         "bess_capacity_kwh": 0.0,
         "retail_tariff_eur_per_mwh": 200.0,
-        "settlement_minutes": 60,
         "mode": "self_consumption",
         "allow_bess_grid_charging": False,
         "show_titles": False,

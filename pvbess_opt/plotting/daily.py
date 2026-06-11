@@ -608,19 +608,28 @@ def plot_daily_revenue(
     rev_pv = df.get("profit_export_from_pv_eur", pd.Series(0.0, index=df.index))
     rev_bess = df.get("profit_export_from_bess_eur", pd.Series(0.0, index=df.index))
     cost_grid = df.get("expense_charge_bess_grid_eur", pd.Series(0.0, index=df.index))
+    # PPA contract leg per step (absent when no contract is active).  A
+    # CfD leg can mix signs within a day: the positive part stacks with
+    # the exports, the negative part with the cost.
+    ppa = df.get("revenue_pv_ppa_eur", pd.Series(0.0, index=df.index))
+    ppa_arr = ppa.to_numpy(dtype=float)
+    ppa_pos = np.clip(ppa_arr, 0.0, None)
+    ppa_neg = np.clip(ppa_arr, None, 0.0)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     t_pad, pos = pad_right_to_end(
-        t, [rev_pv.to_numpy(), rev_bess.to_numpy()], end,
+        t, [rev_pv.to_numpy(), rev_bess.to_numpy(), ppa_pos], end,
     )
     plot_stack_filtered(
-        ax, t_pad, pos, ["Export from PV", "Export from BESS"],
+        ax, t_pad, pos, ["Export from PV", "Export from BESS", "PPA revenue"],
         step_post=True,
     )
-    t_pad_n, neg = pad_right_to_end(t, [(-cost_grid).to_numpy()], end)
+    t_pad_n, neg = pad_right_to_end(t, [(-cost_grid).to_numpy(), ppa_neg], end)
+    # The legend dedups the repeated "PPA revenue" label (apply_legend).
     plot_stack_filtered(
-        ax, t_pad_n, neg, ["Grid-charging cost"], step_post=True,
+        ax, t_pad_n, neg, ["Grid-charging cost", "PPA revenue"],
+        step_post=True,
     )
     ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
 

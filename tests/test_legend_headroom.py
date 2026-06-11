@@ -373,3 +373,133 @@ def test_reserve_legend_headroom_is_idempotent():
     assert ymax_after_first == pytest.approx(ymax_after_second)
     # And the headroom must actually be larger than the original 30.0.
     assert ymax_after_first > 30.0
+
+
+# ---------------------------------------------------------------------------
+# Uncertainty-plot family — MEASURED no-overlap guarantee
+# ---------------------------------------------------------------------------
+#
+# These figures attach their legends through
+# style.attach_legend_clear_of_data, which measures the drawn legend
+# against the data artists and grows headroom until they no longer
+# intersect.  The assertions below re-measure with the same production
+# helper (style.legend_overlaps_data) on rendered figures, so a
+# regression in any panel of the family fails here.
+
+
+def _uncertainty_ts(n_steps: int = 96 * 28) -> pd.DataFrame:
+    """Four weeks of 15-min synthetic data (DAM + PV + load)."""
+    from tests.conftest import _make_short_ts_15min
+
+    return _make_short_ts_15min(n_steps)
+
+
+def _family_overlap_issues(fig) -> list[str]:
+    from pvbess_opt.plotting.style import legend_overlaps_data
+
+    issues: list[str] = []
+    for ax in fig.axes:
+        if ax.get_legend() is not None:
+            issues.extend(legend_overlaps_data(ax))
+    return issues
+
+
+@pytest.mark.parametrize("plot_name", [
+    "inputs_forecast_band",
+    "coverage_by_horizon",
+    "pit_histogram",
+    "residual_qq",
+    "crps_timeline",
+])
+def test_uncertainty_family_legends_clear(plot_name, tmp_path):
+    from pvbess_opt.plotting import inputs_uncertainty as iu
+
+    ts = _uncertainty_ts()
+    render = {
+        # The synthetic frame starts June 1 (DOY 152); pick a window
+        # inside the four-week span.
+        "inputs_forecast_band": lambda: iu.plot_input_forecast_band(
+            ts, tmp_path / "band.pdf", week_start_doy=155,
+        ),
+        "coverage_by_horizon": lambda: iu.plot_uncertainty_coverage_by_horizon(
+            ts, tmp_path / "cov.pdf", commit_steps=96,
+        ),
+        "pit_histogram": lambda: iu.plot_uncertainty_pit_histogram(
+            ts, tmp_path / "pit.pdf",
+        ),
+        "residual_qq": lambda: iu.plot_uncertainty_residual_qq(
+            ts, tmp_path / "qq.pdf",
+        ),
+        "crps_timeline": lambda: iu.plot_uncertainty_crps_timeline(
+            ts, tmp_path / "crps.pdf",
+        ),
+    }[plot_name]
+    fig = _capture(iu, render)
+    assert fig is not None
+    assert _family_overlap_issues(fig) == []
+
+
+def test_coverage_ticks_end_at_probability_ceiling(tmp_path):
+    """The coverage panel may grow legend headroom above 1.0, but its
+    probability ticks must still end at 1.0."""
+    from pvbess_opt.plotting import inputs_uncertainty as iu
+
+    ts = _uncertainty_ts()
+    fig = _capture(
+        iu,
+        lambda: iu.plot_uncertainty_coverage_by_horizon(
+            ts, tmp_path / "cov.pdf", commit_steps=96,
+        ),
+    )
+    assert fig is not None
+    ax = fig.axes[0]
+    assert max(ax.get_yticks()) <= 1.0 + 1e-9
+    assert ax.get_ylim()[0] <= 0.0 + 1e-9
+
+
+def test_rolling_horizon_distribution_legend_clear(tmp_path):
+    """Worst case of the family: narrow ensemble, 4-entry legend
+    (P10 / P50 / P90 / perfect-foresight)."""
+    from pvbess_opt.plotting import uncertainty as unc
+
+    rng = np.random.default_rng(3)
+    mc = pd.DataFrame({
+        "seed": np.arange(30),
+        "profit_total_eur": 1_180_000.0 + rng.normal(0.0, 400.0, 30),
+        "foresight_gap_pct": rng.normal(0.4, 0.1, 30),
+    })
+    fig = _capture(
+        unc,
+        lambda: unc.plot_rolling_horizon_distribution(
+            mc, tmp_path / "rh.pdf",
+            pf_profit_eur=float(mc["profit_total_eur"].max() + 300.0),
+        ),
+    )
+    assert fig is not None
+    assert _family_overlap_issues(fig) == []
+
+
+def test_rolling_horizon_compare_sources_legend_clear(tmp_path):
+    """Compare-sources branch: 4 overlapping histograms + PF marker."""
+    from pvbess_opt.plotting import uncertainty as unc
+
+    rng = np.random.default_rng(9)
+    frames = []
+    for i, src in enumerate(("dam", "pv", "load", "all")):
+        frames.append(pd.DataFrame({
+            "source_set": src,
+            "seed": np.arange(12),
+            "profit_total_eur": (
+                1_180_000.0 - 200.0 * i + rng.normal(0.0, 300.0, 12)
+            ),
+            "foresight_gap_pct": rng.normal(0.4, 0.1, 12),
+        }))
+    mc = pd.concat(frames, ignore_index=True)
+    fig = _capture(
+        unc,
+        lambda: unc.plot_rolling_horizon_distribution(
+            mc, tmp_path / "rh_cmp.pdf", pf_profit_eur=1_181_500.0,
+        ),
+    )
+    assert fig is not None
+    assert _family_overlap_issues(fig) == []

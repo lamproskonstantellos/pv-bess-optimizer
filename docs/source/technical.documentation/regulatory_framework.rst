@@ -79,10 +79,12 @@ Settlement period
 -----------------
 
 Greek Self-consumption settles every 15 minutes per **MD YPEN/DAPEEK/93976/2772/2024**.
-The ``settlement_minutes`` key in the ``project`` sheet is currently
-informational; the MILP timestep is auto-detected from the ``timeseries``
-sheet's timestamp cadence (run ``scripts/resample_timeseries.py`` to
-harmonise mixed-resolution input).
+The MILP timestep is auto-detected from the ``timeseries`` sheet's
+timestamp cadence (run ``scripts/resample_timeseries.py`` to harmonise
+mixed-resolution input), so the canonical workbook ships a 15-minute
+grid and there is no separate settlement-period key to configure; the
+balancing sheet's ``bm_settlement_minutes`` is validated against the
+detected cadence when balancing is enabled.
 
 Mode definitions
 ----------------

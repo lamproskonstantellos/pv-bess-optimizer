@@ -41,6 +41,13 @@ Economics & cash-flow
    :members:
    :undoc-members:
 
+PPA contracts
+~~~~~~~~~~~~~
+
+.. automodule:: pvbess_opt.ppa
+   :members:
+   :undoc-members:
+
 Multi-year hourly dispatch
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 

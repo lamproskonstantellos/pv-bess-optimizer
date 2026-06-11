@@ -38,7 +38,7 @@ from pvbess_opt.io import (
 def test_project_sheet_keys():
     expected = {
         "project_lifecycle_years", "project_start_year", "mode",
-        "settlement_minutes", "p_grid_export_max_kw",
+        "p_grid_export_max_kw",
         "retail_tariff_eur_per_mwh", "allow_bess_grid_charging",
         "grid_cap_includes_load",
         "unavailability_pct", "site_capex_eur", "site_devex_eur",
@@ -70,6 +70,7 @@ def test_bess_sheet_keys():
         "opex_bess_eur_per_kw",
         "bess_replacement_year", "bess_replacement_cost_pct",
         "bess_degradation_annual_pct", "bess_degradation_pct_per_cycle",
+        "bess_eol_soh_pct",
         "bess_wear_cost_eur_per_mwh",
     }
     assert set(BESS_SHEET_DEFAULTS) == expected
@@ -87,6 +88,7 @@ def test_economics_sheet_keys():
         "sensitivity_enabled", "sensitivity_capex_delta_pct",
         "sensitivity_opex_delta_pct", "sensitivity_revenue_delta_pct",
         "sensitivity_discount_rate_delta_pp",
+        "sensitivity_ppa_price_delta_pct",
         "gearing_pct", "debt_interest_rate_pct", "debt_tenor_years",
         "debt_repayment",
         "grid_co2_intensity_kg_per_mwh", "grid_co2_annual_decline_pct",
@@ -118,7 +120,7 @@ def test_all_sheets_present(repo_input_xlsx):
     sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "balancing", "max_injection_profile",
+        "simulation", "balancing", "ppa", "max_injection_profile",
         "max_injection_profile_pv", "max_injection_profile_bess",
         "sizing", "scenarios",
     }

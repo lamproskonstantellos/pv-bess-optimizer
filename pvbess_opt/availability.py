@@ -66,6 +66,11 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     "profit_export_from_pv_eur",
     "profit_export_from_bess_eur",
     "expense_charge_bess_grid_eur",
+    # PPA contract leg + the covered volume's counterfactual DAM value
+    # (both PV-origin EUR streams; scale with availability like the
+    # market revenue they replace / shadow).
+    "revenue_pv_ppa_eur",
+    "ppa_covered_dam_value_eur",
     "profit_total_eur",
     # Balancing expected-activation energies (kWh) — they scale with the
     # reservation throughput which the derate applies to.

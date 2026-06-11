@@ -93,7 +93,7 @@ set a location on the `pv` sheet to source it from PVGIS instead.
 ### `project`
 
 Project-level scalars including `mode`
-(`self_consumption` | `merchant`), `settlement_minutes`,
+(`self_consumption` | `merchant`),
 `p_grid_export_max_kw`, `retail_tariff_eur_per_mwh`,
 `allow_bess_grid_charging`, `grid_cap_includes_load`,
 `unavailability_pct`, and the site-wide lump sums (`site_capex_eur`,
@@ -141,16 +141,27 @@ loader falls back to a flat 100 % and logs INFO.
 
 ### `balancing`
 
-33 keys covering the master switch (`balancing_enabled`), per-product
+34 keys covering the master switch (`balancing_enabled`), per-product
 capacity shares of `bess_power_kw` (`fcr_capacity_share_pct`,
 `afrr_up_capacity_share_pct`, `afrr_dn_capacity_share_pct`,
 `mfrr_up_capacity_share_pct`, `mfrr_dn_capacity_share_pct`),
 acceptance and activation probabilities, fallback capacity and
 activation prices, the FCR sustained-duration requirement, the SOC
-safety buffer, a balancing-revenue inflation rate, and the two Monte
-Carlo seeds.  See
+safety buffer, a balancing-revenue inflation rate, and the Monte Carlo
+price sigmas, scenario count (`bm_mc_scenarios`) and seed.  See
 [`docs/balancing_market_design.md`](docs/balancing_market_design.md)
 for the design deep-dive.
+
+### `ppa`
+
+Pay-as-produced PPA contract on a share of the PV export, mirroring the
+`balancing` master-switch pattern: `ppa_enabled`, `ppa_structure`
+(`pay_as_produced`; `baseload` reserved), `ppa_settlement`
+(`physical` | `cfd`), `ppa_price_eur_per_mwh`, `ppa_volume_share_pct`,
+`ppa_term_years`, `ppa_inflation_pct`.  Ships **disabled** — outputs
+are bit-identical to a pre-PPA build until the switch is set.  See
+[`docs/ppa_design.md`](docs/ppa_design.md) for the design note
+(structures, settlements, dispatch treatment, fee and LCOE scope).
 
 ### `sizing`
 
@@ -198,10 +209,13 @@ Each run writes a self-contained folder
 ### KPIs
 
 `compute_kpis` returns a flat dict with the headline year-1 figures
-plus per-product balancing breakdowns and eight canonical revenue
+plus per-product balancing breakdowns and nine canonical revenue
 aggregates used by the financial plots:
 
-* `revenue_pv_dam_eur`         — PV → DAM exports.
+* `revenue_pv_dam_eur`         — PV → DAM exports (under a physical
+  PPA: the uncovered share only).
+* `revenue_pv_ppa_eur`         — the PPA contract leg on the covered
+  share of PV export (`0.0` without an active contract).
 * `revenue_bess_dam_eur`       — BESS-DAM arbitrage net of grid
   charging.
 * `revenue_self_consumption_eur` — load coverage from PV-direct and
@@ -226,7 +240,11 @@ re-optimises a rolling-window dispatch per seed, evaluating realised
 KPIs against the noise-free actuals.  Output is one row per seed
 (`profit_total_eur`, grid import/export, curtailment, cycles, and the
 `foresight_gap_pct` against the perfect-foresight benchmark); the
-pipeline reports its P10 / P50 / P90.  Balancing capacity / activation
+pipeline reports its P10 / P50 / P90.  Seed KPIs share the headline-KPI
+scope — the same unavailability derate and the same year-close SOC
+condition as the benchmark — so `foresight_gap_pct` is non-negative up
+to solver tolerance and the perfect-foresight marker bounds the
+distribution from above (see `pvbess_opt/conventions.md`).  Balancing capacity / activation
 prices are perturbed separately by
 `pvbess_opt.rolling_horizon.monte_carlo_balancing`.
 

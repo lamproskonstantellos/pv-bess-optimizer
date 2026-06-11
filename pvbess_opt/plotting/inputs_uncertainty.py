@@ -29,6 +29,7 @@ from ..theme import COLORS, FINANCIAL_COLORS
 from ._dates import apply_house_date_axis
 from .style import (
     apply_universal_margins,
+    attach_legend_clear_of_data,
     save_figure,
     show_titles,
 )
@@ -39,6 +40,9 @@ from .style import (
 _Z90 = 1.2816  # Phi^{-1}(0.90)
 
 # House legend placement for the whole 06_uncertainty_plots/ family.
+# Attached via style.attach_legend_clear_of_data as the LAST step of every
+# figure: the drawn legend is measured against the data artists and the
+# panel grows top headroom until the two no longer intersect.
 LEGEND_LOC = "upper right"
 LEGEND_KWARGS = dict(loc=LEGEND_LOC, framealpha=0.85, fontsize=9)
 
@@ -118,7 +122,6 @@ def plot_input_forecast_band(
                         label=f"P10–P90 (σ={sigma:.2f})")
         ax.plot(t, actual, color=color, linewidth=1.0, label="Actual")
         ax.set_ylabel(ylabel)
-        ax.legend(**LEGEND_KWARGS)
         ax.grid(True, linestyle="--", alpha=0.5)
         apply_house_date_axis(ax)
 
@@ -129,6 +132,7 @@ def plot_input_forecast_band(
         )
     for ax in axes:
         apply_universal_margins(ax)
+        attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
     return save_figure(out_path)
 
 
@@ -342,9 +346,11 @@ def plot_uncertainty_coverage_by_horizon(
     ax.set_ylim(0.0, 1.0)
     if show_titles():
         ax.set_title("P10–P90 coverage by forecast horizon")
-    ax.legend(**LEGEND_KWARGS)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    # The probability axis may grow headroom above 1.0 for the legend,
+    # but its ticks end at 1.0 so the scale still reads 0..1.
+    attach_legend_clear_of_data(ax, tick_ceiling=1.0, **LEGEND_KWARGS)
     return save_figure(out_path)
 
 
@@ -379,13 +385,13 @@ def plot_uncertainty_pit_histogram(
         ideal = pit.size / 20.0 if pit.size else 0.0
         ax.axhline(ideal, color="grey", linestyle="--", linewidth=1.0)
         ax.set_ylabel(label)
-        ax.legend(**LEGEND_KWARGS)
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     axes[-1].set_xlabel("PIT value")
     if show_titles():
         axes[0].set_title("Probability integral transform (flat ⇒ calibrated)")
     for ax in axes:
         apply_universal_margins(ax, skip_x=True)
+        attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
     return save_figure(out_path)
 
 
@@ -423,10 +429,10 @@ def plot_uncertainty_crps_timeline(
     ax.set_ylabel("CRPS")
     if show_titles():
         ax.set_title("Step-wise CRPS over the forecast band")
-    ax.legend(**LEGEND_KWARGS)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_house_date_axis(ax)
     apply_universal_margins(ax)
+    attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
     return save_figure(out_path)
 
 
@@ -463,11 +469,11 @@ def plot_uncertainty_residual_qq(
             ax.plot([-lim, lim], [-lim, lim], color="grey", linestyle="--",
                     linewidth=1.0, label="Standard normal")
         ax.set_ylabel(label)
-        ax.legend(**LEGEND_KWARGS)
         ax.grid(True, linestyle="--", alpha=0.5)
     axes[-1].set_xlabel("Theoretical normal quantile")
     if show_titles():
         axes[0].set_title("Normalised-residual Q-Q vs standard normal")
     for ax in axes:
         apply_universal_margins(ax)
+        attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
     return save_figure(out_path)

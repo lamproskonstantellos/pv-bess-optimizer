@@ -83,6 +83,7 @@ from .constants import DEFAULT_MAX_INJECTION_PCT_HOURLY
 from .kpis import ENERGY_TOLERANCE, _balancing_soc_drift
 from .max_injection import build_per_step_max_injection_frac
 from .modes import resolve_mode
+from .ppa import resolve_ppa_config
 from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,11 @@ __all__ = [
 # Tiny tie-breaker on ``pv_curtail`` for determinism under degeneracy.
 # Set to 0.0 to disable.  NOT a constraint substitute.
 _WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH: float = 1.0e-5
+
+# Once-per-process latch for the merchant grid_cap_includes_load no-op
+# warning — build_model runs per rolling-horizon window, so an unlatched
+# warning would repeat hundreds of times per Monte Carlo seed.
+_MERCHANT_CAP_FLAG_WARNED = False
 
 # Battery wear cost (cycle degradation) is a per-MWh-throughput penalty
 # read from params['bess_wear_cost_eur_per_mwh'] (default 0 = off) and
@@ -361,6 +367,7 @@ def build_model(
     *,
     initial_soc_kwh: float | None = None,
     terminal_soc_free: bool | None = None,
+    terminal_soc_target_kwh: float | None = None,
 ) -> pyo.ConcreteModel:
     """Construct the Pyomo MILP.
 
@@ -393,6 +400,15 @@ def build_model(
         step).  Default ``None`` means follow ``params['terminal_soc_equal']``.
         Used by the rolling-horizon dispatcher (a single window should not
         be forced to close its cycle).
+    terminal_soc_target_kwh
+        If supplied, pins the post-final-step SOC to this explicit kWh
+        value instead of ``soc[0]`` (overrides ``terminal_soc_free``).
+        Used by the rolling-horizon dispatcher on the window(s) that
+        reach the end of the horizon: the year-initial SOC is passed in
+        so the stitched dispatch honours the same closed-cycle condition
+        as the annual perfect-foresight benchmark — without it the last
+        window drains the battery and the foresight comparison is
+        biased in the rolling horizon's favour.
     """
     dt_h = dt_hours_from(params)
     if dt_h <= 0:
@@ -414,6 +430,20 @@ def build_model(
     # has no co-located load, so the basis collapses to surplus export).
     cap_includes_load = bool(params.get("grid_cap_includes_load", False))
     strict_injection_cap = cap_includes_load and mode == "self_consumption"
+    if cap_includes_load and mode != "self_consumption":
+        # Merchant has no co-located load, so the strict total-injection
+        # basis collapses to surplus export — the flag is a clean no-op.
+        # Say so once, loudly, so a user who set it expecting an effect
+        # is not silently ignored.
+        global _MERCHANT_CAP_FLAG_WARNED
+        if not _MERCHANT_CAP_FLAG_WARNED:
+            logger.warning(
+                "grid_cap_includes_load=True has no effect in merchant "
+                "mode: there is no co-located load, so the injection cap "
+                "already binds on total (surplus) export. The flag is "
+                "ignored."
+            )
+            _MERCHANT_CAP_FLAG_WARNED = True
 
     if pd.api.types.is_datetime64_any_dtype(ts["timestamp"]):
         day_labels = ts["timestamp"].dt.date.tolist()
@@ -745,7 +775,14 @@ def build_model(
 
         if terminal_soc_free is None:
             terminal_soc_free = not bool(params.get("terminal_soc_equal", True))
-        if not terminal_soc_free:
+        if terminal_soc_target_kwh is not None:
+            # Rolling-horizon year-close: the window's own soc[0] is the
+            # carried-over SOC, so the closed-cycle condition must pin the
+            # terminal state to the explicit year-initial target instead.
+            m.SOC_TERM = pyo.Constraint(
+                expr=final_soc_expr == float(terminal_soc_target_kwh),
+            )
+        elif not terminal_soc_free:
             m.SOC_TERM = pyo.Constraint(expr=final_soc_expr == m.soc[0])
         else:
             m.SOC_TERM_MIN = pyo.Constraint(
@@ -970,21 +1007,38 @@ def build_model(
         m.pv_curtail[t] for t in time_index
     )
 
+    # Pay-as-produced PPA: the covered share s of PV export earns the
+    # contract strike instead of (physical) or on top of (CfD) the DAM,
+    # and both settlements total (1-s)·DAM + s·strike per exported kWh —
+    # one effective PV-export price serves both.  This deliberately lets
+    # covered PV keep exporting through negative-DAM hours while the
+    # uncovered share curtails (the documented behaviour of
+    # generation-settled as-produced contracts; see docs/ppa_design.md).
+    ppa_cfg = resolve_ppa_config(params.get("ppa"))
+    if ppa_cfg.active and pv_present:
+        s_ppa = ppa_cfg.share_frac
+        strike = float(ppa_cfg.ppa_price_eur_per_mwh)
+        pv_export_price = {
+            t: (1.0 - s_ppa) * dam_price[t] + s_ppa * strike
+            for t in time_index
+        }
+    else:
+        pv_export_price = dam_price
+
     if mode == "self_consumption":
         avoided_cost = sum(
             retail_price[t] * (m.pv_to_load[t] + m.bess_dis_load[t]) / 1000.0
             for t in time_index
         )
-        export_revenue = sum(
-            dam_price[t] * (m.pv_to_grid[t] + m.bess_dis_grid[t]) / 1000.0
-            for t in time_index
-        )
     else:  # merchant
         avoided_cost = 0.0
-        export_revenue = sum(
-            dam_price[t] * (m.pv_to_grid[t] + m.bess_dis_grid[t]) / 1000.0
-            for t in time_index
-        )
+    export_revenue = sum(
+        (
+            pv_export_price[t] * m.pv_to_grid[t]
+            + dam_price[t] * m.bess_dis_grid[t]
+        ) / 1000.0
+        for t in time_index
+    )
 
     grid_charge_cost = sum(
         dam_price[t] * m.grid_to_bess[t] / 1000.0 for t in time_index
@@ -1225,6 +1279,7 @@ def run_scenario(
     tee: bool = ...,
     initial_soc_kwh: float | None = ...,
     terminal_soc_free: bool | None = ...,
+    terminal_soc_target_kwh: float | None = ...,
     return_unrounded: Literal[False] = ...,
 ) -> tuple[pd.DataFrame, str]: ...
 @overload
@@ -1238,6 +1293,7 @@ def run_scenario(
     tee: bool = ...,
     initial_soc_kwh: float | None = ...,
     terminal_soc_free: bool | None = ...,
+    terminal_soc_target_kwh: float | None = ...,
     return_unrounded: Literal[True],
 ) -> tuple[pd.DataFrame, str, pd.DataFrame]: ...
 def run_scenario(
@@ -1250,6 +1306,7 @@ def run_scenario(
     tee: bool = False,
     initial_soc_kwh: float | None = None,
     terminal_soc_free: bool | None = None,
+    terminal_soc_target_kwh: float | None = None,
     return_unrounded: bool = False,
 ) -> tuple[pd.DataFrame, str] | tuple[pd.DataFrame, str, pd.DataFrame]:
     """Build, solve and extract dispatch for a single scenario.
@@ -1269,6 +1326,7 @@ def run_scenario(
         params, ts,
         initial_soc_kwh=initial_soc_kwh,
         terminal_soc_free=terminal_soc_free,
+        terminal_soc_target_kwh=terminal_soc_target_kwh,
     )
     solved, resolved = solve_model(
         model, solver_name,
@@ -1353,7 +1411,7 @@ def _balancing_invariants(
     bess_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
     # Strict key access — the MILP build path uses params["soc_min_frac"]
     # / params["soc_max_frac"] directly, so the loader always populates
-    # both keys (io.py:1490-1491).  A silent .get fallback here would let
+    # both keys (io._typed_to_flat).  A silent .get fallback here would let
     # a hand-built ``params`` dict bypass the invariant check that build
     # would have rejected with KeyError.  Pass-2 P2.4.
     soc_min = float(params["soc_min_frac"]) * bess_kwh

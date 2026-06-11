@@ -97,6 +97,28 @@ def test_header_row_is_frozen(workbook, sheet_name):
 
 
 @pytest.mark.parametrize("sheet_name", [
+    "max_injection_profile",
+    "max_injection_profile_pv",
+    "max_injection_profile_bess",
+])
+def test_max_injection_trio_headers_centered(workbook, sheet_name):
+    """All three max-injection sheets carry center-aligned headers.
+
+    The combined sheet has always been centered (pandas' default header
+    style at write time); the two per-asset sheets are centered by
+    ``scripts/polish_input_workbook.py`` so the trio reads consistently.
+    """
+    ws = workbook[sheet_name]
+    for cell in ws[1]:
+        if cell.value is None:
+            continue
+        assert cell.alignment.horizontal == "center", (
+            f"{sheet_name}!{cell.coordinate}: header alignment "
+            f"{cell.alignment.horizontal!r}, expected 'center'"
+        )
+
+
+@pytest.mark.parametrize("sheet_name", [
     "timeseries", "project", "pv", "bess", "economics",
     "simulation", "max_injection_profile",
     "max_injection_profile_pv", "max_injection_profile_bess", "balancing",

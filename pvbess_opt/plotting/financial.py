@@ -438,7 +438,10 @@ def plot_monthly_cashflow_year1(
     the per-month bars reconcile to the net-cash-flow line.  The
     aggregator fee is already netted out of ``revenue_eur`` upstream
     (see :func:`derive_monthly_cashflow`) and is therefore not shown
-    as a separate bar here.
+    as a separate bar here.  Investment events booked in the monthly
+    frame (a Year-1 BESS replacement lands in month 12) are drawn as
+    CAPEX / DEVEX bars stacked below OPEX, mirroring the yearly stack,
+    so the bars still reconcile to the net line.
     """
     out_path = Path(out_path)
     yr_col = (
@@ -453,6 +456,14 @@ def plot_monthly_cashflow_year1(
         balancing = sub["balancing_revenue_eur"].astype(float).to_numpy()
     else:
         balancing = np.zeros_like(revenue)
+    if "devex_eur" in sub.columns:
+        devex = sub["devex_eur"].astype(float).to_numpy()
+    else:
+        devex = np.zeros_like(revenue)
+    if "capex_eur" in sub.columns:
+        capex = sub["capex_eur"].astype(float).to_numpy()
+    else:
+        capex = np.zeros_like(revenue)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -465,6 +476,14 @@ def plot_monthly_cashflow_year1(
                label="Balancing revenue")
     ax.bar(months, opex, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
+    if np.any(np.abs(devex) > 1e-9):
+        ax.bar(months, devex, bottom=opex,
+               color=financial_color("DEVEX"),
+               edgecolor="black", linewidth=0.4, label="DEVEX")
+    if np.any(np.abs(capex) > 1e-9):
+        ax.bar(months, capex, bottom=opex + devex,
+               color=financial_color("CAPEX"),
+               edgecolor="black", linewidth=0.4, label="CAPEX")
     ax.plot(months, net, color=financial_color("Net cash-flow"),
             linewidth=1.5, marker="o", markersize=4, label="Net cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.6)
@@ -518,6 +537,8 @@ def _format_driver_value(
         return f"€{mag / 1e6:.1f}M"
     if dt in ("discount_rate", "discount rate"):
         return f"{value:.1f}%"
+    if dt == "ppa_price":
+        return f"€{value:.0f}/MWh"
     logger.warning(
         "tornado: unknown driver_type %r; using fallback EUR format",
         driver_type,

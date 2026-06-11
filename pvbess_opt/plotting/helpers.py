@@ -78,10 +78,16 @@ def pad_line_to_bins_end(left: pd.Series, width_days, y):
 
 
 def plot_stack_filtered(ax, x, series, labels, *, step_post: bool = False):
-    """Draw a stackplot, dropping any series that is identically zero."""
+    """Draw a stackplot, dropping any series that is identically zero.
+
+    The keep-filter tests the ABSOLUTE sum: a negative stack (e.g. the
+    grid-charging cost, or a CfD settlement leg) carries signal even
+    though its signed sum is below zero — filtering on the signed sum
+    silently dropped every negative segment from the revenue views.
+    """
     keep = []
     for s, lab in zip(series, labels, strict=False):
-        total = np.nansum(np.asarray(s))
+        total = np.nansum(np.abs(np.asarray(s, dtype=float)))
         if total > ZERO_THRESHOLD:
             keep.append((s, lab))
     if not keep:
@@ -147,11 +153,16 @@ def fill_stacked_above(ax, x, base, series, labels, *, step_post: bool = False):
 
 
 def bar_stacked_bins(ax, left, width_days, series, labels, *, bottom=None):
-    """Stacked bars that exactly fill each bin width."""
+    """Stacked bars that exactly fill each bin width.
+
+    Keeps a series when its ABSOLUTE sum carries signal — negative
+    stacks (grid-charging cost, CfD legs) must render; the previous
+    signed-sum filter silently dropped them.
+    """
     keep = []
     for s, lab in zip(series, labels, strict=False):
         arr = np.nan_to_num(np.asarray(s, dtype=float), nan=0.0)
-        if np.nansum(arr) > ZERO_THRESHOLD:
+        if np.nansum(np.abs(arr)) > ZERO_THRESHOLD:
             keep.append((arr, lab))
     if not keep:
         return []

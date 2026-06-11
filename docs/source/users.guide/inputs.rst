@@ -44,9 +44,9 @@ High-level run configuration:
 * ``project_lifecycle_years`` — total project horizon (years).
 * ``project_start_year`` — calendar year of Year 1 (first operating
   year).  CAPEX is paid in Year 0 (``project_start_year - 1``).
-* ``mode`` — ``self_consumption`` | ``merchant``.
-* ``settlement_minutes`` — informational; the MILP timestep is
-  auto-detected from the timeseries.
+* ``mode`` — ``self_consumption`` | ``merchant``.  (The MILP timestep
+  is auto-detected from the timeseries cadence; there is no timestep
+  key to set.)
 * ``p_grid_export_max_kw`` — grid-connection export limit (kW).  A
   positive number caps the combined PV + BESS export flow.  Leave the
   cell empty, or set it to ``inf`` / ``infinity`` / ``unlimited`` /
@@ -142,6 +142,11 @@ Sheet ``bess``
   full equivalent cycle, in percent (LFP default 0.008, range
   0.005–0.010; NMC ~0.010–0.020).  Layered additively on the calendar
   fade.  Set to 0 — or omit the row — to use calendar-only fade.
+* ``bess_eol_soh_pct`` (default 80) — end-of-life SOH threshold for the
+  degradation diagnostic: when no ``bess_replacement_year`` is
+  scheduled, the SOH report swaps in a fresh pack the first year SOH
+  falls to this level.  Diagnostic only — the cashflow charges
+  replacement CAPEX only for a scheduled ``bess_replacement_year``.
 * ``bess_wear_cost_eur_per_mwh`` — cycle wear cost penalised per MWh
   discharged in the dispatch objective (default 0 = off).  When set, the
   optimizer only cycles when the price spread beats the wear cost.  It is
@@ -280,6 +285,40 @@ leaves LCOE and LCOS bit-identical.  The Revenue tornado driver
 sweeps the full Year-1+ income stream including balancing, so a
 "+10 % Revenue" scenario produces a strictly higher NPV than the
 base case under any positive cashflow configuration.
+
+Sheet ``ppa``
+-------------
+
+Pay-as-produced PPA contract on a share of the PV export
+(design note: ``docs/ppa_design.md``).  Master-switch pattern like the
+``balancing`` sheet — disabled (the shipped default) leaves every
+output bit-identical to a build without the feature.
+
+* ``ppa_enabled`` — master switch (default FALSE).
+* ``ppa_structure`` — ``pay_as_produced`` (implemented); ``baseload``
+  is reserved for a future shaped profile and rejected with guidance.
+* ``ppa_settlement`` — ``physical`` (sleeved: the covered volume is
+  paid the strike and never touches the DAM) or ``cfd`` (full DAM
+  exposure plus a two-way strike-minus-DAM leg, negative whenever the
+  DAM exceeds the strike).  Both total share × export × strike on the
+  covered volume, so the dispatch is identical — the MILP prices PV
+  export at ``(1 − s)·DAM + s·strike`` — and only the revenue
+  decomposition differs.
+* ``ppa_price_eur_per_mwh`` — the contract strike.
+* ``ppa_volume_share_pct`` — covered share of the PV **export**,
+  pro-rata per step (self-consumed PV is settled at retail; BESS
+  export is not covered).
+* ``ppa_term_years`` — operating years 1..term under contract; after
+  the term the stream ends and, under physical settlement, the covered
+  volume's DAM value rejoins the DAM revenue stream (where the
+  aggregator fee applies to it as market revenue).
+* ``ppa_inflation_pct`` — yearly indexation of the strike,
+  independent of ``retail_inflation_pct`` and ``dam_inflation_pct``.
+
+While under contract the PPA stream carries **no aggregator fee**
+(bilateral offtake — same convention as balancing/TSO settlement) and
+stays out of LCOE/LCOS.  The ``sensitivity_ppa_price_delta_pct``
+economics key adds a PPA-price tornado driver when the contract is on.
 
 Sheet ``simulation``
 --------------------
