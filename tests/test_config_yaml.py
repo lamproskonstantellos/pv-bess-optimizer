@@ -24,7 +24,7 @@ from pvbess_opt.io_read import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-_SECTIONS = ("project", "pv", "bess", "economics", "simulation", "balancing")
+_SECTIONS = ("project", "pv", "bess", "economics", "simulation", "balancing", "ppa")
 
 
 def _highs_available() -> bool:

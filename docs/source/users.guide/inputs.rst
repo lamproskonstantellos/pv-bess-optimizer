@@ -463,8 +463,12 @@ referenced by ``timeseries_path`` (a CSV / Parquet file) rather than a
 
 Run it with ``pvbess --config run.yaml``.  A structured config and the
 equivalent workbook parse to the same typed dict and produce identical
-results.  :func:`pvbess_opt.io_read.config_json_schema` emits a JSON
-Schema for external validation and
+results: every section accepts exactly the keys of the matching workbook
+sheet, an unknown or misplaced key is warned about and ignored (the same
+semantics as the workbook loader), and a ``bess`` section that omits
+``bess_degradation_pct_per_cycle`` runs calendar-only fade exactly like a
+workbook that omits the row.  :func:`pvbess_opt.io_read.config_json_schema`
+emits a JSON Schema for external validation and
 :func:`pvbess_opt.io_read.validate_config` checks a config against it.
 
 PVGIS PV profiles (location-sourced)
@@ -616,7 +620,12 @@ examples/scenarios.yaml`` lists the same overrides as nested mappings::
         capex_multiplier: 0.8
 
 Each scenario runs through the same path as a standalone run, so its
-results match running it alone.  The batch writes a styled
+results match running it alone.  Every override target must name a real
+workbook key — any ``<sheet>.<key>`` from the seven parameter sheets, the
+short aliases above, or the bare specials.  An unknown target raises a
+``ValueError`` naming the scenario and the offending key *before* any
+solver time is spent: a typo'd override would otherwise silently produce
+a comparison row identical to the base case.  The batch writes a styled
 ``scenario_comparison.xlsx`` (one row per scenario: NPV / IRR / payback /
 LCOE / LCOS + revenue by stream) plus a comparison-bars plot and a
 revenue bridge between the first two scenarios.  Scenarios vary on a

@@ -82,6 +82,71 @@ def _as_bool(value: Any) -> bool:
 # Inheritance + override application
 # ---------------------------------------------------------------------------
 
+# Sectioned overrides accepted by _apply_scenario_overrides, and the bare
+# specials that live next to them in a scenario spec.
+_OVERRIDE_SECTIONS: tuple[str, ...] = (
+    "project", "pv", "bess", "economics", "simulation", "balancing", "ppa",
+)
+_BARE_SPECIALS: frozenset[str] = frozenset({
+    "name", "inherits", "capex_multiplier",
+})
+
+
+def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
+    """Reject unknown scenario override sections or keys with guidance.
+
+    A typo'd override would otherwise be dropped silently at workbook
+    materialization (``io._build_kv_sheet`` writes only template keys),
+    producing a comparison row identical to the base case — actively
+    misleading.  Every target must therefore be a ``<sheet>.<key>`` pair
+    from the workbook schema (aliases ``pv.source``, ``pv.nameplate_kwp``,
+    ``bess.power_kw``, ``bess.capacity_kwh`` included), the bare
+    ``balancing`` on/off scalar, or the ``capex_multiplier`` special.
+    """
+    from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS
+
+    name = scenario.get("name", "<unnamed>")
+    for section, value in scenario.items():
+        if section in _BARE_SPECIALS:
+            continue
+        if section == "balancing" and not isinstance(value, dict):
+            continue  # bare on/off scalar
+        if section not in _OVERRIDE_SECTIONS:
+            owner = _KEY_TO_SHEET.get(section)
+            hint = (
+                f"; did you mean target '{owner}.{section}'?"
+                if owner else
+                f"; known sections: {', '.join(_OVERRIDE_SECTIONS)}; bare "
+                "specials: balancing, capex_multiplier"
+            )
+            raise ValueError(
+                f"scenario {name!r}: unknown override target {section!r}{hint}"
+            )
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"scenario {name!r}: section {section!r} must be a mapping "
+                f"of <key>: <value> overrides, got {type(value).__name__}."
+            )
+        aliases = (
+            _PV_ALIASES if section == "pv"
+            else _BESS_ALIASES if section == "bess"
+            else {}
+        )
+        defaults = _SHEET_DEFAULTS[section]
+        for key in value:
+            canonical = aliases.get(str(key), str(key))
+            if canonical in defaults:
+                continue
+            owner = _KEY_TO_SHEET.get(canonical)
+            hint = (
+                f"; key {canonical!r} belongs to the {owner!r} sheet — use "
+                f"target '{owner}.{canonical}'"
+                if owner else ""
+            )
+            raise ValueError(
+                f"scenario {name!r}: unknown key {section}.{key!r}{hint}"
+            )
+
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     out = copy.deepcopy(base)
@@ -125,6 +190,7 @@ def resolve_inheritance(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]
 def _apply_scenario_overrides(
     base_typed: dict[str, Any], scenario: dict[str, Any],
 ) -> dict[str, Any]:
+    validate_scenario_overrides(scenario)
     typed = copy.deepcopy(base_typed)
     for key, value in (scenario.get("pv") or {}).items():
         typed["pv"][_PV_ALIASES.get(key, key)] = value
@@ -218,6 +284,10 @@ def run_scenario_batch(
 ) -> pd.DataFrame:
     """Evaluate every (inheritance-resolved) scenario into a comparison table."""
     resolved = resolve_inheritance(scenarios)
+    # Fail fast on a typo'd override BEFORE any solver time is spent —
+    # scenario N failing after N-1 solves wastes minutes per batch.
+    for scn in resolved:
+        validate_scenario_overrides(scn)
     rows = [
         evaluate_scenario(base_typed, scn, solver_opts=solver_opts)
         for scn in resolved
