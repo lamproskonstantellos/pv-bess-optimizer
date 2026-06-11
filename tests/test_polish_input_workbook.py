@@ -50,6 +50,8 @@ def _normalise_rgb(value: object) -> str:
 
 def _build_minimal_typed() -> dict[str, object]:
     """Return a typed-dict fixture covering every parameter sheet."""
+    import numpy as np
+
     ts = pd.DataFrame({
         "timestamp": pd.date_range("2026-01-01", periods=4, freq="15min"),
         "load_kwh": [1.0, 1.0, 1.0, 1.0],
@@ -64,6 +66,10 @@ def _build_minimal_typed() -> dict[str, object]:
         "economics": dict(ECONOMICS_SHEET_DEFAULTS),
         "simulation": dict(SIMULATION_SHEET_DEFAULTS),
         "balancing": dict(BALANCING_SHEET_DEFAULTS),
+        # Per-asset sub-cap sheets so the polish exercises the centered
+        # header path on the same schema the shipped workbook carries.
+        "max_injection_profile_pv": np.full(24, 100.0),
+        "max_injection_profile_bess": np.full(24, 100.0),
     }
 
 
@@ -88,6 +94,7 @@ def _sheet_state_hash(path: Path) -> str:
                     + repr(getattr(c.font.color, "rgb", None)).encode(),
                 )
                 h.update(b"|wrap:" + repr(c.alignment.wrap_text).encode())
+                h.update(b"|halign:" + repr(c.alignment.horizontal).encode())
     return h.hexdigest()
 
 
@@ -148,6 +155,24 @@ def test_header_row_navy_white_bold(polished_workbook: Path) -> None:
             )
             assert cell.font.bold is True, (
                 f"{sn}!{cell.coordinate}: header not bold"
+            )
+
+
+def test_per_asset_injection_headers_are_centered(
+    polished_workbook: Path,
+) -> None:
+    """The polish center-aligns row 1 of the per-asset max-injection
+    sheets (the combined sheet is already centered by the pandas header
+    style at write time, so the trio reads consistently)."""
+    wb = load_workbook(polished_workbook)
+    for sn in ("max_injection_profile_pv", "max_injection_profile_bess"):
+        ws = wb[sn]
+        for cell in ws[1]:
+            if cell.value is None:
+                continue
+            assert cell.alignment.horizontal == "center", (
+                f"{sn}!{cell.coordinate}: header alignment "
+                f"{cell.alignment.horizontal!r}, expected 'center'"
             )
 
 

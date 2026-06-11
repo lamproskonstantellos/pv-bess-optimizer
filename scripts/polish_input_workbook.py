@@ -21,6 +21,11 @@ in order:
    header (white bold font, thin ``#BFBFBF`` bottom border), AutoFit
    column widths, and wrap-text on the ``notes`` column.  The same styler
    runs on every output workbook, so input and output look identical.
+5. Center-align the header row of the per-asset max-injection sheets
+   (``max_injection_profile_pv`` / ``max_injection_profile_bess``) —
+   their short numeric columns read better with centered headers.  The
+   general house style deliberately leaves header alignment at the
+   Excel default (see :mod:`pvbess_opt.io_style`).
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from pvbess_opt.io import _SHEET_ROW_TEMPLATES
 from pvbess_opt.io_style import style_worksheet
+from pvbess_opt.theme import HEADER_CENTER
 
 AMBER_FILL_HEXES: frozenset[str] = frozenset({
     "FFF2CC", "00FFF2CC",
@@ -42,6 +48,12 @@ AMBER_FILL_HEXES: frozenset[str] = frozenset({
 
 _PARAMETER_SHEETS: tuple[str, ...] = (
     "project", "pv", "bess", "economics", "simulation", "balancing",
+)
+
+# Sheets whose header row is center-aligned on top of the house style.
+_CENTERED_HEADER_SHEETS: tuple[str, ...] = (
+    "max_injection_profile_pv",
+    "max_injection_profile_bess",
 )
 
 logger = logging.getLogger(__name__)
@@ -173,6 +185,13 @@ def _rebuild_parameter_notes(ws: Worksheet, sheet_name: str) -> int:
     return rewritten
 
 
+def _center_header_row(ws: Worksheet) -> None:
+    """Center-align every populated header cell of ``ws`` (row 1)."""
+    for cell in ws[1]:
+        if cell.value is not None:
+            cell.alignment = HEADER_CENTER
+
+
 def polish_workbook(path: Path) -> dict[str, int]:
     """Polish ``path`` in place and return per-sheet diagnostics.
 
@@ -192,6 +211,8 @@ def polish_workbook(path: Path) -> dict[str, int]:
         elif sheet_name in _PARAMETER_SHEETS:
             _rebuild_parameter_notes(ws, sheet_name)
         style_worksheet(ws)
+        if sheet_name in _CENTERED_HEADER_SHEETS:
+            _center_header_row(ws)
     wb.save(path)
     return cleared_by_sheet
 

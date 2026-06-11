@@ -23,6 +23,7 @@ __all__ = [
     "FINANCIAL_LEGEND_ORDER",
     "HEADER_BORDER",
     "HEADER_BORDER_HEX",
+    "HEADER_CENTER",
     "HEADER_FILL",
     "HEADER_FILL_HEX",
     "HEADER_FONT",
@@ -60,6 +61,11 @@ HEADER_FILL = PatternFill(
 HEADER_FONT = Font(bold=True, color=HEADER_FONT_HEX)
 HEADER_BORDER = Border(bottom=Side(border_style="thin", color=HEADER_BORDER_HEX))
 NOTES_WRAP = Alignment(wrap_text=True, vertical="top")
+# Centered header variant — applied by scripts/polish_input_workbook.py to
+# the per-asset max-injection sheets only (their short numeric columns read
+# better centered); the general house style leaves headers at the Excel
+# default alignment.
+HEADER_CENTER = Alignment(horizontal="center")
 
 # AutoFit clamp (characters): keep narrow integer columns readable; cap a
 # long "notes" cell from inflating the column (it gets wrap-text instead).

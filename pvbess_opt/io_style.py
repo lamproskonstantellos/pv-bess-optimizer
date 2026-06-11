@@ -7,8 +7,11 @@ Single source of truth for the navy frozen-header look applied to the
 
 Contract: no worksheet is saved without passing through
 :func:`style_workbook` / :func:`style_worksheet`.  Centering and an explicit
-font name/size are intentionally *not* applied, so the input workbook stays
-byte-stable.
+font name/size are intentionally *not* applied here, so output workbooks
+stay byte-stable; the one centering exception lives in
+:mod:`scripts.polish_input_workbook`, which center-aligns the header row of
+the per-asset ``max_injection_profile_pv`` / ``_bess`` sheets of the
+shipped input workbook.
 """
 
 from __future__ import annotations
