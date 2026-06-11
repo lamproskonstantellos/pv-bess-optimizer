@@ -13,7 +13,7 @@ from ..theme import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
 from ._currency import euro_axis_formatter, format_eur_adaptive
 from .style import (
     apply_universal_margins,
-    reserve_legend_headroom,
+    attach_legend_clear_of_data,
     save_figure,
     show_titles,
 )
@@ -101,10 +101,9 @@ def plot_rolling_horizon_distribution(
         ax.xaxis.set_major_formatter(euro_axis_formatter(currency_format))
         if show_titles():
             ax.set_title("Rolling-horizon MC profit distribution by source set")
-        reserve_legend_headroom(ax, loc="best")
-        ax.legend(loc="best", framealpha=0.9, fontsize=7)
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
         apply_universal_margins(ax, skip_y=True)
+        attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
         return save_figure(out_path)
 
     profits = mc_df["profit_total_eur"].astype(float).to_numpy()
@@ -146,10 +145,9 @@ def plot_rolling_horizon_distribution(
     ax.xaxis.set_major_formatter(euro_axis_formatter(currency_format))
     if show_titles():
         ax.set_title("Rolling-horizon Monte Carlo profit distribution")
-    reserve_legend_headroom(ax, loc="best")
-    ax.legend(loc="best", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
+    attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
     return save_figure(out_path)
 
 
