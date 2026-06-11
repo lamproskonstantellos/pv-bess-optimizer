@@ -226,7 +226,11 @@ re-optimises a rolling-window dispatch per seed, evaluating realised
 KPIs against the noise-free actuals.  Output is one row per seed
 (`profit_total_eur`, grid import/export, curtailment, cycles, and the
 `foresight_gap_pct` against the perfect-foresight benchmark); the
-pipeline reports its P10 / P50 / P90.  Balancing capacity / activation
+pipeline reports its P10 / P50 / P90.  Seed KPIs share the headline-KPI
+scope — the same unavailability derate and the same year-close SOC
+condition as the benchmark — so `foresight_gap_pct` is non-negative up
+to solver tolerance and the perfect-foresight marker bounds the
+distribution from above (see `pvbess_opt/conventions.md`).  Balancing capacity / activation
 prices are perturbed separately by
 `pvbess_opt.rolling_horizon.monte_carlo_balancing`.
 

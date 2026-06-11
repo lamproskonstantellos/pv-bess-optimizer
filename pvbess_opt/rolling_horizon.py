@@ -34,6 +34,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .availability import apply_unavailability_derate
 from .balancing import (
     PRODUCTS_ALL,
     PRODUCTS_DN,
@@ -288,8 +289,21 @@ def rolling_horizon_dispatch(
     the solver thought it was getting.
 
     The MILP's closed-cycle ``terminal_soc_equal`` is **not** enforced
-    inside rolling-horizon windows (that constraint only makes sense
-    for the annual benchmark).
+    *within* rolling-horizon windows (a window should not close its own
+    cycle), but when ``params['terminal_soc_equal']`` is true every
+    window that reaches the end of the horizon pins its post-final-step
+    SOC to the **year-initial** SOC.  The stitched dispatch then honours
+    the same closed-cycle condition as the annual perfect-foresight
+    benchmark; without this the last window drains the battery for free
+    profit the benchmark is not allowed to take, and the foresight gap
+    goes spuriously negative.
+
+    Scope of the returned KPIs: identical to the pipeline's headline
+    Year-1 KPIs — ``compute_kpis`` followed by
+    :func:`pvbess_opt.availability.apply_unavailability_derate` using
+    ``params['unavailability_pct']``.  ``foresight_gap_pct`` computed
+    against the (equally derated) perfect-foresight benchmark is
+    therefore derate-invariant.  See ``pvbess_opt/conventions.md``.
 
     Returns ``(full_year_dispatch_df, kpis_dict)``.
     """
@@ -330,6 +344,19 @@ def rolling_horizon_dispatch(
     initial_soc_kwh: float | None = None
     committed_chunks: list[pd.DataFrame] = []
 
+    # Year-close target: when the annual benchmark closes its SOC cycle
+    # (terminal_soc_equal), the window(s) covering the final step must
+    # return the battery to the year-initial SOC so the realised profit
+    # is comparable with the perfect-foresight profit.
+    bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
+    if bool(params.get("terminal_soc_equal", True)) and bess_capacity_kwh > 0.0:
+        year_close_soc_kwh: float | None = (
+            float(params.get("initial_soc_frac", 0.0) or 0.0)
+            * bess_capacity_kwh
+        )
+    else:
+        year_close_soc_kwh = None
+
     # Per-window progress: emit ~20 INFO lines per seed (not one per
     # window — 365 lines/seed is too noisy at INFO).
     n_windows = max(1, (n + commit_steps - 1) // commit_steps)
@@ -367,6 +394,12 @@ def rolling_horizon_dispatch(
             solver_name=solver_name,
             initial_soc_kwh=initial_soc_kwh,
             terminal_soc_free=True,  # do not close the cycle within a window
+            # Windows that see the end of the horizon steer toward (and the
+            # final one enforces) the year-initial SOC — the same closed
+            # cycle the perfect-foresight benchmark must honour.
+            terminal_soc_target_kwh=(
+                year_close_soc_kwh if win_end == n else None
+            ),
             **solve_kwargs,
         )
 
@@ -424,6 +457,12 @@ def rolling_horizon_dispatch(
         full = add_economic_columns(full, params)
 
     kpis = compute_kpis(full, params, verify_balance=False)
+    # Identical scope to the pipeline's headline Year-1 KPIs: the same
+    # post-solve unavailability derate is applied here so the foresight
+    # gap compares derated-vs-derated (the factor cancels in the ratio).
+    kpis = apply_unavailability_derate(
+        kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
+    )
     return full, kpis
 
 
@@ -455,6 +494,15 @@ def monte_carlo_rolling(
     ``pf_profit_eur`` is the perfect-foresight benchmark used to compute
     ``foresight_gap_pct = 100 * (1 - rh_profit / pf_profit)``.  When
     ``None`` the gap column is NaN.
+
+    Scope contract: pass the pipeline's headline (unavailability-derated)
+    ``profit_total_eur`` — the per-seed profits returned by
+    :func:`rolling_horizon_dispatch` carry the identical derate, so the
+    benchmark and the ensemble compare like for like and the gap is
+    derate-invariant.  Because every seed's dispatch is feasible for the
+    perfect-foresight MILP (same constraints, including the year-close
+    SOC condition), seeds cannot beat the benchmark beyond solver
+    tolerance: the gap is non-negative up to ``mip_gap`` slack.
 
     Returns
     -------

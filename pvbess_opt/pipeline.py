@@ -998,6 +998,11 @@ def _run_one(
         rolling_mc_df: pd.DataFrame | None = None
         rolling_compare_df: pd.DataFrame | None = None
         if unc_cfg["enabled"]:
+            # Headline (unavailability-derated) Year-1 profit.  The
+            # rolling-horizon KPIs carry the identical derate (see
+            # rolling_horizon_dispatch), so the perfect-foresight marker
+            # and the Monte Carlo ensemble share one scope and the
+            # foresight gap is derate-invariant.
             pf_profit_eur = float(kpis.get("profit_total_eur", 0.0))
             n_seeds = int(unc_cfg["n_seeds"])
             window_h = int(unc_cfg["window_hours"])

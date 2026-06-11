@@ -361,6 +361,7 @@ def build_model(
     *,
     initial_soc_kwh: float | None = None,
     terminal_soc_free: bool | None = None,
+    terminal_soc_target_kwh: float | None = None,
 ) -> pyo.ConcreteModel:
     """Construct the Pyomo MILP.
 
@@ -393,6 +394,15 @@ def build_model(
         step).  Default ``None`` means follow ``params['terminal_soc_equal']``.
         Used by the rolling-horizon dispatcher (a single window should not
         be forced to close its cycle).
+    terminal_soc_target_kwh
+        If supplied, pins the post-final-step SOC to this explicit kWh
+        value instead of ``soc[0]`` (overrides ``terminal_soc_free``).
+        Used by the rolling-horizon dispatcher on the window(s) that
+        reach the end of the horizon: the year-initial SOC is passed in
+        so the stitched dispatch honours the same closed-cycle condition
+        as the annual perfect-foresight benchmark — without it the last
+        window drains the battery and the foresight comparison is
+        biased in the rolling horizon's favour.
     """
     dt_h = dt_hours_from(params)
     if dt_h <= 0:
@@ -745,7 +755,14 @@ def build_model(
 
         if terminal_soc_free is None:
             terminal_soc_free = not bool(params.get("terminal_soc_equal", True))
-        if not terminal_soc_free:
+        if terminal_soc_target_kwh is not None:
+            # Rolling-horizon year-close: the window's own soc[0] is the
+            # carried-over SOC, so the closed-cycle condition must pin the
+            # terminal state to the explicit year-initial target instead.
+            m.SOC_TERM = pyo.Constraint(
+                expr=final_soc_expr == float(terminal_soc_target_kwh),
+            )
+        elif not terminal_soc_free:
             m.SOC_TERM = pyo.Constraint(expr=final_soc_expr == m.soc[0])
         else:
             m.SOC_TERM_MIN = pyo.Constraint(
@@ -1225,6 +1242,7 @@ def run_scenario(
     tee: bool = ...,
     initial_soc_kwh: float | None = ...,
     terminal_soc_free: bool | None = ...,
+    terminal_soc_target_kwh: float | None = ...,
     return_unrounded: Literal[False] = ...,
 ) -> tuple[pd.DataFrame, str]: ...
 @overload
@@ -1238,6 +1256,7 @@ def run_scenario(
     tee: bool = ...,
     initial_soc_kwh: float | None = ...,
     terminal_soc_free: bool | None = ...,
+    terminal_soc_target_kwh: float | None = ...,
     return_unrounded: Literal[True],
 ) -> tuple[pd.DataFrame, str, pd.DataFrame]: ...
 def run_scenario(
@@ -1250,6 +1269,7 @@ def run_scenario(
     tee: bool = False,
     initial_soc_kwh: float | None = None,
     terminal_soc_free: bool | None = None,
+    terminal_soc_target_kwh: float | None = None,
     return_unrounded: bool = False,
 ) -> tuple[pd.DataFrame, str] | tuple[pd.DataFrame, str, pd.DataFrame]:
     """Build, solve and extract dispatch for a single scenario.
@@ -1269,6 +1289,7 @@ def run_scenario(
         params, ts,
         initial_soc_kwh=initial_soc_kwh,
         terminal_soc_free=terminal_soc_free,
+        terminal_soc_target_kwh=terminal_soc_target_kwh,
     )
     solved, resolved = solve_model(
         model, solver_name,

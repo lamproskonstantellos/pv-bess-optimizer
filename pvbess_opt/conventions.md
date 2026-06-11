@@ -75,6 +75,34 @@ For total project revenue including balancing, use the cashflow
 DataFrame: `cashflow_yearly['revenue_eur'] +
 cashflow_yearly['balancing_revenue_eur']`.
 
+## Perfect-foresight benchmark and the MC ensemble share one scope
+
+The rolling-horizon Monte Carlo compares each seed's realised profit
+against the perfect-foresight benchmark.  Both sides MUST share the
+headline-KPI scope, or the comparison silently biases:
+
+1. **Unavailability derate** — `pvbess_opt.rolling_horizon.
+   rolling_horizon_dispatch` applies `apply_unavailability_derate`
+   (using `params['unavailability_pct']`) to its returned KPIs, exactly
+   as `pipeline._run_one` derates the Year-1 KPI dict it draws
+   `pf_profit_eur` from.  `foresight_gap_pct = 100 * (1 - rh/pf)` is
+   then derate-invariant.  Never compare a raw seed profit against the
+   derated benchmark: with the default 1 % unavailability that alone
+   pushes the gap ~1 pp negative ("imperfect foresight beats perfect
+   foresight"), which is impossible.
+2. **Year-close SOC condition** — when `terminal_soc_equal` is true the
+   benchmark must return the battery to its initial SOC.  The rolling
+   horizon enforces the same condition by pinning the post-final-step
+   SOC of every window that reaches the end of the horizon to the
+   year-initial SOC (`terminal_soc_target_kwh` in `build_model`).
+   Without it the last window drains the battery for profit the
+   benchmark is not allowed to take.
+
+With both rules in place every seed's stitched dispatch is feasible for
+the perfect-foresight MILP, so `seed profit <= pf profit` up to the
+solver's `mip_gap` slack and the PF marker sits at or above the upper
+tail of the Monte Carlo histogram.
+
 ## Default inflation: balancing tracks CPI, DAM is held nominal
 
 The economics defaults set `bm_inflation_pct = 2.0` (Greek balancing

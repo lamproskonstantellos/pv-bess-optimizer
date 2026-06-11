@@ -896,12 +896,13 @@ def compute_financial_kpis(
       totals; with a scheduled BESS replacement these also include the
       replacement CAPEX charged in ``bess_replacement_year``.
     * ``roi_pct`` — sum of operating net cashflow (Years 1..N) over
-      ``|initial_investment_eur|``.  Balancing
-    revenue enters NPV / IRR / ROI / BCR / payback the same way — via
-    ``balancing_revenue_eur`` in the yearly cashflow, which is included
-    in ``net_cashflow_eur`` by :func:`build_yearly_cashflow` — so all
-    five cashflow-derived KPIs already account for the FCR / aFRR /
-    mFRR streams when balancing is on.
+      ``|initial_investment_eur|``.
+
+    Balancing revenue enters NPV / IRR / ROI / BCR / payback the same
+    way — via ``balancing_revenue_eur`` in the yearly cashflow, which is
+    included in ``net_cashflow_eur`` by :func:`build_yearly_cashflow` —
+    so all five cashflow-derived KPIs already account for the FCR /
+    aFRR / mFRR streams when balancing is on.
 
     LCOE is PV-only and LCOS is BESS-only (IEA / IRENA / NREL ATB /
     Lazard convention): their numerators are built from the per-asset

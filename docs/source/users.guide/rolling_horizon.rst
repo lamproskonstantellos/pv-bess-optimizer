@@ -47,9 +47,15 @@ For each window starting at hour :math:`t \in \{0, c, 2c, \ldots\}` where
    slice.
 5. Pass ``soc_kwh[commit_hours]`` as ``initial_soc`` to the next window.
 
-The MILP's ``terminal_soc_equal`` constraint is **disabled** inside
-rolling-horizon windows (it only makes sense for the annual closed-cycle
-benchmark).  The BESS energy capacity ``e_cap`` is pinned at workbook
+The MILP's ``terminal_soc_equal`` constraint is **disabled** *within*
+rolling-horizon windows (a window should not close its own cycle), but
+when the workbook sets ``terminal_soc_equal`` every window that reaches
+the end of the horizon pins its post-final-step SOC to the
+**year-initial** SOC.  The stitched dispatch then honours the same
+closed-cycle condition as the annual perfect-foresight benchmark —
+without it the final window would drain the battery for profit the
+benchmark is not allowed to take, biasing the foresight comparison.
+The BESS energy capacity ``e_cap`` is pinned at workbook
 load (the per-window MILP reads ``e_cap`` as a constant from the
 start) so every window operates against the same physical asset.
 
@@ -62,7 +68,10 @@ reflects realised performance.  Otherwise KPIs reflect what the solver
 thought it was getting given the forecast.
 
 The implementation runs ``add_economic_columns`` and ``compute_kpis`` on
-the committed dispatch with the original prices.  It does **not** re-solve.
+the committed dispatch with the original prices, then applies the same
+post-solve unavailability derate as the pipeline's headline Year-1 KPIs
+so the rolling-horizon and perfect-foresight numbers share one scope.
+It does **not** re-solve.
 
 Foresight gap
 ~~~~~~~~~~~~~
@@ -72,11 +81,14 @@ Foresight gap
    \text{foresight\_gap\_pct} = 100 \cdot \left( 1 - \frac{\text{rh\_profit}}{\text{pf\_profit}} \right)
 
 where :math:`\text{pf\_profit}` is the perfect-foresight benchmark
-computed from the existing single-MILP solve.  Positive values mean
-imperfect foresight reduces profit; negative values mean the rolling
-horizon out-cycled the perfect-foresight benchmark (typically due to
-local cycle-limit relaxation across windows — interpret as a numerical
-artifact).
+computed from the existing single-MILP solve (the headline,
+unavailability-derated ``profit_total_eur``) and
+:math:`\text{rh\_profit}` carries the identical derate, so the gap is
+derate-invariant.  Positive values mean imperfect foresight reduces
+profit.  Because every seed's stitched dispatch — including the
+year-close SOC condition — is feasible for the perfect-foresight MILP,
+the gap cannot go negative beyond the solver's ``mip_gap`` slack; with
+zero forecast noise it collapses to ~0.
 
 CLI examples
 ------------
