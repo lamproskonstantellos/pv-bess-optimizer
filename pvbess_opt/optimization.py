@@ -103,6 +103,11 @@ __all__ = [
 # Set to 0.0 to disable.  NOT a constraint substitute.
 _WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH: float = 1.0e-5
 
+# Once-per-process latch for the merchant grid_cap_includes_load no-op
+# warning — build_model runs per rolling-horizon window, so an unlatched
+# warning would repeat hundreds of times per Monte Carlo seed.
+_MERCHANT_CAP_FLAG_WARNED = False
+
 # Battery wear cost (cycle degradation) is a per-MWh-throughput penalty
 # read from params['bess_wear_cost_eur_per_mwh'] (default 0 = off) and
 # subtracted in the objective; see pvbess_opt.degradation for the
@@ -424,6 +429,20 @@ def build_model(
     # has no co-located load, so the basis collapses to surplus export).
     cap_includes_load = bool(params.get("grid_cap_includes_load", False))
     strict_injection_cap = cap_includes_load and mode == "self_consumption"
+    if cap_includes_load and mode != "self_consumption":
+        # Merchant has no co-located load, so the strict total-injection
+        # basis collapses to surplus export — the flag is a clean no-op.
+        # Say so once, loudly, so a user who set it expecting an effect
+        # is not silently ignored.
+        global _MERCHANT_CAP_FLAG_WARNED
+        if not _MERCHANT_CAP_FLAG_WARNED:
+            logger.warning(
+                "grid_cap_includes_load=True has no effect in merchant "
+                "mode: there is no co-located load, so the injection cap "
+                "already binds on total (surplus) export. The flag is "
+                "ignored."
+            )
+            _MERCHANT_CAP_FLAG_WARNED = True
 
     if pd.api.types.is_datetime64_any_dtype(ts["timestamp"]):
         day_labels = ts["timestamp"].dt.date.tolist()
