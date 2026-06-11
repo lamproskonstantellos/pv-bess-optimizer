@@ -124,7 +124,7 @@ def test_time_limit_with_incumbent_accepted():
         "terminal_soc_equal": True, "max_cycles_per_day": 1.0,
         "p_grid_export_max_kw": 5000.0, "pv_nameplate_kwp": 4500.0,
         "bess_power_kw": 5000.0, "bess_capacity_kwh": 20000.0,
-        "retail_tariff_eur_per_mwh": 120.0, "settlement_minutes": 15,
+        "retail_tariff_eur_per_mwh": 120.0,
         "mode": "self_consumption", "allow_bess_grid_charging": False, "show_titles": False,
     }
     ts = pd.DataFrame({

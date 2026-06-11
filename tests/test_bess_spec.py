@@ -56,7 +56,6 @@ def _params(*, pv_kwp: float, bess_kw: float, bess_kwh: float, mode: str) -> dic
         "bess_power_kw": bess_kw,
         "bess_capacity_kwh": bess_kwh,
         "retail_tariff_eur_per_mwh": 132.0,
-        "settlement_minutes": 15,
         "mode": mode,
         "allow_bess_grid_charging": False,
         "show_titles": False,

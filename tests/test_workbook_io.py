@@ -34,7 +34,6 @@ _PROJECT_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {
     "project_lifecycle_years": (int, 1, 100),
     "project_start_year": (int, 1900, 2100),
     "mode": (str, None, None),
-    "settlement_minutes": (int, 1, 1440),
     "p_grid_export_max_kw": (float, 0.0, None),
     "retail_tariff_eur_per_mwh": (float, 0.0, None),
     "allow_bess_grid_charging": (bool, None, None),
@@ -71,6 +70,7 @@ _BESS_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {
     "bess_replacement_cost_pct": (float, 0.0, 100.0),
     "bess_degradation_annual_pct": (float, 0.0, 100.0),
     "bess_degradation_pct_per_cycle": (float, 0.0, 100.0),
+    "bess_eol_soh_pct": (float, 0.0, 100.0),
 }
 
 _ECONOMICS_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {

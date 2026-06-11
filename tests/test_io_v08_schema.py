@@ -38,7 +38,7 @@ from pvbess_opt.io import (
 def test_project_sheet_keys():
     expected = {
         "project_lifecycle_years", "project_start_year", "mode",
-        "settlement_minutes", "p_grid_export_max_kw",
+        "p_grid_export_max_kw",
         "retail_tariff_eur_per_mwh", "allow_bess_grid_charging",
         "grid_cap_includes_load",
         "unavailability_pct", "site_capex_eur", "site_devex_eur",
@@ -70,6 +70,7 @@ def test_bess_sheet_keys():
         "opex_bess_eur_per_kw",
         "bess_replacement_year", "bess_replacement_cost_pct",
         "bess_degradation_annual_pct", "bess_degradation_pct_per_cycle",
+        "bess_eol_soh_pct",
         "bess_wear_cost_eur_per_mwh",
     }
     assert set(BESS_SHEET_DEFAULTS) == expected

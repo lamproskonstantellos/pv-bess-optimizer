@@ -696,6 +696,7 @@ def _build_degradation_report(
                      PROJECT_SHEET_DEFAULTS["project_start_year"])
             or PROJECT_SHEET_DEFAULTS["project_start_year"]
         ),
+        end_of_life_soh_pct=float(econ.get("bess_eol_soh_pct", 80.0) or 80.0),
         replacement_year=int(econ.get("bess_replacement_year", 0) or 0),
     )
 

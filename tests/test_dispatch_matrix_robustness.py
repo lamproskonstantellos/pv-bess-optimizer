@@ -59,7 +59,6 @@ def _matrix_params(**overrides) -> dict:
         "bess_power_kw": 5.0,
         "bess_capacity_kwh": 10.0,
         "retail_tariff_eur_per_mwh": 180.0,
-        "settlement_minutes": 60,
         "mode": "self_consumption",
         "allow_bess_grid_charging": False,
         "show_titles": False,

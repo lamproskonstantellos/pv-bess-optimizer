@@ -44,9 +44,9 @@ High-level run configuration:
 * ``project_lifecycle_years`` — total project horizon (years).
 * ``project_start_year`` — calendar year of Year 1 (first operating
   year).  CAPEX is paid in Year 0 (``project_start_year - 1``).
-* ``mode`` — ``self_consumption`` | ``merchant``.
-* ``settlement_minutes`` — informational; the MILP timestep is
-  auto-detected from the timeseries.
+* ``mode`` — ``self_consumption`` | ``merchant``.  (The MILP timestep
+  is auto-detected from the timeseries cadence; there is no timestep
+  key to set.)
 * ``p_grid_export_max_kw`` — grid-connection export limit (kW).  A
   positive number caps the combined PV + BESS export flow.  Leave the
   cell empty, or set it to ``inf`` / ``infinity`` / ``unlimited`` /
@@ -142,6 +142,11 @@ Sheet ``bess``
   full equivalent cycle, in percent (LFP default 0.008, range
   0.005–0.010; NMC ~0.010–0.020).  Layered additively on the calendar
   fade.  Set to 0 — or omit the row — to use calendar-only fade.
+* ``bess_eol_soh_pct`` (default 80) — end-of-life SOH threshold for the
+  degradation diagnostic: when no ``bess_replacement_year`` is
+  scheduled, the SOH report swaps in a fresh pack the first year SOH
+  falls to this level.  Diagnostic only — the cashflow charges
+  replacement CAPEX only for a scheduled ``bess_replacement_year``.
 * ``bess_wear_cost_eur_per_mwh`` — cycle wear cost penalised per MWh
   discharged in the dispatch objective (default 0 = off).  When set, the
   optimizer only cycles when the price spread beats the wear cost.  It is

@@ -53,7 +53,6 @@ def _surplus_params() -> dict:
         "bess_power_kw": 100.0,
         "bess_capacity_kwh": 200.0,
         "retail_tariff_eur_per_mwh": 200.0,
-        "settlement_minutes": 15,
         "mode": "self_consumption",
         "allow_bess_grid_charging": False,
         "show_titles": False,

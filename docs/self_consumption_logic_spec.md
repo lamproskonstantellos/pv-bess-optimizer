@@ -35,9 +35,10 @@ co-located load with a behind-the-meter PV array and an optional BESS:
 * Surplus PV / BESS energy may be exported to the DAM under the
   combined per-step cap derived from `p_grid_export_max_kw` and the
   `max_injection_profile` sheet.
-* Settlement is 15-minute by default (`settlement_minutes = 15`); the
-  optimization timestep is auto-detected from the timeseries cadence
-  (`pvbess_opt/io.py:detect_timestep_minutes`).
+* Settlement is 15-minute under the regulation; the optimization
+  timestep is auto-detected from the timeseries cadence
+  (`pvbess_opt/io.py:detect_timestep_minutes`), so the canonical
+  workbook ships a 15-minute grid.
 
 ## 2. Decision variables
 

@@ -137,7 +137,6 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "project_lifecycle_years": 20,
     "project_start_year": 2026,
     "mode": "self_consumption",
-    "settlement_minutes": 15,
     "p_grid_export_max_kw": 5000.0,
     "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
@@ -190,6 +189,9 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     # LFP cycle-fade default (matches the canonical workbook row in
     # _BESS_ROWS and the schema default); range 0.005-0.010.
     "bess_degradation_pct_per_cycle": 0.008,
+    # End-of-life SOH threshold (%) for the diagnostic replacement
+    # schedule when no bess_replacement_year is set.
+    "bess_eol_soh_pct": 80.0,
     # Per-MWh-throughput cycle wear cost in the dispatch objective (0 = off).
     "bess_wear_cost_eur_per_mwh": 0.0,
 }
@@ -333,7 +335,6 @@ _BOOL_KEYS: frozenset[str] = frozenset({
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
     "project_start_year",
-    "settlement_minutes",
     "debt_tenor_years",
     "bess_replacement_year",
     "uncertainty_n_seeds",
@@ -381,9 +382,6 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "PV / BESS dispatch entirely to the DAM. The per-step max-injection "
      "export cap (p_grid_export_max_kw x max_injection_profile) applies "
      "unconditionally in BOTH modes — curtailment is never skipped."),
-    ("settlement_minutes", 15, "int",
-     "Greek Self-consumption settles every 15 min per MD YPEN/DAPEEK/93976/2772/2024. "
-     "Currently informational; the MILP timestep is auto-detected."),
     ("p_grid_export_max_kw", 5000, "kW",
      "Max grid export (kW). Leave empty or use 'inf' / 'unlimited' / "
      "'disabled' to remove cap; no injection limit is applied."),
@@ -511,6 +509,12 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Cycle-based BESS capacity fade per full equivalent cycle, in "
      "percent. LFP default 0.008 (range 0.005-0.010). Set to 0 to "
      "disable cycle aging (calendar-only mode)."),
+    ("bess_eol_soh_pct", 80.0, "%",
+     "End-of-life state-of-health threshold for the SOH diagnostic: "
+     "when no bess_replacement_year is scheduled, the degradation "
+     "report swaps in a fresh pack the first year SOH falls to this "
+     "level. Diagnostic only — the cashflow charges replacement CAPEX "
+     "only for a scheduled bess_replacement_year."),
 )
 
 _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -1677,6 +1681,13 @@ def validate_workbook_params(
                 f"{key!r} must be in (0, 1]; got {value!r}."
             )
 
+    if "bess_eol_soh_pct" in bess:
+        eol = float(bess["bess_eol_soh_pct"] or 0.0)
+        if not (0.0 < eol <= 100.0):
+            raise ValueError(
+                f"'bess_eol_soh_pct' must be in (0, 100]; got {eol!r}."
+            )
+
     if dt_minutes is not None:
         if dt_minutes <= 0:
             raise ValueError(
@@ -1898,7 +1909,6 @@ def _typed_to_flat(
         # to API consumers), so they are retained intentionally.
         "grid_export_unlimited": grid_export_unlimited,
         "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
-        "settlement_minutes": int(project["settlement_minutes"]),
         "mode": str(project["mode"]),
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
         "grid_cap_includes_load": bool(project["grid_cap_includes_load"]),

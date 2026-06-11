@@ -141,16 +141,20 @@ def _sync_pv_sheet(ws: Worksheet) -> int:
 
 
 def _rebuild_parameter_notes(ws: Worksheet, sheet_name: str) -> int:
-    """Overwrite the ``notes`` column from :data:`_SHEET_ROW_TEMPLATES`.
+    """Migrate a parameter sheet to the canonical row template.
 
-    The header row (row 1) carries the column names ``key | value | unit
-    | notes`` written by :func:`pvbess_opt.io.write_workbook`. We locate
-    the ``notes`` column from the header, build a ``key -> notes`` map
-    from the row template, and rewrite every matching body cell. Keys
-    not present in the template are left untouched; unknown sheets are
-    a no-op.
+    Three operations against :data:`_SHEET_ROW_TEMPLATES`:
+
+    * rewrite the ``notes`` column of every key the template knows, so
+      wording changes in the typed dict reach the workbook;
+    * DROP rows whose key has been removed from the schema (the loader
+      already warns-and-ignores them; carrying them in the shipped
+      workbook would advertise dead knobs);
+    * APPEND rows for template keys the sheet does not carry yet, with
+      their default value / unit / notes.
 
     Returns the number of cells rewritten so the caller can log it.
+    Unknown sheets are a no-op.
     """
     template = _SHEET_ROW_TEMPLATES.get(sheet_name)
     if template is None:
@@ -162,12 +166,36 @@ def _rebuild_parameter_notes(ws: Worksheet, sheet_name: str) -> int:
         (c for v, c in header if isinstance(v, str) and v.strip().lower() == "key"),
         None,
     )
+    value_col = next(
+        (c for v, c in header if isinstance(v, str) and v.strip().lower() == "value"),
+        None,
+    )
+    unit_col = next(
+        (c for v, c in header if isinstance(v, str) and v.strip().lower() == "unit"),
+        None,
+    )
     notes_col = next(
         (c for v, c in header if isinstance(v, str) and v.strip().lower() == "notes"),
         None,
     )
     if key_col is None or notes_col is None:
         return 0
+
+    # Drop rows whose key left the schema (bottom-up so indices hold).
+    seen_keys: set[str] = set()
+    for row in reversed(list(ws.iter_rows(min_row=2, max_row=ws.max_row))):
+        key_cell = row[key_col - 1]
+        if not isinstance(key_cell.value, str) or not key_cell.value.strip():
+            continue
+        key = key_cell.value.strip()
+        if key not in notes_by_key:
+            logger.info(
+                "%s: dropping removed schema key %r (row %d).",
+                sheet_name, key, key_cell.row,
+            )
+            ws.delete_rows(key_cell.row, 1)
+            continue
+        seen_keys.add(key)
 
     rewritten = 0
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
@@ -182,6 +210,23 @@ def _rebuild_parameter_notes(ws: Worksheet, sheet_name: str) -> int:
         if notes_cell.value != new_notes:
             notes_cell.value = new_notes
         rewritten += 1
+
+    # Append template keys the sheet does not carry yet.
+    if value_col is not None and unit_col is not None:
+        next_row = ws.max_row + 1
+        for key, default, unit, notes in template:
+            if key in seen_keys:
+                continue
+            logger.info(
+                "%s: appending new schema key %r with its default %r.",
+                sheet_name, key, default,
+            )
+            ws.cell(row=next_row, column=key_col).value = key
+            ws.cell(row=next_row, column=value_col).value = default
+            ws.cell(row=next_row, column=unit_col).value = unit
+            ws.cell(row=next_row, column=notes_col).value = notes
+            next_row += 1
+            rewritten += 1
     return rewritten
 
 

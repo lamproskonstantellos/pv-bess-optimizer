@@ -93,7 +93,7 @@ set a location on the `pv` sheet to source it from PVGIS instead.
 ### `project`
 
 Project-level scalars including `mode`
-(`self_consumption` | `merchant`), `settlement_minutes`,
+(`self_consumption` | `merchant`),
 `p_grid_export_max_kw`, `retail_tariff_eur_per_mwh`,
 `allow_bess_grid_charging`, `grid_cap_includes_load`,
 `unavailability_pct`, and the site-wide lump sums (`site_capex_eur`,

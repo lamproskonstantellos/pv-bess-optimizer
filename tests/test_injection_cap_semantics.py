@@ -47,7 +47,6 @@ def _params_merchant(**overrides) -> dict:
         "bess_power_kw": 0.0,
         "bess_capacity_kwh": 0.0,
         "retail_tariff_eur_per_mwh": 0.0,
-        "settlement_minutes": 60,
         "mode": "merchant",
         "allow_bess_grid_charging": False,
         "show_titles": False,
