@@ -720,6 +720,7 @@ def monte_carlo_balancing(
     *,
     n_scenarios: int = 200,
     seed: int | None = None,
+    availability_factor: float = 1.0,
 ) -> dict[str, Any]:
     """Run the balancing-market Monte Carlo realisation across scenarios.
 
@@ -728,6 +729,13 @@ def monte_carlo_balancing(
     when the balancing block fired). Returns aggregated P10/P50/P90 of
     total balancing revenue plus per-product breakdowns and the fraction
     of scenarios that hit a realised SOC bound.
+
+    ``availability_factor`` scales every realised revenue figure (the
+    quantiles, the per-product breakdowns, and the raw realisations) so
+    the distribution shares the headline-KPI scope: the pipeline passes
+    the same post-solve unavailability factor it applied to the
+    deterministic ``bm_*`` revenue KPIs, keeping P50 comparable with
+    ``bm_total_balancing_revenue_eur``.
 
     When ``balancing_enabled`` is FALSE the function short-circuits and
     returns an empty dict so the rolling-horizon path stays unchanged.
@@ -829,6 +837,8 @@ def monte_carlo_balancing(
             for h in logger.handlers + logging.getLogger().handlers:
                 h.flush()
 
+    af = max(0.0, min(1.0, float(availability_factor)))
+    totals = totals * af
     quantiles = np.quantile(totals, [0.10, 0.50, 0.90])
     aggregated: dict[str, Any] = {
         "bm_total_balancing_revenue_p10_eur": float(round(quantiles[0], 2)),
@@ -840,12 +850,12 @@ def monte_carlo_balancing(
         "bm_mc_total_realised_eur": [float(v) for v in totals],
     }
     for product, arr in per_product_totals.items():
-        q = np.quantile(arr, [0.10, 0.50, 0.90])
+        q = np.quantile(arr * af, [0.10, 0.50, 0.90])
         aggregated[f"bm_{product}_capacity_revenue_p10_eur"] = float(round(q[0], 2))
         aggregated[f"bm_{product}_capacity_revenue_p50_eur"] = float(round(q[1], 2))
         aggregated[f"bm_{product}_capacity_revenue_p90_eur"] = float(round(q[2], 2))
     for product, arr in per_product_activation_totals.items():
-        q = np.quantile(arr, [0.10, 0.50, 0.90])
+        q = np.quantile(arr * af, [0.10, 0.50, 0.90])
         aggregated[f"bm_{product}_activation_revenue_p10_eur"] = float(round(q[0], 2))
         aggregated[f"bm_{product}_activation_revenue_p50_eur"] = float(round(q[1], 2))
         aggregated[f"bm_{product}_activation_revenue_p90_eur"] = float(round(q[2], 2))

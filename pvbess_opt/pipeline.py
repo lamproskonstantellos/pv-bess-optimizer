@@ -33,6 +33,7 @@ from typing import Any
 import pandas as pd
 
 from pvbess_opt.availability import apply_unavailability_derate, availability_factor
+from pvbess_opt.balancing import resolve_balancing_config
 from pvbess_opt.degradation import build_degradation_report
 from pvbess_opt.economics import (
     build_debt_schedule,
@@ -69,6 +70,8 @@ from pvbess_opt.optimization import (
 )
 from pvbess_opt.plotting import (
     apply_ieee_style,
+    plot_balancing_mc_distribution,
+    plot_balancing_reservation_profile,
     plot_bess_capacity_vs_activation_split,
     plot_bess_revenue_by_month,
     plot_bess_revenue_waterfall,
@@ -116,7 +119,11 @@ from pvbess_opt.plotting import (
     set_show_titles,
 )
 from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
-from pvbess_opt.rolling_horizon import monte_carlo_rolling, rolling_horizon_dispatch
+from pvbess_opt.rolling_horizon import (
+    monte_carlo_balancing,
+    monte_carlo_rolling,
+    rolling_horizon_dispatch,
+)
 from pvbess_opt.sensitivity import run_sensitivity_analysis
 
 logger = logging.getLogger("pvbess_opt.pipeline")
@@ -994,6 +1001,27 @@ def _run_one(
         _emit_bess_utilisation_audit(kpis, params)
         kpis_monthly = compute_monthly_kpis(res)
 
+        # Balancing-revenue Monte Carlo realisation (P10/P50/P90 + the
+        # per-product breakdowns + the distribution plot input).  The
+        # README's output reference promises this alongside the
+        # reservation profile; both no-op when the balancing block did
+        # not fire.  Sharing kpis['availability_factor'] keeps the
+        # distribution in the same derated scope as the bm_* KPIs.
+        bm_mc: dict[str, Any] = {}
+        if bool(params.get("balancing", {}).get("balancing_enabled", False)):
+            bm_cfg = resolve_balancing_config(params.get("balancing") or {})
+            bm_mc = monte_carlo_balancing(
+                res, params,
+                n_scenarios=int(bm_cfg.bm_mc_scenarios),
+                availability_factor=float(
+                    kpis.get("availability_factor", 1.0)
+                ),
+            )
+            kpis.update({
+                key: value for key, value in bm_mc.items()
+                if key != "bm_mc_total_realised_eur"
+            })
+
         # Optional rolling-horizon run (writes its KPIs alongside the
         # perfect-foresight benchmark for comparison).
         rolling_mc_df: pd.DataFrame | None = None
@@ -1142,6 +1170,21 @@ def _run_one(
             params=params,
             solver_name=resolved_solver,
         )
+
+        # Balancing plot pair promised by the README's report list; both
+        # helpers return None (no file) when their inputs are absent.
+        try:
+            plot_balancing_reservation_profile(
+                res,
+                layout["financial_plots"] / "balancing_reservation_profile.pdf",
+            )
+            plot_balancing_mc_distribution(
+                bm_mc,
+                layout["financial_plots"] / "balancing_mc_distribution.pdf",
+                econ=econ,
+            )
+        except Exception:
+            logger.exception("Balancing plot generation failed")
 
         if degradation_df is not None and not degradation_df.empty:
             plot_soh_trajectory(

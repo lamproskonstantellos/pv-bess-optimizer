@@ -135,6 +135,7 @@ class BalancingConfig:
     bm_inflation_pct: float = 2.0
     bm_price_sigma_capacity_pct: float = 25.0
     bm_price_sigma_activation_pct: float = 35.0
+    bm_mc_scenarios: int = 200
     bm_random_seed: int = 1729
 
 
@@ -194,7 +195,7 @@ def resolve_balancing_config(raw: dict[str, Any]) -> BalancingConfig:
         value = raw[name]
         if fld.type is bool or name == "balancing_enabled":
             kwargs[name] = bool(value)
-        elif name in {"bm_settlement_minutes", "bm_random_seed"}:
+        elif name in {"bm_settlement_minutes", "bm_mc_scenarios", "bm_random_seed"}:
             kwargs[name] = int(value)
         else:
             kwargs[name] = float(value)

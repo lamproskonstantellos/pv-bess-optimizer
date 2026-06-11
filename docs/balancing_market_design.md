@@ -111,14 +111,14 @@ P10 / P50 / P90 of balancing revenue and a per-product breakdown.
 ## Workbook schema
 
 The optional `balancing` sheet uses the same key/value structure as the existing
-parameter sheets. The 33 keys cover the master switch, six capacity shares
+parameter sheets. The 34 keys cover the master switch, six capacity shares
 (DAM + five products), ten probabilities (five acceptance × five activation),
 nine default prices (five capacity + four activation; FCR has no activation
 price), the FCR sustained-duration requirement, the balancing settlement
 period, an SOC safety buffer, a balancing-revenue inflation rate, two Monte
-Carlo price sigmas and a default seed. The reference workbook keeps the master
-switch off by default so a fresh checkout behaves identically to the previous
-release.
+Carlo price sigmas, the Monte Carlo scenario count (`bm_mc_scenarios`) and a
+default seed. The reference workbook keeps the master switch off by default
+so a fresh checkout behaves identically to the previous release.
 
 Nine optional per-step timeseries columns sit on the existing `timeseries`
 sheet alongside `pv_kwh`, `load_kwh`, and `dam_price_eur_per_mwh`. Each

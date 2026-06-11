@@ -276,6 +276,9 @@ BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
     # capacity and activation prices around the deterministic schedule.
     "bm_price_sigma_capacity_pct": 25.0,
     "bm_price_sigma_activation_pct": 35.0,
+    # Number of Monte Carlo scenarios realised post-solve for the
+    # balancing-revenue distribution (P10/P50/P90 + histogram).
+    "bm_mc_scenarios": 200,
     # Default Monte Carlo seed for the balancing realisation.
     "bm_random_seed": 1729,
 }
@@ -341,6 +344,7 @@ _INT_KEYS: frozenset[str] = frozenset({
     "uncertainty_window_hours",
     "uncertainty_commit_hours",
     "bm_settlement_minutes",
+    "bm_mc_scenarios",
     "bm_random_seed",
 })
 _STR_KEYS: frozenset[str] = frozenset({
@@ -690,6 +694,10 @@ _BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Log-normal sigma for Monte Carlo perturbation of capacity prices."),
     ("bm_price_sigma_activation_pct", 35.0, "%",
      "Log-normal sigma for Monte Carlo perturbation of activation prices."),
+    ("bm_mc_scenarios", 200, "int",
+     "Number of Monte Carlo scenarios realised post-solve for the "
+     "balancing-revenue distribution (P10/P50/P90 KPIs and the "
+     "balancing_mc_distribution plot)."),
     ("bm_random_seed", 1729, "int",
      "Default seed for the balancing Monte Carlo realisation."),
 )
@@ -1520,6 +1528,13 @@ def _validate_balancing_config(
         raise ValueError(
             "balancing sheet key 'bm_soc_headroom_pct' must be in "
             f"[0, 50]; got {headroom!r}."
+        )
+
+    mc_scenarios = int(balancing.get("bm_mc_scenarios", 200) or 0)
+    if mc_scenarios < 1:
+        raise ValueError(
+            "balancing sheet key 'bm_mc_scenarios' must be a positive "
+            f"integer; got {mc_scenarios!r}."
         )
 
 

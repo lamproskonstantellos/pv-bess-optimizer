@@ -643,9 +643,16 @@ def derive_monthly_cashflow(
       ``revenue_eur``.
     * ``opex_eur`` — Year-1 ``opex`` split evenly across months, scaled
       by the year's opex inflation factor.
-    * ``net_cashflow_eur`` — ``revenue_eur + balancing_revenue_eur
-      + opex_eur``. Sums to ``yearly_cf['net_cashflow_eur']`` row-for-
-      row in any operating year without replacement / devex events.
+    * ``capex_eur`` / ``devex_eur`` — the year's investment events
+      (e.g. the scheduled BESS replacement CAPEX), booked in month 12.
+      End-of-year placement matches the yearly sheet's ``1/(1+r)^y``
+      discounting exactly (December of year ``y`` carries that same
+      factor), so the monthly and yearly DCFs agree on the event.
+    * ``net_cashflow_eur`` — ``revenue_eur + balancing_revenue_eur +
+      opex_eur + capex_eur + devex_eur``. Sums to
+      ``yearly_cf['net_cashflow_eur']`` row-for-row in EVERY operating
+      year, including a BESS-replacement year.  (Year 0 is not part of
+      the monthly frame; the initial outlay stays on the yearly sheet.)
     * ``discounted_cf_eur`` — ``net_cashflow_eur`` discounted at
       ``econ['discount_rate_pct']`` to the start of the project,
       end-of-month convention: month ``m`` of year ``y`` lands at
@@ -773,6 +780,8 @@ def derive_monthly_cashflow(
 
     has_balancing_col = "balancing_revenue_eur" in yearly_cf.columns
     has_fee_col = "aggregator_fee_eur" in yearly_cf.columns
+    has_capex_col = "capex_eur" in yearly_cf.columns
+    has_devex_col = "devex_eur" in yearly_cf.columns
 
     rows: list[dict[str, Any]] = []
     yearly_indexed = yearly_cf.set_index("project_year")
@@ -791,6 +800,12 @@ def derive_monthly_cashflow(
             float(yearly_indexed.loc[y, "aggregator_fee_eur"])
             if has_fee_col else 0.0
         )
+        capex_y = (
+            float(yearly_indexed.loc[y, "capex_eur"]) if has_capex_col else 0.0
+        )
+        devex_y = (
+            float(yearly_indexed.loc[y, "devex_eur"]) if has_devex_col else 0.0
+        )
 
         if abs(yearly_y1_revenue) > 1e-9:
             rev_scale = rev_y / yearly_y1_revenue
@@ -807,7 +822,12 @@ def derive_monthly_cashflow(
             pv_mwh_m = float(monthly_pv_mwh_y1.loc[m]) * pv_factor
             balancing_m = float(balancing_share.loc[m]) * balancing_y
             fee_m = float(fee_share.loc[m]) * fee_y
-            net_m = rev_m + balancing_m + opex_m
+            # Investment events (BESS replacement CAPEX, any operating-
+            # year DEVEX) book in month 12 so the monthly DCF carries
+            # the yearly end-of-year discount factor for them exactly.
+            capex_m = capex_y if m == 12 else 0.0
+            devex_m = devex_y if m == 12 else 0.0
+            net_m = rev_m + balancing_m + opex_m + capex_m + devex_m
             # End-of-month discounting: month m of year y lands at
             # (y - 1) + m/12, so December of year y discounts exactly like
             # the end-of-year yearly row (1 / (1+r)^y) and earlier months
@@ -825,6 +845,8 @@ def derive_monthly_cashflow(
                     "balancing_revenue_eur": float(balancing_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
+                    "capex_eur": float(capex_m),
+                    "devex_eur": float(devex_m),
                     "net_cashflow_eur": float(net_m),
                     "discounted_cf_eur": float(net_m * disc_factor),
                 }
@@ -836,7 +858,8 @@ def derive_monthly_cashflow(
         "project_year", "calendar_year", "period",
         "period_type", "pv_production_mwh", "revenue_eur",
         "balancing_revenue_eur", "aggregator_fee_eur",
-        "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
+        "opex_eur", "capex_eur", "devex_eur",
+        "net_cashflow_eur", "discounted_cf_eur",
     ]
     if monthly_cf.empty:
         quarterly_cf = pd.DataFrame(columns=monthly_columns)
@@ -851,7 +874,8 @@ def derive_monthly_cashflow(
                 [
                     "pv_production_mwh", "revenue_eur",
                     "balancing_revenue_eur", "aggregator_fee_eur",
-                    "opex_eur", "net_cashflow_eur", "discounted_cf_eur",
+                    "opex_eur", "capex_eur", "devex_eur",
+                    "net_cashflow_eur", "discounted_cf_eur",
                 ]
             ].sum()
         )

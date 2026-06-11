@@ -141,14 +141,14 @@ loader falls back to a flat 100 % and logs INFO.
 
 ### `balancing`
 
-33 keys covering the master switch (`balancing_enabled`), per-product
+34 keys covering the master switch (`balancing_enabled`), per-product
 capacity shares of `bess_power_kw` (`fcr_capacity_share_pct`,
 `afrr_up_capacity_share_pct`, `afrr_dn_capacity_share_pct`,
 `mfrr_up_capacity_share_pct`, `mfrr_dn_capacity_share_pct`),
 acceptance and activation probabilities, fallback capacity and
 activation prices, the FCR sustained-duration requirement, the SOC
-safety buffer, a balancing-revenue inflation rate, and the two Monte
-Carlo seeds.  See
+safety buffer, a balancing-revenue inflation rate, and the Monte Carlo
+price sigmas, scenario count (`bm_mc_scenarios`) and seed.  See
 [`docs/balancing_market_design.md`](docs/balancing_market_design.md)
 for the design deep-dive.
 
