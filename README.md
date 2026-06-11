@@ -152,6 +152,17 @@ price sigmas, scenario count (`bm_mc_scenarios`) and seed.  See
 [`docs/balancing_market_design.md`](docs/balancing_market_design.md)
 for the design deep-dive.
 
+### `ppa`
+
+Pay-as-produced PPA contract on a share of the PV export, mirroring the
+`balancing` master-switch pattern: `ppa_enabled`, `ppa_structure`
+(`pay_as_produced`; `baseload` reserved), `ppa_settlement`
+(`physical` | `cfd`), `ppa_price_eur_per_mwh`, `ppa_volume_share_pct`,
+`ppa_term_years`, `ppa_inflation_pct`.  Ships **disabled** — outputs
+are bit-identical to a pre-PPA build until the switch is set.  See
+[`docs/ppa_design.md`](docs/ppa_design.md) for the design note
+(structures, settlements, dispatch treatment, fee and LCOE scope).
+
 ### `sizing`
 
 Optional capacity-sweep grid, columnar (one column per axis —
@@ -198,10 +209,13 @@ Each run writes a self-contained folder
 ### KPIs
 
 `compute_kpis` returns a flat dict with the headline year-1 figures
-plus per-product balancing breakdowns and eight canonical revenue
+plus per-product balancing breakdowns and nine canonical revenue
 aggregates used by the financial plots:
 
-* `revenue_pv_dam_eur`         — PV → DAM exports.
+* `revenue_pv_dam_eur`         — PV → DAM exports (under a physical
+  PPA: the uncovered share only).
+* `revenue_pv_ppa_eur`         — the PPA contract leg on the covered
+  share of PV export (`0.0` without an active contract).
 * `revenue_bess_dam_eur`       — BESS-DAM arbitrage net of grid
   charging.
 * `revenue_self_consumption_eur` — load coverage from PV-direct and

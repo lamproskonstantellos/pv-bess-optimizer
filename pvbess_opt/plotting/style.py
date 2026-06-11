@@ -155,6 +155,18 @@ def apply_legend(
     handles, labels = ax.get_legend_handles_labels()
     if not labels:
         return
+    # Dedup repeated labels — a mixed-sign stream (e.g. a CfD PPA leg)
+    # is drawn as separate positive and negative stacks sharing one
+    # label; the legend shows it once (first handle wins).
+    seen: set[str] = set()
+    deduped = []
+    for handle, lab in zip(handles, labels, strict=False):
+        if lab in seen:
+            continue
+        seen.add(lab)
+        deduped.append((handle, lab))
+    handles = [h for h, _ in deduped]
+    labels = [lab for _, lab in deduped]
 
     if plot_type == "daily":
         y_offset = -0.20

@@ -71,6 +71,7 @@ _DRIVER_TYPE_BY_VARIABLE: dict[str, str] = {
     "OPEX": "opex",
     "Revenue": "revenue",
     "DiscountRate": "discount_rate",
+    "PpaPrice": "ppa_price",
 }
 
 
@@ -101,6 +102,20 @@ def variables_for_npv_sensitivity(
         {"name": "DiscountRate", "kind": "absolute", "delta": rate_d,
          "label": "Discount rate"},
     ]
+    # Optional PPA-strike driver — only meaningful with an enabled
+    # contract (the run loop additionally requires a non-zero Year-1
+    # PPA stream before recording the rows).
+    if bool(econ.get("ppa_enabled", False)):
+        ppa_d = float(
+            econ.get(
+                "sensitivity_ppa_price_delta_pct",
+                DEFAULT_SENSITIVITY_DELTA_PCT,
+            )
+        ) / 100.0
+        raw.append(
+            {"name": "PpaPrice", "kind": "relative", "delta": ppa_d,
+             "label": "PPA price"},
+        )
     return [v for v in raw if float(v["delta"]) > 0.0]  # type: ignore[arg-type]
 
 
@@ -479,6 +494,70 @@ def run_sensitivity_analysis(
             _record(name, label, "base", 0.0, base_value, base_kpis)
             _record(name, label, "low", -delta, low_value, low_kpis)
             _record(name, label, "high", +delta, high_value, high_kpis)
+            continue
+
+        if name == "PpaPrice":
+            # Exact strike rescaling of the Year-1 bases: the contract
+            # leg is linear in the strike (physical: covered x strike;
+            # cfd: covered x (strike - DAM), whose strike part is
+            # covered x strike).  The cashflow is rebuilt from the
+            # rescaled KPI bases so the term / reversion / escalation
+            # arithmetic stays exact.
+            base_strike = float(econ.get("ppa_price_eur_per_mwh", 0.0) or 0.0)
+            settlement = str(
+                econ.get("ppa_settlement", "physical") or "physical"
+            ).strip().lower()
+            rev1_ppa = float(
+                year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0
+            )
+            covered_dam = float(
+                year1_kpis.get("ppa_covered_dam_value_eur", 0.0) or 0.0
+            )
+            strike_value = (
+                rev1_ppa + covered_dam if settlement == "cfd" else rev1_ppa
+            )
+            if base_strike <= 0.0 or abs(strike_value) < 1e-9:
+                continue  # no meaningful PPA stream to perturb
+
+            def _ppa_kpis_at(
+                factor: float,
+                *,
+                _strike_value: float = strike_value,
+                _covered_dam: float = covered_dam,
+                _settlement: str = settlement,
+                _rev1_ppa: float = rev1_ppa,
+            ) -> dict[str, Any]:
+                rescaled = dict(year1_kpis)
+                new_leg = _strike_value * factor - (
+                    _covered_dam if _settlement == "cfd" else 0.0
+                )
+                rescaled["revenue_pv_ppa_eur"] = new_leg
+                rescaled["profit_total_eur"] = float(
+                    year1_kpis.get("profit_total_eur", 0.0) or 0.0
+                ) + (new_leg - _rev1_ppa)
+                return rescaled
+
+            low_kpis = compute_financial_kpis(
+                build_yearly_cashflow(
+                    _ppa_kpis_at(1.0 - delta), econ, capacities,
+                ),
+                econ,
+            )
+            high_kpis = compute_financial_kpis(
+                build_yearly_cashflow(
+                    _ppa_kpis_at(1.0 + delta), econ, capacities,
+                ),
+                econ,
+            )
+            _record(name, label, "base", 0.0, base_strike, base_kpis)
+            _record(
+                name, label, "low", -delta,
+                base_strike * (1.0 - delta), low_kpis,
+            )
+            _record(
+                name, label, "high", +delta,
+                base_strike * (1.0 + delta), high_kpis,
+            )
             continue
 
         if name == "DiscountRate":

@@ -286,6 +286,40 @@ sweeps the full Year-1+ income stream including balancing, so a
 "+10 % Revenue" scenario produces a strictly higher NPV than the
 base case under any positive cashflow configuration.
 
+Sheet ``ppa``
+-------------
+
+Pay-as-produced PPA contract on a share of the PV export
+(design note: ``docs/ppa_design.md``).  Master-switch pattern like the
+``balancing`` sheet — disabled (the shipped default) leaves every
+output bit-identical to a build without the feature.
+
+* ``ppa_enabled`` — master switch (default FALSE).
+* ``ppa_structure`` — ``pay_as_produced`` (implemented); ``baseload``
+  is reserved for a future shaped profile and rejected with guidance.
+* ``ppa_settlement`` — ``physical`` (sleeved: the covered volume is
+  paid the strike and never touches the DAM) or ``cfd`` (full DAM
+  exposure plus a two-way strike-minus-DAM leg, negative whenever the
+  DAM exceeds the strike).  Both total share × export × strike on the
+  covered volume, so the dispatch is identical — the MILP prices PV
+  export at ``(1 − s)·DAM + s·strike`` — and only the revenue
+  decomposition differs.
+* ``ppa_price_eur_per_mwh`` — the contract strike.
+* ``ppa_volume_share_pct`` — covered share of the PV **export**,
+  pro-rata per step (self-consumed PV is settled at retail; BESS
+  export is not covered).
+* ``ppa_term_years`` — operating years 1..term under contract; after
+  the term the stream ends and, under physical settlement, the covered
+  volume's DAM value rejoins the DAM revenue stream (where the
+  aggregator fee applies to it as market revenue).
+* ``ppa_inflation_pct`` — yearly indexation of the strike,
+  independent of ``retail_inflation_pct`` and ``dam_inflation_pct``.
+
+While under contract the PPA stream carries **no aggregator fee**
+(bilateral offtake — same convention as balancing/TSO settlement) and
+stays out of LCOE/LCOS.  The ``sensitivity_ppa_price_delta_pct``
+economics key adds a PPA-price tornado driver when the contract is on.
+
 Sheet ``simulation``
 --------------------
 

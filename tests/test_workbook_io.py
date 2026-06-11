@@ -88,6 +88,7 @@ _ECONOMICS_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {
     "sensitivity_opex_delta_pct": (float, 0.0, 100.0),
     "sensitivity_revenue_delta_pct": (float, 0.0, 100.0),
     "sensitivity_discount_rate_delta_pp": (float, 0.0, 100.0),
+    "sensitivity_ppa_price_delta_pct": (float, 0.0, 100.0),
 }
 
 _SIMULATION_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {

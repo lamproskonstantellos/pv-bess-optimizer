@@ -257,6 +257,33 @@ def plot_revenue_stack_yearly(
             label="Aggregator fee",
         )
 
+    # PPA contract leg — drawn straight from the cashflow column so the
+    # bar carries the exact stream NPV/IRR saw (term cutoff, its own
+    # ppa_inflation_pct escalation, and the post-term reversion are all
+    # already in the column).  A CfD leg can flip sign across years:
+    # the positive part stacks with the revenue components, the
+    # negative part below the cost/fee stack.
+    if "ppa_revenue_eur" in op.columns:
+        ppa_arr = op["ppa_revenue_eur"].astype(float).to_numpy()
+        ppa_pos = np.clip(ppa_arr, 0.0, None)
+        ppa_neg = np.clip(ppa_arr, None, 0.0)
+        drew_ppa_label = False
+        if np.any(ppa_pos > 1e-9):
+            ax.bar(
+                years, ppa_pos, bottom=bottoms,
+                color=financial_color("PPA revenue"),
+                edgecolor="black", linewidth=0.4, label="PPA revenue",
+            )
+            bottoms = bottoms + ppa_pos
+            drew_ppa_label = True
+        if np.any(ppa_neg < -1e-9):
+            ax.bar(
+                years, ppa_neg, bottom=cost + agg_fee,
+                color=financial_color("PPA revenue"),
+                edgecolor="black", linewidth=0.4,
+                label=None if drew_ppa_label else "PPA revenue",
+            )
+
     # Balancing-revenue segments — one stacked bar per product on top
     # of the DAM/retail revenue stack.  Year-1 values come from the
     # canonical revenue aggregates in ``year1_kpis``; subsequent years
@@ -305,6 +332,8 @@ def plot_revenue_stack_yearly(
     net = (op["revenue_eur"].astype(float)).to_numpy()
     if "balancing_revenue_eur" in op.columns:
         net = net + op["balancing_revenue_eur"].astype(float).to_numpy()
+    if "ppa_revenue_eur" in op.columns:
+        net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The
     # universality rule forbids markeredgecolor="white" rings; line
     # contrast comes from the charcoal colour itself.

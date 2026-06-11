@@ -32,6 +32,7 @@ _BESS_ALIASES = {"capacity_kwh": "bess_capacity_kwh", "power_kw": "bess_power_kw
 
 _REVENUE_STREAMS: tuple[str, ...] = (
     "revenue_pv_dam_eur",
+    "revenue_pv_ppa_eur",
     "revenue_bess_dam_eur",
     "revenue_self_consumption_eur",
     "revenue_bess_fcr_eur",
@@ -129,7 +130,7 @@ def _apply_scenario_overrides(
         typed["pv"][_PV_ALIASES.get(key, key)] = value
     for key, value in (scenario.get("bess") or {}).items():
         typed["bess"][_BESS_ALIASES.get(key, key)] = value
-    for section in ("project", "economics", "simulation"):
+    for section in ("project", "economics", "simulation", "ppa"):
         for key, value in (scenario.get(section) or {}).items():
             typed[section][key] = value
 

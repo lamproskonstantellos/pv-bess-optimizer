@@ -537,6 +537,8 @@ def _format_driver_value(
         return f"€{mag / 1e6:.1f}M"
     if dt in ("discount_rate", "discount rate"):
         return f"{value:.1f}%"
+    if dt == "ppa_price":
+        return f"€{value:.0f}/MWh"
     logger.warning(
         "tornado: unknown driver_type %r; using fallback EUR format",
         driver_type,

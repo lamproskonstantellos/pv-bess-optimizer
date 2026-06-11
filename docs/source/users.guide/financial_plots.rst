@@ -38,6 +38,17 @@ A family of plots is produced when the financial pipeline runs
    with vertical markers at P10 / P50 / P90 and a dashed marker at the
    perfect-foresight benchmark (only when ``--rolling-horizon
    --monte-carlo`` is active).
+9. ``balancing_reservation_profile.pdf`` /
+   ``balancing_mc_distribution.pdf`` — 24-hour average per-product
+   reservation stack and the realised balancing-revenue Monte Carlo
+   histogram (``bm_mc_scenarios`` draws, P10 / P50 / P90 markers).
+   Written only when ``balancing_enabled`` is on; the distribution
+   shares the headline availability-derated scope of the ``bm_*`` KPIs.
+
+When a PPA contract is enabled, the yearly revenue stack gains a
+``PPA revenue`` bar drawn straight from the cashflow's
+``ppa_revenue_eur`` column (term cutoff, escalation and the post-term
+reversion included), and the tornado gains the ``PPA price`` driver.
 
 Input-uncertainty plots
 -----------------------

@@ -269,12 +269,13 @@ def build_debt_schedule(
 
 
 def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
-    """Read the project / pv / bess / economics / simulation / balancing sheets.
+    """Read the project / pv / bess / economics / simulation / balancing
+    / ppa sheets.
 
-    Returns a single flat dict combining every key from the six
+    Returns a single flat dict combining every key from the seven
     parameter sheets — the financial helpers downstream expect a flat
     mapping (e.g. ``econ['discount_rate_pct']``,
-    ``econ['capex_pv_eur_per_kw']``, ``econ['bm_inflation_pct']``).
+    ``econ['capex_pv_eur_per_kw']``, ``econ['ppa_term_years']``).
     Key names are unique across sheets by construction
     (:data:`pvbess_opt.io._KEY_TO_SHEET`), so the flat merge is lossless.
     """
@@ -282,6 +283,7 @@ def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     for section in (
         "project", "pv", "bess", "economics", "simulation", "balancing",
+        "ppa",
     ):
         merged.update(typed[section])
     return merged

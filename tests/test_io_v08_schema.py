@@ -88,6 +88,7 @@ def test_economics_sheet_keys():
         "sensitivity_enabled", "sensitivity_capex_delta_pct",
         "sensitivity_opex_delta_pct", "sensitivity_revenue_delta_pct",
         "sensitivity_discount_rate_delta_pp",
+        "sensitivity_ppa_price_delta_pct",
         "gearing_pct", "debt_interest_rate_pct", "debt_tenor_years",
         "debt_repayment",
         "grid_co2_intensity_kg_per_mwh", "grid_co2_annual_decline_pct",
@@ -119,7 +120,7 @@ def test_all_sheets_present(repo_input_xlsx):
     sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "balancing", "max_injection_profile",
+        "simulation", "balancing", "ppa", "max_injection_profile",
         "max_injection_profile_pv", "max_injection_profile_bess",
         "sizing", "scenarios",
     }

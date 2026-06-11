@@ -112,6 +112,29 @@ the perfect-foresight MILP, so `seed profit <= pf profit` up to the
 solver's `mip_gap` slack and the PF marker sits at or above the upper
 tail of the Monte Carlo histogram.
 
+## PPA stream scope
+
+The pay-as-produced PPA (`docs/ppa_design.md`) keeps one scope across
+every consumer:
+
+1. **Per-step columns** — `revenue_pv_ppa_eur` (contract leg) and
+   `ppa_covered_dam_value_eur` (covered volume's counterfactual DAM
+   value) are written by `add_economic_columns` only when a contract is
+   active; both are PV-origin (`pv_factor` in the lifetime frame) and
+   in the availability-derate list (derate exactly once).
+2. **Profit / KPIs** — `profit_total_eur` includes the contract leg;
+   `revenue_pv_ppa_eur` is the ninth canonical revenue aggregate.
+3. **Cashflow** — `ppa_revenue_eur` is its own column (like
+   `balancing_revenue_eur`): the strike leg escalates on
+   `ppa_inflation_pct`, the CfD's DAM leg on `dam_inflation_pct`, the
+   stream ends after `ppa_term_years`, and physical settlement then
+   reverts the covered DAM value into the DAM revenue stream where the
+   aggregator fee applies to it as market revenue.  While under
+   contract the stream carries NO aggregator fee (bilateral offtake —
+   mirrors the balancing/TSO convention) and stays out of LCOE/LCOS
+   (revenue-agnostic Lazard metrics) and out of the lifetime frame's
+   `revenue_eur_dam_retail` (per-step DAM+retail scope).
+
 ## Default inflation: balancing tracks CPI, DAM is held nominal
 
 The economics defaults set `bm_inflation_pct = 2.0` (Greek balancing

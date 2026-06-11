@@ -28,3 +28,12 @@ scenarios:
   - name: "Cheap CAPEX (merchant hybrid)"
     inherits: "Merchant hybrid"
     capex_multiplier: 0.8
+
+  - name: "Merchant hybrid + PPA"
+    inherits: "Merchant hybrid"
+    ppa:
+      ppa_enabled: true
+      ppa_settlement: physical
+      ppa_price_eur_per_mwh: 65
+      ppa_volume_share_pct: 80
+      ppa_term_years: 10

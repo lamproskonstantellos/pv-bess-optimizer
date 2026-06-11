@@ -19,6 +19,8 @@ See :doc:`outputs` for the full reference.  Quick summary::
     │   ├── cumulative_cashflow_with_payback_{start}-{end}.pdf
     │   ├── sensitivity_npv_tornado.pdf
     │   ├── sensitivity_irr_tornado.pdf
+    │   ├── balancing_reservation_profile.pdf   # balancing on
+    │   ├── balancing_mc_distribution.pdf       # balancing on
     │   └── rolling_horizon_distribution.pdf
     ├── 05_energy_plots/
     │   └── <calendar_year>/{daily,monthly,yearly}/...

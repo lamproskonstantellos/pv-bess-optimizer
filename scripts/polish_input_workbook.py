@@ -47,7 +47,7 @@ AMBER_FILL_HEXES: frozenset[str] = frozenset({
 })
 
 _PARAMETER_SHEETS: tuple[str, ...] = (
-    "project", "pv", "bess", "economics", "simulation", "balancing",
+    "project", "pv", "bess", "economics", "simulation", "balancing", "ppa",
 )
 
 # Sheets whose header row is center-aligned on top of the house style.
@@ -237,6 +237,39 @@ def _center_header_row(ws: Worksheet) -> None:
             cell.alignment = HEADER_CENTER
 
 
+def _ensure_parameter_sheets(wb) -> None:
+    """Create any canonical parameter sheet the workbook does not carry.
+
+    The schema-migration counterpart of the drop/append logic in
+    :func:`_rebuild_parameter_notes`: a NEW sheet (e.g. ``ppa``) is
+    created with the ``key | value | unit | notes`` header and its
+    template rows, placed after the last existing parameter sheet so
+    the workbook keeps its canonical ordering.
+    """
+    for sheet_name in _PARAMETER_SHEETS:
+        if sheet_name in wb.sheetnames:
+            continue
+        template = _SHEET_ROW_TEMPLATES.get(sheet_name)
+        if template is None:
+            continue
+        anchor = max(
+            (
+                wb.sheetnames.index(existing)
+                for existing in _PARAMETER_SHEETS
+                if existing in wb.sheetnames
+            ),
+            default=len(wb.sheetnames) - 1,
+        )
+        logger.info(
+            "creating missing parameter sheet %r with %d template rows.",
+            sheet_name, len(template),
+        )
+        ws = wb.create_sheet(sheet_name, index=anchor + 1)
+        ws.append(["key", "value", "unit", "notes"])
+        for key, default, unit, notes in template:
+            ws.append([key, default, unit, notes])
+
+
 def polish_workbook(path: Path) -> dict[str, int]:
     """Polish ``path`` in place and return per-sheet diagnostics.
 
@@ -247,6 +280,7 @@ def polish_workbook(path: Path) -> dict[str, int]:
     wb = load_workbook(path)
     if "timeseries" in wb.sheetnames:
         _drop_legacy_pv_override(wb["timeseries"])
+    _ensure_parameter_sheets(wb)
     cleared_by_sheet: dict[str, int] = {}
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]

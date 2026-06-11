@@ -128,6 +128,10 @@ MERCHANT_COLORS: dict[str, str] = {
     "Export from PV":      COLORS["PV to grid"],
     "Export from BESS":    COLORS["BESS to grid"],
     "Grid-charging cost":  COLORS["Grid to BESS"],
+    # PPA contract leg in the per-step revenue views — same hex as the
+    # financial-plot "PPA revenue" so the stream reads identically
+    # across both plot families.
+    "PPA revenue":         "#5D4037",
 }
 
 
@@ -275,6 +279,9 @@ FINANCIAL_COLORS: dict[str, str] = {
     "export_from_bess": "#0D47A1",  # Material blue 900
     "grid_charge_cost": "#D32F2F",  # Material red 700 (negative stack)
     "aggregator_fee":   "#AD1457",  # Material pink 800 (deduction tone)
+    # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
+    # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
+    "ppa_revenue":      "#5D4037",  # Material brown 700
     # Aggregate balancing-revenue marker used by plots that surface the
     # FCR / aFRR / mFRR products as a single roll-up (e.g. the Year-1
     # monthly cash-flow stack).  Distinct from every per-product hex.
@@ -385,6 +392,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Load from BESS",
     "Export from PV",
     "Export from BESS",
+    "PPA revenue",
     "Grid-charging cost",
     "Aggregator fee",
     # Balancing-product subcomponents (FCR / aFRR / mFRR)
@@ -418,6 +426,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Load from BESS":                   "load_from_bess",
     "Export from PV":                   "export_from_pv",
     "Export from BESS":                 "export_from_bess",
+    "PPA revenue":                      "ppa_revenue",
     "Grid-charging cost":               "grid_charge_cost",
     "Aggregator fee":                   "aggregator_fee",
     "FCR":                              "bm_fcr",
@@ -449,6 +458,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Load from BESS",
     "Export from PV",
     "Export from BESS",
+    "PPA revenue",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.

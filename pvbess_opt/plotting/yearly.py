@@ -403,6 +403,7 @@ def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
         "rev_pv": "profit_export_from_pv_eur",
         "rev_bess": "profit_export_from_bess_eur",
         "cost_grid": "expense_charge_bess_grid_eur",
+        "ppa": "revenue_pv_ppa_eur",
     }
     monthly = df.groupby(df["timestamp"].dt.to_period("M")).agg(
         {c: "sum" for c in cols.values() if c in df.columns}
@@ -412,6 +413,15 @@ def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     if monthly.empty:
         return
     left, width_days = edges_and_widths_yearly(monthly["month_start"])
+
+    # Mixed-sign CfD leg: positive part stacks with the exports,
+    # negative part with the cost (apply_legend dedups the label).
+    if cols["ppa"] in monthly.columns:
+        ppa_monthly = monthly[cols["ppa"]].to_numpy(dtype=float)
+    else:
+        ppa_monthly = np.zeros(len(monthly), dtype=float)
+    ppa_pos = np.clip(ppa_monthly, 0.0, None)
+    ppa_neg = np.clip(ppa_monthly, None, 0.0)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -423,14 +433,18 @@ def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     if cols["rev_bess"] in monthly.columns:
         pos.append(monthly[cols["rev_bess"]].to_numpy(dtype=float))
         pos_labels.append("Export from BESS")
+    pos.append(ppa_pos)
+    pos_labels.append("PPA revenue")
     if pos:
         bar_stacked_bins(ax, left, width_days, pos, pos_labels)
+    neg = []
+    neg_labels = []
     if cols["cost_grid"] in monthly.columns:
-        bar_stacked_bins(
-            ax, left, width_days,
-            [-monthly[cols["cost_grid"]].to_numpy(dtype=float)],
-            ["Grid-charging cost"],
-        )
+        neg.append(-monthly[cols["cost_grid"]].to_numpy(dtype=float))
+        neg_labels.append("Grid-charging cost")
+    neg.append(ppa_neg)
+    neg_labels.append("PPA revenue")
+    bar_stacked_bins(ax, left, width_days, neg, neg_labels)
     ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
     if show_titles():
         ax.set_title(
