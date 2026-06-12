@@ -148,7 +148,10 @@ they produce the **nine canonical revenue aggregates**
 | `revenue_bess_dam_eur` | $\sum_t \pi^{\mathrm{DAM}}_t x^{bg}_t/1000 - \sum_t \pi^{\mathrm{DAM}}_t x^{gb}_t/1000$ (grid-charge expense bundled into the BESS-DAM stream — `pvbess_opt/conventions.md`) |
 | `revenue_self_consumption_eur` | $\sum_t \pi^{\mathrm{ret}}_t (x^{pl}_t + x^{bl}_t)/1000$; ≡ 0 in merchant mode |
 | `revenue_bess_fcr_eur` | FCR capacity revenue (no activation payment) |
-| `revenue_bess_afrr_up_eur` … `revenue_bess_mfrr_dn_eur` | per-product capacity + activation revenue (`docs/balancing_market_design.md`) |
+| `revenue_bess_afrr_up_eur` | aFRR-up capacity + activation revenue (`docs/balancing_market_design.md`) |
+| `revenue_bess_afrr_dn_eur` | aFRR-down capacity + activation revenue |
+| `revenue_bess_mfrr_up_eur` | mFRR-up capacity + activation revenue |
+| `revenue_bess_mfrr_dn_eur` | mFRR-down capacity + activation revenue |
 
 ### Yearly cashflow
 
