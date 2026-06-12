@@ -153,6 +153,15 @@ they produce the **nine canonical revenue aggregates**
 | `revenue_bess_mfrr_up_eur` | mFRR-up capacity + activation revenue |
 | `revenue_bess_mfrr_dn_eur` | mFRR-down capacity + activation revenue |
 
+Scope identity (regression-guarded): `profit_total_eur` is the
+per-step DAM + retail + PPA profit, i.e. exactly the sum of the four
+non-balancing aggregates — balancing revenue settles per window via
+expected values, never enters the per-step `profit_*` columns, and
+joins the project economics through its own cashflow column
+(`kpis._compute_balancing_kpis` denominator note;
+`tests/test_p2_docs_and_refactor.py`).  The Σ of all nine aggregates
+therefore equals `profit_total_eur` + `bm_total_balancing_revenue_eur`.
+
 ### Yearly cashflow
 
 `economics.build_yearly_cashflow` splits the Year-1 base per origin and

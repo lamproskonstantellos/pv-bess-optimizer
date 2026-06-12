@@ -130,7 +130,7 @@ Emitted on every balancing run (zero when the gate is off):
 `bm_<k>_capacity_revenue_eur` (×5), `bm_<k>_activation_revenue_eur`
 (×4), `bm_total_capacity_revenue_eur`,
 `bm_total_activation_revenue_eur`, `bm_total_balancing_revenue_eur`,
-`bm_revenue_share_pct` (balancing share of total profit),
+`bm_revenue_share_pct` (balancing share of total revenue: the denominator is the non-balancing per-step profit plus the balancing total, so the share cannot double-count),
 `bm_expected_activation_energy_up_kwh` / `_dn_kwh` (Eq. B6 sums), and
 `bm_reservation_avg_kw_<k>` (×5).  The canonical aggregates
 `revenue_bess_<k>_eur` add capacity + activation per product
