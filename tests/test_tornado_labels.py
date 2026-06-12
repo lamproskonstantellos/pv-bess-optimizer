@@ -286,3 +286,78 @@ def test_short_range_row_labels_dont_collide(tmp_path, monkeypatch):
             f"(left.x1={left_bbox.x1} >= right.x0={right_bbox.x0})"
         )
     plt.close("all")
+
+
+def _negative_cost_sens_df() -> pd.DataFrame:
+    """Production-faithful frame: the cashflow stores CAPEX / OPEX
+    driver values as SIGNED OUTFLOWS (negative), so the 'low' scenario
+    (-10 %) carries the numerically LARGER value (e.g. -11.0M > -13.4M)
+    while still being the cheaper world with the higher metric."""
+    rows = []
+    drivers = (
+        # (variable, label, base_v, low_v, high_v, low_irr, high_irr)
+        ("CAPEX", "Total CAPEX",
+         -12.2e6, -11.0e6, -13.4e6, 17.5, 13.5),
+        ("OPEX", "Total annual OPEX",
+         -6.9e6, -6.2e6, -7.6e6, 15.7, 15.0),
+    )
+    for var, label, base_v, low_v, high_v, low_irr, high_irr in drivers:
+        common = {"variable": var, "label": label}
+        rows.append({**common, "scenario": "base", "delta_value": 0.0,
+                     "value": base_v, "irr_pct": 15.3})
+        rows.append({**common, "scenario": "low", "delta_value": -0.1,
+                     "value": low_v, "irr_pct": low_irr})
+        rows.append({**common, "scenario": "high", "delta_value": +0.1,
+                     "value": high_v, "irr_pct": high_irr})
+    return pd.DataFrame(rows)
+
+
+def test_endpoint_labels_with_negative_signed_cost_drivers(tmp_path, monkeypatch):
+    """Cost drivers stored as negative outflows must still label each
+    endpoint with the value of the scenario that produced that metric:
+    leftmost (smallest IRR) carries the +10 % magnitude, rightmost the
+    -10 % magnitude."""
+    captured: dict[str, plt.Figure] = {}
+
+    def _save_no_close(path):
+        captured["fig"] = plt.gcf()
+        return path
+
+    monkeypatch.setattr(fin_mod, "save_figure", _save_no_close)
+    plt.close("all")
+
+    out = tmp_path / "irr_negative_costs.pdf"
+    plot_irr_tornado(_negative_cost_sens_df(), {"irr_pct": 15.3}, _econ(), out)
+
+    fig = captured["fig"]
+    ax = fig.axes[0]
+    yticklabels = [t.get_text() for t in ax.get_yticklabels()]
+
+    by_row: dict[int, list[tuple[float, str]]] = {}
+    for txt in ax.texts:
+        if not txt.get_bbox_patch():
+            continue
+        x_data, y_data = txt.get_position()
+        if abs(y_data - round(y_data)) > 1e-6:
+            continue
+        by_row.setdefault(round(y_data), []).append(
+            (float(x_data), txt.get_text())
+        )
+    plt.close("all")
+
+    expected = {
+        "Total CAPEX": ("€13.4M", "€11.0M"),
+        "Total annual OPEX": ("€7.6M", "€6.2M"),
+    }
+    assert by_row, "no bbox-wrapped endpoint labels found"
+    for row, items in by_row.items():
+        items.sort(key=lambda t: t[0])
+        row_label = yticklabels[row].split(" / ")[0]
+        want_left, want_right = expected[row_label]
+        assert items[0][1] == want_left, (
+            f"{row_label}: leftmost label {items[0][1]!r} != {want_left!r} "
+            "(cost-driver endpoint labels swapped)"
+        )
+        assert items[-1][1] == want_right, (
+            f"{row_label}: rightmost label {items[-1][1]!r} != {want_right!r}"
+        )
