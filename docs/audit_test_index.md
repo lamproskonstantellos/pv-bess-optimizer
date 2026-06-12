@@ -28,3 +28,12 @@ the default branch and on the nightly schedule.
   evergreen surfaces, required tokens and files present, and the shipped
   input workbook loading without legacy warnings — are locked by
   `tests/test_repo_hygiene.py`.
+* The domain design documents under `docs/` (see `docs/README.md`) are
+  machine-checked where they state code contracts:
+  `tests/test_logic_spec_conformance.py` parses the constraint and
+  invariant headings out of `docs/self_consumption_design.md` and the
+  verification-appendix symbols out of
+  `docs/balancing_market_design.md` and asserts each one on a freshly
+  built model; `tests/test_input_surface_parity.py` locks the
+  workbook / YAML / scenario-target configuration surfaces to be exact
+  mirrors.

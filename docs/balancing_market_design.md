@@ -1,215 +1,308 @@
-# Balancing market participation — design note
+# Balancing market participation — design
 
-## Mission
+Domain design document for stochastic participation in the European
+balancing markets (ENTSO-E framework: FCR, aFRR, mFRR) alongside DAM
+dispatch: the reservation MILP extension, expected-revenue objective,
+ex-post Monte Carlo, settlement wiring, KPIs, and the verification log.
+Notation follows the shared table in `docs/README.md`.  The
+conformance test `tests/test_logic_spec_conformance.py` asserts that
+the symbols named here (`r_balancing`, `BM_POWER_DN`, `BM_POWER_UP`,
+`BM_SOC_UP`, `BM_SOC_DN`) exist on a balancing-enabled Pyomo model.
 
-Extend the `pvbess_opt` package with stochastic participation in the European
-balancing markets (ENTSO-E framework) alongside the existing Day-Ahead Market
-(DAM) co-optimisation. The aim is to model FCR, aFRR, and mFRR with the same
-rigour applied today to DAM dispatch and self-consumption: per-product capacity
-reservations are explicit decision variables, expected revenues drive the MILP
-objective, and a Monte Carlo realisation step gives a P10 / P50 / P90 view of
-realised balancing income for risk analysis.
+## Purpose & scope
 
-The extension is fully **opt-in**: when `balancing_enabled = FALSE` (the default)
-the MILP, the KPI dictionary, the lifetime cashflow, the Monte Carlo output, and
-the PDF report are bit-identical to the previous release. The nine existing
-dispatch invariants continue to hold; six new balancing-specific invariants are
-added to the test suite and documented below.
+A BESS can stack capacity-reservation revenue (and, for aFRR/mFRR,
+activation revenue) on top of DAM arbitrage.  The model treats
+per-product reservations as explicit decision variables whose
+*expected* revenue (probability-weighted) enters the MILP objective,
+and quantifies realisation risk with a post-solve Monte Carlo
+(`docs/uncertainty_design.md` Eqs. U4–U5).  The extension is fully
+**opt-in**: with `balancing_enabled = FALSE` (the default) the MILP,
+KPI dict, cashflow, Monte Carlo output and PDF report are bit-identical
+to a workbook without the sheet.
 
-## Five products
+Five products (`pvbess_opt/balancing.py` canonical tuples —
+`PRODUCTS_ALL`, `PRODUCTS_WITH_ACTIVATION`, `PRODUCTS_UP`,
+`PRODUCTS_DN`, `PRODUCTS_SYMMETRIC`):
 
-| Key        | Direction  | Capacity payment | Activation payment | Notes                                                |
-|------------|------------|------------------|--------------------|------------------------------------------------------|
-| `fcr`      | symmetric  | yes              | no                 | ENTSO-E FCR is capacity-only; symmetric reservation. |
-| `afrr_up`  | up only    | yes              | yes                | Upward aFRR (battery discharges).                    |
-| `afrr_dn`  | down only  | yes              | yes                | Downward aFRR (battery charges).                     |
-| `mfrr_up`  | up only    | yes              | yes                | Upward mFRR.                                         |
-| `mfrr_dn`  | down only  | yes              | yes                | Downward mFRR.                                       |
+| Key | Direction | Capacity payment | Activation payment | Notes |
+|---|---|---|---|---|
+| `fcr` | symmetric | yes | no | capacity-only (ENTSO-E SAFA convention); the same kW counts in both directions |
+| `afrr_up` | up | yes | yes | battery discharges when called |
+| `afrr_dn` | down | yes | yes | battery charges when called |
+| `mfrr_up` | up | yes | yes | |
+| `mfrr_dn` | down | yes | yes | |
 
-`fcr` carries no activation payment because the duty cycle is implicit in the
-capacity certification (ENTSO-E SAFA convention). Symmetric reservation means
-that the same kW counts in **both** the up and down power-budget directions.
+## Inputs
 
-## High-level MILP extension
+The optional `balancing` sheet carries **34 keys** (kv structure like
+every parameter sheet; the shipped workbook keeps the master switch
+off):
 
-For each product `k` and timestep `t` the model gains a continuous
-non-negative variable `r[k, t]` (kW reserved). Auxiliary inputs that
-parameterise its economic effect:
+| Group | Keys | Defaults |
+|---|---|---|
+| master switch | `balancing_enabled` | FALSE |
+| capacity shares (% of `bess_power_kw`; sum across all six ≤ 100) | `dam_capacity_share_pct`, `fcr_capacity_share_pct`, `afrr_up_capacity_share_pct`, `afrr_dn_capacity_share_pct`, `mfrr_up_capacity_share_pct`, `mfrr_dn_capacity_share_pct` | 70 / 10 / 8 / 7 / 3 / 2 |
+| bid-acceptance probabilities $\alpha_k$ (%) | `fcr_bid_acceptance_pct`, `afrr_up_…`, `afrr_dn_…`, `mfrr_up_…`, `mfrr_dn_…` | 70 / 55 / 55 / 40 / 40 |
+| activation probabilities $\beta_k$ (%) | `fcr_activation_probability_pct` (informational-only, see Appendix §10), `afrr_up_…`, `afrr_dn_…`, `mfrr_up_…`, `mfrr_dn_…` | 15 / 10 / 8 / 5 / 4 |
+| fallback capacity prices (EUR/MWh) | `<k>_default_capacity_price_eur_per_mwh` ×5 | 12 / 18 / 15 / 6 / 5 |
+| fallback activation prices (EUR/MWh; no FCR) | `<k>_default_activation_price_eur_per_mwh` ×4 | 220 / 25 / 180 / 20 |
+| FCR duration | `fcr_required_duration_hours` | 0.5 |
+| settlement period | `bm_settlement_minutes` (validated == `dt_minutes`) | 15 |
+| SOC safety buffer | `bm_soc_headroom_pct` | 10 |
+| indexation | `bm_inflation_pct` | 2.0 |
+| MC price sigmas (%) | `bm_price_sigma_capacity_pct`, `bm_price_sigma_activation_pct` | 25 / 35 |
+| MC size / seed | `bm_mc_scenarios`, `bm_random_seed` | 200 / 1729 |
 
-* `α_k = acceptance_probability[k]` — probability that a submitted bid clears.
-* `β_k = activation_probability[k]` — probability that a cleared bid is called.
-* `p_cap_k(t)` — capacity price (€/MWh) at time `t`.
-* `p_act_k(t)` — activation price (€/MWh), zero for FCR.
+Nine optional per-step price columns may sit on the `timeseries`
+sheet (`<k>_capacity_price_eur_per_mwh` ×5,
+`<k>_activation_price_eur_per_mwh` ×4); each is read verbatim when
+present and filled with the sheet's scalar fallback otherwise
+(`balancing.resolve_balancing_timeseries`; a synthetic diurnal
+generator `balancing.generate_synthetic_balancing_timeseries` exists
+for studies).
 
-Reservation bounds (per product share of `bess_power_kw`):
+## Mathematical formulation
 
-```
-0 ≤ r[k, t] ≤ s_k · bess_power_kw
-```
+For each product $k$ and step $t$ the model gains the continuous
+variable `r_balancing[k, t]` $= r_{k,t} \ge 0$ (kW reserved), bounded
+by the per-product share:
 
-Power-budget per direction (FCR counts in BOTH directions):
+$$0 \le r_{k,t} \le s_k\, P^{B} \tag{B1}$$
 
-```
-charge_dam(t)    + r[fcr, t] + r[afrr_dn, t] + r[mfrr_dn, t]  ≤ bess_power_kw
-discharge_dam(t) + r[fcr, t] + r[afrr_up, t] + r[mfrr_up, t]  ≤ bess_power_kw
-```
+Per-direction power budgets — DAM flows plus reservations must fit the
+rated power; FCR counts in **both** directions
+(`BM_POWER_DN` / `BM_POWER_UP`):
 
-SOC headroom (per direction), including a safety buffer `h_buf` and the
-FCR-specific duration requirement `D_fcr`:
+$$x^{pb}_t + x^{gb}_t + \Delta t \sum_{k \in \mathrm{DN} \cup \mathrm{SYM}} r_{k,t} \;\le\; P^{B} \Delta t \tag{B2}$$
 
-```
-soc(t) − soc_min  ≥ (1 + h_buf) · dt · ( r[afrr_up] + r[mfrr_up] ) / η_d
-                  + (1 + h_buf) · D_fcr · r[fcr]   / η_d
+$$x^{bl}_t + x^{bg}_t + \Delta t \sum_{k \in \mathrm{UP} \cup \mathrm{SYM}} r_{k,t} \;\le\; P^{B} \Delta t \tag{B3}$$
 
-soc_max − soc(t)  ≥ (1 + h_buf) · dt · ( r[afrr_dn] + r[mfrr_dn] ) · η_c
-                  + (1 + h_buf) · D_fcr · r[fcr]                   · η_c
-```
+SOC headroom per direction with safety buffer $h$ and the
+FCR sustained-duration $d_{\mathrm{fcr}}$ (`BM_SOC_UP` / `BM_SOC_DN`):
 
-Expected activation energy enters the existing SOC recursion as a deterministic
-drift (FCR symmetric activations cancel in expectation):
+$$E_t - \underline{e}\,E^{\mathrm{cap}} \;\ge\; (1+h)\left[\Delta t \sum_{k \in \mathrm{UP}} r_{k,t} + d_{\mathrm{fcr}} \sum_{k \in \mathrm{SYM}} r_{k,t}\right] / \eta_d \tag{B4}$$
 
-```
-soc(t+1) = soc(t) + η_c · charge_dam(t) · dt − discharge_dam(t) · dt / η_d
-                  + E_act_charge(t) − E_act_discharge(t)
+$$\overline{e}\,E^{\mathrm{cap}} - E_t \;\ge\; (1+h)\,\eta_c \left[\Delta t \sum_{k \in \mathrm{DN}} r_{k,t} + d_{\mathrm{fcr}} \sum_{k \in \mathrm{SYM}} r_{k,t}\right] \tag{B5}$$
 
-E_act_charge(t)    = η_c · dt · Σ_{k in DN}  α_k · β_k · r[k, t]
-E_act_discharge(t) = (dt / η_d) · Σ_{k in UP} α_k · β_k · r[k, t]
-```
+Expected activation energy enters the SOC recursion (S10) as a
+deterministic drift; FCR's symmetric activations cancel in
+expectation:
 
-Expected balancing revenue (the new objective contribution, summed over `t`):
+$$\delta^{c}_t = \eta_c\, \Delta t \sum_{k \in \mathrm{DN}} \alpha_k \beta_k\, r_{k,t}, \qquad
+\delta^{d}_t = \frac{\Delta t}{\eta_d} \sum_{k \in \mathrm{UP}} \alpha_k \beta_k\, r_{k,t} \tag{B6}$$
 
-```
-R_cap(t) = dt · Σ_{k in ALL}             α_k · p_cap_k(t) · r[k, t] / 1000
-R_act(t) = dt · Σ_{k in WITH_ACTIVATION} α_k · β_k · p_act_k(t) · r[k, t] / 1000
-```
+Expected revenue added to the objective (S1):
 
-Both up and down activation prices are treated as positive payments to the
-balancing service provider per MWh activated. Sign conventions are the user's
-responsibility on input prices; the shipped defaults follow the most common EU
-convention.
+$$R^{\mathrm{bm}} = \sum_{k \in \mathrm{ALL}} \alpha_k\, \Delta t \sum_t \pi^{\mathrm{cap}}_{k,t}\, r_{k,t} / 1000 \;+\; \sum_{k \in \mathrm{ACT}} \alpha_k \beta_k\, \Delta t \sum_t \pi^{\mathrm{act}}_{k,t}\, r_{k,t} / 1000 \tag{B7}$$
 
-## Monte Carlo realisation
+Both up and down activation prices enter as positive payments per MWh
+activated (the common EU convention); sign-correctness of the input
+prices is the user's responsibility.  Dimension check:
+EUR/MWh × kW × h / 1000 → EUR.
 
-After the MILP fixes the optimal `r*[k, t]`, the rolling-horizon module
-samples `n_scenarios` × per-product per-step independent Bernoullis for
-acceptance (`α_k`) and activation (`β_k`), plus log-normal multiplicative
-noise (`bm_price_sigma_*_pct`) on the capacity and activation prices. SOC
-trajectories are tracked: scenarios that would breach `soc_min` / `soc_max`
-are flagged as `soc_constrained` and truncated. The aggregate output exposes
-P10 / P50 / P90 of balancing revenue and a per-product breakdown.
+The ex-post Monte Carlo realises Eq. (B7)'s expectation with Bernoulli
+acceptance/activation draws and log-normal price noise — equations
+(U4)–(U5) and the SOC-coupling rule in `docs/uncertainty_design.md`.
 
-## Six new invariants
+## Settlement & cashflow equations
 
-* **INV-B1** Sum of per-product capacity shares ≤ 100 % of `bess_power_kw`.
-* **INV-B2** Per-product reservation `r[k, t] ≤ s_k · bess_power_kw`.
-* **INV-B3** Up-direction SOC headroom satisfied at every `t`.
-* **INV-B4** Down-direction SOC headroom satisfied at every `t`.
-* **INV-B5** Per-direction power-budget satisfied at every `t`.
-* **INV-B6** `balancing_enabled = FALSE` ⇒ all `r[k, t] = 0` and the model is
-  bit-identical to the previous release.
+Year-1 expected balancing revenue lands in the KPI dict
+(`bm_total_capacity_revenue_eur`, `bm_total_activation_revenue_eur`),
+is availability-derated once, and projects per Eq. (E11) — on the BESS
+fade curve, indexed by `bm_inflation_pct`:
 
-## Workbook schema
+$$R^{\mathrm{bm,cap/act}}_y = R^{\mathrm{bm,cap/act}}_1\, f^{B}_y\, (1+i_{\mathrm{bm}})^{y-1} \tag{B8}$$
 
-The optional `balancing` sheet uses the same key/value structure as the existing
-parameter sheets. The 34 keys cover the master switch, six capacity shares
-(DAM + five products), ten probabilities (five acceptance × five activation),
-nine default prices (five capacity + four activation; FCR has no activation
-price), the FCR sustained-duration requirement, the balancing settlement
-period, an SOC safety buffer, a balancing-revenue inflation rate, two Monte
-Carlo price sigmas, the Monte Carlo scenario count (`bm_mc_scenarios`) and a
-default seed. The reference workbook keeps the master switch off by default
-so a fresh checkout behaves identically to the previous release.
+The yearly cashflow carries three columns
+(`balancing_capacity_revenue_eur`, `balancing_activation_revenue_eur`,
+`balancing_revenue_eur`); the monthly view allocates them by the
+Year-1 monthly reservation weights (flat 1/12 fallback).  Balancing
+revenue carries **no aggregator fee** (BSPs settle directly with the
+TSO) and is **excluded from LCOE/LCOS** (revenue-agnostic Lazard
+convention; see `docs/economics_design.md`).  Default
+`bm_inflation_pct = 2.0` tracks CPI while DAM stays nominal —
+`pvbess_opt/conventions.md`.
 
-Nine optional per-step timeseries columns sit on the existing `timeseries`
-sheet alongside `pv_kwh`, `load_kwh`, and `dam_price_eur_per_mwh`. Each
-per-product price column is read verbatim when present, or filled with the
-scalar default from the balancing sheet otherwise.
+## KPI definitions
 
-## KPI reference
-
-Every balancing run emits the following keys on the headline KPI dict (zero
-when the gate is off): `bm_<product>_capacity_revenue_eur` for the five
-products, `bm_<product>_activation_revenue_eur` for the four
-activation-paying products, `bm_total_capacity_revenue_eur`,
+Emitted on every balancing run (zero when the gate is off):
+`bm_<k>_capacity_revenue_eur` (×5), `bm_<k>_activation_revenue_eur`
+(×4), `bm_total_capacity_revenue_eur`,
 `bm_total_activation_revenue_eur`, `bm_total_balancing_revenue_eur`,
-`bm_revenue_share_pct`, the two expected activation energies
-(`bm_expected_activation_energy_up_kwh` and `..._dn_kwh`), and per-product
-average reservation `bm_reservation_avg_kw_<product>`.
+`bm_revenue_share_pct` (balancing share of total profit),
+`bm_expected_activation_energy_up_kwh` / `_dn_kwh` (Eq. B6 sums), and
+`bm_reservation_avg_kw_<k>` (×5).  The canonical aggregates
+`revenue_bess_<k>_eur` add capacity + activation per product
+(capacity-only for FCR) — `docs/economics_design.md`.  The Monte Carlo
+adds P10/P50/P90 of total realised revenue, per-product breakdowns,
+`bm_mc_soc_violation_share`, and the raw realisations for the
+histogram.  Financial lifecycle totals:
+`total_balancing_{capacity,activation,}revenue_eur_lifecycle`.
 
-The Monte Carlo helper extends the dict with the P10 / P50 / P90 quantiles
-of total balancing revenue, the per-product capacity and activation
-quantiles, the share of scenarios that hit a SOC bound, and the raw realised
-totals for the histogram plot.
+## Implementation map
 
-The yearly cashflow gains three columns: `balancing_capacity_revenue_eur`,
-`balancing_activation_revenue_eur`, and their sum `balancing_revenue_eur`.
-The financial KPIs include the lifecycle totals
-(`lifetime_bm_revenue_total_eur`, the capacity and activation totals) and a
-per-year list (`lifetime_bm_revenue_eur_per_year`).
+| Equation | Implementing symbol |
+|---|---|
+| (B1) | `optimization.build_model` → `r_balancing` bounds (`balancing.capacity_share_kw`) |
+| (B2)–(B3) | `BM_POWER_DN`, `BM_POWER_UP` |
+| (B4)–(B5) | `BM_SOC_UP`, `BM_SOC_DN` |
+| (B6) | `soc_dynamics` drift terms; KPI mirror `kpis._balancing_soc_drift` |
+| (B7) | `build_model` → `m.balancing_revenue_expr` (`balancing.acceptance_probability`, `activation_probability`); KPI mirror `kpis._compute_balancing_kpis` |
+| (B8) | `economics.build_yearly_cashflow` balancing rows; `lifetime._BALANCING_RESERVATION_COLUMNS` |
+| MC realisation | `rolling_horizon.realise_balancing_scenario`, `monte_carlo_balancing` |
+| config / prices | `balancing.resolve_balancing_config`, `resolve_balancing_timeseries`; validators `io._validate_balancing_config` |
+| plots | `plotting.balancing.plot_balancing_reservation_profile`, `plot_balancing_mc_distribution` (both return None without balancing columns) |
 
-## Plotting reference
+## Validation & tests
 
-Two dedicated balancing plots ship in `pvbess_opt/plotting/balancing.py`:
+Six balancing invariants (post-solve, `optimization._balancing_invariants`):
 
-* `plot_balancing_reservation_profile` — 24-hour average reservation by
-  product, rendered as a stacked area chart.
-* `plot_balancing_mc_distribution` — histogram of realised balancing
-  revenue across the Monte Carlo scenarios with P10 / P50 / P90 lines.
+* **INV-B1** sum of the six capacity shares ≤ 100 % (validator) —
+  `dam_capacity_share_pct` participates in the sum only.
+* **INV-B2** $r_{k,t} \le s_k P^{B}$ per product and step.
+* **INV-B3 / INV-B4** up/down SOC headroom satisfied at every step.
+* **INV-B5** per-direction power budget satisfied at every step.
+* **INV-B6** `balancing_enabled = FALSE` ⇒ all $r_{k,t} = 0$ and the
+  run is bit-identical to the pre-balancing release.
 
-Both helpers return `None` when the dispatch frame does not carry the
-balancing columns so the main pipeline can skip the page write without
-conditionals.
+Test anchors: `tests/test_balancing_module.py` (config/data model),
+`tests/test_balancing_optimization.py` + `tests/test_balancing_invariants.py`
+(B1–B7 on the model), `tests/test_balancing_io.py` +
+`tests/test_balancing_validator_resolved.py` (schema/validators),
+`tests/test_balancing_mc.py` + `tests/test_balancing_mc_coupling.py`
+(U4–U5, SOC coupling), `tests/test_balancing_lifetime_cashflow.py`
+(B8, LCOE/LCOS exclusion), `tests/test_balancing_bess_only.py`,
+`tests/test_balancing_runtime_invariants.py`,
+`tests/test_logic_spec_conformance.py::test_balancing_verification_symbols_present`
+(symbols on a built model), `tests/test_p2_docs_and_refactor.py`
+(`bm_revenue_share_pct` denominator, KPI key-set parity off-vs-on).
 
-## Modelling simplifications
+## Worked example
 
-* **Settlement period.** All five products share a single settlement period
-  equal to `dt_minutes` from the dispatch timeseries; the validator in
-  `pvbess_opt.io._validate_balancing_config` rejects loads where
-  `bm_settlement_minutes != dt_minutes`. In the real European markets the
-  settlement cadences differ — FCR is sub-second, aFRR is typically 4–15 min,
-  mFRR is 15 min — and a higher-fidelity model would resolve each product on
-  its own cadence and re-aggregate to the DAM step. The audit decided to keep
-  the simplification because (a) the workbook cadence is the natural
-  reservation horizon for project-finance analysis, and (b) the worst-case
-  SOC headroom carried by `bm_soc_headroom_pct` already absorbs the within-
-  step variability the sub-cadence model would otherwise add.
-* **FCR symmetry in expectation.** FCR up- and down-activations are assumed
-  to cancel in expectation, so FCR contributes zero net SOC drift. The
-  `fcr_activation_probability_pct` field is retained for documentation and
-  is not consumed by the MILP, KPI, or Monte Carlo paths.
-* **DAM capacity share is declarative.** `dam_capacity_share_pct` is a
-  validator-only field used to ensure `sum(shares) <= 100 %`; DAM dispatch
-  is bounded indirectly by `BM_POWER_UP / BM_POWER_DN` consuming the residual
-  of `bess_power_kw` left over after the balancing reservations in each step.
+1 MW / 4 MWh BESS, hourly cadence: `fcr_capacity_share_pct = 10`,
+$d_{\mathrm{fcr}} = 0.5$ h, $\alpha_{\mathrm{fcr}} = 0.70$,
+$\pi^{\mathrm{cap}}_{\mathrm{fcr}} = 12$ EUR/MWh, $h = 0.10$,
+$\eta = 0.97$, SOC bounds 800–3 800 kWh.
 
-## Worked numerical example
+* Eq. (B1): $r_{\mathrm{fcr}} \le 0.10 \cdot 1000 = 100$ kW.
+* Eq. (B4) at full reservation:
+  $(1.10)(0.5)(100)/0.97 \approx 56.7$ kWh of up-headroom required.
+* Eq. (B7) per step: $0.70 \cdot 1 \cdot 12 \cdot 100/1000 = 0.84$ EUR
+  ⇒ ≈ 7 358 EUR over 8 760 hourly steps at the default share/price.
 
-Project: 1 MW / 4 MWh BESS, hourly cadence, one settlement period of dispatch.
-Configuration: `fcr_capacity_share_pct = 10`, `fcr_required_duration_hours = 0.5`,
-`fcr_bid_acceptance_pct = 70`, `fcr_default_capacity_price_eur_per_mwh = 12`,
-`bm_soc_headroom_pct = 10`, `eta_charge = eta_discharge = 0.97`,
-`soc_min = 800 kWh`, `soc_max = 3 800 kWh`.
+## Assumptions & limitations
 
-* Reservation cap: `r_max[fcr] = 0.10 · 1 000 kW = 100 kW`.
-* SOC headroom (up): `(1 + 0.10) · 0.5 · 100 / 0.97 ≈ 56.7 kWh`. The MILP
-  must keep `soc(t) − 800 ≥ 56.7` kWh at every step where `r[fcr, t] = 100`.
-* Expected capacity revenue per step: `0.70 · 1 · 12 · 100 / 1000 = 0.84 EUR`.
-* Over one year of hourly steps that is `0.84 · 8 760 = 7 358 EUR` at the
-  default share and FCR price.
+* **Single settlement cadence.** All five products settle on the
+  dispatch cadence; `io._validate_balancing_config` rejects
+  `bm_settlement_minutes != dt_minutes`.  Real markets differ (FCR
+  sub-second, aFRR 4–15 min, mFRR 15 min); the worst-case headroom in
+  `bm_soc_headroom_pct` absorbs the within-step variability a
+  sub-cadence model would resolve.
+* **FCR symmetric in expectation** — zero net SOC drift;
+  `fcr_activation_probability_pct` is documentation-only (Appendix §10).
+* **`dam_capacity_share_pct` is declarative** — share-sum validation
+  only; DAM dispatch is bounded indirectly by (B2)–(B3) consuming the
+  residual power.
+* Acceptance/activation independent across steps and products;
+  activation duration equals one step; no re-dispatch after rejection.
+* Expected-value objective: the MILP is risk-neutral; risk shows up
+  only in the ex-post MC distribution.
 
-## Build sequence
+## References
 
-The work is structured as eleven self-contained increments, each landing as one
-local commit:
+* ENTSO-E balancing framework (FCR/aFRR/mFRR product definitions;
+  SAFA convention for FCR).
+* `docs/uncertainty_design.md` (MC realisation),
+  `docs/economics_design.md` (cashflow/fee/LCOE-LCOS scope),
+  `docs/README.md` (notation), `pvbess_opt/conventions.md`.
 
-* setup and this design note
-* workbook schema in `io.py`
-* `pvbess_opt/balancing.py` module (data model + synthetic generator)
-* MILP extension in `optimization.py`
-* KPIs in `kpis.py`
-* economics and lifetime cashflow integration
-* Monte Carlo realisation in `rolling_horizon.py`
-* plotting (yearly stack, MC histogram, reservation profile)
-* tests (unit, integration, invariant, Monte Carlo)
-* reference workbook update with the new sheet and synthetic timeseries
-* documentation, changelog, version bump
+---
+
+## Appendix: verification and falsification log
+
+Each numbered section states the intended math, cites the implementing
+symbol, and records a **PASS / FAIL** status from the audit.  The
+named symbols are pinned by
+`tests/test_logic_spec_conformance.py::test_balancing_verification_symbols_present`
+against a built model, so this log cannot silently drift from the
+code.  (`file.py:NN` references are indicative of the audited
+revision; the symbols are the stable anchors.)
+
+### 1. Product taxonomy — PASS
+
+Every consumer iterates the canonical tuples
+(`balancing.PRODUCTS_ALL/UP/DN/SYMMETRIC/WITH_ACTIVATION`) without
+re-deriving them: the MILP (reservation variable, power-budget and
+SOC-headroom rules, revenue terms), the KPI layer, and the Monte Carlo
+(Bernoulli draws + SOC-trajectory check).  FCR is consistently
+symmetric and capacity-only across all three layers.
+
+### 2. MILP power budget — PASS, `BM_POWER_DN` / `BM_POWER_UP`
+
+Implemented exactly as Eqs. (B2)–(B3): both sides resolve to kWh per
+step ($r_{k,t}$ lifted by $\Delta t$); FCR included in both
+directions.
+
+### 3. SOC headroom — PASS, `BM_SOC_UP` / `BM_SOC_DN`
+
+Implemented exactly as Eqs. (B4)–(B5); the η placement matches (divide
+by $\eta_d$ for up-delivery, multiply by $\eta_c$ for down-absorption),
+and FCR uses $d_{\mathrm{fcr}}$ instead of $\Delta t$ because the
+sustained-output requirement is independent of the settlement period.
+
+### 4. Expected SOC drift in `soc_dynamics` — PASS
+
+The drift terms of Eq. (B6) appear in the SOC recursion and its
+terminal-step copy; the KPI helper `kpis._balancing_soc_drift`
+implements the same formula term-for-term and
+`verify_dispatch_invariants` consumes it, keeping invariants 3, 4 and
+8 aligned with the MILP.  FCR is absent from both directional tuples
+— zero net drift, matching the symmetric-FCR simplification.
+
+### 5. Expected revenue dimensions — PASS
+
+Eq. (B7) as implemented: `/1000` converts EUR/MWh × kW × h → EUR; FCR
+is excluded from the activation loop by iterating
+`PRODUCTS_WITH_ACTIVATION`.  The KPI mirror uses the same numeric
+formula.
+
+### 6. MC SOC-violation coupling — PASS
+
+`rolling_horizon.realise_balancing_scenario` captures the per-product
+`activated` arrays in the revenue pass and reuses them in the SOC
+pass: a scenario cannot report revenue from activations missing from
+its SOC trace, nor "SOC OK" on a trace that never earned.  Falsified
+and fixed during the audit; regression:
+`tests/test_balancing_mc_coupling.py`.
+
+### 7. Lifetime / cashflow scaling — PASS
+
+`lifetime._BALANCING_RESERVATION_COLUMNS` scales reservations on
+`bess_factor(y)`; the cashflow composes
+year-$y$ revenue = year-1 revenue × $f^{B}_y$ × $(1+i_{\mathrm{bm}})^{y-1}$
+(Eq. B8), with $i_{\mathrm{bm}}$ from the balancing sheet.
+
+### 8. LCOE / LCOS exclusion — PASS
+
+The LCOE and LCOS numerators are built strictly from per-asset CAPEX /
+DEVEX / OPEX / replacement; no `bm_*` term enters either, and
+balancing produces no DAM-discharge MWh for the LCOS denominator.
+Balancing reaches NPV / IRR / payback via `build_yearly_cashflow`
+only.  Toggling `balancing_enabled` leaves LCOE/LCOS unchanged
+(regression: `tests/test_balancing_lifetime_cashflow.py`).
+
+### 9. `dam_capacity_share_pct` semantics — PASS, declarative-only
+
+Validator-only: the share-sum rule
+$\sum$ shares (DAM + five products) ≤ 100 %.  No MILP or KPI consumer
+caps DAM flows on it — DAM dispatch is bounded indirectly by
+(B2)–(B3).
+
+### 10. `fcr_activation_probability_pct` informational-only — PASS
+
+Declared, range-validated, stored on `BalancingConfig`, and never read
+by the MILP, KPI, or Monte Carlo paths
+(`PRODUCTS_WITH_ACTIVATION` excludes FCR).  The field is preserved on
+the schema so a future FCR activation-revenue stream can land without
+a workbook migration.

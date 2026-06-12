@@ -70,9 +70,23 @@ compatibility surface is maintained.
 - Stochastic balancing market participation across FCR, aFRR, and
   mFRR with per-product capacity reservation, expected-value MILP,
   and Monte Carlo realisation.
+- Pay-as-produced PPA contract engine on a configurable share of PV
+  export: physical (sleeved) or two-way-CfD settlement, the
+  PPA-adjusted dispatch price `(1-s)·DAM + s·strike`, contract-term
+  cutoff with post-term reversion of the covered DAM value, its own
+  inflation index, a dedicated `ppa` workbook sheet, a `PPA price`
+  tornado driver, and bit-identical disabled runs.
 - Project finance pipeline: lifetime cashflow, NPV, IRR, ROI, BCR,
   LCOE, LCOS, payback.  Inflation indexation per revenue / cost
-  stream.
+  stream.  Optional debt/equity leverage layer (gearing, annuity or
+  linear amortisation, equity IRR, minimum DSCR, debt schedule
+  sheet).
+- Grid-emissions accounting and 24/7 CFE scoring from a grid CO2
+  intensity (scalar with annual decline, or a per-step timeseries
+  column); off by default.
+- Optional per-source max-injection sub-caps
+  (`max_injection_profile_pv` / `max_injection_profile_bess` sheets)
+  on top of the combined hour-of-day injection cap.
 - IEEE-styled PDF reporting with full plotting suite, including
   per-product balancing revenue breakdowns (yearly stack, per-month
   BESS revenue, BESS revenue waterfall, capacity-vs-activation split).
@@ -86,7 +100,16 @@ compatibility surface is maintained.
 - Batch scenario comparison (inheritance, per-section overrides, CAPEX
   multiplier, balancing on/off) driven from the workbook's tidy
   `scenarios` sheet (gated by an `enabled` toggle) or a `--scenarios`
-  YAML / JSON file.
+  YAML / JSON file.  Unknown override targets fail fast with a
+  did-you-mean hint; the three configuration surfaces (workbook,
+  YAML/JSON config, scenario dotted targets) are regression-locked
+  mirrors of one another.
+- Publication-grade domain design documents under `docs/`
+  (`self_consumption_design.md`, `merchant_design.md`,
+  `balancing_market_design.md`, `ppa_design.md`,
+  `economics_design.md`, `uncertainty_design.md`) sharing one
+  template and one notation table (`docs/README.md`), every numbered
+  equation mapped to its implementing symbol.
 
 ### Solver
 
