@@ -43,6 +43,17 @@ EUR metrics
 * ``expense_charge_bess_grid_eur``.
 * ``profit_total_eur``.
 
+The **nine canonical revenue aggregates** consumed by the financial
+pipeline and the plot stack — ``revenue_pv_dam_eur``,
+``revenue_pv_ppa_eur``, ``revenue_bess_dam_eur``,
+``revenue_self_consumption_eur``, and the five per-product
+``revenue_bess_<product>_eur`` balancing aggregates — are defined with
+their construction rules in ``docs/economics_design.md``; the
+balancing ``bm_*`` key families are catalogued in
+``docs/balancing_market_design.md``.  Every revenue-bearing key is
+availability-derated exactly once
+(:func:`pvbess_opt.availability.apply_unavailability_derate`).
+
 Rolling-horizon metrics (only when ``--rolling-horizon`` is active)
 -------------------------------------------------------------------
 

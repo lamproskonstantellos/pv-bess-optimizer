@@ -2011,7 +2011,6 @@ def _typed_to_flat(
     project = typed["project"]
     pv = typed["pv"]
     bess = typed["bess"]
-    sim = typed["simulation"]
     ts = typed["ts"]
 
     bess_power_kw = float(bess["bess_power_kw"])
@@ -2086,10 +2085,6 @@ def _typed_to_flat(
         # PPA contract section — same nested-dict pattern; consumed by
         # the MILP objective and the per-step EUR columns.
         "ppa": dict(typed.get("ppa") or PPA_SHEET_DEFAULTS),
-        # simulation
-        "plot_daily_scope": str(sim["plot_daily_scope"]),
-        "plot_monthly_scope": str(sim["plot_monthly_scope"]),
-        "plot_yearly_scope": str(sim["plot_yearly_scope"]),
     }
     return params, ts
 

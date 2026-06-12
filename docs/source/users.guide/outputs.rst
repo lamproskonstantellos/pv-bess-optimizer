@@ -3,7 +3,9 @@ Output artifacts
 
 A run produces a single result directory under ``results/``.
 
-* ``00_summary/`` — ``run_log.txt`` (full stdout + stderr capture).
+* ``00_summary/`` — ``SUMMARY.md`` (the run digest: capacities,
+  headline KPIs, artifact map) and ``run_log.txt`` (full stdout +
+  stderr capture).
 * ``01_inputs/`` — ``input_snapshot.xlsx`` (a verbatim copy of the
   workbook used) and ``assumptions_summary.txt`` (a flat dump of the
   parsed parameters and economic assumptions).
@@ -18,7 +20,7 @@ A run produces a single result directory under ``results/``.
   IRR tornados, rolling-horizon distribution (when active).
 * ``05_energy_plots/<calendar_year>/`` — daily / monthly / yearly
   PDFs.  Each resolution is gated by its scope flag on the
-  ``economic`` sheet (``plot_daily_scope`` /
+  ``simulation`` sheet (``plot_daily_scope`` /
   ``plot_monthly_scope`` / ``plot_yearly_scope``); each accepts
   ``none`` | ``year1_only`` | ``all``.
 

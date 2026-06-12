@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If this software contributes to academic work, please cite it using the metadata below."
+type: software
+title: "PV & BESS Optimizer: MILP dispatch and project-finance pipeline for co-located PV + battery systems"
+authors:
+  - family-names: "Konstantellos"
+    given-names: "Lampros"
+version: "0.9.0"
+date-released: "2026-06-12"
+repository-code: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
+url: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
+abstract: >-
+  Mixed-integer linear programming model for co-located PV + BESS
+  dispatch at 15-minute resolution, with a multi-year project-finance
+  pipeline, stochastic balancing-market participation (FCR/aFRR/mFRR),
+  a pay-as-produced PPA contract engine, and rolling-horizon Monte
+  Carlo for uncertainty analysis. Targets the Greek self-consumption
+  and merchant regulatory regimes.
+keywords:
+  - photovoltaics
+  - battery energy storage
+  - MILP
+  - dispatch optimization
+  - project finance
+  - balancing markets
+  - power purchase agreement

@@ -1,7 +1,7 @@
 """Conformance tests: lock docs/* against pvbess_opt.
 
-The two canonical specs at ``docs/self_consumption_logic_spec.md`` and
-``docs/balancing_logic_verification.md`` describe the MILP contract in
+The two canonical design docs at ``docs/self_consumption_design.md``
+and ``docs/balancing_market_design.md`` describe the MILP contract in
 prose. This test parses the symbol names out of those files and asserts
 each one is attached to a freshly built Pyomo model, so adding a
 constraint in code without documenting it (or vice versa) breaks CI.
@@ -13,9 +13,9 @@ Three checks:
 * Audit invariants under "Nine audit invariants" appear in
   :func:`pvbess_opt.optimization.verify_dispatch_invariants` output
   and stay within :data:`pvbess_opt.kpis.ENERGY_TOLERANCE`.
-* Symbols cited as PASS in §2 / §3 of the balancing verification doc
-  (``BM_POWER_DN``, ``BM_POWER_UP``, ``BM_SOC_UP``, ``BM_SOC_DN``,
-  ``r_balancing``) exist on a balancing-enabled model.
+* Symbols claimed PASS in the verification appendix of the balancing
+  design doc (``BM_POWER_DN``, ``BM_POWER_UP``, ``BM_SOC_UP``,
+  ``BM_SOC_DN``, ``r_balancing``) exist on a balancing-enabled model.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ from pvbess_opt.optimization import (
 from tests._balancing_helpers import _balancing_on
 
 ROOT = Path(__file__).resolve().parent.parent
-SELF_CONSUMPTION_SPEC = ROOT / "docs" / "self_consumption_logic_spec.md"
-BALANCING_VERIFICATION = ROOT / "docs" / "balancing_logic_verification.md"
+SELF_CONSUMPTION_SPEC = ROOT / "docs" / "self_consumption_design.md"
+BALANCING_VERIFICATION = ROOT / "docs" / "balancing_market_design.md"
 
 # Sections in the self-consumption spec are organised under H2 anchors;
 # the constraint names live as H3s ("### NAME(t)" or "### NAME, ...") and
@@ -172,7 +172,7 @@ def test_self_consumption_spec_constraints_present(short_ts):
     assert not missing, (
         "self-consumption MILP is missing constraints documented in the spec: "
         f"{missing}. Either add the constraint to the model or remove the "
-        "H3 from docs/self_consumption_logic_spec.md."
+        "H3 from docs/self_consumption_design.md."
     )
 
 
@@ -205,14 +205,14 @@ def test_self_consumption_invariants_within_tolerance(short_ts):
 
 
 def test_balancing_verification_symbols_present(short_ts):
-    """The PASS symbols in §§2-3 of the balancing doc exist on a model."""
+    """The PASS symbols in the balancing appendix exist on a model."""
     text = _read(BALANCING_VERIFICATION)
     # Cheap sanity: every documented symbol must actually appear in the
     # verification doc (catches a rename that bypassed the doc).
     for symbol in _BALANCING_SYMBOLS:
         assert symbol in text, (
             f"symbol {symbol!r} is asserted by the conformance test but "
-            "is not mentioned in docs/balancing_logic_verification.md."
+            "is not mentioned in docs/balancing_market_design.md."
         )
 
     params = _balancing_on(_self_consumption_params())
@@ -220,5 +220,5 @@ def test_balancing_verification_symbols_present(short_ts):
     missing = [s for s in _BALANCING_SYMBOLS if not hasattr(model, s)]
     assert not missing, (
         "balancing-enabled MILP is missing symbols claimed PASS in "
-        f"docs/balancing_logic_verification.md: {missing}."
+        f"docs/balancing_market_design.md: {missing}."
     )

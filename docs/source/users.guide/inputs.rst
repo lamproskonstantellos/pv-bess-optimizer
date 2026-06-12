@@ -1,11 +1,13 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook.  Eight core data sheets —
+The optimiser consumes a single Excel workbook.  Nine core data sheets —
 ``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
-``simulation``, ``balancing``, ``max_injection_profile`` — carry the run,
-plus two optional sweep sheets, ``sizing`` and ``scenarios`` (each gated
-by an ``enabled`` toggle and shipped disabled).  All keys use lowercase
+``balancing``, ``ppa``, ``simulation``, ``max_injection_profile`` —
+carry the run, plus the optional per-source sub-cap sheets
+(``max_injection_profile_pv`` / ``max_injection_profile_bess``) and two
+optional sweep sheets, ``sizing`` and ``scenarios`` (each gated by an
+``enabled`` toggle and shipped disabled).  All keys use lowercase
 snake_case.
 
 Sheet ``timeseries``
@@ -189,7 +191,15 @@ Sheet ``economics``
 * ``sensitivity_enabled`` / ``sensitivity_capex_delta_pct`` /
   ``sensitivity_opex_delta_pct`` /
   ``sensitivity_revenue_delta_pct`` /
-  ``sensitivity_discount_rate_delta_pp`` — tornado configuration.
+  ``sensitivity_discount_rate_delta_pp`` /
+  ``sensitivity_ppa_price_delta_pct`` — tornado configuration (the
+  PPA-price driver activates only with an enabled contract).
+* ``benchmark_lcoe_low_eur_per_mwh`` / ``benchmark_lcoe_high_eur_per_mwh``
+  / ``benchmark_lcos_low_eur_per_mwh`` /
+  ``benchmark_lcos_high_eur_per_mwh`` — Lazard 2024 band overlays
+  drawn on the LCOE / LCOS summary plots (defaults 30 / 85 and
+  157 / 274 EUR/MWh); presentation-only, never enter the metric
+  computation.
 
 Debt / equity leverage
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -271,8 +281,48 @@ Optional FCR / aFRR / mFRR balancing-market block, gated by
 cap is a share of ``bess_power_kw`` and every revenue KPI is zero
 whenever ``bess_power_kw == 0`` or ``balancing_enabled`` is FALSE,
 regardless of PV nameplate or load profile.  See
-:mod:`pvbess_opt.balancing` for the per-product configuration and the
-formal contract.
+:mod:`pvbess_opt.balancing` for the per-product configuration and
+``docs/balancing_market_design.md`` for the formal contract.
+
+The 34 keys (defaults in the design doc's Inputs table):
+
+* ``balancing_enabled`` — master switch (FALSE).
+* Capacity shares, % of ``bess_power_kw``, sum across all six ≤ 100:
+  ``dam_capacity_share_pct`` (declarative, share-sum validation only),
+  ``fcr_capacity_share_pct``, ``afrr_up_capacity_share_pct``,
+  ``afrr_dn_capacity_share_pct``, ``mfrr_up_capacity_share_pct``,
+  ``mfrr_dn_capacity_share_pct``.
+* Bid-acceptance probabilities (%): ``fcr_bid_acceptance_pct``,
+  ``afrr_up_bid_acceptance_pct``, ``afrr_dn_bid_acceptance_pct``,
+  ``mfrr_up_bid_acceptance_pct``, ``mfrr_dn_bid_acceptance_pct``.
+* Activation probabilities (%): ``fcr_activation_probability_pct``
+  (informational only — FCR carries no activation payment),
+  ``afrr_up_activation_probability_pct``,
+  ``afrr_dn_activation_probability_pct``,
+  ``mfrr_up_activation_probability_pct``,
+  ``mfrr_dn_activation_probability_pct``.
+* Fallback capacity prices (EUR/MWh, used when the timeseries column
+  is absent): ``fcr_default_capacity_price_eur_per_mwh``,
+  ``afrr_up_default_capacity_price_eur_per_mwh``,
+  ``afrr_dn_default_capacity_price_eur_per_mwh``,
+  ``mfrr_up_default_capacity_price_eur_per_mwh``,
+  ``mfrr_dn_default_capacity_price_eur_per_mwh``.
+* Fallback activation prices (EUR/MWh; FCR has none):
+  ``afrr_up_default_activation_price_eur_per_mwh``,
+  ``afrr_dn_default_activation_price_eur_per_mwh``,
+  ``mfrr_up_default_activation_price_eur_per_mwh``,
+  ``mfrr_dn_default_activation_price_eur_per_mwh``.
+* ``fcr_required_duration_hours`` — FCR sustained-output requirement.
+* ``bm_settlement_minutes`` — must equal the timeseries cadence
+  (validated; the runtime uses the auto-detected ``dt_minutes``).
+* ``bm_soc_headroom_pct`` — SOC safety buffer on the worst-case
+  activation reservation.
+* ``bm_inflation_pct`` — yearly indexation of the balancing revenue
+  lines in the multi-year cashflow.
+* ``bm_price_sigma_capacity_pct`` / ``bm_price_sigma_activation_pct``
+  — log-normal Monte Carlo price sigmas.
+* ``bm_mc_scenarios`` / ``bm_random_seed`` — Monte Carlo size and
+  seed.
 
 The Year-1 balancing capacity + activation revenues flow into the
 cashflow as ``balancing_revenue_eur`` and are then escalated by
@@ -323,8 +373,15 @@ economics key adds a PPA-price tornado driver when the contract is on.
 Sheet ``simulation``
 --------------------
 
-* The 11 ``uncertainty_*`` keys driving the rolling-horizon Monte
-  Carlo (see :doc:`/technical.documentation/uncertainty_modelling`).
+* The 12 ``uncertainty_*`` keys driving the rolling-horizon Monte
+  Carlo — ``uncertainty_enabled``, ``uncertainty_compare_sources``,
+  ``uncertainty_n_seeds``, ``uncertainty_window_hours``,
+  ``uncertainty_commit_hours``, ``uncertainty_dam_enabled``,
+  ``uncertainty_pv_enabled``, ``uncertainty_load_enabled``,
+  ``uncertainty_sigma_dam``, ``uncertainty_sigma_pv``,
+  ``uncertainty_sigma_load``, ``uncertainty_diagnostics_enabled`` —
+  with their defaults tabulated in
+  :doc:`/technical.documentation/uncertainty_modelling`.
 * ``plot_daily_scope`` / ``plot_monthly_scope`` /
   ``plot_yearly_scope`` ∈ ``none | year1_only | all``.
 * ``uncertainty_diagnostics_enabled`` (default ``TRUE``) — render the
@@ -463,8 +520,12 @@ referenced by ``timeseries_path`` (a CSV / Parquet file) rather than a
 
 Run it with ``pvbess --config run.yaml``.  A structured config and the
 equivalent workbook parse to the same typed dict and produce identical
-results.  :func:`pvbess_opt.io_read.config_json_schema` emits a JSON
-Schema for external validation and
+results: every section accepts exactly the keys of the matching workbook
+sheet, an unknown or misplaced key is warned about and ignored (the same
+semantics as the workbook loader), and a ``bess`` section that omits
+``bess_degradation_pct_per_cycle`` runs calendar-only fade exactly like a
+workbook that omits the row.  :func:`pvbess_opt.io_read.config_json_schema`
+emits a JSON Schema for external validation and
 :func:`pvbess_opt.io_read.validate_config` checks a config against it.
 
 PVGIS PV profiles (location-sourced)
@@ -616,7 +677,12 @@ examples/scenarios.yaml`` lists the same overrides as nested mappings::
         capex_multiplier: 0.8
 
 Each scenario runs through the same path as a standalone run, so its
-results match running it alone.  The batch writes a styled
+results match running it alone.  Every override target must name a real
+workbook key — any ``<sheet>.<key>`` from the seven parameter sheets, the
+short aliases above, or the bare specials.  An unknown target raises a
+``ValueError`` naming the scenario and the offending key *before* any
+solver time is spent: a typo'd override would otherwise silently produce
+a comparison row identical to the base case.  The batch writes a styled
 ``scenario_comparison.xlsx`` (one row per scenario: NPV / IRR / payback /
 LCOE / LCOS + revenue by stream) plus a comparison-bars plot and a
 revenue bridge between the first two scenarios.  Scenarios vary on a

@@ -8,14 +8,14 @@ in order:
    sheet — PV now lives in the single ``pv_kwh`` column.
 2. Sweep every sheet for the prior amber bootstrap fill (``FFF2CC``)
    and reset it to *no fill*.
-3. Rebuild the ``pv`` sheet from the canonical template so the source
-   switch (``pv_source``) and the PVGIS location / geometry rows
-   (``latitude``, ``longitude``, ``tilt``, ``azimuth``, ``losses_pct``,
-   ``weather_year``, ``timeseries_path``) are present; existing values are
-   preserved by key.  Rebuild the ``notes`` column of the other parameter
-   sheets (``project``, ``bess``, ``economics``, ``simulation``,
-   ``balancing``) from the canonical templates in :mod:`pvbess_opt.io` so
-   wording changes in the typed dict actually reach the workbook.
+3. Rebuild every parameter sheet (``project``, ``pv``, ``bess``,
+   ``economics``, ``simulation``, ``balancing``, ``ppa``) from the
+   canonical row templates in :mod:`pvbess_opt.io`: existing values are
+   preserved by key; rows are rewritten in template order; keys removed
+   from the schema are dropped; new schema keys are added with their
+   defaults; missing parameter sheets are created.  A migrated workbook
+   therefore carries the same rows in the same order as a freshly
+   generated one.
 4. Apply the shared house style via
    :func:`pvbess_opt.io_style.style_worksheet`: navy ``#1F3864`` frozen
    header (white bold font, thin ``#BFBFBF`` bottom border), AutoFit
@@ -103,16 +103,27 @@ def _drop_legacy_pv_override(ws: Worksheet) -> bool:
     return True
 
 
-def _sync_pv_sheet(ws: Worksheet) -> int:
-    """Rebuild the ``pv`` sheet rows from the canonical template.
+def _sync_param_sheet(ws: Worksheet, sheet_name: str) -> int:
+    """Rebuild a parameter sheet's rows from the canonical template.
 
-    Existing values are preserved by key; rows the template adds
-    (``pv_source`` and the PVGIS location / geometry rows) are written with
-    their template defaults.  The ``value`` / ``unit`` / ``notes`` columns
-    are rewritten so the sheet matches :func:`pvbess_opt.io.write_workbook`.
-    Returns the number of rows written.
+    Existing values are preserved by key; everything else is canonical:
+
+    * rows are rewritten in TEMPLATE ORDER, so a migrated workbook and a
+      freshly generated one (:func:`pvbess_opt.io.write_workbook`) carry
+      the same rows in the same order;
+    * keys the template adds are written with their default value / unit
+      / notes;
+    * rows whose key has been removed from the schema are DROPPED (the
+      loader already warns-and-ignores them; carrying them in the shipped
+      workbook would advertise dead knobs);
+    * the ``unit`` / ``notes`` columns are rewritten so wording changes
+      in the typed dict actually reach the workbook.
+
+    Returns the number of rows written.  Unknown sheets are a no-op.
     """
-    template = _SHEET_ROW_TEMPLATES["pv"]
+    template = _SHEET_ROW_TEMPLATES.get(sheet_name)
+    if template is None:
+        return 0
     key_col = _column_index(ws, "key")
     value_col = _column_index(ws, "value")
     unit_col = _column_index(ws, "unit")
@@ -120,11 +131,20 @@ def _sync_pv_sheet(ws: Worksheet) -> int:
     if key_col is None or value_col is None or unit_col is None or notes_col is None:
         return 0
 
+    template_keys = {key for key, _default, _unit, _notes in template}
     existing: dict[str, object] = {}
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
         key_cell = row[key_col - 1]
-        if isinstance(key_cell.value, str) and key_cell.value.strip():
-            existing[key_cell.value.strip()] = row[value_col - 1].value
+        if not isinstance(key_cell.value, str) or not key_cell.value.strip():
+            continue
+        key = key_cell.value.strip()
+        if key not in template_keys:
+            logger.info(
+                "%s: dropping removed schema key %r (row %d).",
+                sheet_name, key, key_cell.row,
+            )
+            continue
+        existing[key] = row[value_col - 1].value
 
     last_row = max(ws.max_row, len(template) + 1)
     for r in range(2, last_row + 1):
@@ -132,102 +152,17 @@ def _sync_pv_sheet(ws: Worksheet) -> int:
             ws.cell(row=r, column=c).value = None
 
     for idx, (key, default, unit, notes) in enumerate(template):
+        if key not in existing:
+            logger.info(
+                "%s: appending new schema key %r with its default %r.",
+                sheet_name, key, default,
+            )
         r = idx + 2
         ws.cell(row=r, column=key_col).value = key
         ws.cell(row=r, column=value_col).value = existing.get(key, default)
         ws.cell(row=r, column=unit_col).value = unit
         ws.cell(row=r, column=notes_col).value = notes
     return len(template)
-
-
-def _rebuild_parameter_notes(ws: Worksheet, sheet_name: str) -> int:
-    """Migrate a parameter sheet to the canonical row template.
-
-    Three operations against :data:`_SHEET_ROW_TEMPLATES`:
-
-    * rewrite the ``notes`` column of every key the template knows, so
-      wording changes in the typed dict reach the workbook;
-    * DROP rows whose key has been removed from the schema (the loader
-      already warns-and-ignores them; carrying them in the shipped
-      workbook would advertise dead knobs);
-    * APPEND rows for template keys the sheet does not carry yet, with
-      their default value / unit / notes.
-
-    Returns the number of cells rewritten so the caller can log it.
-    Unknown sheets are a no-op.
-    """
-    template = _SHEET_ROW_TEMPLATES.get(sheet_name)
-    if template is None:
-        return 0
-    notes_by_key = {key: notes for key, _default, _unit, notes in template}
-
-    header = [(cell.value, cell.column) for cell in ws[1]]
-    key_col = next(
-        (c for v, c in header if isinstance(v, str) and v.strip().lower() == "key"),
-        None,
-    )
-    value_col = next(
-        (c for v, c in header if isinstance(v, str) and v.strip().lower() == "value"),
-        None,
-    )
-    unit_col = next(
-        (c for v, c in header if isinstance(v, str) and v.strip().lower() == "unit"),
-        None,
-    )
-    notes_col = next(
-        (c for v, c in header if isinstance(v, str) and v.strip().lower() == "notes"),
-        None,
-    )
-    if key_col is None or notes_col is None:
-        return 0
-
-    # Drop rows whose key left the schema (bottom-up so indices hold).
-    seen_keys: set[str] = set()
-    for row in reversed(list(ws.iter_rows(min_row=2, max_row=ws.max_row))):
-        key_cell = row[key_col - 1]
-        if not isinstance(key_cell.value, str) or not key_cell.value.strip():
-            continue
-        key = key_cell.value.strip()
-        if key not in notes_by_key:
-            logger.info(
-                "%s: dropping removed schema key %r (row %d).",
-                sheet_name, key, key_cell.row,
-            )
-            ws.delete_rows(key_cell.row, 1)
-            continue
-        seen_keys.add(key)
-
-    rewritten = 0
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-        key_cell = row[key_col - 1]
-        if not isinstance(key_cell.value, str):
-            continue
-        key = key_cell.value.strip()
-        new_notes = notes_by_key.get(key)
-        if new_notes is None:
-            continue
-        notes_cell = row[notes_col - 1]
-        if notes_cell.value != new_notes:
-            notes_cell.value = new_notes
-        rewritten += 1
-
-    # Append template keys the sheet does not carry yet.
-    if value_col is not None and unit_col is not None:
-        next_row = ws.max_row + 1
-        for key, default, unit, notes in template:
-            if key in seen_keys:
-                continue
-            logger.info(
-                "%s: appending new schema key %r with its default %r.",
-                sheet_name, key, default,
-            )
-            ws.cell(row=next_row, column=key_col).value = key
-            ws.cell(row=next_row, column=value_col).value = default
-            ws.cell(row=next_row, column=unit_col).value = unit
-            ws.cell(row=next_row, column=notes_col).value = notes
-            next_row += 1
-            rewritten += 1
-    return rewritten
 
 
 def _center_header_row(ws: Worksheet) -> None:
@@ -241,7 +176,7 @@ def _ensure_parameter_sheets(wb) -> None:
     """Create any canonical parameter sheet the workbook does not carry.
 
     The schema-migration counterpart of the drop/append logic in
-    :func:`_rebuild_parameter_notes`: a NEW sheet (e.g. ``ppa``) is
+    :func:`_sync_param_sheet`: a NEW sheet (e.g. ``ppa``) is
     created with the ``key | value | unit | notes`` header and its
     template rows, placed after the last existing parameter sheet so
     the workbook keeps its canonical ordering.
@@ -285,10 +220,8 @@ def polish_workbook(path: Path) -> dict[str, int]:
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         cleared_by_sheet[sheet_name] = _clear_amber_fills(ws)
-        if sheet_name == "pv":
-            _sync_pv_sheet(ws)
-        elif sheet_name in _PARAMETER_SHEETS:
-            _rebuild_parameter_notes(ws, sheet_name)
+        if sheet_name in _PARAMETER_SHEETS:
+            _sync_param_sheet(ws, sheet_name)
         style_worksheet(ws)
         if sheet_name in _CENTERED_HEADER_SHEETS:
             _center_header_row(ws)

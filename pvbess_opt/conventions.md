@@ -137,10 +137,12 @@ every consumer:
 
 ## Default inflation: balancing tracks CPI, DAM is held nominal
 
-The economics defaults set `bm_inflation_pct = 2.0` (Greek balancing
-market historically tracks inflation as the TSO indexes capacity
-payments) while `dam_inflation_pct = 0.0` (wholesale DAM stays at the
-nominal user-supplied price unless explicitly overridden, since DAM
-price forecasts already incorporate an inflation view in their
-trajectory).  Override either knob in the `economics` sheet to model
-an explicit indexation curve.
+The schema defaults set `bm_inflation_pct = 2.0` on the `balancing`
+sheet (Greek balancing market historically tracks inflation as the TSO
+indexes capacity payments) while the `economics` sheet sets
+`dam_inflation_pct = 0.0` (wholesale DAM stays at the nominal
+user-supplied price unless explicitly overridden, since DAM price
+forecasts already incorporate an inflation view in their trajectory).
+Override each knob on its own sheet to model an explicit indexation
+curve; `read_economic_params` merges all parameter sheets, so both
+reach the cashflow through the same flat dict.

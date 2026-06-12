@@ -29,11 +29,23 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .io import _SHEET_DEFAULTS, write_workbook
+from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS, write_workbook
 
 logger = logging.getLogger(__name__)
 
 STRUCTURED_SUFFIXES: frozenset[str] = frozenset({".yaml", ".yml", ".json"})
+
+# Top-level config keys accepted besides the seven sheet sections.
+_TOP_LEVEL_EXTRAS: frozenset[str] = frozenset({
+    "timeseries",
+    "timeseries_path",
+    "financing",
+    "grid",
+    "max_injection_profile",
+    "max_injection_profile_pv",
+    "max_injection_profile_bess",
+    "sizing",  # read separately by pvbess_opt.sizing.read_sizing_block
+})
 
 # Reference specific yield (kWh/kWp/yr) and divergence threshold for the PV
 # consistency check.  EU-representative; the resource layer (PVGIS) calls it.
@@ -145,16 +157,56 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
     path = Path(path)
     raw = _load_raw(path)
     typed: dict[str, Any] = {}
+    for key in raw:
+        if key in _SHEET_DEFAULTS or key in _TOP_LEVEL_EXTRAS:
+            continue
+        if key == "scenarios":
+            # Honoured only via --scenarios <file>; flag the no-op loudly.
+            logger.warning(
+                "Config %s carries a 'scenarios' block, which is ignored "
+                "for config files — pass it via --scenarios instead.", path,
+            )
+            continue
+        logger.warning(
+            "Config top-level key %r is unknown; ignored.", key,
+        )
     for section, defaults in _SHEET_DEFAULTS.items():
         user = raw.get(section)
         if user is None:
             user = {}
         if not isinstance(user, dict):
             raise ValueError(f"Config section {section!r} must be a mapping.")
-        # Drop the config-only timeseries_path hint from the pv section so it
-        # does not leak into the workbook pv sheet.
-        user = {k: v for k, v in user.items() if k != "timeseries_path"}
-        typed[section] = {**defaults, **user}
+        known: dict[str, Any] = {}
+        for key, value in user.items():
+            if key in defaults:
+                known[key] = value
+                continue
+            if section == "pv" and key == "timeseries_path":
+                # Config-only hint consumed by _resolve_timeseries; keep it
+                # out of the workbook pv sheet.
+                continue
+            # Mirror the workbook loader's unknown-key semantics
+            # (io._parse_kv_sheet): warn and ignore, naming the owning
+            # sheet when the key merely sits in the wrong section.
+            if key in _KEY_TO_SHEET:
+                logger.warning(
+                    "Key %r found in %r section but belongs to %r; ignored.",
+                    key, section, _KEY_TO_SHEET[key],
+                )
+                continue
+            logger.warning(
+                "%s section key %r is unknown; ignored.", section, key,
+            )
+        typed[section] = {**defaults, **known}
+        if section == "bess" and "bess_degradation_pct_per_cycle" not in known:
+            # Mirror io.read_workbook: a config that omits the cycle-fade
+            # coefficient runs calendar-only, exactly like a workbook that
+            # omits the row.
+            typed["bess"]["bess_degradation_pct_per_cycle"] = 0.0
+            logger.info(
+                "[bess] bess_degradation_pct_per_cycle not found in "
+                "config; defaulting to 0.0 (calendar-only mode)."
+            )
     _apply_financing_block(raw, typed)
     _apply_grid_block(raw, typed)
     typed["ts"] = _resolve_timeseries(raw, path.parent)

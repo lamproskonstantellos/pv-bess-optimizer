@@ -8,9 +8,10 @@
 ## What it does
 
 Mixed-integer linear programming model for co-located PV + BESS dispatch
-at 15-minute resolution, with a multi-year project-finance pipeline,
-stochastic balancing-market participation, and rolling-horizon Monte
-Carlo for uncertainty analysis.
+at 15-minute resolution (auto-detected cadence), with a multi-year
+project-finance pipeline, stochastic balancing-market participation
+(FCR / aFRR / mFRR), a pay-as-produced PPA contract engine, and
+rolling-horizon Monte Carlo for uncertainty analysis.
 
 Two regulatory regimes are supported:
 
@@ -70,6 +71,31 @@ Override the workbook value at the CLI:
 python main.py inputs/input.xlsx --mode merchant --outdir results/merchant
 ```
 
+## Configuration surfaces
+
+Three configuration surfaces exist, and they are exact,
+regression-locked mirrors of one another
+(`tests/test_input_surface_parity.py`):
+
+1. **The workbook** (`inputs/input.xlsx`) — the primary surface.
+   Every parameter is a row on one of the seven kv sheets; the sheets
+   are migrated to the canonical schema by
+   `python scripts/polish_input_workbook.py` (drops removed keys,
+   appends new ones in template order, creates missing sheets,
+   preserves your values by key).
+2. **A YAML / JSON config** (`pvbess --config run.yaml`) — sections
+   mirror the sheets key-for-key, the timeseries comes from a
+   `timeseries_path` CSV / Parquet (or an inline list), and the config
+   is materialized to a real workbook that re-enters the same read
+   path, so results are identical by construction.  Unknown or
+   misplaced keys warn and are ignored, exactly like the workbook
+   loader.
+3. **Scenario overrides** — the workbook `scenarios` sheet and a
+   `--scenarios file.yaml` share one resolution path; every
+   `<sheet>.<key>` dotted target (plus the documented aliases and the
+   `balancing` / `capex_multiplier` specials) is reachable, and an
+   unknown target raises before any solver time is spent.
+
 ## Input workbook reference
 
 The canonical workbook is `inputs/input.xlsx`.  Every sheet's first row
@@ -116,13 +142,21 @@ location".
 
 `bess_power_kw` (symmetric charge / discharge limit),
 `bess_capacity_kwh`, round-trip efficiencies, SOC bounds,
-`max_cycles_per_day`, cycle-fade coefficient, replacement year.
+`max_cycles_per_day`, calendar and per-cycle fade coefficients,
+replacement year and cost, the end-of-life SOH threshold, and the
+optional `bess_wear_cost_eur_per_mwh` dispatch shadow price.
 
 ### `economics`
 
-Discount rate, OPEX / inflation rates per stream
-(`retail_inflation_pct`, `dam_inflation_pct`), CAPEX and DEVEX per
-asset and per site, sensitivity-tornado deltas, aggregator fee.
+Discount rate, OPEX inflation, per-stream revenue indexation
+(`retail_inflation_pct`, `dam_inflation_pct`), aggregator fee,
+LCOE / LCOS benchmark-band overrides, the five sensitivity-tornado
+deltas (CAPEX / OPEX / revenue / discount-rate / PPA-price), the
+debt layer (`gearing_pct`, `debt_interest_rate_pct`,
+`debt_tenor_years`, `debt_repayment`), and grid-emissions
+intensity for the optional 24/7-CFE accounting.  Per-asset CAPEX /
+DEVEX / OPEX live on the `pv` and `bess` sheets; the site-wide lump
+sums on `project`.
 
 ### `simulation`
 
@@ -252,9 +286,9 @@ prices are perturbed separately by
 
 Generated under `results/<run>/04_financial_plots/`:
 
-* Yearly revenue stack (PV-load, BESS-load, PV-DAM, BESS-DAM, 5
-  balancing products, aggregator fee, grid-charging cost) with net
-  line.
+* Yearly revenue stack (PV-load, BESS-load, PV-DAM, BESS-DAM, the PPA
+  contract leg when a contract is on, 5 balancing products, aggregator
+  fee, grid-charging cost) with net line.
 * BESS revenue waterfall — single chart stepping from BESS-DAM through
   every balancing product to the total BESS revenue.
 * BESS revenue capacity-vs-activation split — grouped bar per
@@ -263,8 +297,10 @@ Generated under `results/<run>/04_financial_plots/`:
   products per calendar month.
 * Lifetime cycles per operating year.
 * Cumulative cashflow + payback marker.
-* Monthly cashflow Year 1.
-* NPV / IRR tornado plots.
+* Monthly cashflow Year 1 (CAPEX / DEVEX events booked in month 12, so
+  the monthly and yearly DCFs agree).
+* NPV / IRR tornado plots (drivers: CAPEX, OPEX, revenue, discount
+  rate — NPV only — and PPA price when a contract is on).
 * NPV waterfall.
 * LCOE / LCOS summary with Lazard 2024 benchmark band.
 * Rolling-horizon Monte Carlo distribution.
@@ -301,14 +337,21 @@ lockstep:
   cross-module test sweep keeps them numerically identical.
 * **Availability** — `unavailability_pct` is applied once, post-solve,
   to the Year-1 energy / revenue KPIs and the lifetime aggregates.
-* **Aggregator fee** — a non-negative deduction on gross DAM + retail
-  revenue (never on balancing revenue), applied once in the cashflow.
+* **Aggregator fee** — a non-negative deduction applied once to the
+  gross DAM + retail revenue only; balancing revenue (TSO-settled) and
+  PPA revenue (bilateral offtake) never carry it.
+* **PPA stream** — the contract leg is its own cashflow column with
+  its own indexation; after `ppa_term_years` the covered volume's DAM
+  value reverts into the DAM stream (where the fee applies), and a
+  disabled contract leaves every output bit-identical to a pre-PPA
+  build.
 * **LCOE / LCOS** — Lazard-style: per-asset CAPEX / DEVEX / OPEX (plus
   discounted BESS replacement) over discounted delivered MWh.  Site-wide
-  lump sums and balancing revenue are excluded by convention.  For an
-  LCOS comparable to the Lazard band, supply `capex_bess_eur_per_kw` as
-  the *full installed* cost (duration_h × EUR/kWh) — a power-block-only
-  figure understates LCOS against that band.
+  lump sums, balancing revenue, and PPA revenue are excluded by
+  convention.  For an LCOS comparable to the Lazard band, supply
+  `capex_bess_eur_per_kw` as the *full installed* cost
+  (duration_h × EUR/kWh) — a power-block-only figure understates LCOS
+  against that band.
 * **Battery wear cost** — an optional €/MWh shadow price that shapes
   dispatch only; it is never added to the cashflow, so degradation is
   not double-counted with the replacement CAPEX.
@@ -319,6 +362,36 @@ re-solved; the regulatory model targets the Greek self-consumption and
 merchant regimes; balancing participation is expected-value in the MILP
 with Monte Carlo realisation ex-post.
 
+## Documentation map
+
+The mathematical specification lives in the domain design documents
+under [`docs/`](docs/README.md) — one template, one shared notation
+table, every numbered equation mapped to its implementing symbol:
+
+* [`docs/self_consumption_design.md`](docs/self_consumption_design.md) —
+  the self-consumption MILP: variables, objective, every hard
+  constraint, the nine audit invariants (machine-checked against the
+  built model by `tests/test_logic_spec_conformance.py`).
+* [`docs/merchant_design.md`](docs/merchant_design.md) — the merchant
+  regime: pinning constraints, cap semantics, the merchant objective.
+* [`docs/balancing_market_design.md`](docs/balancing_market_design.md) —
+  FCR / aFRR / mFRR reservations, expected-value MILP terms, the six
+  balancing invariants, and the verification appendix.
+* [`docs/ppa_design.md`](docs/ppa_design.md) — the PPA engine:
+  settlements, the `(1-s)·DAM + s·strike` dispatch price, term and
+  reversion.
+* [`docs/economics_design.md`](docs/economics_design.md) — year
+  conventions, the nine revenue aggregates, fee clamp, degradation
+  factors, debt, NPV/IRR/payback, LCOE/LCOS.
+* [`docs/uncertainty_design.md`](docs/uncertainty_design.md) —
+  rolling-horizon MC, the foresight gap, balancing MC, sensitivity
+  drivers.
+
+The Sphinx manual (`make -C docs html`) carries the user's guide
+(installation, workbook reference, outputs, CLI) and links to the
+design docs as the authoritative formulation; cross-module lockstep
+rules live in [`pvbess_opt/conventions.md`](pvbess_opt/conventions.md).
+
 ## Citing
 
 If this tool contributes to academic work, please cite it as:
@@ -328,6 +401,23 @@ Konstantellos, L. (2026). PV & BESS Optimizer (v0.9.0): MILP dispatch
 and project-finance pipeline for co-located PV + battery systems.
 https://github.com/lamproskonstantellos/pv-bess-optimizer
 ```
+
+BibTeX:
+
+```bibtex
+@software{konstantellos_pv_bess_optimizer_2026,
+  author  = {Konstantellos, Lampros},
+  title   = {{PV} \& {BESS} Optimizer: {MILP} dispatch and
+             project-finance pipeline for co-located {PV} + battery
+             systems},
+  version = {0.9.0},
+  year    = {2026},
+  url     = {https://github.com/lamproskonstantellos/pv-bess-optimizer}
+}
+```
+
+A [`CITATION.cff`](CITATION.cff) ships at the repository root, so
+GitHub's "Cite this repository" button serves the same metadata.
 
 ## Development
 
