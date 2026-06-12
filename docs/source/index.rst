@@ -4,9 +4,10 @@ pv-bess-optimizer — PV + BESS dispatch optimizer
 =================================================
 
 **pv-bess-optimizer** is a Mixed-Integer Linear Programming (MILP) model
-for hourly dispatch optimization, with PV + BESS capacity sizing (a sweep
-over the dispatch solve), a multi-year project-finance pipeline and
-rolling-horizon Monte Carlo for uncertainty analysis.
+for sub-hourly dispatch optimization (15-minute canonical cadence,
+auto-detected from the timeseries), with PV + BESS capacity sizing (a
+sweep over the dispatch solve), a multi-year project-finance pipeline
+and rolling-horizon Monte Carlo for uncertainty analysis.
 
 Two regulatory regimes are supported:
 

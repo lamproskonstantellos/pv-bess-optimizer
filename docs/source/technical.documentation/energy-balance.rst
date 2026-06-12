@@ -13,7 +13,11 @@ maximum residual:
 * ``max_export_definition_residual_kwh``
   — ``grid_export_total_kwh - (pv_to_grid_kwh + bess_dis_grid_kwh)``.
 * ``max_soc_dynamics_residual_kwh``
-  — ``soc[t+1] - soc[t] - (efficiency_charge × charge - discharge / efficiency_discharge)``.
+  — ``soc[t+1] - soc[t] - (efficiency_charge × charge - discharge / efficiency_discharge)``;
+  when ``balancing_enabled`` the expected-activation drift
+  (:func:`pvbess_opt.kpis._balancing_soc_drift`, equation B6 in
+  ``docs/balancing_market_design.md``) is included in the expected
+  delta, so a balancing run does not flag spurious SOC residuals.
 
 The default tolerance is :data:`pvbess_opt.kpis.ENERGY_TOLERANCE`
 = 1e-3 kWh per timestep.  Residuals above this threshold are logged at

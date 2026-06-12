@@ -6,7 +6,10 @@ The annual MILP solved by ``pvbess_opt.optimization.run_scenario`` is a
 output, and load and produces an upper bound on achievable profit.
 Real operators never have that visibility.  The package supplies a
 workbook-driven rolling-horizon Monte Carlo so the foresight gap is
-quantifiable.
+quantifiable.  The authoritative formulation (equations U1–U5, noise
+construction, foresight gap, balancing Monte Carlo, sensitivity
+drivers) is ``docs/uncertainty_design.md``; this page matches it and
+adds the workbook/CLI plumbing.
 
 Sources of uncertainty
 ----------------------
@@ -45,7 +48,7 @@ as in the input.
 Workbook configuration (the ``# uncertainty`` group)
 ----------------------------------------------------
 
-Eleven keys on the simulation sheet drive the rolling-horizon engine:
+Twelve keys on the simulation sheet drive the rolling-horizon engine:
 
 .. list-table::
    :header-rows: 1
@@ -86,6 +89,9 @@ Eleven keys on the simulation sheet drive the rolling-horizon engine:
    * - ``uncertainty_sigma_load``
      - ``0.05``
      - Log-normal sigma, load.
+   * - ``uncertainty_diagnostics_enabled``
+     - ``TRUE``
+     - Emit the input-uncertainty diagnostic PDFs.
 
 The CLI flags ``--rolling-horizon``, ``--monte-carlo``,
 ``--window-hours``, ``--commit-hours``,
@@ -163,11 +169,16 @@ When to use what
 Implementation notes
 --------------------
 
-* The rolling-horizon dispatcher pins the BESS energy capacity to the
-  first window's solution so subsequent windows operate against the
+* The BESS energy capacity is pinned to ``bess_capacity_kwh`` inside
+  ``build_model``, so every window automatically operates against the
   same physical asset.
 * SOC carryover happens at the end of each committed slice — there is
-  no closed-cycle constraint within a window.
+  no closed-cycle constraint *within* a window, but when
+  ``terminal_soc_equal`` is TRUE the window reaching the end of the
+  horizon pins its post-final-step SOC back to the year-initial SOC,
+  so the stitched dispatch honours the same closed cycle as the
+  perfect-foresight benchmark (equation U2 in
+  ``docs/uncertainty_design.md``).
 * KPIs are re-evaluated against the original (noise-free) timeseries
   by default (``evaluate_with_actuals=True``).  This reflects realised
   performance rather than what the solver thought it was getting.

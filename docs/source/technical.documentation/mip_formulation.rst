@@ -4,6 +4,16 @@ MIP formulation
 The MILP is formulated in `Pyomo <https://pyomo.readthedocs.io/>`_ and
 lives in :mod:`pvbess_opt.optimization`.
 
+.. note::
+
+   The **authoritative formulation** — every constraint as a numbered
+   equation with its implementing symbol — lives in the domain design
+   documents ``docs/self_consumption_design.md`` (equations S1–S34),
+   ``docs/merchant_design.md`` (M1–M3) and
+   ``docs/balancing_market_design.md`` (B1–B8), indexed by
+   ``docs/README.md``.  This page is a one-stop summary kept verbatim-
+   consistent with those documents.
+
 Decision variables (per timestep, kWh)
 --------------------------------------
 
@@ -12,8 +22,14 @@ Decision variables (per timestep, kWh)
 * ``bess_dis_load[t]``, ``bess_dis_grid[t]`` — BESS discharge.
 * ``grid_to_load[t]``, ``grid_to_bess[t]`` — grid-bound flows.
 * ``soc[t]`` — state-of-charge (kWh).
+* ``slack[t]`` — surplus-only-export slack
+  (``self_consumption`` only).
 * ``y_charge[t]``, ``y_dis[t]``, ``y_grid_io[t]``, ``z_pv_active[t]``
-  — binary indicators.
+  — binary indicators (``y_grid_io`` exists in ``self_consumption``
+  only; ``z_pv_active`` only when grid charging is enabled).
+* ``r_balancing[k, t]`` — per-product reserved kW
+  (``balancing_enabled`` only; see
+  ``docs/balancing_market_design.md``).
 
 The BESS energy capacity ``e_cap`` is a fixed parameter pinned to
 ``bess_capacity_kwh`` from the workbook — no longer a decision
@@ -42,6 +58,23 @@ SOC dynamics:
    \text{soc}[t+1] = \text{soc}[t] + \eta_{\text{ch}} \cdot
        (p^{\text{bess←pv}}_t + p^{\text{grid→bess}}_t)
        - \frac{p^{\text{bess→load}}_t + p^{\text{bess→grid}}_t}{\eta_{\text{dis}}}
+       + \delta^{\text{ch}}_t - \delta^{\text{dis}}_t
+
+where the expected-activation drift terms
+:math:`\delta^{\text{ch}}_t, \delta^{\text{dis}}_t` are nonzero only
+when ``balancing_enabled`` (equation B6 in
+``docs/balancing_market_design.md``).  SOC is bounded inside
+``[soc_min_frac, soc_max_frac] × e_cap``; ``soc[0]`` is pinned to
+``initial_soc_frac × e_cap``; with ``terminal_soc_equal = TRUE`` the
+post-final-step SOC closes the cycle back to ``soc[0]``
+(``SOC_TERM``), otherwise it is only kept within the SOC bounds.
+
+Daily cycle cap — per calendar day :math:`d`:
+
+.. math::
+
+   \sum_{t \in d} \left(p^{\text{bess→load}}_t + p^{\text{bess→grid}}_t\right)
+   \le \text{max\_cycles\_per\_day} \cdot e_{\text{cap}}
 
 Charge / discharge power limits — a single symmetric per-step energy
 cap derived from ``bess_power_kw``:
@@ -93,14 +126,42 @@ optional ``grid_cap_includes_load`` project input:
   load is physically injected at the plant connection point too, so the
   regulatory limit is a **physical plant-injection cap**, not merely a
   surplus-export cap.  Load priority stays strict but shares the cap: its
-  floor becomes :math:`\min(\text{pv}_t, l_t, \text{cap}_t)`, so the load
-  takes all available injection capacity before any surplus export.  When
+  floor becomes :math:`\min(\text{pv}_t, l_t, \text{cap}_t)` — and when a
+  PV-source sub-cap sheet is supplied the floor is additionally bounded
+  by the per-step PV sub-cap — so the load takes all available injection
+  capacity before any surplus export.  When
   the cap cannot fit the full load the uncovered remainder is grid-served
   at the retail tariff and surplus PV is curtailed — the run is never
   infeasible, it degrades to the maximum feasible coverage.  In
   ``merchant`` mode there is no
   co-located load, so :math:`g_t` collapses to surplus export and the
   flag is a no-op.
+
+Optional per-source injection sub-caps — when the
+``max_injection_profile_pv`` / ``max_injection_profile_bess`` sheets
+are supplied, the PV-origin and BESS-origin injections are additionally
+capped per step (``EXPORT_CAP_PV`` / ``EXPORT_CAP_BESS``); the combined
+cap above still binds.
+
+Grid-charging gates — only when ``allow_bess_grid_charging = TRUE``
+and a BESS is present (both modes):
+
+.. math::
+
+   p^{\text{grid→bess}}_t \le M^{\text{ch}} \cdot (1 - z^{\text{pv}}_t),
+   \qquad
+   p^{\text{pv}}_t \le M^{\text{pv}} \cdot z^{\text{pv}}_t
+
+so the BESS charges from the grid only in steps where PV is effectively
+zero.  With the flag off, ``grid_to_bess[t] = 0`` is pinned.
+
+Balancing extension — with ``balancing_enabled = TRUE`` the model
+additionally carries the per-product reservation bounds, the
+per-direction power budgets (``BM_POWER_DN`` / ``BM_POWER_UP``), the
+SOC headroom constraints (``BM_SOC_UP`` / ``BM_SOC_DN``) and the
+expected-revenue objective terms — equations B1–B7 in
+``docs/balancing_market_design.md`` (this page does not duplicate
+them).
 
 In ``self_consumption`` mode additionally:
 

@@ -5,6 +5,7 @@ See :doc:`outputs` for the full reference.  Quick summary::
 
     results/<input>_<scenario>_<timestamp>/
     ├── 00_summary/
+    │   ├── SUMMARY.md
     │   └── run_log.txt
     ├── 01_inputs/
     │   ├── input_snapshot.xlsx

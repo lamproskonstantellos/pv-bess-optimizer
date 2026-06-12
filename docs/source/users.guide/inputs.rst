@@ -1,11 +1,13 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook.  Eight core data sheets —
+The optimiser consumes a single Excel workbook.  Nine core data sheets —
 ``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
-``simulation``, ``balancing``, ``max_injection_profile`` — carry the run,
-plus two optional sweep sheets, ``sizing`` and ``scenarios`` (each gated
-by an ``enabled`` toggle and shipped disabled).  All keys use lowercase
+``balancing``, ``ppa``, ``simulation``, ``max_injection_profile`` —
+carry the run, plus the optional per-source sub-cap sheets
+(``max_injection_profile_pv`` / ``max_injection_profile_bess``) and two
+optional sweep sheets, ``sizing`` and ``scenarios`` (each gated by an
+``enabled`` toggle and shipped disabled).  All keys use lowercase
 snake_case.
 
 Sheet ``timeseries``
