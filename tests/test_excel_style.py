@@ -135,7 +135,7 @@ def test_results_and_dispatch_workbooks_are_styled(tmp_path):
     for sn in rwb.sheetnames:
         _assert_sheet_styled(rwb[sn])
 
-    dispatch_xlsx = result.out_dir / "02_dispatch" / "dispatch_hourly.xlsx"
+    dispatch_xlsx = result.out_dir / "02_dispatch" / "dispatch_timeseries.xlsx"
     assert dispatch_xlsx.exists()
     dwb = load_workbook(dispatch_xlsx)
     assert dwb.sheetnames

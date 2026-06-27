@@ -2364,7 +2364,7 @@ def write_summary_md(
     lines.append("## Where to look next")
     lines.append("")
     lines.append("- `03_results.xlsx` — KPIs, cashflows, sensitivity, lifetime")
-    lines.append("- `02_dispatch/dispatch_hourly.xlsx` — per-step dispatch")
+    lines.append("- `02_dispatch/dispatch_timeseries.xlsx` — per-step dispatch")
     lines.append("- `04_financial_plots/` and `05_energy_plots/` — figures")
     lines.append("- `00_summary/run_log.txt` — full run log")
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2381,7 +2381,7 @@ def write_dispatch_artifacts(
     """Write the ``02_dispatch/`` artefacts."""
     dispatch_dir = Path(dispatch_dir)
     dispatch_dir.mkdir(parents=True, exist_ok=True)
-    out = dispatch_dir / "dispatch_hourly.xlsx"
+    out = dispatch_dir / "dispatch_timeseries.xlsx"
 
     if lifetime_df is not None and not lifetime_df.empty:
         with pd.ExcelWriter(out, engine="openpyxl") as writer:

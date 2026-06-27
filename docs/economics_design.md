@@ -324,8 +324,10 @@ quarterly aggregates by $q = \lceil m/3 \rceil$.
 `total_capex_eur` / `total_devex_eur` / `total_capex_devex_eur`
 (lifecycle incl. replacement), `total_opex_eur_lifecycle`,
 `total_revenue_eur_lifecycle`, `total_aggregator_fee_eur_lifecycle`,
-`total_balancing_{capacity,activation,}revenue_eur_lifecycle`,
-`total_ppa_revenue_eur_lifecycle`, `lcoe_eur_per_mwh`,
+`lifetime_bm_revenue_total_eur` /
+`lifetime_bm_capacity_revenue_total_eur` /
+`lifetime_bm_activation_revenue_total_eur`,
+`lifetime_ppa_revenue_total_eur`, `lcoe_eur_per_mwh`,
 `lcos_eur_per_mwh` (+ their `lcoe_disc_*`/`lcos_disc_*` components),
 `pv_capacity_factor`, `bess_lifetime_cycles`, the three
 `bess_*_fade_pct_y_final` keys, `project_start_year` /
@@ -391,7 +393,8 @@ Year 2: $f^{PV}_2 = 0.98$; retail = 300·0.98·1.02 = 299.88; DAM =
 396.29/1.21 = 327.51.  NPV = −1000 + 363.64 + 327.51 = −308.85.
 Cumulative CF: −1000, −600, −203.71 — no crossing, payback = NaN
 (Eq. E19).  IRR solves $-1000 + 400/(1+x) + 396.29/(1+x)^2 = 0$ →
-$x \approx -25.5\%$.
+$x \approx -13.95\%$ (the positive root $u = 1/(1+x) \approx 1.162$ of
+$396.29\,u^2 + 400\,u - 1000 = 0$).
 
 ## Assumptions & limitations
 

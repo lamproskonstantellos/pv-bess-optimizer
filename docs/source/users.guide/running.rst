@@ -60,7 +60,7 @@ A run writes to
 
     00_summary/        SUMMARY.md, run_log.txt
     01_inputs/         input_snapshot.xlsx, assumptions_summary.txt
-    02_dispatch/       dispatch_hourly.xlsx (one sheet per calendar year)
+    02_dispatch/       dispatch_timeseries.xlsx (one sheet per calendar year)
     03_results.xlsx    KPIs, cashflows, financial KPIs, sensitivity,
                        rolling-horizon MC distribution
     04_financial_plots/ cumulative, waterfall, payback, tornados,

@@ -1,9 +1,38 @@
 # Changelog
 
-## 0.9.0 — Current state (unreleased)
+## 0.9.0 — 2026-06-27
 
-Feature-complete pre-release.  No prior versions have shipped; no
+First production release.  No prior versions have shipped; no
 compatibility surface is maintained.
+
+### Production-readiness hardening
+
+- **Input validation.** `validate_workbook_params` now reads the PV/BESS
+  CAPEX/OPEX keys from the sheets they actually live on (they were read
+  from `economics`, so a negative CAPEX was silently accepted and flipped
+  the Year-0 outflow to an inflow), and its non-negative coverage extends
+  to DEVEX, the site lump sums, the degradation / cycle-fade percentages,
+  the replacement year and cost, and the grid-CO2 intensity; `gearing_pct`
+  and `grid_co2_annual_decline_pct` are range-checked to `[0, 100]`.
+- **Fail loud on bad enums.** An invalid value for any known enum (not
+  just `mode`) now raises instead of silently falling back to the default;
+  an unknown `ppa_settlement` is rejected; the YAML/JSON config surface
+  validates and normalises through the same per-key parser as the
+  workbook.
+- **CLI / scenarios.** `--mode` is now applied to `--scenarios` batches
+  (it was ignored); `--config` shadowing a positional workbook and
+  `--scenarios` overriding an enabled `sizing` sheet now warn.
+- **Domain fixes.** Widened the IRR bisection bracket to `-0.999` to match
+  the spec; guarded the oversizing break-even against duplicate-capacity
+  divide-by-zero; `build_model` raises when a self-consumption run is
+  missing `load_kwh`.
+- **Tooling / docs.** `scripts/polish_input_workbook.py` runs as the
+  documented standalone command (added the repo-root `sys.path`
+  bootstrap); the design docs' KPI-key names, worked-example IRR and
+  sensitivity-frame columns were corrected to match the code; the README
+  documents balancing as a both-mode opt-in feature, the per-source
+  max-injection sheets, the presentation knobs and the emissions plots.
+- **PNG figure export** for the README result gallery.
 
 ### Changed (financial reporting consistency)
 

@@ -51,6 +51,11 @@ FORBIDDEN = (
 SCAN_GLOBS = ("**/*.py", "**/*.md", "**/*.rst")
 ALLOWED_PATHS = {
     "tests/test_repo_hygiene.py",
+    # The production-readiness report is a process/audit artifact (not an
+    # evergreen user surface); it necessarily records phase and
+    # finding-number annotations as data, so — like this file — it
+    # allow-lists itself out of the version/phase regex scan.
+    "docs/production_readiness_report.md",
 }
 SKIP_DIR_PARTS = {
     "__pycache__", "build", ".git", "_static", "_templates",
@@ -108,6 +113,8 @@ FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
     Path(p) for p in (
         "tests/test_plot_scopes.py",
         "tests/test_repo_hygiene.py",
+        # Audit artifact: records phase / finding-number tokens as data.
+        "docs/production_readiness_report.md",
     )
 )
 

@@ -160,14 +160,18 @@ revenue also drive the realised SOC excursion
 $+B\,r\,\Delta t\,\eta_c$ for down-products) around the scheduled
 trajectory; a scenario whose excursion violates the SOC bounds
 (±10⁻⁶ kWh tolerance) is flagged, and the pipeline reports the
-violating fraction as `bm_mc_soc_violation_share` — revenue and SOC
-views of one scenario are bit-consistent by construction.
+violating share (as a **percent** of scenarios) as
+`bm_soc_constrained_scenarios_pct` — revenue and SOC views of one
+scenario are bit-consistent by construction.
 
-Outputs (`rolling_horizon.monte_carlo_balancing`): P10/P50/P90 of
-total balancing revenue, per-product mean breakdowns, the violation
-share, and the raw realisations for the histogram plot; every figure
-is scaled by the same availability factor as the deterministic
-`bm_*` KPIs so P50 is comparable with
+Outputs (`rolling_horizon.monte_carlo_balancing`):
+`bm_total_balancing_revenue_p10/p50/p90_eur` (total realised revenue
+quantiles), per-product `bm_<product>_capacity_revenue_p10/p50/p90_eur`
+and `bm_<product>_activation_revenue_p10/p50/p90_eur` breakdowns,
+`bm_soc_constrained_scenarios_pct` (the SOC-violation share), and
+`bm_mc_total_realised_eur` (the raw realisations for the histogram
+plot); every figure is scaled by the same availability factor as the
+deterministic `bm_*` KPIs so P50 is comparable with
 `bm_total_balancing_revenue_eur`.
 
 ### Sensitivity analysis (one-at-a-time tornado)
@@ -186,11 +190,14 @@ KPIs (`sensitivity.run_sensitivity_analysis`):
 
 NPV tornado shows all active drivers; the IRR tornado drops
 DiscountRate (`variables_for_irr_sensitivity`).  Output: an 11-column
-tidy frame (driver, label, case base/low/high, delta, driver value,
-NPV, IRR, payback, LCOE, LCOS, …) written to the
-`sensitivity_analysis` sheet.  LCOE/LCOS ranges use the exported
-discounted components (Eq. E21–E22 note) rather than a multiplicative
-approximation.
+tidy frame written to the `sensitivity_analysis` sheet —
+`variable`, `label`, `scenario` (base/low/high), `delta_value`,
+`value`, `npv_eur`, `irr_pct`, `payback_years`, `delta_npv_eur`,
+`delta_irr_pp`, `delta_payback_years`.  (The frame itself carries no
+LCOE/LCOS columns; the LCOE/LCOS tornado plot instead derives its
+ranges from the exported `lcoe_disc_*` / `lcos_disc_*` discounted
+components — Eq. E21–E22 note — rather than a multiplicative
+approximation.)
 
 ## Settlement & cashflow equations
 
@@ -205,17 +212,19 @@ parameters.
 
 * `foresight_gap_pct` per seed (Eq. U3); pipeline aggregates
   `foresight_gap_pct_p10/p50/p90` and, in comparison mode, the four
-  `foresight_gap_pct_p50_<source>` keys.
-* `rh_profit_total_eur_p10/p50/p90` — ensemble profit quantiles.
-* `bm_mc_revenue_p10/p50/p90_eur`, `bm_mc_soc_violation_share`,
-  per-product mean realisations.
-* The sensitivity sheet's KPI columns per driver case.
+  `foresight_gap_pct_p50_<source>` keys, plus the run metadata
+  `mc_n_seeds` / `mc_window_hours` / `mc_commit_hours`.
+* `bm_total_balancing_revenue_p10/p50/p90_eur`,
+  `bm_soc_constrained_scenarios_pct`, `bm_mc_total_realised_eur` (raw
+  realisations), and per-product
+  `bm_<product>_{capacity,activation}_revenue_p10/p50/p90_eur`.
+* The sensitivity sheet's columns per driver case (above).
 
 ## Implementation map
 
 | Equation | Implementing symbol |
 |---|---|
-| (U1) | `rolling_horizon._lognormal_multiplier`, `_lognormal_unit_mean` |
+| (U1) | `rolling_horizon._lognormal_multiplier` (forecast noise via `add_forecast_noise`); `_lognormal_unit_mean` is the same unit-mean draw for the balancing-MC price multipliers $\xi$ in (U5) |
 | noise per source | `rolling_horizon.add_forecast_noise` |
 | (U2) | `rolling_horizon.rolling_horizon_dispatch` (window loop, SOC carry, year-close pin) |
 | actuals restore | `rolling_horizon.PRICE_COLUMNS` + `kpis.add_economic_columns` |

@@ -1,10 +1,12 @@
 """Sphinx configuration for the pv-bess-optimizer documentation.
 
 Builds the docs site (Read-the-Docs theme) from ``docs/source/`` into
-``docs/build/`` via::
+``docs/build/html/`` via::
 
     pip install -r requirements/docs.txt
-    sphinx-build -b html docs/source docs/build
+    sphinx-build -b html docs/source docs/build/html
+
+or, equivalently, ``make -C docs html`` (the canonical entry point).
 """
 
 from __future__ import annotations
