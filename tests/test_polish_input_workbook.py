@@ -187,3 +187,34 @@ def test_polish_is_idempotent(tmp_path: Path) -> None:
         "polish_workbook is not idempotent: sheet-state hash changed "
         "across two consecutive runs."
     )
+
+
+def test_script_runs_standalone_without_install(tmp_path: Path) -> None:
+    """The README-documented command ``python scripts/polish_input_workbook.py``
+    must run from a checkout where the package is not pip-installed: the
+    script puts the repo root on ``sys.path`` itself (the script's own
+    directory, not the repo root, is ``sys.path[0]`` for a file
+    invocation).  Regression for the missing bootstrap that raised
+    ``ModuleNotFoundError: No module named 'pvbess_opt'``."""
+    import os
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parent.parent
+    workbook_path = tmp_path / "input.xlsx"
+    write_workbook(_build_minimal_typed(), workbook_path)
+
+    env = dict(os.environ)
+    # Drop PYTHONPATH so the subprocess cannot inherit the repo root that
+    # way — the script's own bootstrap must do the work.  cwd is tmp_path
+    # (not the repo root) for the same reason.
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        [sys.executable, str(repo_root / "scripts" / "polish_input_workbook.py"),
+         str(workbook_path)],
+        capture_output=True, text=True, cwd=str(tmp_path), env=env,
+    )
+    assert result.returncode == 0, (
+        "standalone `python scripts/polish_input_workbook.py` failed:\n"
+        + result.stderr
+    )

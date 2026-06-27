@@ -32,15 +32,24 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 
-from pvbess_opt.io import _SHEET_ROW_TEMPLATES
-from pvbess_opt.io_style import style_worksheet
-from pvbess_opt.theme import HEADER_CENTER
+# Allow running as a standalone script
+# (``python scripts/polish_input_workbook.py``) from a checkout where the
+# package is not pip-installed: put the repo root on sys.path before the
+# first-party imports (mirrors scripts/resample_timeseries.py).
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from pvbess_opt.io import _SHEET_ROW_TEMPLATES  # noqa: E402
+from pvbess_opt.io_style import style_worksheet  # noqa: E402
+from pvbess_opt.theme import HEADER_CENTER  # noqa: E402
 
 AMBER_FILL_HEXES: frozenset[str] = frozenset({
     "FFF2CC", "00FFF2CC",

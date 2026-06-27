@@ -1,0 +1,176 @@
+"""Export a curated set of result figures as PNG for the README gallery.
+
+GitHub cannot inline the PDF report figures, so this script renders two
+representative full-year scenarios through the normal pipeline with the
+figure format switched to PNG — the single switch
+:func:`pvbess_opt.plotting.style.set_figure_format`, so no plotting code
+is forked — and copies a small curated set into ``docs/assets/`` with
+descriptive names.
+
+Scenarios (both on the shipped ``inputs/input.xlsx``: PV 15 MWp,
+BESS 15 MW / 60 MWh, 20-year horizon, 7 % discount):
+
+* **Merchant + balancing** — DAM dispatch with FCR/aFRR/mFRR
+  participation on; yields the revenue stack (with balancing products),
+  the BESS-revenue waterfall, the LCOS band, and the cumulative-cashflow
+  / payback chart.
+* **Self-consumption** — retail-settled load coverage, no balancing;
+  yields the daily dispatch + SOC trace and the revenue stack.
+
+Re-runnable; overwrites the gallery PNGs in place.  Run from anywhere::
+
+    python scripts/export_readme_figures.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from pvbess_opt.io import read_workbook, write_workbook  # noqa: E402
+from pvbess_opt.pipeline import RunConfig, run  # noqa: E402
+from pvbess_opt.plotting.style import set_figure_format  # noqa: E402
+
+logger = logging.getLogger("export_readme_figures")
+
+ASSETS_DIR = REPO_ROOT / "docs" / "assets"
+
+# A representative summer day (15-min steps) for the daily dispatch trace —
+# ~21 June, when both PV and the load shape are most illustrative.
+_SUMMER_DAY_START_STEP = 96 * 171
+_STEPS_PER_DAY = 96
+
+# Curated figure picks: {glob under the run folder: destination name}.
+# The financial figures come from full-year runs; the daily dispatch trace
+# comes from a one-day run (see ``_build_workbook``).
+_MERCHANT_FIGURES = {
+    "04_financial_plots/revenue_stack_yearly_*.png": "merchant_revenue_stack.png",
+    "04_financial_plots/bess_revenue_waterfall.png": "merchant_bess_revenue_waterfall.png",
+    "04_financial_plots/lcos_summary.png": "merchant_lcos_band.png",
+    "04_financial_plots/cumulative_cashflow_with_payback_*.png":
+        "merchant_cumulative_cashflow.png",
+}
+_SELF_CONSUMPTION_FINANCIAL_FIGURES = {
+    "04_financial_plots/revenue_stack_yearly_*.png":
+        "self_consumption_revenue_stack.png",
+}
+_SELF_CONSUMPTION_DAILY_FIGURES = {
+    "05_energy_plots/**/daily_combined_with_soc_*.png":
+        "self_consumption_daily_dispatch_soc.png",
+}
+
+
+def _build_workbook(
+    dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
+) -> Path:
+    """Materialise a single-scenario workbook from the shipped input.
+
+    ``one_day`` slices the timeseries to a single representative summer day
+    and keeps the daily energy plot (for the dispatch + SOC trace);
+    otherwise the full year runs with the energy-plot fan-out switched off
+    (only the financial figures are needed, and the per-day plots over a
+    full year dominate the wall-clock).
+    """
+    typed = read_workbook(REPO_ROOT / "inputs" / "input.xlsx")
+    typed["project"]["mode"] = mode
+    typed["balancing"]["balancing_enabled"] = balancing
+    typed["ppa"]["ppa_enabled"] = False
+    typed["simulation"]["uncertainty_enabled"] = False
+    # The gallery uses none of the uncertainty diagnostic plots, which
+    # render over the full series and dominate the wall-clock; skip them.
+    typed["simulation"]["uncertainty_diagnostics_enabled"] = False
+    typed["simulation"]["plot_monthly_scope"] = "none"
+    typed["simulation"]["plot_yearly_scope"] = "none"
+    if one_day:
+        start = _SUMMER_DAY_START_STEP
+        typed["ts"] = typed["ts"].iloc[
+            start:start + _STEPS_PER_DAY
+        ].reset_index(drop=True)
+        typed["simulation"]["plot_daily_scope"] = "year1_only"
+    else:
+        typed["simulation"]["plot_daily_scope"] = "none"
+    stem = f"{mode}{'_day' if one_day else ''}"
+    out = dst_dir / f"{stem}.xlsx"
+    write_workbook(typed, out)
+    return out
+
+
+def _run(dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
+         mip_gap: float, time_limit: int) -> Path:
+    wb = _build_workbook(
+        dst_dir, mode=mode, balancing=balancing, one_day=one_day,
+    )
+    run(RunConfig(
+        excel=wb, solver="highs", outdir=dst_dir / "out",
+        mip_gap=mip_gap, time_limit=time_limit,
+    ))
+    runs = sorted((dst_dir / "out").glob(f"{wb.stem}_*"))
+    if not runs:
+        raise RuntimeError(f"no run folder produced for {wb.stem!r}")
+    return runs[-1]
+
+
+def _curate(run_dir: Path, mapping: dict[str, str]) -> list[Path]:
+    ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for pattern, dest_name in mapping.items():
+        matches = sorted(run_dir.glob(pattern))
+        if not matches:
+            logger.warning("no figure matched %r under %s", pattern, run_dir)
+            continue
+        dest = ASSETS_DIR / dest_name
+        shutil.copyfile(matches[0], dest)
+        written.append(dest)
+        logger.info("wrote %s", dest.relative_to(REPO_ROOT))
+    return written
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mip-gap", type=float, default=0.01)
+    parser.add_argument("--time-limit", type=int, default=1800)
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+    written: list[Path] = []
+    set_figure_format("png")
+    try:
+        with tempfile.TemporaryDirectory(prefix="readme_figs_") as tmp:
+            tmp_dir = Path(tmp)
+            logger.info("merchant + balancing — full-year financials ...")
+            merchant_run = _run(
+                tmp_dir / "merchant", mode="merchant", balancing=True,
+                one_day=False, mip_gap=args.mip_gap, time_limit=args.time_limit,
+            )
+            written += _curate(merchant_run, _MERCHANT_FIGURES)
+
+            logger.info("self-consumption — full-year financials ...")
+            sc_run = _run(
+                tmp_dir / "sc", mode="self_consumption", balancing=False,
+                one_day=False, mip_gap=args.mip_gap, time_limit=args.time_limit,
+            )
+            written += _curate(sc_run, _SELF_CONSUMPTION_FINANCIAL_FIGURES)
+
+            logger.info("self-consumption — representative-day dispatch ...")
+            sc_day_run = _run(
+                tmp_dir / "sc_day", mode="self_consumption", balancing=False,
+                one_day=True, mip_gap=args.mip_gap, time_limit=args.time_limit,
+            )
+            written += _curate(sc_day_run, _SELF_CONSUMPTION_DAILY_FIGURES)
+    finally:
+        set_figure_format("pdf")
+
+    logger.info("exported %d gallery figures to %s", len(written), ASSETS_DIR)
+    return 0 if written else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

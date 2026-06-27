@@ -7,10 +7,21 @@ import pandas as pd
 import pytest
 
 from pvbess_opt.optimization import (
+    build_model,
     derive_tight_big_m,
     run_scenario,
     verify_dispatch_invariants,
 )
+
+
+def test_build_model_self_consumption_requires_load_column(short_params, short_ts):
+    """A self_consumption build with no ``load_kwh`` column must raise,
+    not silently optimise against zero load — the contract stated in
+    docs/self_consumption_design.md (the workbook loader raises the same
+    error earlier in io._normalise_timeseries)."""
+    ts_no_load = short_ts.drop(columns=["load_kwh"])
+    with pytest.raises(ValueError, match="load_kwh"):
+        build_model(short_params, ts_no_load)
 
 
 @pytest.fixture(scope="module")

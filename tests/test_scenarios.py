@@ -325,6 +325,34 @@ def test_run_scenarios_three(tmp_path):
     assert (runs[0] / "scenario_revenue_bridge.pdf").exists()
 
 
+def test_run_scenarios_applies_cli_mode_override(tmp_path, monkeypatch):
+    """The CLI ``--mode`` override is applied to the scenario-batch base,
+    mirroring ``pipeline.run`` and ``sizing.run_sizing`` (regression:
+    ``run_scenarios`` previously ignored ``config.mode`` so
+    ``--mode merchant --scenarios ...`` ran in the workbook's mode)."""
+    from pvbess_opt import RunConfig
+    from pvbess_opt import scenarios as scn_mod
+
+    captured: dict[str, str] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _fake_batch(base_typed, scenarios, **_kwargs):
+        captured["mode"] = base_typed["project"]["mode"]
+        raise _Stop
+
+    monkeypatch.setattr(scn_mod, "run_scenario_batch", _fake_batch)
+
+    config = RunConfig(
+        excel=ROOT / "inputs" / "input.xlsx", solver="highs",
+        outdir=tmp_path / "out", mode="merchant",
+    )
+    with pytest.raises(_Stop):
+        scn_mod.run_scenarios(config, [{"name": "base"}])
+    assert captured["mode"] == "merchant"
+
+
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_no_override_scenario_matches_standalone(tmp_path):
     from pvbess_opt.availability import apply_unavailability_derate

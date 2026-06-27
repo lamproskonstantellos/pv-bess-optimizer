@@ -21,8 +21,16 @@ Two regulatory regimes are supported:
   big-M.  Self-consumption is settled at the retail tariff; surplus is
   settled at the day-ahead market price.
 * `merchant` — utility-scale dispatch with **no co-located load**.  PV
-  and BESS dispatch entirely to the DAM, optionally augmented with
-  stochastic balancing-market participation (FCR / aFRR / mFRR).
+  and BESS dispatch entirely to the DAM.
+
+Two optional revenue layers stack on **either** regime and both ship
+**disabled** (opt-in via their master switch): stochastic
+balancing-market participation (FCR / aFRR / mFRR — requires a BESS, and
+is TSO-settled fee-free with the SOC safety buffer respected) and a
+pay-as-produced PPA on PV export.  Balancing is a property of the battery,
+not of the market regime, so it is available in self-consumption and
+merchant alike; leave `balancing_enabled = FALSE` on the `balancing` sheet
+wherever the asset does not offer the service.
 
 Three asset configurations are supported in both regimes: `hybrid`
 (PV + BESS), `pv_only`, and `bess_only`.
@@ -119,12 +127,15 @@ set a location on the `pv` sheet to source it from PVGIS instead.
 ### `project`
 
 Project-level scalars including `mode`
-(`self_consumption` | `merchant`),
-`p_grid_export_max_kw`, `retail_tariff_eur_per_mwh`,
-`allow_bess_grid_charging`, `grid_cap_includes_load`,
-`unavailability_pct`, and the site-wide lump sums (`site_capex_eur`,
-`site_devex_eur`).  The balancing master switch (`balancing_enabled`)
-lives on the `balancing` sheet.
+(`self_consumption` | `merchant`), `project_lifecycle_years`,
+`project_start_year`, `p_grid_export_max_kw`,
+`retail_tariff_eur_per_mwh`, `allow_bess_grid_charging`,
+`grid_cap_includes_load`, `unavailability_pct`, and the site-wide lump
+sums (`site_capex_eur`, `site_devex_eur`).  Two presentation knobs also
+live here: `currency_format` (`auto` | `millions` | `raw`, the axis /
+label currency scaling) and `show_titles` (render plot titles; off by
+default).  The balancing master switch (`balancing_enabled`) lives on
+the `balancing` sheet.
 
 ### `pv`
 
@@ -171,7 +182,11 @@ Hour-of-day cap profile (24 rows) optionally with one column per
 calendar month, expressing the share of `p_grid_export_max_kw`
 available for export.  **Default 100 %** — no curtailment; users opt
 in to curtailment by editing the sheet.  If the sheet is missing the
-loader falls back to a flat 100 % and logs INFO.
+loader falls back to a flat 100 % and logs INFO.  Two optional
+per-source sheets, `max_injection_profile_pv` and
+`max_injection_profile_bess`, share the identical schema and impose a
+sub-cap on the PV and BESS export legs respectively (the combined cap
+still binds); omit them for a single shared cap.
 
 ### `balancing`
 
@@ -228,14 +243,19 @@ Each run writes a self-contained folder
 ```
 00_summary/          SUMMARY.md (headline digest), run_log.txt
 01_inputs/           input_snapshot.xlsx, assumptions_summary.txt
-02_dispatch/         dispatch_hourly.xlsx (one sheet per calendar year)
+02_dispatch/         dispatch_timeseries.xlsx (one sheet per calendar year)
 03_results.xlsx      kpis_year1 | kpis_monthly_year1 | dispatch_year1 |
                      cashflow_yearly | cashflow_quarterly | cashflow_monthly |
                      financial_kpis | sensitivity_analysis |
                      lifetime_dispatch_yearly | economic_assumptions |
                      degradation (+ debt_schedule / emissions /
                      rolling-horizon sheets when enabled)
-04_financial_plots/  cashflow, payback, tornados, waterfall, LCOE/LCOS, SOH
+04_financial_plots/  revenue stack, BESS waterfall/by-month/split,
+                     balancing reservation + MC, lifetime cycles,
+                     cumulative + monthly cashflow, payback, NPV/IRR
+                     tornados, NPV waterfall, LCOE/LCOS, SOH, and the
+                     energy Sankey + 24/7-CFE duration curve when
+                     emissions accounting is on (full list below)
 05_energy_plots/     daily / monthly / yearly dispatch views per year
 06_uncertainty_plots/ forecast band, seasonal boxplot, DAM heatmap, diagnostics
 ```
@@ -306,10 +326,60 @@ Generated under `results/<run>/04_financial_plots/`:
 * Rolling-horizon Monte Carlo distribution.
 * Balancing reservation profile + Monte Carlo distribution per
   product.
+* Energy Sankey (PV / BESS / grid / load flows) and the 24/7 carbon-free
+  energy duration curve — emitted only when emissions accounting is on
+  (`grid_co2_intensity_kg_per_mwh > 0`).
 
 Energy plots under `results/<run>/05_energy_plots/`: daily / monthly / yearly
 supply, surplus, combined, dispatch, SOC, and revenue, plus the
 merchant trio when the mode is `merchant`.
+
+## Results gallery
+
+Real output from two runs on the shipped `inputs/input.xlsx`
+(PV 15 MWp, BESS 15 MW / 60 MWh, 20-year horizon, 7 % discount,
+retail 120 EUR/MWh).  Regenerate with
+`python scripts/export_readme_figures.py` (renders the PDF report figures
+as PNG through the same styler — `set_figure_format`).
+
+### Merchant + balancing (`--mode merchant`, `balancing_enabled = TRUE`)
+
+PV + BESS dispatching to the day-ahead market with FCR / aFRR / mFRR
+participation stacked on the battery.
+
+![Merchant yearly revenue stack](docs/assets/merchant_revenue_stack.png)
+
+*Yearly revenue stack — PV-DAM and BESS-DAM exports plus the five
+balancing products, net of the aggregator fee and grid-charging cost.*
+
+![BESS revenue waterfall](docs/assets/merchant_bess_revenue_waterfall.png)
+
+*BESS revenue waterfall — stepping from DAM arbitrage through each
+balancing product to the total battery revenue.*
+
+![LCOS benchmark band](docs/assets/merchant_lcos_band.png)
+
+*Levelised cost of storage against the Lazard 2024 LCOS benchmark band.*
+
+![Merchant cumulative cashflow](docs/assets/merchant_cumulative_cashflow.png)
+
+*Cumulative discounted cashflow over the project life, with the payback
+marker (or none, when the discounted cashflow never crosses zero).*
+
+### Self-consumption (`--mode self_consumption`)
+
+Behind-the-meter PV + BESS serving a co-located load at the retail
+tariff, exporting only the surplus to the DAM — no balancing.
+
+![Self-consumption daily dispatch and SOC](docs/assets/self_consumption_daily_dispatch_soc.png)
+
+*A representative day: the hard PV→load priority, BESS charge / discharge,
+grid import / export, and the battery state of charge.*
+
+![Self-consumption yearly revenue stack](docs/assets/self_consumption_revenue_stack.png)
+
+*Yearly revenue stack — retail-valued self-consumption (avoided cost)
+plus the DAM surplus-export leg, net of the aggregator fee.*
 
 ## Methodology & conventions
 

@@ -55,6 +55,7 @@ from .style import (
     apply_universal_margins,
     reserve_legend_headroom,
     save_figure,
+    save_figure_object,
     show_titles,
 )
 from .style import (
@@ -553,12 +554,7 @@ def plot_lcoe_summary(
     apply_fine_ticks(ax, axis="x")
     if show_titles():
         fig.suptitle("Levelized Cost of Energy — Lazard 2024 benchmark")
-    fig.tight_layout()
-    out = out_path.with_suffix(".pdf")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, format="pdf", bbox_inches="tight")
-    plt.close(fig)
-    return out
+    return save_figure_object(fig, out_path)
 
 
 def plot_lcos_summary(
@@ -621,12 +617,7 @@ def plot_lcos_summary(
     apply_fine_ticks(ax, axis="x")
     if show_titles():
         fig.suptitle("Levelized Cost of Storage — Lazard 2024 benchmark")
-    fig.tight_layout()
-    out = out_path.with_suffix(".pdf")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, format="pdf", bbox_inches="tight")
-    plt.close(fig)
-    return out
+    return save_figure_object(fig, out_path)
 
 
 # ---------------------------------------------------------------------------

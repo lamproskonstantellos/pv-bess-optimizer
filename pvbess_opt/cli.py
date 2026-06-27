@@ -106,6 +106,12 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
+    if args.config and args.excel != "inputs/input.xlsx":
+        logger.warning(
+            "Both a positional workbook (%s) and --config (%s) were given; "
+            "the --config file is used and the positional workbook is "
+            "ignored.", args.excel, args.config,
+        )
     input_path = Path(args.config) if args.config else Path(args.excel)
     if not input_path.exists():
         logger.error("Input file not found: %s", input_path)
@@ -134,6 +140,12 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError(
                 "Both the 'sizing' and 'scenarios' sheets are enabled; "
                 "enable only one (set the other's 'enabled' cell to FALSE)."
+            )
+        if args.scenarios and sizing_block:
+            logger.warning(
+                "--scenarios was supplied; the workbook's enabled 'sizing' "
+                "sheet is ignored for this run (the --scenarios batch takes "
+                "precedence)."
             )
         if args.scenarios:
             run_scenarios(config, read_scenarios_file(args.scenarios))

@@ -82,6 +82,20 @@ def test_breakeven_nan_when_npv_monotone_increasing():
     assert np.isnan(find_oversizing_breakeven(mwh, npv))
 
 
+def test_breakeven_duplicate_capacities_no_divide_by_zero():
+    """Duplicate capacity points (zero spacing between sorted MWh values)
+    must not raise a divide-by-zero RuntimeWarning nor invent a spurious
+    crossing — the zero-spacing segment is skipped (NaN slope)."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        be = find_oversizing_breakeven([2.0, 2.0, 4.0], [10.0, 10.0, 5.0])
+    # The 2->4 segment has slope (5-10)/(4-2) = -2.5 < 0, so the crossing
+    # is the midpoint of that segment; the duplicate 2.0 point is skipped.
+    assert np.isfinite(be)
+
+
 def test_rank_frontier_sorts_by_npv_desc():
     ranked = rank_frontier(pd.DataFrame({"npv_eur": [1.0, 3.0, 2.0]}))
     assert list(ranked["npv_eur"]) == [3.0, 2.0, 1.0]

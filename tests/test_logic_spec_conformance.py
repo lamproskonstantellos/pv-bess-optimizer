@@ -76,10 +76,7 @@ def _section_body(text: str, h2_title: str) -> str:
     return match.group("body")
 
 
-_H3_NAME_RE = re.compile(
-    r"^###\s+(?P<names>[A-Z][A-Z0-9_]+(?:\s*,\s*[A-Z][A-Z0-9_]+(?:_[A-Z0-9_]+)*)*)",
-    re.MULTILINE,
-)
+_H3_CONSTRAINT_TOKEN_RE = re.compile(r"[A-Z][A-Z0-9_]{2,}")
 
 
 def _h3_constraint_names(body: str) -> list[str]:
@@ -88,20 +85,29 @@ def _h3_constraint_names(body: str) -> list[str]:
     Each H3 in the spec is one of:
 
     * ``### NAME(t)`` — single constraint.
-    * ``### NAME(t), OTHER(t)`` — two constraints sharing a section.
-    * ``### NAME, NAME_MIN / NAME_MAX`` — alternation, accept all names
-      that are valid identifiers (drop slashes / "or" tokens).
+    * ``### NAME(t), OTHER(t), THIRD(t)`` — several constraints sharing a
+      section (e.g. ``CH_LIM(t), DIS_LIM(t), MODE_LINK(t)``); every
+      comma-separated name is asserted present.
+    * ``### NAME, NAME_ALT / NAME_MIN / NAME_MAX`` — the part after the
+      first ``/`` is a mutually-exclusive alternation (e.g.
+      ``SOC_TERM / SOC_TERM_MIN / SOC_TERM_MAX`` — only one branch is on a
+      built model, gated by ``terminal_soc_equal``).  Names before the
+      slash are unconditional and asserted; the alternation branches are
+      intentionally not (only the first, ``SOC_TERM``, before the slash is
+      kept).
 
-    The regex captures the leading run of comma-separated UPPER_SNAKE
-    tokens before the first non-alphanumeric break (``(``, ``/``, etc.),
-    which is what every section title in the spec uses.
+    Harvesting every UPPER_SNAKE token in the pre-slash heading (rather
+    than stopping at the first ``(``) makes the conformance check cover
+    the trailing names of multi-constraint sections — previously
+    ``DIS_LIM``, ``MODE_LINK`` and ``NO_SIM_GRID_EXPORT`` were silently
+    skipped.
     """
     out: list[str] = []
-    for match in _H3_NAME_RE.finditer(body):
-        for raw in match.group("names").split(","):
-            name = raw.strip()
-            if name:
-                out.append(name)
+    for line in body.splitlines():
+        if not line.startswith("### "):
+            continue
+        heading = line[4:].split("/", 1)[0]
+        out.extend(_H3_CONSTRAINT_TOKEN_RE.findall(heading))
     return out
 
 

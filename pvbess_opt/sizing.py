@@ -203,7 +203,8 @@ def compute_marginal_value_of_storage(frontier: pd.DataFrame) -> pd.DataFrame:
         if mwh.size < 2:
             continue
         d_mwh = np.diff(mwh)
-        slope = np.where(d_mwh != 0.0, np.diff(npv) / d_mwh, np.nan)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            slope = np.where(d_mwh != 0.0, np.diff(npv) / d_mwh, np.nan)
         mid = (mwh[:-1] + mwh[1:]) / 2.0
         for m, s in zip(mid, slope, strict=False):
             rows.append({
@@ -234,7 +235,14 @@ def find_oversizing_breakeven(mwh: Any, npv: Any) -> float:
     npv_arr = npv_arr[order]
     if mwh_arr.size < 2:
         return float("nan")
-    slope = np.diff(npv_arr) / np.diff(mwh_arr)
+    # Guard duplicate capacity points (zero spacing): an unguarded
+    # ``np.diff(npv)/np.diff(mwh)`` divides by zero (RuntimeWarning) and
+    # yields a spurious crossing.  ``np.errstate`` silences the eager
+    # division and ``np.where`` maps the zero-spacing segments to NaN,
+    # which the ``<= 0`` / ``> 0`` crossing tests then skip.
+    d_mwh = np.diff(mwh_arr)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        slope = np.where(d_mwh != 0.0, np.diff(npv_arr) / d_mwh, np.nan)
     mid = (mwh_arr[:-1] + mwh_arr[1:]) / 2.0
     for i in range(slope.size):
         if slope[i] <= 0.0:

@@ -11,7 +11,7 @@ See :doc:`outputs` for the full reference.  Quick summary::
     │   ├── input_snapshot.xlsx
     │   └── assumptions_summary.txt
     ├── 02_dispatch/
-    │   └── dispatch_hourly.xlsx          # one sheet per calendar year
+    │   └── dispatch_timeseries.xlsx          # one sheet per calendar year
     ├── 03_results.xlsx
     ├── 04_financial_plots/
     │   ├── cumulative_cashflow_*.pdf

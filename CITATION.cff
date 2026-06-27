@@ -6,7 +6,7 @@ authors:
   - family-names: "Konstantellos"
     given-names: "Lampros"
 version: "0.9.0"
-date-released: "2026-06-12"
+date-released: "2026-06-27"
 repository-code: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
 url: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
 abstract: >-

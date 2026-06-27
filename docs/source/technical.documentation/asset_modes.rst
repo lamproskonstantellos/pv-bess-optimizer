@@ -95,7 +95,7 @@ Lifetime dispatch
 three modes — when an asset's per-step columns are identically zero,
 multiplying by the degradation factor is a no-op.  The timestamp
 shift always applies regardless of ``pv_kwp`` or ``bess_kw``, so
-``02_dispatch/dispatch_hourly.xlsx`` is internally consistent.
+``02_dispatch/dispatch_timeseries.xlsx`` is internally consistent.
 
 Smoke-test recipe
 -----------------
