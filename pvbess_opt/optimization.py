@@ -452,6 +452,15 @@ def build_model(
     unique_days = list(pd.Index(day_labels).unique())
     day_to_idx = {d: [i for i, label in enumerate(day_labels) if label == d] for d in unique_days}
 
+    if mode == "self_consumption" and "load_kwh" not in ts.columns:
+        # The workbook loader normally raises this in
+        # io._normalise_timeseries; guard direct build_model callers too so
+        # self_consumption never silently optimises against zero load (the
+        # behaviour the self-consumption design doc promises).
+        raise ValueError(
+            "self_consumption mode requires a 'load_kwh' column in the "
+            "timeseries; none was provided."
+        )
     load = {
         t: float(ts.loc[t, "load_kwh"]) if "load_kwh" in ts.columns else 0.0
         for t in time_index

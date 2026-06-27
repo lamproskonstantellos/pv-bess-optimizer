@@ -125,7 +125,11 @@ def calculate_irr(
             return float(new_rate)
         rate = new_rate
 
-    low, high = -0.99, 10.0
+    # Bracket the valid IRR domain down to the same floor the Newton path
+    # guards against (rate <= -0.999), so an extreme negative IRR in
+    # (-0.999, -0.99) is still bracketed and the design-doc statement
+    # "(-0.999, 10]" matches the implementation.
+    low, high = -0.999, 10.0
     f_low, f_high = npv(low), npv(high)
     if np.isnan(f_low) or np.isnan(f_high) or f_low * f_high > 0.0:
         return float("nan")

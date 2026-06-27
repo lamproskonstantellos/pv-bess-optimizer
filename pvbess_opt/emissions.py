@@ -77,6 +77,12 @@ def cfe_score(res: pd.DataFrame) -> float:
     total_load = float(load.sum())
     if total_load <= 0.0:
         return float("nan")
+    # No clamp to 100 % here (unlike the per-step ``hourly_cfe_fraction``,
+    # which clips rounding noise on individual steps): carbon-free supply
+    # to load is physically bounded by load at every step in a valid MILP
+    # dispatch, so the annual ratio cannot exceed 100 %.  An out-of-range
+    # value would signal an upstream dispatch bug and should surface, not
+    # be silently capped.
     return float(carbon_free_to_load_kwh(res).sum() / total_load * 100.0)
 
 
