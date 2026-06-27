@@ -1076,16 +1076,20 @@ def _parse_string_enum(
     if token == "":
         return default
     if token not in allowed:
+        # An invalid value for a KNOWN enum key is a genuine mistake (a
+        # typo or a stale option), not a forward/backward-compat unknown
+        # key — fail loudly rather than silently substituting the default,
+        # which could otherwise change the economics (e.g. a mistyped
+        # ``ppa_settlement`` quietly reverting to ``physical``).  Unknown
+        # *keys* are still warned-and-ignored by ``_parse_kv_sheet``.
         if key == "mode":
             raise ValueError(
                 f"unknown mode {token!r}; valid modes are "
                 f"{sorted(allowed)!r}"
             )
-        logger.warning(
-            "Workbook value for %r is %r which is not in %s; using default %r.",
-            key, value, sorted(allowed), default,
+        raise ValueError(
+            f"{key!r} value {value!r} is not one of {sorted(allowed)!r}."
         )
-        return default
     return token
 
 
@@ -1643,6 +1647,19 @@ def _validate_ppa_config(ppa: dict[str, Any]) -> None:
             f"ppa_structure must be 'pay_as_produced'; got {structure!r}."
         )
 
+    # Settlement must be a known enum: the KPI engine and the cashflow each
+    # branch on it (``kpis.add_economic_columns`` on ``== 'physical'``,
+    # ``economics.build_yearly_cashflow`` on ``== 'cfd'``), so an
+    # unrecognised value would decompose the PPA revenue inconsistently
+    # between the two — physical in one, CfD in the other.  Reject it here
+    # the same way ``ppa_structure`` is validated (the loader also raises
+    # via ``_parse_string_enum``; this guards hand-built typed dicts).
+    settlement = str(ppa.get("ppa_settlement", "physical") or "physical").lower()
+    if settlement not in ("physical", "cfd"):
+        raise ValueError(
+            f"ppa_settlement must be 'physical' or 'cfd'; got {settlement!r}."
+        )
+
     share = float(ppa.get("ppa_volume_share_pct", 0.0) or 0.0)
     if not (0.0 <= share <= 100.0):
         raise ValueError(
@@ -1758,6 +1775,7 @@ def validate_workbook_params(
     constructing the flat ``params`` dict — every downstream consumer
     relies on these invariants.
     """
+    project = typed.get("project") or {}
     pv = typed.get("pv") or {}
     bess = typed.get("bess") or {}
     economics = typed.get("economics") or {}
@@ -1780,17 +1798,58 @@ def validate_workbook_params(
                 f"{key!r} must be non-negative; got {value!r}."
             )
 
-    for key in ("pv_nameplate_kwp",):
-        _require_non_negative(pv, key)
-    for key in ("bess_power_kw", "bess_capacity_kwh", "max_cycles_per_day"):
-        _require_non_negative(bess, key)
+    # Cost / sizing keys are validated against the section they actually
+    # live on in ``_SHEET_DEFAULTS`` (the PV/BESS cost block sits on the
+    # ``pv`` / ``bess`` sheets, not ``economics``; the site lump sums on
+    # ``project``).  Reading them from the wrong section silently no-ops
+    # the check and lets a negative CAPEX flip the Year-0 outflow into an
+    # inflow.
     for key in (
+        "pv_nameplate_kwp",
         "capex_pv_eur_per_kw",
-        "capex_bess_eur_per_kw",
+        "devex_pv_eur_per_kw",
         "opex_pv_eur_per_kwp",
-        "opex_bess_eur_per_kw",
+        # Degradation percentages must be non-negative: a negative fade
+        # makes the SOH / production factor climb above 100 % over the
+        # project life (verified: build_degradation_report with a negative
+        # annual fade returns SOH 100 -> 105 -> 110.25 %).
+        "pv_degradation_year1_pct",
+        "pv_degradation_annual_pct",
     ):
-        _require_non_negative(economics, key)
+        _require_non_negative(pv, key)
+    for key in (
+        "bess_power_kw",
+        "bess_capacity_kwh",
+        "max_cycles_per_day",
+        "capex_bess_eur_per_kw",
+        "devex_bess_eur_per_kw",
+        "opex_bess_eur_per_kw",
+        "bess_replacement_cost_pct",
+        "bess_degradation_annual_pct",
+        "bess_degradation_pct_per_cycle",
+        "bess_replacement_year",
+    ):
+        _require_non_negative(bess, key)
+    for key in ("site_capex_eur", "site_devex_eur"):
+        _require_non_negative(project, key)
+
+    gearing = float(economics.get("gearing_pct", 0.0) or 0.0)
+    if not (0.0 <= gearing <= 100.0):
+        raise ValueError(
+            f"'gearing_pct' must be in [0, 100]; got {gearing!r}."
+        )
+
+    # Grid-emissions accounting (24/7-CFE): a non-negative intensity and a
+    # decline in [0, 100] %/yr.  A decline above 100 % makes the
+    # ``(1 - decline)^y`` projection factor negative, flipping the grid
+    # carbon intensity (and the avoided-emissions sign) from year 2 on.
+    _require_non_negative(economics, "grid_co2_intensity_kg_per_mwh")
+    co2_decline = float(economics.get("grid_co2_annual_decline_pct", 0.0) or 0.0)
+    if not (0.0 <= co2_decline <= 100.0):
+        raise ValueError(
+            "'grid_co2_annual_decline_pct' must be in [0, 100]; "
+            f"got {co2_decline!r}."
+        )
 
     soc_min = float(bess.get("soc_min_frac", 0.0) or 0.0)
     soc_max = float(bess.get("soc_max_frac", 1.0) or 1.0)

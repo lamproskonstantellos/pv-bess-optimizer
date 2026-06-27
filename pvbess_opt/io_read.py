@@ -29,7 +29,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS, write_workbook
+from .io import (
+    _KEY_TO_SHEET,
+    _SHEET_DEFAULTS,
+    _parse_grid_export_max,
+    _parse_value,
+    write_workbook,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +185,17 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
         known: dict[str, Any] = {}
         for key, value in user.items():
             if key in defaults:
-                known[key] = value
+                # Route every known key through the SAME typed parser the
+                # workbook loader uses (io._parse_value / the grid-export
+                # special case), so a YAML/JSON config validates and
+                # normalises identically to the workbook — invalid enums
+                # and unparseable types fail loudly at load instead of
+                # slipping through as raw strings until the xlsx
+                # round-trip (three-surface parity).
+                if key == "p_grid_export_max_kw":
+                    known[key] = _parse_grid_export_max(value, defaults[key])
+                else:
+                    known[key] = _parse_value(key, value, defaults[key])
                 continue
             if section == "pv" and key == "timeseries_path":
                 # Config-only hint consumed by _resolve_timeseries; keep it
