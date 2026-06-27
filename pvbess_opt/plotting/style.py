@@ -1,8 +1,12 @@
-"""IEEE matplotlib styling, PDF figure saving, and legend helpers.
+"""IEEE matplotlib styling, figure saving, and legend helpers.
 
-All figures use the IEEE rcParams preset and are exported as PDF.  Plot
-titles default to off (the figure caption in a paper plays that role) and
-can be turned on via the ``show_titles`` key in the input workbook.
+All figures use the IEEE rcParams preset and are exported as PDF by
+default.  The export format is a single module-level switch
+(:func:`set_figure_format`, ``pdf`` | ``png`` | ``svg``) that the one
+saver :func:`save_figure` honours, so the README result gallery can be
+rendered as PNG without forking any plotting code.  Plot titles default
+to off (the figure caption in a paper plays that role) and can be turned
+on via the ``show_titles`` key in the input workbook.
 """
 
 from __future__ import annotations
@@ -35,12 +39,15 @@ __all__ = [
     "apply_universal_margins",
     "attach_legend_clear_of_data",
     "empty_placeholder",
+    "get_figure_format",
     "get_project_mode_label",
     "get_scenario_label",
     "legend_overlaps_data",
     "reserve_legend_headroom",
     "save_figure",
     "save_figure_daily",
+    "save_figure_object",
+    "set_figure_format",
     "set_project_mode_label",
     "set_scenario_label",
     "set_show_titles",
@@ -102,18 +109,75 @@ def get_project_mode_label() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Figure saving (always PDF)
+# Figure saving (PDF by default; format is a single module-level switch)
 # ---------------------------------------------------------------------------
+
+_VALID_FIGURE_FORMATS: frozenset[str] = frozenset({"pdf", "png", "svg"})
+FIGURE_FORMAT: str = "pdf"
+# Raster DPI used only when the format is ``png`` — kept modest so gallery
+# images stay lightweight while remaining crisp on GitHub.
+FIGURE_PNG_DPI: int = 150
+
+
+def set_figure_format(fmt: str) -> None:
+    """Set the export format for every subsequent :func:`save_figure` call.
+
+    ``pdf`` (default, vector report) | ``png`` (raster, for the README
+    gallery / Markdown previews) | ``svg``.  A single switch keeps the one
+    saver authoritative — no plotting code is forked per format.
+    """
+    global FIGURE_FORMAT
+    fmt = str(fmt).strip().lower()
+    if fmt not in _VALID_FIGURE_FORMATS:
+        raise ValueError(
+            f"figure format must be one of {sorted(_VALID_FIGURE_FORMATS)}; "
+            f"got {fmt!r}."
+        )
+    FIGURE_FORMAT = fmt
+
+
+def get_figure_format() -> str:
+    """Return the current figure export format."""
+    return FIGURE_FORMAT
+
+
+def _save_kwargs() -> dict[str, object]:
+    kwargs: dict[str, object] = {"format": FIGURE_FORMAT, "bbox_inches": "tight"}
+    if FIGURE_FORMAT == "png":
+        kwargs["dpi"] = FIGURE_PNG_DPI
+    return kwargs
 
 
 def save_figure(figpath: Path) -> Path:
-    """Save the current figure as a PDF, honouring the IEEE preset."""
+    """Save the current figure in the configured format, IEEE preset.
+
+    The suffix is forced to the active :data:`FIGURE_FORMAT` so callers can
+    keep passing a ``.pdf`` path and still get a ``.png`` when the gallery
+    export switches the format.
+    """
     figpath = Path(figpath)
     figpath.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
-    out = figpath.with_suffix(".pdf")
-    plt.savefig(out, format="pdf", bbox_inches="tight")
+    out = figpath.with_suffix("." + FIGURE_FORMAT)
+    plt.savefig(out, **_save_kwargs())
     plt.close()
+    return out
+
+
+def save_figure_object(fig, figpath: Path) -> Path:
+    """Save an explicit Figure handle in the configured format.
+
+    Companion to :func:`save_figure` for plot functions that hold their own
+    ``Figure`` (rather than relying on the pyplot current-figure state) —
+    it honours the same :data:`FIGURE_FORMAT` switch so no saver is forked
+    and the PNG / SVG export reaches these figures too.
+    """
+    figpath = Path(figpath)
+    figpath.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    out = figpath.with_suffix("." + FIGURE_FORMAT)
+    fig.savefig(out, **_save_kwargs())
+    plt.close(fig)
     return out
 
 

@@ -100,9 +100,9 @@ installed env that CI exercises. All gate commands below use `python -m`.
 
 Legend: status ∈ open / fixed / wontfix. Severity assigned at triage.
 
-All 33 findings are resolved (status **fixed**). `*` on F22 marks a
+All 34 findings are resolved (status **fixed**). `*` on F22 marks a
 self-inflicted issue created by adding this report. Severity counts:
-P0 = 0; P1 = 3 (F6, F22, F32) + 1 mitigated (F13); P2 = 13; P3 = 16.
+P0 = 0; P1 = 3 (F6, F22, F32) + 1 mitigated (F13); P2 = 13; P3 = 17.
 Each behaviour change carries a regression test (named in the row).
 
 | # | Sev | Area | Title | Resolution |
@@ -140,6 +140,7 @@ Each behaviour change carries a regression test (named in the row).
 | F30 | P3 | emissions | `grid_co2_annual_decline_pct > 100` → negative intensity | **fixed** — range-validated `[0,100]`; tests |
 | F31 | P3 | emissions | `cfe_score` clamp asymmetry | **fixed** — documented physical-bound invariant (intentional no-clamp) |
 | F32 | P1 | scripts | documented `python scripts/polish_input_workbook.py` failed (ModuleNotFoundError) | **fixed** — added repo-root `sys.path` bootstrap; `test_script_runs_standalone_without_install` |
+| F33 | P3 | plotting | LCOE/LCOS plots forked the saver (`fig.savefig(..., format="pdf")`) so the figure-format switch never reached them | **fixed** — added `save_figure_object` (single styler honours `FIGURE_FORMAT`); both routed through it; `test_figure_format` + `test_lcoe_lcos_summary` green |
 
 Open questions deferred to owner sign-off at the final gate: discount-rate / inflation
 sign bounds (left unbounded to allow deflation / stress scenarios — intentional);

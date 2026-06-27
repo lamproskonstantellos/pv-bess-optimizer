@@ -334,6 +334,53 @@ Energy plots under `results/<run>/05_energy_plots/`: daily / monthly / yearly
 supply, surplus, combined, dispatch, SOC, and revenue, plus the
 merchant trio when the mode is `merchant`.
 
+## Results gallery
+
+Real output from two runs on the shipped `inputs/input.xlsx`
+(PV 15 MWp, BESS 15 MW / 60 MWh, 20-year horizon, 7 % discount,
+retail 120 EUR/MWh).  Regenerate with
+`python scripts/export_readme_figures.py` (renders the PDF report figures
+as PNG through the same styler — `set_figure_format`).
+
+### Merchant + balancing (`--mode merchant`, `balancing_enabled = TRUE`)
+
+PV + BESS dispatching to the day-ahead market with FCR / aFRR / mFRR
+participation stacked on the battery.
+
+![Merchant yearly revenue stack](docs/assets/merchant_revenue_stack.png)
+
+*Yearly revenue stack — PV-DAM and BESS-DAM exports plus the five
+balancing products, net of the aggregator fee and grid-charging cost.*
+
+![BESS revenue waterfall](docs/assets/merchant_bess_revenue_waterfall.png)
+
+*BESS revenue waterfall — stepping from DAM arbitrage through each
+balancing product to the total battery revenue.*
+
+![LCOS benchmark band](docs/assets/merchant_lcos_band.png)
+
+*Levelised cost of storage against the Lazard 2024 LCOS benchmark band.*
+
+![Merchant cumulative cashflow](docs/assets/merchant_cumulative_cashflow.png)
+
+*Cumulative discounted cashflow over the project life, with the payback
+marker (or none, when the discounted cashflow never crosses zero).*
+
+### Self-consumption (`--mode self_consumption`)
+
+Behind-the-meter PV + BESS serving a co-located load at the retail
+tariff, exporting only the surplus to the DAM — no balancing.
+
+![Self-consumption daily dispatch and SOC](docs/assets/self_consumption_daily_dispatch_soc.png)
+
+*A representative day: the hard PV→load priority, BESS charge / discharge,
+grid import / export, and the battery state of charge.*
+
+![Self-consumption yearly revenue stack](docs/assets/self_consumption_revenue_stack.png)
+
+*Yearly revenue stack — retail-valued self-consumption (avoided cost)
+plus the DAM surplus-export leg, net of the aggregator fee.*
+
 ## Methodology & conventions
 
 The dispatch MILP is solved **once** for a representative Year 1; Years
