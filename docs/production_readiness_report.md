@@ -81,13 +81,23 @@ Resolved versions (key): pandas 2.3.3, numpy 1.26.4, pyomo 6.10.1,
 highspy 1.14.0, matplotlib 3.11.0, openpyxl 3.1.5, ruff 0.15.20,
 mypy 1.19.1, vulture 2.16, pytest 9.1.1.
 
+Final acceptance gate (re-run from scratch after all fixes):
+
 | Gate | Command | Result |
 |---|---|---|
 | ruff | `python -m ruff check .` | **PASS** (All checks passed) |
 | mypy | `python -m mypy` | **PASS** (no issues, 46 files) |
 | vulture | `python -m vulture` | **PASS** (exit 0) |
-| fast lane | `python -m pytest tests/ -q` | running (baseline) |
-| slow lane | `python -m pytest tests/ -q -m slow` | pending |
+| docs html | `make -C docs html` / `test_docs_build.py` | **PASS** (no doc warnings) |
+| fast lane | `python -m pytest tests/ -q` | **PASS** (1377 passed, 8 deselected) |
+| slow lane | `python -m pytest tests/ -q -m slow` | **PASS** (8 passed — real-scale full-year matrix) |
+
+**Acceptance: zero open findings at every severity (P0/P1/P2/P3 all 0).**
+All 34 findings are resolved and locked with a regression test; the entire
+gate (lint + types + dead-code + fast lane + slow lane + docs build) is
+green. The mode×asset×feature matrix is re-verified end-to-end at full-year
+scale by `tests/test_realscale_all_combos.py` (slow lane) and was
+spot-inspected per cell in Phase 3.
 
 Environment note (not a code finding): the container ships a stale
 `/root/.local/bin/mypy` and `ruff` on PATH bound to a different
