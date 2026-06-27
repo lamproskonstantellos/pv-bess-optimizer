@@ -443,6 +443,12 @@ def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResul
     tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_base_"))
     base_xlsx = materialize_to_xlsx(src, tmp) if is_structured_config(src) else src
     base_typed = read_workbook(base_xlsx)
+    # Apply the CLI ``--mode`` override to the batch base, mirroring
+    # ``pipeline.run`` and ``sizing.run_sizing`` so the three dispatch
+    # surfaces agree.  Per-scenario ``project.mode`` targets still override
+    # this base.
+    if getattr(config, "mode", None) is not None:
+        base_typed["project"]["mode"] = config.mode
     solver_opts = {
         "solver_name": config.solver,
         "mip_gap": config.mip_gap,

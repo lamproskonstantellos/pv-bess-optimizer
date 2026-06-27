@@ -21,8 +21,16 @@ Two regulatory regimes are supported:
   big-M.  Self-consumption is settled at the retail tariff; surplus is
   settled at the day-ahead market price.
 * `merchant` — utility-scale dispatch with **no co-located load**.  PV
-  and BESS dispatch entirely to the DAM, optionally augmented with
-  stochastic balancing-market participation (FCR / aFRR / mFRR).
+  and BESS dispatch entirely to the DAM.
+
+Two optional revenue layers stack on **either** regime and both ship
+**disabled** (opt-in via their master switch): stochastic
+balancing-market participation (FCR / aFRR / mFRR — requires a BESS, and
+is TSO-settled fee-free with the SOC safety buffer respected) and a
+pay-as-produced PPA on PV export.  Balancing is a property of the battery,
+not of the market regime, so it is available in self-consumption and
+merchant alike; leave `balancing_enabled = FALSE` on the `balancing` sheet
+wherever the asset does not offer the service.
 
 Three asset configurations are supported in both regimes: `hybrid`
 (PV + BESS), `pv_only`, and `bess_only`.
