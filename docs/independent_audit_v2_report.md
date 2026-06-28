@@ -256,12 +256,33 @@ tolerance ⇒ no Phase 3 finding.
 | # | Sev | Area | Title | Resolution |
 |---|---|---|---|---|
 | V2-1 | P3 | input | The energy `aggregator_fee_pct_revenue` was only *clamped* to [0,1] in economics, never range-validated — a typo like `150` (meaning "1.50 %") silently became a 100 % fee that wiped revenue. Inconsistent with `gearing_pct`/`grid_co2_*` (which reject) and with the new BSP fee. | **fixed** — `validate_workbook_params` now rejects either revenue fee outside `[0,100]`; `tests/test_balancing_aggregator_fee.py::test_energy_aggregator_fee_out_of_range_rejected` + `::test_balancing_fee_out_of_range_rejected`. |
+| V2-2 | P2 | test | The monthly BSP-fee reconciliation lock only checked the annual *sum* (both candidate weightings sum to 1, so the test could not tell `balancing_share` from `fee_share`), and its fixture had flat shares — a mutation allocating the fee by the energy-revenue share *survived*. | **fixed** — added `test_monthly_fee_follows_balancing_profile_not_revenue` with a seasonal fixture (reservations in H1, revenue in H2) asserting per-month `fee == -frac × gross balancing`; the mutant is now killed. |
 
 ---
 
 ## Mutation-kill summary
 
-_Pending Phase 4._
+21 mutations injected across three batches; every one is caught by a named
+test (one survivor found and its lock strengthened — V2-2).
+
+**Prior-pass locks (Phase 1, 7):** F6, F13, F22, F32, F29, F4, F14 — each
+fails its named lock when reverted. (Table above.)
+
+**New-feature code (Phase 4, 10):** flip BSP-fee sign; zero the fee fraction;
+drop the fee from the yearly net; drop it from the monthly net; remove the
+`[0,100]` validation; **allocate the monthly fee by the wrong share
+(SURVIVED → strengthened, V2-2)**; drop the fee from the sensitivity-scaled
+columns; suppress the revenue-stack fee bar; drop the guardrail mode gate;
+lifecycle net KPI ignoring the fee. After V2-2 all 10 are killed.
+
+**Existing core numerics (Phase 4, 4):** wrong discount exponent
+(`(1+r)^(y+1)`); retail-escalation off-by-one (`^y` vs `^(y-1)`); energy-fee
+sign flip; balancing-escalation off-by-one — all killed by
+`test_independent_reconciliation` / `test_balancing_lifetime_cashflow`.
+
+Restoration after every mutation is from a saved in-memory copy, never
+`git checkout` (which would discard uncommitted work — a hazard hit and
+corrected mid-audit).
 
 ---
 

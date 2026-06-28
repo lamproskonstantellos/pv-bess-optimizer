@@ -240,6 +240,57 @@ def test_monthly_and_quarterly_fee_reconcile_to_yearly():
             assert mnet == pytest.approx(ynet, abs=0.05), f"net year {y}"
 
 
+def _res_seasonal() -> pd.DataFrame:
+    """Daily Year-1 frame where the balancing RESERVATION profile and the
+    energy-REVENUE profile concentrate in DIFFERENT halves of the year, so
+    the per-month balancing share != the per-month revenue (fee) share.
+
+    Reservations sit in months 1-6; per-step energy revenue sits in
+    months 7-12.  This makes the two monthly weightings provably distinct
+    (a flat-1/12 fixture cannot tell them apart)."""
+    ts = pd.date_range("2026-01-01", periods=365, freq="D")
+    n = len(ts)
+    month = ts.month.to_numpy()
+    first_half = (month <= 6).astype(float)
+    second_half = (month >= 7).astype(float)
+    df = pd.DataFrame({
+        "timestamp": ts,
+        "pv_kwh": np.ones(n) * 10.0,
+        # Energy revenue only in H2 -> fee_share weights months 7-12.
+        "profit_load_from_pv_eur": second_half * 5.0,
+        "profit_load_from_bess_eur": np.zeros(n),
+        "profit_export_from_pv_eur": np.zeros(n),
+        "profit_export_from_bess_eur": np.zeros(n),
+        "expense_charge_bess_grid_eur": np.zeros(n),
+    })
+    # Reservations only in H1 -> balancing_share weights months 1-6.
+    for p in ("fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn"):
+        df[f"bm_reservation_{p}_kw"] = first_half * 100.0
+    return df
+
+
+def test_monthly_fee_follows_balancing_profile_not_revenue():
+    """The per-month BSP fee must track the per-month GROSS balancing
+    revenue (same reservation weighting), NOT the energy-revenue share.
+
+    Kills the mutant that allocates the fee by ``fee_share`` instead of
+    ``balancing_share``: with the two profiles in opposite halves of the
+    year, the fee must be zero in every month with no balancing revenue
+    and exactly ``-frac`` of the balancing revenue where it is present."""
+    frac = 0.18
+    econ = _econ(balancing_aggregator_fee_pct_revenue=frac * 100.0)
+    yearly_cf = build_yearly_cashflow(_year1_kpis(), econ, _capacities())
+    monthly_cf, _ = derive_monthly_cashflow(_res_seasonal(), yearly_cf, econ)
+
+    y1 = monthly_cf[monthly_cf["project_year"] == 1]
+    bal = y1["balancing_revenue_eur"].to_numpy()
+    fee = y1["balancing_aggregator_fee_eur"].to_numpy()
+    # Some months carry balancing revenue and some do not (profiles split).
+    assert (bal > 1e-9).any() and (bal <= 1e-9).any()
+    # Per month: fee == -frac * gross balancing (so zero where balancing is).
+    np.testing.assert_allclose(fee, -frac * bal, rtol=1e-9, atol=1e-9)
+
+
 # ---------------------------------------------------------------------------
 # Range validation — both revenue fees, [0, 100]
 # ---------------------------------------------------------------------------
