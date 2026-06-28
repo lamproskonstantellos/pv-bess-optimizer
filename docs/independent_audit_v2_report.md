@@ -286,6 +286,40 @@ corrected mid-audit).
 
 ---
 
+## Phase 5 — adversarial robustness & production-ops
+
+Focused on the surfaces this pass actually changed; the broad pipeline
+robustness (malformed xlsx, missing/!infeasible solver, DST/cadence,
+NaN/inf timeseries) is owned by the prior suite, whose locks were verified
+genuine in Phase 1 and which is unaffected by the default-off fee (the new
+code is economics-layer and bit-identical at fee 0).
+
+`tests/test_balancing_aggregator_fee_robustness.py` (new) pins:
+
+* **No phantom fee.** Fee set but no balancing revenue (balancing off / no
+  bids) ⇒ the `balancing_aggregator_fee_eur` column is identically zero and
+  the net equals the fee-off net; same for a BESS-less `pv_only` project.
+* **Malformed values degrade per contract.** A non-numeric fee cell coerces
+  to the default 0.0 with a "could not be parsed" warning (the shared float
+  contract); an empty cell (NaN) ⇒ 0.0; `inf` / `>100` / `<0` are rejected
+  loudly by `validate_workbook_params` naming the key.
+* **Determinism.** The economics layer is pure — repeated builds give
+  byte-identical frames and KPIs (no dict-order / RNG / wall-clock use); the
+  new fee adds no randomness.
+
+**Cross-version determinism.** The numeric core (escalation `(1+i)^(y-1)`,
+discount `1/(1+r)^y`, the bisection IRR) hashes **byte-identically** across
+CPython 3.11.15, 3.12.3 and 3.13.12 (SHA-256 of the packed doubles is the
+same on all three). The full pandas/pyomo stack is pinned to 3.11 in this
+environment, so the cross-version probe runs the stdlib-only core; same-stack
+determinism is covered by the test above and the prior suite.
+
+No Phase 5 finding: every hostile/degenerate case for the new feature either
+fails loudly with an actionable message or degrades to the documented
+default-off behaviour.
+
+---
+
 ## Independent sign-off
 
 _Pending Phase 7._
