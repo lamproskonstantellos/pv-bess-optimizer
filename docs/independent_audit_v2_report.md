@@ -219,6 +219,38 @@ suite stays green).
 
 ---
 
+## Phase 3 — independent numerical re-derivation
+
+`tests/test_independent_reconciliation.py` re-derives the headline numbers
+with a from-scratch numpy calculation that imports the project's economics
+builder ONLY to produce the *actual* frame — every *expected* value is an
+independent hand/numpy computation. A 3-year, round-number case (CAPEX
+−1000; Year-1 retail 300, DAM 200, balancing cap 100 + act 50; energy fee
+10 %, BSP fee 20 %; discount 10 %) is reconciled to ≤ 1e-6 / 1e-2:
+
+* **Energy-fee scope + split.** `aggregator_fee_eur = −50` (10 % of the
+  500 gross DAM+retail only), split pro-rata to `revenue_retail_eur = 270`,
+  `revenue_dam_eur = 180`, `revenue_eur = 450`.
+* **BSP fee.** Gross balancing stays `150`; `balancing_aggregator_fee_eur =
+  −30` (20 % of 150); the net cashflow is `450 + 150 − 30 = 570`; PPA
+  carries neither fee (`ppa_revenue_eur = 0`).
+* **DCF consumes NET balancing.** Turning the BSP fee on lowers NPV by
+  exactly the discounted fee stream `Σ 30 / 1.1^y`.
+* **Escalation / discount.** A second parametrisation with `i_ret = 3 %`,
+  `i_bm = 2 %` reproduces every per-year `net`/`dcf` under `(1+i)^(y-1)`
+  escalation and `1/(1+r)^y` discounting.
+* **NPV + IRR.** NPV matches the independent discounted sum; IRR is
+  re-solved with an INDEPENDENT bisection on the polynomial NPV (not
+  `economics.calculate_irr`) and matches `irr_pct` to 1e-3.
+
+The pre-existing `tests/test_financial_reference.py` (an independent
+reference implementation) plus the LCOE/LCOS, PPA, balancing-MC,
+degradation and debt locks already re-derive the remaining formulas; the
+new fee is the only addition and is covered above. No mismatch beyond
+tolerance ⇒ no Phase 3 finding.
+
+---
+
 ## New findings (this pass)
 
 | # | Sev | Area | Title | Resolution |
