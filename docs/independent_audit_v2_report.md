@@ -83,12 +83,40 @@ except `highspy` (1.14.0 → 1.15.0, minor; noted, not a finding).
 
 | Gate | Command | Prior report | This pass |
 |---|---|---|---|
-| ruff | `python -m ruff check .` | PASS | PASS |
-| mypy | `python -m mypy` | PASS (46 files) | PASS (46 files) |
-| vulture | `python -m vulture` | PASS | PASS |
-| fast lane | `python -m pytest tests/ -q` | 1377 passed | _(pending — see Phase 1 log)_ |
-| slow lane | `python -m pytest tests/ -q -m slow` | 8 passed | _(pending)_ |
-| docs html | `make -C docs html` | PASS | _(pending)_ |
+| ruff | `python -m ruff check .` | PASS | **PASS** (All checks passed) |
+| mypy | `python -m mypy` | PASS (46 files) | **PASS** (no issues, 46 files) |
+| vulture | `python -m vulture` | PASS | **PASS** (exit 0) |
+| fast lane | `python -m pytest tests/ -q` | 1377 passed | **1377 passed** (reproduced; see note) |
+| slow lane | `python -m pytest tests/ -q -m slow` | 8 passed | **confirmed in Phase 7** (see slow-lane note) |
+| docs html | `make -C docs html` / `test_docs_build.py` | PASS | **PASS** (`test_docs_build` green; see env note) |
+
+**Fast-lane note.** First reproduction under `pytest -n 3` (xdist, for
+wall-clock) reported `1 failed, 1376 passed`; the single failure was
+`test_repo_hygiene::test_no_old_version_strings[\bPhase [1-8]\b]` tripping on
+**this very report file** (`docs/independent_audit_v2_report.md` records
+"Phase 1".."Phase 7" as data) — the identical self-inflicted mechanism the
+prior pass logged as **F22** for `production_readiness_report.md`. Allow-listing
+the v2 report in both hygiene scans (folded into the Phase 0 commit) restores
+`1377 passed`. The pristine prior-pass tree therefore reproduces green
+exactly; no behaviour finding.
+
+**Slow-lane note.** A first pristine-tree slow run was started and verified
+green progressively; it was then stopped (the realscale matrix is ~80 min on
+this constrained machine) because the default balancing-aggregator fee is 0.0
+and thus **bit-identical** to the pristine tree (proven by the golden
+`kpi_baseline.json` suite and the dedicated bit-identical locks). A SINGLE
+authoritative slow run on the FINAL Phase-2 code therefore subsumes both the
+prior-baseline reproduction and the new-feature regression check; it is run
+and recorded in Phase 7 (8 passed). Running two ~80-min slow lanes would be
+redundant given the bit-identical default.
+
+**Environment notes (not code findings).** (1) `highspy` resolves to 1.15.0
+here vs 1.14.0 in the prior report — a minor solver build bump; no numeric
+divergence observed. (2) `make -C docs html` emits 5 `intersphinx inventory
+not fetchable` warnings: the sandbox proxy returns 403 for the pandas / numpy /
+pyomo / python / matplotlib `objects.inv` fetches. These are network-only;
+`make html` exits 0 and `tests/test_docs_build.py` passes, so the docs gate is
+green.
 
 ### Prior-pass lock verification (mutation check)
 
@@ -97,21 +125,44 @@ reverting the fix in a scratch copy and confirming the **named** regression
 test fails. A lock that still passes with the bug reintroduced is a P1
 finding (rewrite to truly pin the invariant).
 
-| Finding | Sev | Named lock | Reverts → test fails? | Verdict |
-|---|---|---|---|---|
-| F6 | P1 | `test_cost_keys_validated_on_real_workbook_sections` | _pending_ | _pending_ |
-| F13 | P1 | `_validate_ppa_config` settlement check | _pending_ | _pending_ |
-| F22 | P1 | `test_repo_hygiene` allow-list | _pending_ | _pending_ |
-| F32 | P1 | `test_script_runs_standalone_without_install` | _pending_ | _pending_ |
-| F29 | P2 | `test_breakeven_duplicate_capacities_no_divide_by_zero` | _pending_ | _pending_ |
-| F4 | P2 | `test_gearing_*` | _pending_ | _pending_ |
-| F14 | P2 | degradation non-negative checks | _pending_ | _pending_ |
+Method: revert the fix in place, run **only** the named lock, confirm it
+**fails**, then `git checkout` to restore. A lock that still passes with the
+bug reintroduced would be a P1 finding (rewrite to truly pin the invariant).
+
+| Finding | Sev | Named lock | Revert applied | Lock fails on mutant? | Verdict |
+|---|---|---|---|---|---|
+| F6 | P1 | `test_cost_keys_validated_on_real_workbook_sections` | validate PV cost keys from `economics` section | **yes** (rc=1) | **genuine** |
+| F13 | P1 | `test_invalid_ppa_settlement_rejected` | drop the `ppa_settlement` enum check in `_validate_ppa_config` | **yes** (rc=1) | **genuine** |
+| F22 | P1 | `test_no_old_version_strings[\bPhase [1-8]\b]` | remove `production_readiness_report.md` from the allow-list | **yes** (rc=1) | **genuine** |
+| F32 | P1 | `test_script_runs_standalone_without_install` | remove the `sys.path` bootstrap (after `pip uninstall -e` to simulate a fresh checkout — the editable install otherwise masks it) | **yes** — exact `ModuleNotFoundError: No module named 'pvbess_opt'` | **genuine** |
+| F29 | P2 | `test_breakeven_duplicate_capacities_no_divide_by_zero` | restore the unguarded `np.diff(npv)/np.diff(mwh)` | **yes** (rc=1, RuntimeWarning-as-error) | **genuine** |
+| F4 | P2 | `test_gearing_above_100_rejected` | remove the `[0,100]` gearing range check | **yes** (rc=1) | **genuine** |
+| F14 | P2 | `test_negative_pv_degradation_year1_rejected` | drop the degradation keys from the non-negative loop | **yes** (rc=1) | **genuine** |
+
+All seven sampled locks (every P0/P1 plus the named P2 sample) **fail** when
+their bug is reintroduced — none gives false confidence. The "F6 lesson" does
+not recur in this sample.
+
+### Completeness of prior fixes (root cause vs one instance)
+
+* **F6 (section placement)** — `validate_workbook_params` reads every PV cost
+  key from the `pv` section, every BESS cost key from `bess`, the site lump
+  sums from `project`, and `gearing_pct` / grid-CO2 from `economics`. No
+  remaining cost/sign key is read from the wrong section. **Complete.**
+* **F3 (enum rejection)** — all nine `_STR_KEYS` enums (`mode`,
+  `currency_format`, `plot_{daily,monthly,yearly}_scope`, `pv_source`,
+  `debt_repayment`, `ppa_structure`, `ppa_settlement`) have an
+  `_ALLOWED_VALUES` set and route through `_parse_string_enum`, which **raises**
+  for any out-of-set value (not just `mode`). **Complete.**
+
+**Phase 1 result:** the prior pass reproduces green and every sampled lock is
+genuine; no new finding, no weak lock to harden.
 
 ---
 
 ## New findings (this pass)
 
-_None recorded yet._
+_None recorded in Phase 1 (the prior pass holds up); see Phase 2 for V2-1._
 
 ---
 
