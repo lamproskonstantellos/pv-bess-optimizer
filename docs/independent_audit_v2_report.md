@@ -320,6 +320,53 @@ default-off behaviour.
 
 ---
 
-## Independent sign-off
+## Phase 6 — surface equivalence & docs/image truth
 
-_Pending Phase 7._
+**Three surfaces.** The new `balancing_aggregator_fee_pct_revenue` is on all
+three config surfaces by construction (schema-derived): the shipped
+`inputs/input.xlsx` carries the row (default 0.0, regenerated atomically via
+`scripts/polish_input_workbook.py`); a YAML/JSON `--config` accepts the key
+(probe: config sets 12.5, loads 12.5); the scenario dotted target
+`economics.balancing_aggregator_fee_pct_revenue` validates. The
+surface-parity suite (`test_input_surface_parity.py`, schema-driven over
+`_SHEET_DEFAULTS` / `_SHEET_ROW_TEMPLATES`) and `test_io_v08_schema` /
+`test_workbook_io` (extended) lock this.
+
+**Docs truthed-up.** Both fees are now described consistently across README,
+the six `*_design.md` docs (economics, balancing, self_consumption, merchant,
+ppa, uncertainty), `conventions.md`, `docs/README.md`, the Sphinx
+`inputs.rst`, and the CHANGELOG. The two design docs that previously stated
+"balancing carries no fee" (`merchant_design.md`, `ppa_design.md`) now read
+"no energy-aggregator fee, but may carry the optional BSP fee" / "PPA carries
+neither fee". `make -C docs html` builds clean (only the 5 network-only
+intersphinx warnings) and `test_docs_build` passes. CITATION/version stay at
+0.9.0 / 2026-06-27 per the kept prior decision (`test_version_badge_consistency`
+green).
+
+**Result gallery.** `scripts/export_readme_figures.py` gains a
+`balancing_aggregator_fee_pct` knob and renders the merchant+balancing
+scenario with a representative 10 % BSP fee so the regenerated PNGs show the
+new deduction. The regeneration is itself a scope check: the merchant
+revenue-stack and BESS-waterfall PNGs change (the fee bar / step appear), the
+cumulative-cashflow PNG steps lower (the DCF consumes the net), while
+`merchant_lcos_band.png` comes back **byte-identical** — confirming LCOS
+excludes balancing and its fee — and the two self-consumption PNGs are
+unchanged (no balancing). The self-consumption gallery runs were not
+re-rendered (content-identical and the full-year lifetime-dispatch expansion
+peaks ~10 GB; bounding the resource cost). Captions updated; relative
+`docs/assets/...` paths render on GitHub.
+
+**Matrix reconciliation.** A full merchant+balancing pipeline run with a 15 %
+BSP fee was inspected end-to-end: `03_results.xlsx` carries the
+`balancing_aggregator_fee_eur` column on `cashflow_yearly` /
+`cashflow_quarterly` / `cashflow_monthly` with the Year-1 ratio exactly
+−0.1500 of gross balancing, the `financial_kpis` sheet exposes
+`lifetime_bm_aggregator_fee_total_eur` and `lifetime_bm_revenue_net_total_eur`
+(net = gross + fee), and `00_summary/SUMMARY.md` is written — SUMMARY ↔
+results ↔ KPIs reconcile.
+
+---
+
+## Phase 7 — independent acceptance & sign-off
+
+_Pending the final clean gate re-run._

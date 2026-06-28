@@ -70,6 +70,7 @@ _SELF_CONSUMPTION_DAILY_FIGURES = {
 
 def _build_workbook(
     dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
+    balancing_aggregator_fee_pct: float = 0.0,
 ) -> Path:
     """Materialise a single-scenario workbook from the shipped input.
 
@@ -78,10 +79,18 @@ def _build_workbook(
     otherwise the full year runs with the energy-plot fan-out switched off
     (only the financial figures are needed, and the per-day plots over a
     full year dominate the wall-clock).
+
+    ``balancing_aggregator_fee_pct`` sets the optional BSP / route-to-market
+    fee so the gallery's balancing scenario visibly carries the deduction
+    (it defaults to 0 on the shipped workbook); the merchant+balancing
+    figures use a representative non-zero value to show the new line.
     """
     typed = read_workbook(REPO_ROOT / "inputs" / "input.xlsx")
     typed["project"]["mode"] = mode
     typed["balancing"]["balancing_enabled"] = balancing
+    typed["economics"]["balancing_aggregator_fee_pct_revenue"] = (
+        balancing_aggregator_fee_pct
+    )
     typed["ppa"]["ppa_enabled"] = False
     typed["simulation"]["uncertainty_enabled"] = False
     # The gallery uses none of the uncertainty diagnostic plots, which
@@ -104,9 +113,11 @@ def _build_workbook(
 
 
 def _run(dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
-         mip_gap: float, time_limit: int) -> Path:
+         mip_gap: float, time_limit: int,
+         balancing_aggregator_fee_pct: float = 0.0) -> Path:
     wb = _build_workbook(
         dst_dir, mode=mode, balancing=balancing, one_day=one_day,
+        balancing_aggregator_fee_pct=balancing_aggregator_fee_pct,
     )
     run(RunConfig(
         excel=wb, solver="highs", outdir=dst_dir / "out",
@@ -149,6 +160,9 @@ def main(argv: list[str] | None = None) -> int:
             merchant_run = _run(
                 tmp_dir / "merchant", mode="merchant", balancing=True,
                 one_day=False, mip_gap=args.mip_gap, time_limit=args.time_limit,
+                # Representative BSP / route-to-market fee so the gallery's
+                # revenue stack and waterfall show the deduction line.
+                balancing_aggregator_fee_pct=10.0,
             )
             written += _curate(merchant_run, _MERCHANT_FIGURES)
 

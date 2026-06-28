@@ -123,10 +123,13 @@ grid-charging expense — the BESS-DAM bundling convention), and the
 five `revenue_bess_<product>_eur` balancing aggregates.
 `revenue_self_consumption_eur` ≡ 0 by construction
 (`kpis._compute_canonical_revenue_aggregates` zeroes it for
-merchant).  The aggregator fee applies once to the (here purely DAM)
-gross market revenue; balancing and PPA streams carry no fee.  The
-cashflow projection, degradation scaling, LCOE/LCOS and debt algebra
-are mode-agnostic.
+merchant).  The energy-aggregator fee applies once to the (here purely
+DAM) gross market revenue; PPA carries no fee, and balancing carries no
+energy-aggregator fee but MAY carry the optional, separate
+balancing-aggregator (BSP / route-to-market) fee
+(`balancing_aggregator_fee_pct_revenue`, default 0 — see
+`docs/economics_design.md`).  The cashflow projection, degradation
+scaling, LCOE/LCOS and debt algebra are mode-agnostic.
 
 ## KPI definitions
 
