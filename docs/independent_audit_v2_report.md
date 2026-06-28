@@ -257,6 +257,7 @@ tolerance ⇒ no Phase 3 finding.
 |---|---|---|---|---|
 | V2-1 | P3 | input | The energy `aggregator_fee_pct_revenue` was only *clamped* to [0,1] in economics, never range-validated — a typo like `150` (meaning "1.50 %") silently became a 100 % fee that wiped revenue. Inconsistent with `gearing_pct`/`grid_co2_*` (which reject) and with the new BSP fee. | **fixed** — `validate_workbook_params` now rejects either revenue fee outside `[0,100]`; `tests/test_balancing_aggregator_fee.py::test_energy_aggregator_fee_out_of_range_rejected` + `::test_balancing_fee_out_of_range_rejected`. |
 | V2-2 | P2 | test | The monthly BSP-fee reconciliation lock only checked the annual *sum* (both candidate weightings sum to 1, so the test could not tell `balancing_share` from `fee_share`), and its fixture had flat shares — a mutation allocating the fee by the energy-revenue share *survived*. | **fixed** — added `test_monthly_fee_follows_balancing_profile_not_revenue` with a seasonal fixture (reservations in H1, revenue in H2) asserting per-month `fee == -frac × gross balancing`; the mutant is now killed. |
+| V2-3 | P2 | test/process | Two new audit test docstrings carried `Phase 3` / `Phase 5` process tags. The evergreen forbidden-token hygiene scan (`test_repo_hygiene`, the same mechanism as the prior pass's F22) flags `\bPhase [1-8]\b` in any non-allow-listed `.py`/`.md`/`.rst`, so the final-acceptance fast lane caught three `test_repo_hygiene` failures — surfaced only by the full lane, since the targeted runs never included that file. | **fixed** — rephrased both docstrings to describe behaviour without phase tags (test files are evergreen surfaces, not process artifacts); confirmed no other forbidden token in the diff; `test_repo_hygiene` green (95 passed). |
 
 ---
 
@@ -369,4 +370,43 @@ results ↔ KPIs reconcile.
 
 ## Phase 7 — independent acceptance & sign-off
 
-_Pending the final clean gate re-run._
+### Final gate (clean re-run on the delivered code)
+
+| Gate | Command | Result |
+|---|---|---|
+| ruff | `python -m ruff check .` | **PASS** (All checks passed) |
+| mypy | `python -m mypy` | **PASS** (no issues, 46 files) |
+| vulture | `python -m vulture` | **PASS** (exit 0) |
+| fast lane | `python -m pytest tests/ -q` | **1412 passed** (1377 prior + 35 new), 0 failed |
+| slow lane | `python -m pytest tests/ -q -m slow` | **8 passed** (real-scale mode×asset×feature matrix + rolling-horizon + dispatch-invariant hardening) |
+| docs html | `make -C docs html` / `test_docs_build.py` | **PASS** (`test_docs_build` green; 5 network-only intersphinx warnings) |
+
+### Deliverables
+
+* **Two scope changes** — delivered, wired across all surfaces, visible in the
+  plots, documented, and tested (Phase 2 / 6). Default-off path proven
+  bit-identical.
+* **Prior pass independently re-verified** — gate reproduced; all seven
+  sampled regression locks proven genuine (Phase 1).
+* **Core numbers independently re-derived** — fees, split, escalation,
+  discount, NPV, IRR (Phase 3).
+* **Inputs & test suite attacked** — 21 mutations all caught (one survivor
+  strengthened); robustness + cross-version determinism (Phases 4–5).
+
+### New findings (all fixed + locked)
+
+| # | Sev | Status |
+|---|---|---|
+| V2-1 | P3 | fixed — both revenue fees range-validated `[0,100]` |
+| V2-2 | P2 | fixed — monthly fee-allocation lock strengthened |
+| V2-3 | P2 | fixed — leaked audit-phase tags removed from test docstrings (`test_repo_hygiene` green) |
+
+### Sign-off
+
+Independent assessment: **zero findings open at any severity (P0 = P1 = P2 =
+P3 = 0).** The two scope changes are implemented, documented and tested; the
+core results are independently re-derived; the inputs and the test suite were
+attacked and hardened. No deferral list — the prior pass's three deferred
+owner-sign-off items (version 0.9.0 vs 0.9.1; discount/inflation sign bounds;
+sizing+scenarios warn-vs-error) were reviewed and kept as previously decided
+(none found incorrect).
