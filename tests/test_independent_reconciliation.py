@@ -1,4 +1,4 @@
-"""Independent numerical re-derivation (audit v2, Phase 3).
+"""Independent numerical re-derivation of the financial model.
 
 The expected values here are computed from FIRST PRINCIPLES with plain
 numpy — this module imports the project's economics builder only to

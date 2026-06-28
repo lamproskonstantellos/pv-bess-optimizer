@@ -1,5 +1,5 @@
-"""Adversarial / degenerate-config robustness for the BSP fee (audit v2,
-Phase 5).
+"""Adversarial / degenerate-config robustness for the balancing-aggregator
+(BSP) fee.
 
 Every case must fail loudly with an actionable message OR degrade per a
 documented contract — never an opaque crash or a silent wrong number.
