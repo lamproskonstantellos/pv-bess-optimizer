@@ -184,7 +184,7 @@ KPIs (`sensitivity.run_sensitivity_analysis`):
 |---|---|---|
 | CAPEX | `sensitivity_capex_delta_pct` | scales every `capex_eur` and `devex_eur` row — Year-0 outlay AND the scheduled BESS replacement (`_scale_capex`) |
 | OPEX | `sensitivity_opex_delta_pct` | scales `opex_eur` (`_scale_opex`) |
-| Revenue | `sensitivity_revenue_delta_pct` | recovers the true per-year gross as `revenue_eur + |aggregator_fee_eur|` (exact in both fee-applied and fee-clamped years), scales it, re-derives the fee with the same inferred fraction (`_infer_aggregator_fee_frac`) and clamp, re-splits per stream; balancing and PPA columns scale directly (no fee) (`_scale_revenue`) |
+| Revenue | `sensitivity_revenue_delta_pct` | recovers the true per-year gross as `revenue_eur + |aggregator_fee_eur|` (exact in both fee-applied and fee-clamped years), scales it, re-derives the fee with the same inferred fraction (`_infer_aggregator_fee_frac`) and clamp, re-splits per stream; balancing and PPA columns scale directly with the driver — and the optional `balancing_aggregator_fee_eur` column scales with them so the BSP fee stays in sync with gross balancing revenue (`_scale_revenue`) |
 | DiscountRate | `sensitivity_discount_rate_delta_pp` (absolute pp) | rebuilds discounting at $\rho \pm \delta$; NPV-only by construction — IRR/payback are rate-independent (`_rebuild_with_discount_rate`) |
 | PpaPrice | `sensitivity_ppa_price_delta_pct` | active only when the contract is on, the strike > 0 and the Year-1 strike-leg value is nonzero; rescales the strike-leg base by ±δ (physical: contract leg; CfD: leg + covered DAM value, the strike part), rebuilds the FULL yearly cashflow from the rescaled KPI bases so term/reversion/escalation stay exact |
 

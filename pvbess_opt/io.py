@@ -203,6 +203,11 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "retail_inflation_pct": 0.0,
     "dam_inflation_pct": 0.0,
     "aggregator_fee_pct_revenue": 10.0,
+    # Optional, separate route-to-market (BSP / balancing-aggregator) fee on
+    # GROSS balancing revenue.  Default 0.0 so existing results are
+    # bit-identical; balancing carries no energy-aggregator fee but may carry
+    # this one (Gridcog-style per-stream route-to-market cost).
+    "balancing_aggregator_fee_pct_revenue": 0.0,
     "benchmark_lcoe_low_eur_per_mwh": BENCHMARK_LCOE_LOW_EUR_PER_MWH,
     "benchmark_lcoe_high_eur_per_mwh": BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     "benchmark_lcos_low_eur_per_mwh": BENCHMARK_LCOS_LOW_EUR_PER_MWH,
@@ -572,8 +577,17 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Industry tools (Lazard, Aurora, Gridcog) use exogenous price "
      "curves, not flat inflation."),
     ("aggregator_fee_pct_revenue", 10.0, "%",
-     "Aggregator fee on gross revenue (Gridcog convention; see public "
-     "Gridcog cost / pricing docs)."),
+     "Energy-aggregator fee on gross DAM + retail revenue (Gridcog "
+     "convention; see public Gridcog cost / pricing docs). Does NOT apply "
+     "to balancing or PPA revenue."),
+    ("balancing_aggregator_fee_pct_revenue", 0.0, "%",
+     "Optional, separate route-to-market (BSP / balancing-aggregator) fee on "
+     "GROSS balancing revenue (capacity + activation). Default 0 = fee-free, "
+     "bit-identical to today. Set it when balancing is routed through an "
+     "aggregator/BSP that keeps a share (typical behind-the-meter / smaller "
+     "assets, ~5-20 %); per-stream route-to-market cost, Gridcog convention. "
+     "Surfaces as a signed balancing_aggregator_fee_eur cashflow column. "
+     "Never applies to DAM / retail / PPA revenue."),
     ("benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
@@ -1838,6 +1852,21 @@ def validate_workbook_params(
         raise ValueError(
             f"'gearing_pct' must be in [0, 100]; got {gearing!r}."
         )
+
+    # Revenue-fee percentages are a fraction of gross revenue, so they live
+    # in [0, 100].  An out-of-range value (e.g. 150 meaning a mistyped
+    # "1.50 %") is rejected rather than silently clamped — the same loud
+    # contract as gearing_pct.  Both the energy-aggregator fee and the
+    # optional balancing-aggregator (BSP) fee share this range.
+    for fee_key in ("aggregator_fee_pct_revenue",
+                    "balancing_aggregator_fee_pct_revenue"):
+        if fee_key not in economics:
+            continue
+        fee_val = float(economics.get(fee_key, 0.0) or 0.0)
+        if not (0.0 <= fee_val <= 100.0):
+            raise ValueError(
+                f"{fee_key!r} must be in [0, 100]; got {fee_val!r}."
+            )
 
     # Grid-emissions accounting (24/7-CFE): a non-negative intensity and a
     # decline in [0, 100] %/yr.  A decline above 100 % makes the

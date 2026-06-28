@@ -279,6 +279,10 @@ FINANCIAL_COLORS: dict[str, str] = {
     "export_from_bess": "#0D47A1",  # Material blue 900
     "grid_charge_cost": "#D32F2F",  # Material red 700 (negative stack)
     "aggregator_fee":   "#AD1457",  # Material pink 800 (deduction tone)
+    # Optional balancing-aggregator (BSP / route-to-market) fee — a darker
+    # pink in the same deduction family as the energy aggregator fee, kept
+    # distinct so the two fee lines never collide on the revenue stack.
+    "balancing_aggregator_fee": "#880E4F",  # Material pink 900
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -395,6 +399,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "PPA revenue",
     "Grid-charging cost",
     "Aggregator fee",
+    "Balancing aggregator fee",
     # Balancing-product subcomponents (FCR / aFRR / mFRR)
     "FCR",
     "aFRR-up",
@@ -429,6 +434,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "PPA revenue":                      "ppa_revenue",
     "Grid-charging cost":               "grid_charge_cost",
     "Aggregator fee":                   "aggregator_fee",
+    "Balancing aggregator fee":         "balancing_aggregator_fee",
     "FCR":                              "bm_fcr",
     "aFRR-up":                          "bm_afrr_up",
     "aFRR-down":                        "bm_afrr_dn",
@@ -473,6 +479,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "CAPEX",
     "Grid-charging cost",
     "Aggregator fee",
+    "Balancing aggregator fee",
 )
 
 

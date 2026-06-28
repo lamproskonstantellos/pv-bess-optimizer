@@ -79,6 +79,7 @@ _ECONOMICS_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {
     "retail_inflation_pct": (float, -100.0, 100.0),
     "dam_inflation_pct": (float, -100.0, 100.0),
     "aggregator_fee_pct_revenue": (float, 0.0, 100.0),
+    "balancing_aggregator_fee_pct_revenue": (float, 0.0, 100.0),
     "benchmark_lcoe_low_eur_per_mwh": (float, 0.0, None),
     "benchmark_lcoe_high_eur_per_mwh": (float, 0.0, None),
     "benchmark_lcos_low_eur_per_mwh": (float, 0.0, None),

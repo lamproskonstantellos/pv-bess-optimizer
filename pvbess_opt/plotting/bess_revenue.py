@@ -119,13 +119,33 @@ def plot_bess_revenue_waterfall(
             out_path, "No BESS revenue — waterfall not rendered.",
         )
 
-    labels = [_BESS_DAM_LABEL, *(p[0] for p in products), "Total BESS revenue"]
-    values = [bess_dam, *(p[1] for p in products), 0.0]
-    colours = [
-        _BESS_DAM_COLOUR,
-        *(BM_COLOURS[p[2]] for p in products),
-        _shade(_BESS_DAM_COLOUR, 0.65),
+    # Optional balancing-aggregator (BSP) fee — a deduction on GROSS
+    # balancing revenue (the five products; the DAM-arbitrage segment is
+    # not balancing and carries no BSP fee).  Inserted as its own negative
+    # step before the total so the waterfall total steps down by it; absent
+    # when the fee is off (default 0).
+    bal_fee_frac = 0.0
+    if econ is not None:
+        bal_fee_frac = max(0.0, min(
+            1.0,
+            float(econ.get("balancing_aggregator_fee_pct_revenue", 0.0) or 0.0)
+            / 100.0,
+        ))
+    bm_gross = sum(v for _label, v, _ck in products)
+    bal_fee = -bal_fee_frac * max(bm_gross, 0.0)
+
+    steps: list[tuple[str, float, str]] = [
+        (_BESS_DAM_LABEL, bess_dam, _BESS_DAM_COLOUR),
+        *((label, v, BM_COLOURS[ck]) for label, v, ck in products),
     ]
+    if bal_fee < -1e-9:
+        steps.append((
+            "Balancing aggregator fee", bal_fee,
+            financial_color("Balancing aggregator fee"),
+        ))
+    labels = [s[0] for s in steps] + ["Total BESS revenue"]
+    values = [s[1] for s in steps] + [0.0]
+    colours = [s[2] for s in steps] + [_shade(_BESS_DAM_COLOUR, 0.65)]
     cumulative = 0.0
     bottoms = []
     heights = []

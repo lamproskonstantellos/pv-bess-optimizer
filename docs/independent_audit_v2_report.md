@@ -160,9 +160,70 @@ genuine; no new finding, no weak lock to harden.
 
 ---
 
+## Phase 2 — the two scope changes, as delivered
+
+### 2A — self_consumption balancing guardrail (Decision 1)
+
+`pvbess_opt/pipeline.py` gains `_warn_self_consumption_balancing(params)`,
+called once per run from `_run_one` (after the `--mode` override is applied,
+so the final mode is known). It emits ONE
+`[balancing-in-self_consumption]` warning when balancing is enabled, a BESS
+is present, and the mode resolves to `self_consumption` — never in
+`merchant`, and never for a balancing-on-but-BESS-less no-op. The both-mode
+contract is unchanged (no mode gate added). Documented in README,
+`self_consumption_design.md`, and `balancing_market_design.md`.
+
+Locks (`tests/test_balancing_mode_contract.py`, extended):
+`test_guardrail_warns_in_self_consumption`,
+`test_guardrail_silent_in_merchant`,
+`test_guardrail_silent_when_balancing_off`,
+`test_guardrail_silent_without_bess`; the existing both-mode
+activation/settlement tests stay valid.
+
+### 2B — balancing-aggregator (BSP) fee (Decision 2)
+
+New `balancing_aggregator_fee_pct_revenue` (economics sheet, default 0.0,
+`[0,100]`), wired through every surface and mirroring the energy fee:
+
+* **io.py** — `ECONOMICS_SHEET_DEFAULTS`, the `_ECONOMICS_ROWS` template
+  (right after the energy fee), and a `[0,100]` check in
+  `validate_workbook_params` (covering BOTH fees — see finding V2-1).
+* **economics.py** — `build_yearly_cashflow` computes a non-negative,
+  zero-gross-clamped deduction on gross balancing revenue (escalated with
+  the gross), adds the `balancing_aggregator_fee_eur` column, and folds it
+  into `net_cashflow_eur`; `derive_monthly_cashflow` allocates it by the
+  same reservation weights and (because balancing revenue is gross) adds it
+  to the monthly/quarterly net; `compute_financial_kpis` exposes
+  `lifetime_bm_aggregator_fee_total_eur` and
+  `lifetime_bm_revenue_net_total_eur` while the gross roll-up is unchanged.
+* **sensitivity.py** — the revenue driver scales the fee column with the
+  gross; `_recompute_net` includes it.
+* **plotting** — the yearly revenue stack draws a "Balancing aggregator
+  fee" deduction bar and steps its net line down; the BESS revenue
+  waterfall inserts a fee step so the total steps down. `theme.py` gets a
+  unique `balancing_aggregator_fee` colour + canonical label.
+* **three config surfaces** — workbook row, `--config` key, scenario dotted
+  target `economics.balancing_aggregator_fee_pct_revenue` (all
+  schema-derived, proven by the surface-parity suite).
+* **docs** — economics_design (Eq. E13b + table + net cashflow + KPI list),
+  balancing_market_design, conventions.md, README, docs/README, inputs.rst,
+  uncertainty_design, CHANGELOG.
+
+Locks (`tests/test_balancing_aggregator_fee.py`, new): per-year deduction
+equals `-frac × gross` (escalated); net drops by exactly the fee; gross
+unchanged; default-0 bit-identical to a missing key; lifecycle fee/net KPIs;
+monthly+quarterly reconciliation; `[0,100]` validation for both fees;
+sensitivity scaling; both plots draw the fee (and do NOT when off). The
+default-off path is proven bit-identical (the golden `kpi_baseline.json`
+suite stays green).
+
+---
+
 ## New findings (this pass)
 
-_None recorded in Phase 1 (the prior pass holds up); see Phase 2 for V2-1._
+| # | Sev | Area | Title | Resolution |
+|---|---|---|---|---|
+| V2-1 | P3 | input | The energy `aggregator_fee_pct_revenue` was only *clamped* to [0,1] in economics, never range-validated — a typo like `150` (meaning "1.50 %") silently became a 100 % fee that wiped revenue. Inconsistent with `gearing_pct`/`grid_co2_*` (which reject) and with the new BSP fee. | **fixed** — `validate_workbook_params` now rejects either revenue fee outside `[0,100]`; `tests/test_balancing_aggregator_fee.py::test_energy_aggregator_fee_out_of_range_rejected` + `::test_balancing_fee_out_of_range_rejected`. |
 
 ---
 

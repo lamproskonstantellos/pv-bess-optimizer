@@ -82,7 +82,14 @@ scope, exactly:
 
 For total project revenue including balancing, use the cashflow
 DataFrame: `cashflow_yearly['revenue_eur'] +
-cashflow_yearly['balancing_revenue_eur']`.
+cashflow_yearly['balancing_revenue_eur'] +
+cashflow_yearly['balancing_aggregator_fee_eur']`.  The
+`balancing_revenue_eur` column is GROSS; the optional balancing-aggregator
+(BSP / route-to-market) fee is its own signed
+`balancing_aggregator_fee_eur` column (≤ 0, identically zero when
+`balancing_aggregator_fee_pct_revenue` is 0).  Balancing carries no
+energy-aggregator fee, but may carry this separate, default-off BSP fee;
+both fees are excluded from LCOE/LCOS by the existing convention.
 
 ## Perfect-foresight benchmark and the MC ensemble share one scope
 

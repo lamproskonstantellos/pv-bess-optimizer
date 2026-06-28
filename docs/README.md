@@ -79,7 +79,7 @@ verbatim in each document's Inputs section.
 | $s$, $\pi^{\mathrm{PPA}}$, $T^{\mathrm{PPA}}$, $i_{\mathrm{PPA}}$ | `ppa_volume_share_pct`/100, `ppa_price_eur_per_mwh`, `ppa_term_years`, `ppa_inflation_pct`/100 |
 | $\rho$ | `discount_rate_pct`/100 |
 | $i_{\mathrm{opex}}, i_{\mathrm{ret}}, i_{\mathrm{DAM}}, i_{\mathrm{bm}}$ | `opex_inflation_pct`, `retail_inflation_pct`, `dam_inflation_pct`, `bm_inflation_pct` (each /100) |
-| $\varphi$ | `aggregator_fee_pct_revenue`/100 |
+| $\varphi$, $\varphi_{\mathrm{bm}}$ | `aggregator_fee_pct_revenue`/100 (DAM + retail), `balancing_aggregator_fee_pct_revenue`/100 (optional BSP fee on gross balancing, default 0) |
 | $d_1, d_a$; $d_B, d_c$ | PV year-1 LID / annual degradation; BESS calendar / per-cycle fade (each pct/100) |
 | $f^{PV}_y, f^{B}_y$ | degradation factors (`lifetime._pv_factor`, `lifetime._bess_factor`) |
 | $a$, $A$ | `unavailability_pct`/100; availability factor $A = 1-a$ |

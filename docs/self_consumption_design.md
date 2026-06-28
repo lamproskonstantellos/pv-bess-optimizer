@@ -123,6 +123,20 @@ $\varepsilon = 10^{-5}$ EUR/kWh is the curtailment tie-breaker
 (`_WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH`, module-private, not a
 workbook knob).
 
+> **Balancing under self-consumption — practical caveat.**
+> Balancing-market participation ($R^{\mathrm{bm}}$, opt-in via
+> `balancing_enabled`, off by default) is valid in **both**
+> `self_consumption` and `merchant` mode; the activation gate keys on
+> `balancing_enabled and bess_present` only, with **no** mode gate.
+> Stacking FCR/aFRR/mFRR revenue on top of a self-consumption scheme,
+> however, in practice requires routing through an **aggregator/BSP**
+> and **TSO prequalification**, and not every self-consumption support
+> scheme permits market cumulation. The pipeline emits **one**
+> load/resolve-time warning when balancing runs under `self_consumption`
+> with a BESS present; verify your scheme permits cumulation and
+> consider the optional `balancing_aggregator_fee_pct_revenue`
+> route-to-market cost (default 0). See `docs/balancing_market_design.md`.
+
 ## Hard constraints — formal statements
 
 Each subsection states the constraint and its active scope.  Constraint

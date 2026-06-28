@@ -160,8 +160,11 @@ optional `bess_wear_cost_eur_per_mwh` dispatch shadow price.
 ### `economics`
 
 Discount rate, OPEX inflation, per-stream revenue indexation
-(`retail_inflation_pct`, `dam_inflation_pct`), aggregator fee,
-LCOE / LCOS benchmark-band overrides, the five sensitivity-tornado
+(`retail_inflation_pct`, `dam_inflation_pct`), the energy-aggregator fee
+(`aggregator_fee_pct_revenue`, on DAM + retail) and the optional,
+separate balancing-aggregator / BSP fee
+(`balancing_aggregator_fee_pct_revenue`, on gross balancing revenue;
+default 0), LCOE / LCOS benchmark-band overrides, the five sensitivity-tornado
 deltas (CAPEX / OPEX / revenue / discount-rate / PPA-price), the
 debt layer (`gearing_pct`, `debt_interest_rate_pct`,
 `debt_tenor_years`, `debt_repayment`), and grid-emissions

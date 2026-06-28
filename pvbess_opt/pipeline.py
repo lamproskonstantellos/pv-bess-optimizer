@@ -784,6 +784,40 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
         )
 
 
+def _warn_self_consumption_balancing(params: dict[str, Any]) -> None:
+    """Emit ONE guardrail warning when balancing runs under self_consumption.
+
+    Balancing-market participation is a valid, opt-in capability in BOTH
+    ``self_consumption`` and ``merchant`` mode (the activation gate keys on
+    ``balancing_enabled and bess_present`` only — there is deliberately NO
+    mode gate).  But stacking ancillary-service revenue on top of a
+    self-consumption scheme in practice requires routing through an
+    aggregator/BSP and TSO prequalification, and not every self-consumption
+    support scheme permits market cumulation.  This single load/resolve-time
+    warning flags that caveat; it fires only when balancing would actually
+    participate (a BESS is present) under ``self_consumption`` — never in
+    ``merchant``, and never for a balancing-on but BESS-less no-op.
+    """
+    balancing_enabled = bool(
+        params.get("balancing", {}).get("balancing_enabled", False)
+    )
+    bess_present = float(params.get("bess_power_kw", 0.0) or 0.0) > 0.0
+    if (
+        balancing_enabled
+        and bess_present
+        and resolve_mode(params) == "self_consumption"
+    ):
+        logger.warning(
+            "[balancing-in-self_consumption] balancing-market participation "
+            "is enabled under self_consumption mode: this models revenue "
+            "stacking that in practice requires participation via an "
+            "aggregator/BSP and TSO prequalification. Verify your "
+            "self-consumption support scheme permits market cumulation, and "
+            "consider the balancing_aggregator_fee_pct_revenue route-to-"
+            "market cost (default 0)."
+        )
+
+
 def _emit_bess_utilisation_audit(
     kpis: dict[str, Any], params: dict[str, Any],
 ) -> None:
@@ -945,6 +979,7 @@ def _run_one(
     # points from full-scale reference runs: 35 040 steps + balancing +
     # self_consumption + bess-only ~565 s; merchant + hybrid + balancing
     # on 672 steps ~1.2 s. Scale roughly linearly with n_steps.
+    _warn_self_consumption_balancing(params)
     if bool(params.get("balancing", {}).get("balancing_enabled", False)):
         ref_steps = 35040.0
         ref_seconds = 565.0

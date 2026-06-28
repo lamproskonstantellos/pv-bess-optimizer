@@ -114,15 +114,24 @@ fade curve, indexed by `bm_inflation_pct`:
 
 $$R^{\mathrm{bm,cap/act}}_y = R^{\mathrm{bm,cap/act}}_1\, f^{B}_y\, (1+i_{\mathrm{bm}})^{y-1} \tag{B8}$$
 
-The yearly cashflow carries three columns
+The yearly cashflow carries three gross balancing columns
 (`balancing_capacity_revenue_eur`, `balancing_activation_revenue_eur`,
-`balancing_revenue_eur`); the monthly view allocates them by the
+`balancing_revenue_eur`) plus an optional fee column
+(`balancing_aggregator_fee_eur`); the monthly view allocates them by the
 Year-1 monthly reservation weights (flat 1/12 fallback).  Balancing
-revenue carries **no aggregator fee** (BSPs settle directly with the
-TSO) and is **excluded from LCOE/LCOS** (revenue-agnostic Lazard
-convention; see `docs/economics_design.md`).  Default
-`bm_inflation_pct = 2.0` tracks CPI while DAM stays nominal —
-`pvbess_opt/conventions.md`.
+revenue carries **no energy-aggregator fee** (that fee applies to
+DAM + retail only — ancillary services settle directly with the TSO).
+It **may** carry an optional, separate route-to-market (BSP /
+balancing-aggregator) fee, `balancing_aggregator_fee_pct_revenue`, when
+participation is routed through an aggregator that keeps a share — a
+non-negative deduction on the **gross** balancing revenue
+(Eq. (E13b) in `docs/economics_design.md`) that **defaults to 0**
+(fee-free, bit-identical to today), with a realistic ~5–20 % range for
+behind-the-meter / smaller assets (per-stream route-to-market cost,
+Gridcog convention).  Balancing revenue **and** its BSP fee are
+**excluded from LCOE/LCOS** (revenue-agnostic Lazard convention; see
+`docs/economics_design.md`).  Default `bm_inflation_pct = 2.0` tracks
+CPI while DAM stays nominal — `pvbess_opt/conventions.md`.
 
 ## KPI definitions
 

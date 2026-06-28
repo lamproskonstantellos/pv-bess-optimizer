@@ -34,7 +34,8 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `opex_inflation_pct` | 1.0 | $i_{\mathrm{opex}}$ |
 | economics | `retail_inflation_pct` | 0.0 | $i_{\mathrm{ret}}$ |
 | economics | `dam_inflation_pct` | 0.0 | $i_{\mathrm{DAM}}$ (held nominal by default; DAM forecasts already embed a price view) |
-| economics | `aggregator_fee_pct_revenue` | 10.0 | $\varphi$ |
+| economics | `aggregator_fee_pct_revenue` | 10.0 | $\varphi$ (energy-aggregator fee on DAM + retail only) |
+| economics | `balancing_aggregator_fee_pct_revenue` | 0.0 | $\varphi_{\mathrm{bm}}$ (optional BSP / route-to-market fee on gross balancing revenue; default off) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
 | economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
 | economics | `gearing_pct`, `debt_interest_rate_pct`, `debt_tenor_years`, `debt_repayment` | 0, 5.0, 15, annuity | debt layer |
@@ -197,22 +198,38 @@ under physical settlement, `revenue_pv_ppa_eur` +
 `ppa_covered_dam_value_eur` under CfD (reconstructing strike × covered
 from the two-way difference leg).
 
-Aggregator fee — applied **once**, to the gross DAM + retail revenue
-only, clamped so a negative gross never flips the fee into a rebate;
-balancing and PPA revenue carry **no** fee (TSO / bilateral-offtake
-settlement convention):
+Energy-aggregator fee — applied **once**, to the gross DAM + retail
+revenue only, clamped so a negative gross never flips the fee into a
+rebate; PPA revenue carries **no** fee (bilateral-offtake settlement):
 
 $$F_y = -\varphi \cdot \max\!\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y,\; 0\right) \tag{E13}$$
 
 The fee is split across the retail/DAM net columns pro-rata to their
 gross contribution so per-stream nets sum exactly to `revenue_eur`.
 
+Balancing-aggregator fee — balancing revenue carries **no**
+energy-aggregator fee (ancillary services settle directly with the TSO),
+but it **may** carry an optional, separate route-to-market (BSP /
+balancing-aggregator) fee when participation is routed through an
+aggregator that keeps a share. It is a non-negative deduction on the
+**gross** balancing revenue, clamped the same way, and **defaults to 0**
+($\varphi_{\mathrm{bm}} = 0$) so existing results are bit-identical:
+
+$$F^{\mathrm{bm}}_y = -\varphi_{\mathrm{bm}} \cdot \max\!\left(R^{\mathrm{bm,cap}}_y + R^{\mathrm{bm,act}}_y,\; 0\right) \tag{E13b}$$
+
+It is escalated with the balancing revenue it deducts from (the gross is
+already on the BESS fade curve indexed by $i_{\mathrm{bm}}$), surfaces as
+its own signed `balancing_aggregator_fee_eur` cashflow column, and is
+**excluded from LCOE/LCOS** by the same convention that excludes
+balancing revenue. A realistic range is ~5–20 % for behind-the-meter /
+smaller assets; 0 for utility-scale BSPs that self-dispatch.
+
 OPEX, replacement CAPEX, and the net cashflow:
 
 $$O_y = -\left(o^{PV}\,\mathrm{kWp} + o^{B} P^{B}\right)(1+i_{\mathrm{opex}})^{y-1}, \qquad
 C_y = \begin{cases} c^{B} P^{B} \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
 
-$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + R^{\mathrm{bm}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
+$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
 
 with $V_y$ the DEVEX column (Year 0 only) and Year 0 carrying
 $\mathrm{CF}_0 = \mathrm{CAPEX}_0 + \mathrm{DEVEX}_0$.  Discounted:
@@ -324,9 +341,11 @@ quarterly aggregates by $q = \lceil m/3 \rceil$.
 `total_capex_eur` / `total_devex_eur` / `total_capex_devex_eur`
 (lifecycle incl. replacement), `total_opex_eur_lifecycle`,
 `total_revenue_eur_lifecycle`, `total_aggregator_fee_eur_lifecycle`,
-`lifetime_bm_revenue_total_eur` /
+`lifetime_bm_revenue_total_eur` (gross) /
 `lifetime_bm_capacity_revenue_total_eur` /
-`lifetime_bm_activation_revenue_total_eur`,
+`lifetime_bm_activation_revenue_total_eur` /
+`lifetime_bm_aggregator_fee_total_eur` (the optional BSP fee, ≤ 0) /
+`lifetime_bm_revenue_net_total_eur` (gross + fee),
 `lifetime_ppa_revenue_total_eur`, `lcoe_eur_per_mwh`,
 `lcos_eur_per_mwh` (+ their `lcoe_disc_*`/`lcos_disc_*` components),
 `pv_capacity_factor`, `bess_lifetime_cycles`, the three
