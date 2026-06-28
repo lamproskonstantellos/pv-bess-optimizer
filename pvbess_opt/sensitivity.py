@@ -154,6 +154,8 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("devex_eur")
     if "balancing_revenue_eur" in df.columns:
         components.append("balancing_revenue_eur")
+    if "balancing_aggregator_fee_eur" in df.columns:
+        components.append("balancing_aggregator_fee_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     df["net_cashflow_eur"] = sum(df[c].astype(float) for c in components)
@@ -247,12 +249,15 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
         revenue_base / gross_base.where(nonzero_base, 1.0)
     ).where(nonzero_base, 1.0)
 
-    # Balancing and PPA revenue streams carry no aggregator fee, so they
-    # scale by the driver directly.
+    # Balancing and PPA revenue streams carry no energy-aggregator fee, so
+    # they scale by the driver directly.  The optional balancing-aggregator
+    # (BSP) fee is proportional to gross balancing revenue, so it scales by
+    # the same factor and stays in sync with balancing_revenue_eur.
     for col in (
         "balancing_capacity_revenue_eur",
         "balancing_activation_revenue_eur",
         "balancing_revenue_eur",
+        "balancing_aggregator_fee_eur",
         "ppa_revenue_eur",
     ):
         if col in df.columns:

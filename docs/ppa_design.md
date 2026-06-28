@@ -137,11 +137,12 @@ indexation knob — deliberately independent of `retail_inflation_pct`
 Scope rules (one scope across every consumer —
 `pvbess_opt/conventions.md` "PPA stream scope"):
 
-* **Aggregator fee** — NOT applied to PPA revenue while under
-  contract: a bilateral offtake settles directly with the offtaker,
-  mirroring the balancing/TSO convention.  The fee continues to apply
-  to DAM/retail market revenue, including the post-term reverted
-  volume.
+* **Aggregator fee** — the energy-aggregator fee is NOT applied to PPA
+  revenue while under contract: a bilateral offtake settles directly with
+  the offtaker.  PPA carries neither the energy-aggregator fee nor the
+  optional balancing-aggregator (BSP) fee — only balancing revenue may
+  carry the latter.  The energy fee continues to apply to DAM/retail
+  market revenue, including the post-term reverted volume.
 * **LCOE/LCOS** — unchanged: Lazard-style cost-per-MWh metrics are
   revenue-agnostic, so the PPA (like balancing revenue) never enters
   them.

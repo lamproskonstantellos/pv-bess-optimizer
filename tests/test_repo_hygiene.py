@@ -56,6 +56,9 @@ ALLOWED_PATHS = {
     # finding-number annotations as data, so — like this file — it
     # allow-lists itself out of the version/phase regex scan.
     "docs/production_readiness_report.md",
+    # The independent audit (v2) report is the same kind of process/audit
+    # artifact: it records its own phase/finding annotations as data.
+    "docs/independent_audit_v2_report.md",
 }
 SKIP_DIR_PARTS = {
     "__pycache__", "build", ".git", "_static", "_templates",
@@ -115,6 +118,7 @@ FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
         "tests/test_repo_hygiene.py",
         # Audit artifact: records phase / finding-number tokens as data.
         "docs/production_readiness_report.md",
+        "docs/independent_audit_v2_report.md",
     )
 )
 

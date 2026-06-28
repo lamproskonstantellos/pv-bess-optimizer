@@ -14,11 +14,16 @@ description for narrative reasons, but it is not merchant-exclusive).
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from pvbess_opt.kpis import compute_kpis
 from pvbess_opt.optimization import build_model, run_scenario
+from pvbess_opt.pipeline import _warn_self_consumption_balancing
 from tests._balancing_helpers import _balancing_on
+
+_GUARD_MARKER = "[balancing-in-self_consumption]"
 
 # Symbols the balancing extension must attach to a built model (the same
 # set pinned by tests/test_logic_spec_conformance.py).
@@ -78,3 +83,43 @@ def test_balancing_off_books_zero_in_both_modes(
     )
     kpis = compute_kpis(res, params)
     assert kpis["bm_total_balancing_revenue_eur"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Decision 1 — self_consumption balancing guardrail (one warning, that mode
+# only).  The both-mode contract above stays valid; this pins the caveat.
+# ---------------------------------------------------------------------------
+
+
+def test_guardrail_warns_in_self_consumption(caplog, short_params):
+    """Balancing on + BESS present + self_consumption ⇒ exactly one warning."""
+    params = _balancing_on(short_params)
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.pipeline"):
+        _warn_self_consumption_balancing(params)
+    hits = [r for r in caplog.records if _GUARD_MARKER in r.getMessage()]
+    assert len(hits) == 1, f"expected one guardrail warning, got {len(hits)}"
+
+
+def test_guardrail_silent_in_merchant(caplog, short_params_merchant):
+    """The same feature in merchant mode emits NO guardrail warning."""
+    params = _balancing_on(short_params_merchant)
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.pipeline"):
+        _warn_self_consumption_balancing(params)
+    assert not [r for r in caplog.records if _GUARD_MARKER in r.getMessage()]
+
+
+def test_guardrail_silent_when_balancing_off(caplog, short_params):
+    """No warning when balancing is not enabled (the default)."""
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.pipeline"):
+        _warn_self_consumption_balancing(short_params)
+    assert not [r for r in caplog.records if _GUARD_MARKER in r.getMessage()]
+
+
+def test_guardrail_silent_without_bess(caplog, short_params):
+    """A balancing-on but BESS-less (pv_only) self_consumption run is a
+    no-op for balancing, so it must not warn."""
+    params = _balancing_on(short_params)
+    params["bess_power_kw"] = 0.0
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.pipeline"):
+        _warn_self_consumption_balancing(params)
+    assert not [r for r in caplog.records if _GUARD_MARKER in r.getMessage()]

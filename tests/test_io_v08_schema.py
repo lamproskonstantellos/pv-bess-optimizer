@@ -81,6 +81,7 @@ def test_economics_sheet_keys():
         "discount_rate_pct", "opex_inflation_pct",
         "retail_inflation_pct", "dam_inflation_pct",
         "aggregator_fee_pct_revenue",
+        "balancing_aggregator_fee_pct_revenue",
         "benchmark_lcoe_low_eur_per_mwh",
         "benchmark_lcoe_high_eur_per_mwh",
         "benchmark_lcos_low_eur_per_mwh",

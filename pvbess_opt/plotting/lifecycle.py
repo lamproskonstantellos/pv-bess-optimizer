@@ -230,6 +230,15 @@ def plot_revenue_stack_yearly(
         agg_fee_y1 = gross_y1 * agg_fee_frac
         agg_fee = -((agg_fee_y1 * retail_ratio).to_numpy())
 
+    # Optional balancing-aggregator (BSP) fee — read straight from the
+    # cashflow column so the bar carries the exact deduction the DCF saw
+    # (escalated on the BESS fade curve).  All-zero when the fee is off, so
+    # the bar is simply not drawn.
+    if "balancing_aggregator_fee_eur" in op.columns:
+        bal_agg_fee = op["balancing_aggregator_fee_eur"].astype(float).to_numpy()
+    else:
+        bal_agg_fee = np.zeros_like(load_pv)
+
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     bottoms = np.zeros_like(load_pv)
@@ -257,6 +266,15 @@ def plot_revenue_stack_yearly(
             edgecolor="black", linewidth=0.4,
             label="Aggregator fee",
         )
+    if np.any(bal_agg_fee < -1e-9):
+        # The balancing-aggregator (BSP) fee sits below the energy
+        # aggregator-fee bar so the two deduction lines stay side by side.
+        ax.bar(
+            years, bal_agg_fee, bottom=cost + agg_fee,
+            color=financial_color("Balancing aggregator fee"),
+            edgecolor="black", linewidth=0.4,
+            label="Balancing aggregator fee",
+        )
 
     # PPA contract leg — drawn straight from the cashflow column so the
     # bar carries the exact stream NPV/IRR saw (term cutoff, its own
@@ -279,7 +297,7 @@ def plot_revenue_stack_yearly(
             drew_ppa_label = True
         if np.any(ppa_neg < -1e-9):
             ax.bar(
-                years, ppa_neg, bottom=cost + agg_fee,
+                years, ppa_neg, bottom=cost + agg_fee + bal_agg_fee,
                 color=financial_color("PPA revenue"),
                 edgecolor="black", linewidth=0.4,
                 label=None if drew_ppa_label else "PPA revenue",
@@ -333,6 +351,9 @@ def plot_revenue_stack_yearly(
     net = (op["revenue_eur"].astype(float)).to_numpy()
     if "balancing_revenue_eur" in op.columns:
         net = net + op["balancing_revenue_eur"].astype(float).to_numpy()
+    # balancing_revenue_eur is gross, so step the net line down by the BSP
+    # fee (bal_agg_fee <= 0) to keep it on top of the drawn stack.
+    net = net + bal_agg_fee
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The

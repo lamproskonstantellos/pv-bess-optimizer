@@ -160,8 +160,11 @@ optional `bess_wear_cost_eur_per_mwh` dispatch shadow price.
 ### `economics`
 
 Discount rate, OPEX inflation, per-stream revenue indexation
-(`retail_inflation_pct`, `dam_inflation_pct`), aggregator fee,
-LCOE / LCOS benchmark-band overrides, the five sensitivity-tornado
+(`retail_inflation_pct`, `dam_inflation_pct`), the energy-aggregator fee
+(`aggregator_fee_pct_revenue`, on DAM + retail) and the optional,
+separate balancing-aggregator / BSP fee
+(`balancing_aggregator_fee_pct_revenue`, on gross balancing revenue;
+default 0), LCOE / LCOS benchmark-band overrides, the five sensitivity-tornado
 deltas (CAPEX / OPEX / revenue / discount-rate / PPA-price), the
 debt layer (`gearing_pct`, `debt_interest_rate_pct`,
 `debt_tenor_years`, `debt_repayment`), and grid-emissions
@@ -350,12 +353,15 @@ participation stacked on the battery.
 ![Merchant yearly revenue stack](docs/assets/merchant_revenue_stack.png)
 
 *Yearly revenue stack — PV-DAM and BESS-DAM exports plus the five
-balancing products, net of the aggregator fee and grid-charging cost.*
+balancing products, net of the energy-aggregator fee, grid-charging cost
+and the optional balancing-aggregator (BSP / route-to-market) fee (shown
+here at a representative 10 % of balancing revenue).*
 
 ![BESS revenue waterfall](docs/assets/merchant_bess_revenue_waterfall.png)
 
 *BESS revenue waterfall — stepping from DAM arbitrage through each
-balancing product to the total battery revenue.*
+balancing product, then down by the balancing-aggregator (BSP) fee, to the
+total battery revenue.*
 
 ![LCOS benchmark band](docs/assets/merchant_lcos_band.png)
 

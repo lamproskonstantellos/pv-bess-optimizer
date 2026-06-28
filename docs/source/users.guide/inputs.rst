@@ -186,8 +186,17 @@ Sheet ``economics``
   escalation rates for the retail-indexed revenue stream (load / PPA)
   and the DAM-indexed export stream.
 * ``aggregator_fee_pct_revenue`` (default 10 %, Gridcog
-  convention) — reduces gross revenue post-solve.  Surfaces as a
-  signed ``aggregator_fee_eur`` column on ``cashflow_yearly``.
+  convention) — energy-aggregator fee on gross DAM + retail revenue
+  post-solve.  Surfaces as a signed ``aggregator_fee_eur`` column on
+  ``cashflow_yearly``.  Does **not** apply to balancing or PPA revenue.
+* ``balancing_aggregator_fee_pct_revenue`` (default 0 %) — optional,
+  separate route-to-market (BSP / balancing-aggregator) fee on **gross**
+  balancing revenue (capacity + activation), for assets that participate
+  through an aggregator that keeps a share (~5–20 % typical
+  behind-the-meter).  Surfaces as a signed
+  ``balancing_aggregator_fee_eur`` column; the default 0 keeps results
+  bit-identical and the column all-zero.  Range-validated ``[0, 100]``,
+  like ``aggregator_fee_pct_revenue``.  Excluded from LCOE/LCOS.
 * ``sensitivity_enabled`` / ``sensitivity_capex_delta_pct`` /
   ``sensitivity_opex_delta_pct`` /
   ``sensitivity_revenue_delta_pct`` /

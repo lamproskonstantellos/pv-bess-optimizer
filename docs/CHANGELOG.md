@@ -5,6 +5,35 @@
 First production release.  No prior versions have shipped; no
 compatibility surface is maintained.
 
+### Added (revenue-stacking economics — independent audit)
+
+- **Balancing-aggregator (BSP) fee.** New optional
+  `balancing_aggregator_fee_pct_revenue` key on the `economics` sheet
+  (range `[0, 100]`, **default 0.0**): a separate route-to-market fee on
+  **gross** balancing revenue for assets that participate through an
+  aggregator/BSP that keeps a share.  It mirrors the energy
+  `aggregator_fee_pct_revenue` across all three config surfaces, surfaces
+  as a signed `balancing_aggregator_fee_eur` column on the yearly /
+  quarterly / monthly cashflow, is folded into NPV / IRR / ROI / payback
+  (the DCF consumes NET balancing revenue), is shown as its own deduction
+  on the yearly revenue stack and steps the BESS revenue waterfall total
+  down, and is excluded from LCOE/LCOS.  Gross balancing KPIs are
+  unchanged; the fee and net are exposed as
+  `lifetime_bm_aggregator_fee_total_eur` /
+  `lifetime_bm_revenue_net_total_eur`.  The default 0.0 keeps every
+  existing output bit-identical.  PPA still carries neither fee.
+- **Self-consumption balancing guardrail.** A single load/resolve-time
+  warning is emitted when balancing-market participation runs under
+  `self_consumption` with a BESS present, noting that revenue stacking in
+  practice needs aggregator/BSP routing and TSO prequalification.
+  Balancing remains valid in **both** modes (opt-in, off by default); no
+  mode gate is introduced.
+- **Fee range validation.** Both revenue-fee percentages
+  (`aggregator_fee_pct_revenue` and the new
+  `balancing_aggregator_fee_pct_revenue`) are now range-checked to
+  `[0, 100]` and rejected loudly when out of range, instead of the energy
+  fee being silently clamped — consistent with `gearing_pct`.
+
 ### Production-readiness hardening
 
 - **Input validation.** `validate_workbook_params` now reads the PV/BESS
