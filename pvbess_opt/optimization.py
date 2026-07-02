@@ -1553,7 +1553,7 @@ def verify_dispatch_invariants(
         * ``invariant_4_rte_bound_excess_kwh``
         * ``invariant_5_no_sim_grid_io_max_product_kwh2`` (self_consumption only)
         * ``invariant_6_load_priority_violations`` (self_consumption only)
-        * ``invariant_7_curtail_behavior_kwh`` (BOTH modes)
+        * ``invariant_7_curtail_behavior_count`` (BOTH modes)
         * ``invariant_8_soc_closed_cycle_kwh`` (when terminal_soc_equal)
         * ``invariant_9_pv_load_priority_kwh`` (self_consumption only; Section 2)
 
@@ -1736,7 +1736,7 @@ def verify_dispatch_invariants(
         "invariant_4_rte_bound_excess_kwh": inv_4,
         "invariant_5_no_sim_grid_io_max_product_kwh2": inv_5,
         "invariant_6_load_priority_violations": inv_6,
-        "invariant_7_curtail_behavior_kwh": inv_7,
+        "invariant_7_curtail_behavior_count": inv_7,
         "invariant_8_soc_closed_cycle_kwh": inv_8,
         "invariant_9_pv_load_priority_kwh": inv_9,
     }

@@ -15,12 +15,18 @@ Scaling rules (per year ``y`` for ``y >= 1``)
 ---------------------------------------------
 
 * **PV-origin flows** are multiplied by ``pv_factor[y]``.
-* **BESS-origin flows** are multiplied by ``bess_factor[y]``.
+* **BESS-origin flows** (including ``bess_charge_grid_kwh``, whose
+  throughput is bounded by the fading battery) are multiplied by
+  ``bess_factor[y]``.
 * **SOC** is also multiplied by ``bess_factor[y]``.
-* **Load and grid prices** are unchanged from Year 1.
-* **Mixed flows** (``grid_to_load_kwh``, ``bess_charge_grid_kwh``)
-  pass through Year-1 values; their financial scaling lives in
-  :mod:`pvbess_opt.economics`.
+* **Load and grid prices** are unchanged from Year 1;
+  ``grid_to_load_kwh`` passes through Year-1 values (its financial
+  scaling lives in :mod:`pvbess_opt.economics`).
+* **Mixed totals** (``grid_export_total_kwh``,
+  ``grid_injection_total_kwh``) are recomputed from their scaled
+  components so the identity ``export_total = pv_to_grid +
+  bess_dis_grid`` holds in every projected year even when the PV and
+  BESS fade curves diverge.
 
 Timestamps are shifted year-by-year so each year of the lifetime
 DataFrame carries a plausible datetime aligned with the
@@ -50,6 +56,7 @@ from .kpis import require_economic_columns
 
 __all__ = [
     "aggregate_lifetime_to_yearly",
+    "bess_capacity_factors",
     "build_lifetime_dispatch",
 ]
 
@@ -67,12 +74,18 @@ _BESS_ORIGIN_COLUMNS: tuple[str, ...] = (
     "bess_dis_load_kwh",
     "bess_dis_grid_kwh",
     "bess_charge_grid_kwh",
-    "grid_export_total_kwh",
     "bess_dis_load_green_kwh",
     "bess_dis_grid_green_kwh",
     "soc_kwh",
     "soc_green_kwh",
 )
+
+# Mixed totals rebuilt from their scaled components after the per-origin
+# scaling loops (a single factor cannot scale a PV + BESS sum once the
+# two fade curves diverge).  Maps total -> component columns.
+_RECOMPUTED_TOTAL_COLUMNS: dict[str, tuple[str, ...]] = {
+    "grid_export_total_kwh": ("pv_to_grid_kwh", "bess_dis_grid_kwh"),
+}
 
 # EUR-per-step columns added by :func:`pvbess_opt.kpis.add_economic_columns`.
 # Scaling convention: PV-origin revenue degrades on the PV production
@@ -111,6 +124,48 @@ def _pv_factor(y: int, lid: float, d_annual: float) -> float:
     if y == 1:
         return 1.0
     return (1.0 - lid) * (1.0 - d_annual) ** (y - 2)
+
+
+def bess_capacity_factors(
+    n_years: int,
+    *,
+    d_bess_annual: float,
+    d_bess_per_cycle: float = 0.0,
+    year1_discharge_mwh: float = 0.0,
+    capacity_mwh: float = 0.0,
+    replacement_year: int = 0,
+) -> list[float]:
+    """BESS capacity factors (SOH fractions) for project years 1..N.
+
+    The single source of truth for the reset-at-replacement cycle-fade
+    accumulator that was previously hand-copied across
+    :func:`build_lifetime_dispatch`,
+    :func:`pvbess_opt.economics.build_yearly_cashflow` and
+    :func:`pvbess_opt.degradation.build_degradation_report`.  Per year::
+
+        factor(y) = _bess_factor(y, ..., cumulative_cycles_through=K)
+        K += year1_discharge_mwh * factor(y) / capacity_mwh
+
+    with ``K`` reset to zero at project start and at
+    ``replacement_year``.  ``factors[y - 1]`` is the capacity factor
+    (equivalently the SOH fraction) of project year ``y`` given a
+    replacement in ``replacement_year`` (0 = no replacement), which is
+    exactly the question the SOH-threshold replacement resolver asks.
+    """
+    factors: list[float] = []
+    cumulative_cycles = 0.0
+    for y in range(1, int(n_years) + 1):
+        if replacement_year > 0 and y == replacement_year:
+            cumulative_cycles = 0.0
+        factor = _bess_factor(
+            y, d_bess_annual, replacement_year=replacement_year,
+            d_bess_per_cycle=d_bess_per_cycle,
+            cumulative_cycles_through=cumulative_cycles,
+        )
+        if capacity_mwh > 1e-12:
+            cumulative_cycles += (year1_discharge_mwh * factor) / capacity_mwh
+        factors.append(factor)
+    return factors
 
 
 def _bess_factor(
@@ -237,19 +292,19 @@ def build_lifetime_dispatch(
         pd.to_datetime(res_year1["timestamp"]).dt.year.iloc[0]
     )
 
+    bess_factors = bess_capacity_factors(
+        n_years,
+        d_bess_annual=d_bess,
+        d_bess_per_cycle=d_bess_per_cycle,
+        year1_discharge_mwh=year1_discharge_mwh,
+        capacity_mwh=capacity_mwh,
+        replacement_year=bess_repl_year,
+    )
+
     chunks: list[pd.DataFrame] = []
-    cumulative_cycles = 0.0  # reset at project start AND at replacement_year
     for y in range(1, n_years + 1):
-        if bess_repl_year > 0 and y == bess_repl_year:
-            cumulative_cycles = 0.0
         pv_f = _pv_factor(y, lid, d_annual)
-        bess_f = _bess_factor(
-            y, d_bess, replacement_year=bess_repl_year,
-            d_bess_per_cycle=d_bess_per_cycle,
-            cumulative_cycles_through=cumulative_cycles,
-        )
-        if capacity_mwh > 1e-12:
-            cumulative_cycles += (year1_discharge_mwh * bess_f) / capacity_mwh
+        bess_f = bess_factors[y - 1]
         chunk = res_year1.copy()
         chunk["project_year"] = int(y)
         target_calendar_year = int(project_start_year + y - 1)
@@ -284,6 +339,35 @@ def build_lifetime_dispatch(
             chunk[col] = chunk[col].astype(float) * bess_f
         for col in balancing_cols:
             chunk[col] = chunk[col].astype(float) * bess_f
+        # Mixed totals: rebuild from the scaled components so the export
+        # identity holds when pv_factor != bess_factor (a single-factor
+        # scale of the Year-1 total cannot).
+        for total_col, components in _RECOMPUTED_TOTAL_COLUMNS.items():
+            if total_col in chunk.columns:
+                chunk[total_col] = sum(
+                    chunk[c].astype(float) for c in components
+                    if c in chunk.columns
+                )
+        if "grid_injection_total_kwh" in chunk.columns:
+            # The injection total's basis depends on the cap mode:
+            # surplus export by default, total plant injection under
+            # grid_cap_includes_load.  All four candidate components are
+            # already scaled, so rebuild on the same basis Year 1 used.
+            surplus = sum(
+                chunk[c].astype(float)
+                for c in ("pv_to_grid_kwh", "bess_dis_grid_kwh")
+                if c in chunk.columns
+            )
+            if bool(econ.get("grid_cap_includes_load", False)) and str(
+                econ.get("mode", "self_consumption"),
+            ).lower() == "self_consumption":
+                chunk["grid_injection_total_kwh"] = surplus + sum(
+                    chunk[c].astype(float)
+                    for c in ("pv_to_load_kwh", "bess_dis_load_kwh")
+                    if c in chunk.columns
+                )
+            else:
+                chunk["grid_injection_total_kwh"] = surplus
         # soc_pct stays unchanged: SOC and E_cap both scale by bess_factor.
         chunks.append(chunk)
 

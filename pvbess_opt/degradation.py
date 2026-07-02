@@ -27,6 +27,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .lifetime import bess_capacity_factors
+
 
 def _reversals(series: Any) -> list[float]:
     """Return the turning points (peaks/valleys) of ``series``."""
@@ -155,44 +157,61 @@ def build_degradation_report(
         throughput_mwh = float(year1_discharge_mwh)
 
     rows: list[dict[str, Any]] = []
-    install_year = 1          # project year the in-service pack was installed
-    cumulative_cycles = 0.0   # full-equivalent cycles accrued since install
-    for i in range(max(int(project_years), 0)):
-        year = i + 1
-        # A scheduled replacement is known up front: install a fresh pack at
-        # the start of that year so the calendar and cycle fade restart
-        # there, exactly as _bess_factor does in lifetime.py / economics.py.
-        if scheduled_year > 0 and year == scheduled_year:
-            install_year = year
-            cumulative_cycles = 0.0
-        # Capacity fade = multiplicative calendar fade minus additive cycle
-        # fade -- mirror of pvbess_opt.lifetime._bess_factor (keep in sync).
-        calendar = (1.0 - d_annual) ** (year - install_year)
-        factor = max(0.0, calendar - d_cycle * cumulative_cycles)
-        soh = factor * 100.0
-        # End-of-life replacement only applies when no scheduled year is set:
-        # the pack is swapped the year it reaches EoL, so that year already
-        # shows a fresh 100 %.
-        if scheduled_year <= 0 and soh <= float(end_of_life_soh_pct):
-            install_year = year
-            cumulative_cycles = 0.0
-            factor = 1.0
-            soh = 100.0
-            replaced = True
-        else:
-            replaced = scheduled_year > 0 and year == scheduled_year
-        # Accrue this year's degraded throughput for next year's cycle term,
-        # matching economics.py: cumulative += discharge * factor / capacity.
-        if capacity_mwh > 1e-12:
-            cumulative_cycles += throughput_mwh * factor / capacity_mwh
-        rows.append({
-            "project_year": year,
-            "calendar_year": int(start_year) + i,
-            "equivalent_full_cycles": round(efc_year, 4),
-            "soh_pct": round(soh, 4),
-            "capacity_fade_pct": round(100.0 - soh, 4),
-            "replacement": bool(replaced),
-        })
+    if scheduled_year > 0:
+        # Scheduled replacement: the SOH curve is exactly the shared
+        # capacity-factor sequence the finance and lifetime layers use
+        # (single source of truth: lifetime.bess_capacity_factors).
+        factors = bess_capacity_factors(
+            max(int(project_years), 0),
+            d_bess_annual=d_annual,
+            d_bess_per_cycle=d_cycle,
+            year1_discharge_mwh=throughput_mwh,
+            capacity_mwh=capacity_mwh,
+            replacement_year=scheduled_year,
+        )
+        for i, factor in enumerate(factors):
+            year = i + 1
+            soh = factor * 100.0
+            rows.append({
+                "project_year": year,
+                "calendar_year": int(start_year) + i,
+                "equivalent_full_cycles": round(efc_year, 4),
+                "soh_pct": round(soh, 4),
+                "capacity_fade_pct": round(100.0 - soh, 4),
+                "replacement": bool(year == scheduled_year),
+            })
+    else:
+        install_year = 1        # project year the in-service pack was installed
+        cumulative_cycles = 0.0  # full-equivalent cycles accrued since install
+        for i in range(max(int(project_years), 0)):
+            year = i + 1
+            # Capacity fade = multiplicative calendar fade minus additive
+            # cycle fade -- same model as lifetime.bess_capacity_factors,
+            # with the pack swapped the first year SOH reaches the
+            # end-of-life threshold (so that year already shows 100 %).
+            calendar = (1.0 - d_annual) ** (year - install_year)
+            factor = max(0.0, calendar - d_cycle * cumulative_cycles)
+            soh = factor * 100.0
+            if soh <= float(end_of_life_soh_pct):
+                install_year = year
+                cumulative_cycles = 0.0
+                factor = 1.0
+                soh = 100.0
+                replaced = True
+            else:
+                replaced = False
+            # Accrue this year's degraded throughput for next year's cycle
+            # term: cumulative += discharge * factor / capacity.
+            if capacity_mwh > 1e-12:
+                cumulative_cycles += throughput_mwh * factor / capacity_mwh
+            rows.append({
+                "project_year": year,
+                "calendar_year": int(start_year) + i,
+                "equivalent_full_cycles": round(efc_year, 4),
+                "soh_pct": round(soh, 4),
+                "capacity_fade_pct": round(100.0 - soh, 4),
+                "replacement": bool(replaced),
+            })
     return pd.DataFrame(
         rows,
         columns=[

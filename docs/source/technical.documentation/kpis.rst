@@ -25,6 +25,38 @@ Dispatch metrics
 * ``bess_roundtrip_eff_est`` / ``bess_roundtrip_eff_theoretical``.
 * ``bess_net_soc_change_mwh``.
 
+Cycle-counting convention
+-------------------------
+
+The headline convention everywhere in the package is the
+**discharge-only equivalent full cycle against nameplate energy**::
+
+    cycles = (bess_dis_load_kwh + bess_dis_grid_kwh) / bess_capacity_kwh
+
+One source of truth, four consumers: ``bess_equivalent_cycles_total`` /
+``bess_equivalent_cycles_per_day`` in :mod:`pvbess_opt.kpis`,
+``bess_lifetime_cycles`` and the cycle-fade accumulator in
+:mod:`pvbess_opt.economics` (via
+:func:`pvbess_opt.lifetime.bess_capacity_factors`), the lifetime
+projection in :mod:`pvbess_opt.lifetime`, and the degradation report in
+:mod:`pvbess_opt.degradation`.  Charging throughput is not counted (a
+full cycle is one nameplate energy's worth of discharge), and the
+denominator is the NAMEPLATE capacity, not the usable window.
+
+The Rainflow-based
+:func:`pvbess_opt.degradation.equivalent_full_cycles` diagnostic in the
+degradation report deliberately differs: it counts DoD-weighted swings
+of the SOC trace against the USABLE amplitude
+(``capacity x (soc_max_frac - soc_min_frac)``), so its value is higher
+than the headline count for the same dispatch.  It is a reporting
+diagnostic only and never drives the SOH curve or the cashflow.
+
+Both headline cycle KPIs are availability-derated together with
+``bess_total_discharge_mwh``, so headline cycles reconcile with
+``bess_lifetime_cycles / project_years`` (also derated).  The nested
+``bess_utilization_diagnostics`` dict deliberately stays raw (it
+reports the Year-1 dispatch as solved, before the derate).
+
 Self-consumption / coverage ratios (0 in merchant for load coverage)
 --------------------------------------------------------------------
 

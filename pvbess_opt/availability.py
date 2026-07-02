@@ -59,6 +59,12 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     "bess_green_to_load_mwh",
     "system_green_to_load_mwh",
     "pv_energy_curtailed_mwh",
+    # Equivalent-full-cycle KPIs scale linearly with discharge, so they
+    # derate together with bess_total_discharge_mwh: headline cycles
+    # reconcile with bess_lifetime_cycles / years (both derated).  The
+    # nested bess_utilization_diagnostics dict deliberately stays raw.
+    "bess_equivalent_cycles_total",
+    "bess_equivalent_cycles_per_day",
     # Raw per-stream EUR keys (the canonical aggregates downstream are
     # algebraic combinations of these).
     "profit_load_from_pv_eur",

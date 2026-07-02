@@ -347,7 +347,7 @@ $$\#\left\{t : \left(x^{pg}_t + x^{bg}_t > \tau\right) \wedge \left(x^{gl}_t > \
 
 A count, not a residual.  `self_consumption` only.
 
-### invariant_7_curtail_behavior_kwh
+### invariant_7_curtail_behavior_count
 
 $$\#\left\{t : \left(\mathrm{cap}_t - g_t > \tau\right) \wedge \left(x^{pc}_t > \tau\right) \wedge \left(\pi^{\mathrm{DAM}}_t > 0\right)\right\} \tag{S27}$$
 

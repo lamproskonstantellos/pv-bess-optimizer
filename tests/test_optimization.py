@@ -97,7 +97,7 @@ def test_invariants_self_consumption(short_params, _solved_self_consumption):
     assert inv["invariant_4_rte_bound_excess_kwh"] < tol
     assert inv["invariant_5_no_sim_grid_io_max_product_kwh2"] < tol ** 2
     assert inv["invariant_6_load_priority_violations"] == 0
-    assert inv["invariant_7_curtail_behavior_kwh"] == 0
+    assert inv["invariant_7_curtail_behavior_count"] == 0
     assert inv["invariant_8_soc_closed_cycle_kwh"] < tol
     assert inv["invariant_9_pv_load_priority_kwh"] < tol
 
@@ -113,7 +113,7 @@ def test_invariants_merchant_zero_for_self_consumption_only(
     assert inv["invariant_6_load_priority_violations"] == 0.0
     assert inv["invariant_9_pv_load_priority_kwh"] == 0.0
     assert inv["invariant_1_pv_balance_kwh"] < 1e-3
-    assert inv["invariant_7_curtail_behavior_kwh"] == 0.0
+    assert inv["invariant_7_curtail_behavior_count"] == 0.0
 
 
 def test_merchant_pins_load_flows_to_zero(_solved_merchant):

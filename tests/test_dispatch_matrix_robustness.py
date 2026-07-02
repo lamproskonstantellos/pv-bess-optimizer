@@ -169,7 +169,7 @@ def test_invariant7_ignores_curtailment_at_negative_dam(mode):
     assert curtailed.sum() > 1.0, "expected real curtailment at the loss hours"
     assert (cap - inj > 1e-3).any(), "expected slack cap at the loss hours"
     inv = verify_dispatch_invariants(full, params, mode=mode)
-    assert inv["invariant_7_curtail_behavior_kwh"] == pytest.approx(0.0, abs=1e-9)
+    assert inv["invariant_7_curtail_behavior_count"] == pytest.approx(0.0, abs=1e-9)
 
 
 def test_invariant7_still_flags_lazy_curtailment_at_positive_dam():
@@ -196,9 +196,9 @@ def test_invariant7_still_flags_lazy_curtailment_at_positive_dam():
 
     res_pos = pd.DataFrame({**base, "dam_price_eur_per_mwh": [50.0, 50.0]})
     inv_pos = verify_dispatch_invariants(res_pos, params, mode="merchant")
-    assert inv_pos["invariant_7_curtail_behavior_kwh"] == pytest.approx(1.0)
+    assert inv_pos["invariant_7_curtail_behavior_count"] == pytest.approx(1.0)
 
     # Same frame, non-positive price -> the identical curtailment is optimal.
     res_neg = pd.DataFrame({**base, "dam_price_eur_per_mwh": [-50.0, 50.0]})
     inv_neg = verify_dispatch_invariants(res_neg, params, mode="merchant")
-    assert inv_neg["invariant_7_curtail_behavior_kwh"] == pytest.approx(0.0)
+    assert inv_neg["invariant_7_curtail_behavior_count"] == pytest.approx(0.0)

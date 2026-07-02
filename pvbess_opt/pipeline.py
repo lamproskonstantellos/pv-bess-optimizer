@@ -784,6 +784,24 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
         )
 
 
+def _check_strict_energy_balance(residuals: dict[str, float]) -> None:
+    """Promote energy-balance residuals to hard errors under ``--strict``.
+
+    Mirrors :func:`_check_strict_invariants` for the four per-step
+    balance residuals from :func:`pvbess_opt.kpis.verify_energy_balance`
+    (PV split, load balance, export definition, SOC dynamics), all in
+    kWh against the shared ``ENERGY_TOLERANCE``.
+    """
+    offenders = {
+        k: float(v) for k, v in residuals.items() if v > ENERGY_TOLERANCE
+    }
+    if offenders:
+        raise AssertionError(
+            "Strict-mode energy-balance violations: "
+            + ", ".join(f"{k}={v:.6g}" for k, v in offenders.items())
+        )
+
+
 def _warn_self_consumption_balancing(params: dict[str, Any]) -> None:
     """Emit ONE guardrail warning when balancing runs under self_consumption.
 
@@ -1016,6 +1034,8 @@ def _run_one(
             f"[verify] solver={resolved_solver}  residuals(kWh): "
             + ", ".join(f"{k}={v:.3g}" for k, v in residuals.items())
         )
+        if config.strict:
+            _check_strict_energy_balance(residuals)
 
         invariants = verify_dispatch_invariants(
             res_full, params, mode=resolve_mode(params),

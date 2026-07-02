@@ -78,7 +78,7 @@ from .constants import (
 )
 from .io import PROJECT_SHEET_DEFAULTS, read_workbook
 from .kpis import require_economic_columns
-from .lifetime import _bess_factor
+from .lifetime import bess_capacity_factors
 
 logger = logging.getLogger(__name__)
 
@@ -526,15 +526,22 @@ def build_yearly_cashflow(
     bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
     bess_repl_cost_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
 
-    # Cumulative full-equivalent-cycle accumulator for the cycle-fade
-    # term.  Convention matches compute_financial_kpis' bess_lifetime_cycles
-    # (discharge MWh / capacity MWh).  Resets at project start and at
-    # bess_replacement_year.
+    # BESS capacity factors from the shared reset-at-replacement
+    # cycle-fade accumulator (single source of truth in lifetime.py).
+    # Cycle convention matches compute_financial_kpis'
+    # bess_lifetime_cycles (discharge MWh / capacity MWh).
     capacity_mwh = float(capacities.get("bess_kwh", 0.0) or 0.0) / 1000.0
     year1_discharge_mwh = float(
         year1_kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
     )
-    cumulative_cycles = 0.0
+    bess_factors = bess_capacity_factors(
+        n_years,
+        d_bess_annual=bess_deg_annual,
+        d_bess_per_cycle=bess_deg_per_cycle,
+        year1_discharge_mwh=year1_discharge_mwh,
+        capacity_mwh=capacity_mwh,
+        replacement_year=bess_repl_year,
+    )
 
     rows: list[dict[str, float]] = []
     for y in range(0, n_years + 1):
@@ -557,17 +564,7 @@ def build_yearly_cashflow(
                 pv_factor = 1.0
             else:
                 pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
-            if bess_repl_year > 0 and y == bess_repl_year:
-                cumulative_cycles = 0.0
-            bess_factor = _bess_factor(
-                y, bess_deg_annual, replacement_year=bess_repl_year,
-                d_bess_per_cycle=bess_deg_per_cycle,
-                cumulative_cycles_through=cumulative_cycles,
-            )
-            if capacity_mwh > 1e-12:
-                cumulative_cycles += (
-                    year1_discharge_mwh * bess_factor / capacity_mwh
-                )
+            bess_factor = bess_factors[y - 1]
             # Degrade PV-origin revenue on pv_factor and BESS-origin
             # revenue on bess_factor, mirroring build_lifetime_dispatch's
             # per-year factor loop so the

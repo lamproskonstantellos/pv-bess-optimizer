@@ -175,7 +175,7 @@ def test_existing_general_invariant_keys_still_present(short_params, short_ts):
             4: "_rte_bound_excess_kwh",
             5: "_no_sim_grid_io_max_product_kwh2",
             6: "_load_priority_violations",
-            7: "_curtail_behavior_kwh",
+            7: "_curtail_behavior_count",
             8: "_soc_closed_cycle_kwh",
             9: "_pv_load_priority_kwh",
         }[i]
