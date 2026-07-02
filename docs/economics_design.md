@@ -87,6 +87,31 @@ Investment events inside an operating year (the BESS replacement) are
 booked in **month 12**, so the monthly and yearly DCFs agree on the
 event by construction.
 
+### Wear cost vs replacement cost (no double counting)
+
+Battery degradation enters the model through two strictly separated
+channels:
+
+* `bess_wear_cost_eur_per_mwh` is a **dispatch shadow price**: it is
+  subtracted in the MILP objective only ($C^{\mathrm{wear}}$ in the
+  mode specs), so the optimizer skips marginal cycles whose spread does
+  not beat the wear cost. It never appears in `profit_total_eur`, the
+  cashflow, NPV, IRR, LCOE or LCOS. The wear term penalises DAM and
+  self-consumption discharge only; expected balancing-activation
+  throughput carries **no wear penalty** by design (a modelling
+  decision: activation energy is probabilistic and its expected volume
+  is small next to scheduled discharge, so a wear charge on it would
+  double-damp balancing participation that the SOC-headroom and
+  power-budget constraints already limit).
+* `bess_replacement_cost_pct` is a **cash cost**: the replacement CAPEX
+  (E14) books exactly once in the effective replacement year of the
+  cashflow (month 12 in the monthly frame) and additionally enters the
+  LCOS numerator as a reporting metric.
+
+The invariant "wear in the objective only, replacement in the cashflow
+only" is locked by `tests/test_wear_cost_objective.py` (solver-free)
+and the end-to-end guard in `tests/test_degradation.py`.
+
 ### Degradation factors
 
 PV production factor (LID year 1, linear-in-log thereafter;

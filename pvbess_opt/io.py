@@ -534,8 +534,12 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Daily equivalent-cycle cap (sum of discharge / capacity)."),
     ("bess_wear_cost_eur_per_mwh", 0.0, "EUR/MWh",
      "Cycle wear cost penalised per MWh discharged in the dispatch "
-     "objective (0 = off). Derive from replacement cost / cycle-life / "
-     "usable energy via pvbess_opt.degradation."),
+     "objective (0 = off). A dispatch shadow price only: never charged "
+     "in the cashflow (the replacement CAPEX carries degradation cost), "
+     "so it is not double-counted. Applies to DAM and self-consumption "
+     "discharge; expected balancing-activation throughput carries no "
+     "wear penalty by design. Derive from replacement cost / cycle-life "
+     "/ usable energy via pvbess_opt.degradation."),
     ("capex_bess_eur_per_kwh", 250, "EUR/kWh",
      "Full installed BESS CAPEX per kWh of nameplate energy capacity "
      "(cells + PCS + BOP + EPC). Benchmark band 215-315 EUR/kWh "

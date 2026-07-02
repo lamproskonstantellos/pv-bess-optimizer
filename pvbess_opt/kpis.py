@@ -818,7 +818,7 @@ def _compute_balancing_kpis(
     # enter ``profit_*_eur`` (those columns are driven by DAM / retail
     # only).  If a future change folds balancing into profit_total_eur,
     # the denominator would double-count balancing -- guard regression
-    # is tests/test_balancing_kpi_denominator_non_overlap.py.
+    # is test_bm_revenue_share_denominator_excludes_balancing_from_dam.
     denom = non_balancing_revenue_eur + total
     if abs(denom) > 1e-9:
         out["bm_revenue_share_pct"] = round(100.0 * total / denom, 4)

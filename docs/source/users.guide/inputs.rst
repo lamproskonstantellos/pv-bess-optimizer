@@ -159,9 +159,22 @@ Sheet ``bess``
   optimizer only cycles when the price spread beats the wear cost.  It is
   a behavioural shadow price: it shapes dispatch but is **not** added to
   the reported cashflow / NPV (the replacement CAPEX already charges
-  degradation), so the cost is never double-counted.  Derive it from
-  replacement cost / cycle-life / usable energy with
-  :func:`pvbess_opt.degradation.derive_wear_cost_eur_per_mwh`.
+  degradation), so the cost is never double-counted.  The penalty
+  applies to DAM and self-consumption discharge only; expected
+  balancing-activation throughput carries no wear penalty by design.
+  Derive it with
+  :func:`pvbess_opt.degradation.derive_wear_cost_eur_per_mwh` from
+
+  .. code-block:: text
+
+     replacement_cost_eur = capex_bess_eur_per_kwh x bess_capacity_kwh
+                            x bess_replacement_cost_pct / 100
+     wear_cost = replacement_cost_eur / (cycle_life_cycles x usable_energy_mwh)
+
+  For the shipped case study, 250 EUR/kWh x 60,000 kWh x 50 % =
+  7,500,000 EUR; over 6,000 cycles x 45 MWh usable that is roughly
+  28 EUR/MWh as an upper bound, and LFP packs with higher cycle life
+  land near 10 EUR/MWh.
 
 Every run also writes a **degradation** report (a styled ``degradation``
 sheet in ``03_results.xlsx`` plus an SOH-trajectory plot)
