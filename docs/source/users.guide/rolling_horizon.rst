@@ -88,7 +88,63 @@ derate-invariant.  Positive values mean imperfect foresight reduces
 profit.  Because every seed's stitched dispatch — including the
 year-close SOC condition — is feasible for the perfect-foresight MILP,
 the gap cannot go negative beyond the solver's ``mip_gap`` slack; with
-zero forecast noise it collapses to ~0.
+zero forecast noise it reduces to the pure horizon-truncation cost
+(~0 on short single-window fixtures; measured 0.32 % on the shipped
+full-year workbook, see below).  That bound is enforced at
+runtime: a seed whose profit exceeds
+``pf_profit + 2 * mip_gap * |pf_profit| + 1 EUR`` triggers a prominent
+warning, or a hard error under ``--strict``.  The percentage formula
+assumes a positive benchmark; for a non-positive ``pf_profit`` the sign
+meaning inverts, a warning is emitted, and the absolute profit column
+should be read instead.
+
+Validation of the observed gap magnitude
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The shipped self-consumption case study shows a median foresight gap of
+roughly half a percent of annual profit.  Two checks establish that
+this is a genuine cost of imperfect information rather than solver
+noise (measured on the shipped workbook, 48 h window / 24 h commit):
+
+* **Tight-gap re-run.**  At ``mip_gap = 1e-5`` (PF benchmark
+  2,849,785 EUR) a 5-seed ensemble produced gaps of 0.445 to 0.481 %
+  with a median of 0.464 % — the same magnitude as at the default
+  ``mip_gap = 0.001`` (3 seeds: 0.440 / 0.462 / 0.476 %).  The gap is
+  roughly 50x the combined solver slack, so it is not an optimality
+  artifact.
+* **Sigma-to-zero collapse.**  With all noise sigmas at 0 the gap drops
+  to 0.324 %: this residual is the pure horizon-truncation cost of
+  re-optimising 48 h at a time (a window cannot position SOC for
+  opportunities beyond its lookahead, and the year-end windows discover
+  the closed-cycle SOC condition only 48 h before year end).  On short
+  single-window fixtures, where truncation cannot bite, the same
+  collapse lands at ~0 (see ``tests/test_rolling_horizon_scope.py``).
+
+The decomposition is therefore: about 0.32 pp of the ~0.46 % median
+gap is horizon truncation, and forecast noise adds the remaining
+~0.14 pp.  The noise contribution is small because self-consumption
+profit is dominated by retail-priced avoided cost, and the retail
+tariff is never perturbed (load noise is small, sigma 0.05, and
+irrelevant to the tariff), so only the DAM-exposed export and arbitrage
+slice degrades under the sigma 0.20 DAM noise.
+
+Year-close SOC shortfall
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The year-close SOC condition is enforced on the final window as a
+target relaxed by a heavily penalised shortfall variable (10 EUR/kWh,
+far above any energy price).  The relaxation exists because a hard
+equality can be physically unreachable: on the shipped workbook the
+last 48 hours of December carry only ~3.9 MWh of PV surplus above
+load, and with surplus-only charging the battery cannot climb from a
+drained state back to the 30 MWh target, which would make the final
+window infeasible and abort the run.  When the shortfall activates the
+run completes, ends the year at the highest reachable SOC, logs a
+prominent warning, and reports ``year_close_soc_shortfall_kwh`` in the
+rolling-horizon KPIs.  The perfect-foresight bound check widens by the
+shortfall's maximum energy value so the "no seed beats PF" guard stays
+sound.  In the deterministic (sigma-zero) run the shortfall is
+14,188 kWh; the noisy seeds close the cycle fully (shortfall 0).
 
 CLI examples
 ------------
@@ -143,6 +199,18 @@ Limitations
   prices (sign-aware).
 * **No inter-asset correlation** — a high-PV hour does not depress the
   DAM price in the noise model.
+* **Per-window cycle cap** — ``max_cycles_per_day`` binds inside each
+  window slice, not on the stitched year.  A window sees at most
+  ``window_hours`` of horizon, so the cap it enforces is the pro-rata
+  share of the daily budget for that slice; across the stitched year
+  the realised cycles can differ slightly from what the annual
+  perfect-foresight MILP would allow under the same cap.  The effect is
+  small at the default 48 h window and shows up in the
+  ``bess_cycles_total`` column of the MC sheet.
+* **Integer step counts required** — ``window_hours`` and
+  ``commit_hours`` must be an integer number of steps at the input
+  cadence; non-divisible combinations raise a ``ValueError`` instead of
+  silently truncating the horizon.
 
 These limitations are deliberate.  Adding cross-asset correlation
 without a defensible empirical basis would create an illusion of

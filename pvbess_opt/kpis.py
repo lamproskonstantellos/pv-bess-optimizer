@@ -103,6 +103,48 @@ def _balancing_soc_drift(
     return drift
 
 
+def final_soc_after_last_step(
+    res: pd.DataFrame, params: dict[str, Any],
+) -> float:
+    """Post-final-step SOC of a dispatch frame, mirroring the MILP.
+
+    ``soc_kwh`` is the beginning-of-step SOC, so the state AFTER the
+    last step is reconstructed from the final row's flows exactly as
+    the model's terminal expression does (``final_soc_expr`` in
+    :func:`pvbess_opt.optimization.build_model`)::
+
+        soc[n-1] + eta_c * (pv_to_bess + grid_to_bess)
+                 - (bess_dis_load + bess_dis_grid) / eta_d
+                 + expected balancing-activation drift
+
+    The drift term comes from :func:`_balancing_soc_drift`, the same
+    mirror the invariant checks use, so the reconstruction stays
+    consistent with the MILP when balancing is enabled.  Used by the
+    rolling-horizon dispatcher to carry SOC across fully-committed
+    windows.
+    """
+    if res.empty:
+        raise ValueError("cannot derive a final SOC from an empty frame")
+    eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
+    eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
+    last = res.iloc[-1]
+    soc = (
+        float(last["soc_kwh"])
+        + eta_c * (
+            float(last["pv_to_bess_kwh"])
+            + float(last["bess_charge_grid_kwh"])
+        )
+        - (
+            float(last["bess_dis_load_kwh"])
+            + float(last["bess_dis_grid_kwh"])
+        ) / eta_d
+    )
+    drift = _balancing_soc_drift(res, params)
+    if drift is not None:
+        soc += float(drift[-1])
+    return float(soc)
+
+
 # ---------------------------------------------------------------------------
 # Energy-flow verification
 # ---------------------------------------------------------------------------

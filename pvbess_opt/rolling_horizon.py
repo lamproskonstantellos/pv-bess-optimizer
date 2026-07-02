@@ -45,7 +45,7 @@ from .balancing import (
     activation_probability,
     resolve_balancing_config,
 )
-from .kpis import add_economic_columns, compute_kpis
+from .kpis import add_economic_columns, compute_kpis, final_soc_after_last_step
 from .optimization import run_scenario
 from .timeutils import dt_hours_from
 
@@ -105,15 +105,24 @@ def _hours_to_steps(hours: int, dt_minutes: int) -> int:
     Raises
     ------
     ValueError
-        If ``dt_minutes`` is non-positive, or if the resulting step
-        count is non-positive (e.g. requesting fewer than one full step
-        at the configured cadence).
+        If ``dt_minutes`` is non-positive, if the requested duration is
+        not an integer number of steps at the configured cadence (a
+        silent floor would shorten the documented horizon), or if the
+        resulting step count is non-positive (e.g. requesting fewer
+        than one full step at the configured cadence).
     """
     if dt_minutes <= 0:
         raise ValueError(
             f"dt_minutes must be > 0, got {dt_minutes!r}"
         )
-    steps = int(hours) * 60 // int(dt_minutes)
+    total_minutes = int(hours) * 60
+    if total_minutes % int(dt_minutes) != 0:
+        raise ValueError(
+            f"a {hours}h horizon is not an integer number of steps at "
+            f"dt={dt_minutes}min ({total_minutes} % {dt_minutes} != 0); "
+            "choose hours divisible by the cadence."
+        )
+    steps = total_minutes // int(dt_minutes)
     if steps <= 0:
         raise ValueError(
             f"window of {hours}h at dt={dt_minutes}min yields "
@@ -415,15 +424,21 @@ def rolling_horizon_dispatch(
         if local_commit_n < len(res_window):
             initial_soc_kwh = float(res_window["soc_kwh"].iloc[local_commit_n])
         else:
-            # End of horizon — derive the post-final-step SOC.
-            eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
-            eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
-            last = res_window.iloc[-1]
-            initial_soc_kwh = float(
-                last["soc_kwh"]
-                + eta_c * (last["pv_to_bess_kwh"] + last["bess_charge_grid_kwh"])
-                - (last["bess_dis_load_kwh"] + last["bess_dis_grid_kwh"]) / eta_d
-            )
+            # Fully-committed window (window == commit, or the final
+            # slice): the next window starts AFTER the last solved step,
+            # so reconstruct the post-final-step SOC with the shared
+            # helper.  It mirrors the model's final_soc_expr including
+            # the expected balancing-activation drift, which the
+            # previous hand-rolled algebra omitted.
+            initial_soc_kwh = final_soc_after_last_step(res_window, params)
+        if bess_capacity_kwh > 0.0 and initial_soc_kwh is not None:
+            # The model bounds SOC only up to solver feasibility
+            # tolerance, so the carried value can overshoot the envelope
+            # by ~1e-6 kWh; pinning soc[0] to such a value makes the
+            # next window infeasible.  Clamp away the numerical noise.
+            soc_lo = float(params.get("soc_min_frac", 0.0) or 0.0) * bess_capacity_kwh
+            soc_hi = float(params.get("soc_max_frac", 1.0) or 1.0) * bess_capacity_kwh
+            initial_soc_kwh = min(max(initial_soc_kwh, soc_lo), soc_hi)
 
         cursor = commit_end_global
 
@@ -438,6 +453,28 @@ def rolling_horizon_dispatch(
             )
 
     full = pd.concat(committed_chunks, ignore_index=True)
+
+    # Year-close shortfall: the final window's target is relaxed by a
+    # heavily penalised slack in the MILP (see build_model), so a
+    # physically unreachable target no longer aborts the run.  Surface
+    # the realised shortfall loudly: the stitched year did not close its
+    # SOC cycle, so the profit comparison against the closed-cycle
+    # perfect-foresight benchmark carries up to the shortfall's energy
+    # value of upward bias.
+    year_close_shortfall_kwh = 0.0
+    if year_close_soc_kwh is not None and initial_soc_kwh is not None:
+        year_close_shortfall_kwh = max(
+            0.0, float(year_close_soc_kwh) - float(initial_soc_kwh),
+        )
+        if year_close_shortfall_kwh > 1.0:
+            logger.warning(
+                "rolling_horizon_dispatch: year-close SOC target %.0f kWh "
+                "was physically unreachable; the year ends %.0f kWh short "
+                "(surplus-only charging could not refill the battery in "
+                "the final windows). The foresight gap may be understated "
+                "by up to the shortfall's energy value.",
+                float(year_close_soc_kwh), year_close_shortfall_kwh,
+            )
 
     if evaluate_with_actuals:
         # Restore every noise-free price column from the original
@@ -463,6 +500,7 @@ def rolling_horizon_dispatch(
     kpis = apply_unavailability_derate(
         kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
     )
+    kpis["year_close_soc_shortfall_kwh"] = round(year_close_shortfall_kwh, 4)
     return full, kpis
 
 
@@ -487,13 +525,18 @@ def monte_carlo_rolling(
     window_hours: int = 48,
     commit_hours: int = 24,
     solver_name: str = "highs",
+    strict: bool = False,
     **solve_kwargs: Any,
 ) -> pd.DataFrame:
     """Run rolling_horizon_dispatch with N seeds, return distribution.
 
     ``pf_profit_eur`` is the perfect-foresight benchmark used to compute
     ``foresight_gap_pct = 100 * (1 - rh_profit / pf_profit)``.  When
-    ``None`` the gap column is NaN.
+    ``None`` the gap column is NaN.  The percentage formula assumes a
+    positive benchmark; when ``pf_profit_eur <= 0`` the sign of the gap
+    inverts (a seed less negative than PF reads as a negative gap), so
+    a warning is emitted once and consumers should read the absolute
+    profits instead.
 
     Scope contract: pass the pipeline's headline (unavailability-derated)
     ``profit_total_eur`` — the per-seed profits returned by
@@ -502,12 +545,15 @@ def monte_carlo_rolling(
     derate-invariant.  Because every seed's dispatch is feasible for the
     perfect-foresight MILP (same constraints, including the year-close
     SOC condition), seeds cannot beat the benchmark beyond solver
-    tolerance: the gap is non-negative up to ``mip_gap`` slack.
+    tolerance: the gap is non-negative up to ``mip_gap`` slack.  That
+    bound is enforced at runtime: a seed whose profit exceeds
+    ``pf_profit_eur + 2 * mip_gap * |pf_profit_eur| + 1`` triggers a
+    prominent warning, or a ``RuntimeError`` when ``strict`` is True.
 
     Returns
     -------
     pandas.DataFrame
-        Indexed by seed; columns:
+        One row per seed (RangeIndex; the seed is the ``seed`` column):
             ``seed``,
             ``profit_total_eur``,
             ``grid_export_mwh``,
@@ -525,6 +571,17 @@ def monte_carlo_rolling(
         # n_seeds == 0 — return a column-shaped empty frame so downstream
         # consumers (e.g. foresight_gap_pct readers) see a stable schema.
         return pd.DataFrame(columns=_MC_COLUMNS)
+    # PF-bound tolerance: each window and the benchmark solve carry up
+    # to mip_gap relative optimality slack, so a legitimate seed can
+    # exceed the PF profit by at most ~2 x mip_gap x |PF| plus rounding.
+    mip_gap = float(solve_kwargs.get("mip_gap", 0.001) or 0.001)
+    if pf_profit_eur is not None and float(pf_profit_eur) <= 0.0:
+        logger.warning(
+            "monte_carlo_rolling: pf_profit_eur=%.2f is non-positive; "
+            "foresight_gap_pct = 100*(1 - rh/pf) inverts its sign "
+            "meaning for a non-positive benchmark — read the absolute "
+            "profit column instead.", float(pf_profit_eur),
+        )
     rows: list[dict[str, Any]] = []
     t_start = time.perf_counter()
     for seed in seeds:
@@ -544,6 +601,50 @@ def monte_carlo_rolling(
             **solve_kwargs,
         )
         profit = float(kpis.get("profit_total_eur", 0.0))
+        if pf_profit_eur is not None:
+            # Runtime guard on the perfect-foresight bound: every seed's
+            # dispatch is PF-feasible, so beating PF beyond the combined
+            # solver slack means a modelling error (scope mismatch,
+            # missing constraint in a window, wrong benchmark).  The one
+            # legitimate exception is a year-close SOC shortfall (the
+            # target was physically unreachable): the seed then carries
+            # extra discharged energy the closed-cycle benchmark kept in
+            # the battery, worth at most shortfall x the year's highest
+            # energy price, so the bound widens by exactly that value.
+            pf = float(pf_profit_eur)
+            shortfall_kwh = float(
+                kpis.get("year_close_soc_shortfall_kwh", 0.0) or 0.0,
+            )
+            shortfall_allowance = 0.0
+            if shortfall_kwh > 0.0:
+                max_price = float(
+                    ts["dam_price_eur_per_mwh"].abs().max()
+                ) if "dam_price_eur_per_mwh" in ts.columns else 0.0
+                if "retail_price_eur_per_mwh" in ts.columns:
+                    max_price = max(
+                        max_price,
+                        float(ts["retail_price_eur_per_mwh"].abs().max()),
+                    )
+                max_price = max(
+                    max_price,
+                    float(params.get("retail_tariff_eur_per_mwh", 0.0) or 0.0),
+                )
+                shortfall_allowance = shortfall_kwh / 1000.0 * max_price
+            pf_bound = pf + 2.0 * mip_gap * abs(pf) + 1.0 + shortfall_allowance
+            if profit > pf_bound:
+                msg = (
+                    f"monte_carlo_rolling: seed {seed} profit "
+                    f"{profit:,.2f} EUR exceeds the perfect-foresight "
+                    f"bound {pf_bound:,.2f} EUR (PF {pf:,.2f} EUR, "
+                    f"mip_gap {mip_gap}, year-close shortfall allowance "
+                    f"{shortfall_allowance:,.2f} EUR). A rolling-horizon "
+                    "dispatch is PF-feasible and cannot legitimately beat "
+                    "the benchmark beyond solver tolerance; check the KPI "
+                    "scope and window constraints."
+                )
+                if strict:
+                    raise RuntimeError(msg)
+                logger.warning(msg)
         if pf_profit_eur is not None and abs(pf_profit_eur) > 1e-9:
             gap = 100.0 * (1.0 - profit / float(pf_profit_eur))
         else:

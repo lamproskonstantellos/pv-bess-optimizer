@@ -114,6 +114,14 @@ _MERCHANT_CAP_FLAG_WARNED = False
 # subtracted in the objective; see pvbess_opt.degradation for the
 # calibration helper.
 
+# Penalty on missing the rolling-horizon year-close SOC target, per kWh
+# of shortfall.  Far above any plausible energy value (DAM/retail are
+# ~0.05-0.30 EUR/kWh), so the shortfall stays at the physical minimum:
+# it activates ONLY when the target is unreachable (e.g. a winter year
+# end where the remaining PV surplus cannot recharge the battery and
+# grid charging is off), where a hard equality would be infeasible.
+YEAR_CLOSE_SHORTFALL_PENALTY_EUR_PER_KWH: float = 10.0
+
 
 # ---------------------------------------------------------------------------
 # Solver helpers
@@ -788,8 +796,19 @@ def build_model(
             # Rolling-horizon year-close: the window's own soc[0] is the
             # carried-over SOC, so the closed-cycle condition must pin the
             # terminal state to the explicit year-initial target instead.
+            # The target is relaxed by a heavily penalised shortfall
+            # variable: a hard equality is infeasible when the remaining
+            # horizon physically cannot recharge to the target (winter
+            # year end, surplus-only charging).  The penalty keeps the
+            # shortfall at its physical minimum (zero whenever the
+            # target is reachable), so the reachable case is unchanged.
+            m.year_close_shortfall = pyo.Var(
+                domain=pyo.NonNegativeReals,
+                bounds=(0.0, float(params["soc_max_frac"]) * e_cap_param),
+            )
             m.SOC_TERM = pyo.Constraint(
-                expr=final_soc_expr == float(terminal_soc_target_kwh),
+                expr=final_soc_expr
+                == float(terminal_soc_target_kwh) - m.year_close_shortfall,
             )
         elif not terminal_soc_free:
             m.SOC_TERM = pyo.Constraint(expr=final_soc_expr == m.soc[0])
@@ -1095,6 +1114,13 @@ def build_model(
             expr=sum(cap_terms) + sum(act_terms),
         )
         profit_eur = profit_eur + m.balancing_revenue_expr
+
+    if hasattr(m, "year_close_shortfall"):
+        # Missing the year-close SOC target costs far more than any
+        # energy price, so the shortfall stays at its physical minimum.
+        profit_eur = profit_eur - (
+            YEAR_CLOSE_SHORTFALL_PENALTY_EUR_PER_KWH * m.year_close_shortfall
+        )
 
     m.OBJ = pyo.Objective(
         expr=profit_eur - curtail_tiebreak_term, sense=pyo.maximize,
