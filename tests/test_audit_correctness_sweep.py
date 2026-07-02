@@ -53,7 +53,9 @@ def _econ(**overrides) -> dict:
         "dam_inflation_pct": 0.0,
         "bm_inflation_pct": 0.0,
         "capex_pv_eur_per_kw": 525.0,
-        "capex_bess_eur_per_kw": 200.0,
+        # 50 EUR/kWh x 4,000 kWh == the original 200 EUR/kW x 1,000 kW
+        # = 200,000 EUR, keeping the replacement-CAPEX expectation intact.
+        "capex_bess_eur_per_kwh": 50.0,
         "devex_pv_eur_per_kw": 60.0,
         "devex_bess_eur_per_kw": 30.0,
         "opex_pv_eur_per_kwp": 7.0,
@@ -137,7 +139,7 @@ def test_monthly_and_quarterly_reconcile_in_replacement_year():
     # The replacement CAPEX books in month 12 of the replacement year.
     repl = int(econ["bess_replacement_year"])
     dec = monthly[(monthly["project_year"] == repl) & (monthly["period"] == 12)]
-    expected_capex = -200.0 * 1000.0 * 0.50
+    expected_capex = -50.0 * 4000.0 * 0.50  # EUR/kWh x kWh x repl. pct
     assert float(dec["capex_eur"].iloc[0]) == pytest.approx(expected_capex)
     other = monthly[(monthly["project_year"] == repl) & (monthly["period"] != 12)]
     assert float(other["capex_eur"].abs().sum()) == 0.0

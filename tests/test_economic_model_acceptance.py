@@ -59,7 +59,9 @@ def _default_econ() -> dict:
 
 
 def _caps() -> dict:
-    return {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    # bess_kwh chosen so the default 250 EUR/kWh yields the same
+    # 1 000 000 EUR BESS CAPEX as the old 200 EUR/kW x 5000 kW basis.
+    return {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 4000.0}
 
 
 def _kpis(profit: float = 600_000.0) -> dict:
@@ -114,13 +116,13 @@ def test_npv_monotonic_in_capex():
 
     low_econ = dict(base_econ)
     low_econ["capex_pv_eur_per_kw"] = float(base_econ["capex_pv_eur_per_kw"]) * 0.5
-    low_econ["capex_bess_eur_per_kw"] = float(base_econ["capex_bess_eur_per_kw"]) * 0.5
+    low_econ["capex_bess_eur_per_kwh"] = float(base_econ["capex_bess_eur_per_kwh"]) * 0.5
     low_df = build_yearly_cashflow(_kpis(), low_econ, _caps())
     low_npv = float(compute_financial_kpis(low_df, low_econ)["npv_eur"])
 
     high_econ = dict(base_econ)
     high_econ["capex_pv_eur_per_kw"] = float(base_econ["capex_pv_eur_per_kw"]) * 1.5
-    high_econ["capex_bess_eur_per_kw"] = float(base_econ["capex_bess_eur_per_kw"]) * 1.5
+    high_econ["capex_bess_eur_per_kwh"] = float(base_econ["capex_bess_eur_per_kwh"]) * 1.5
     high_df = build_yearly_cashflow(_kpis(), high_econ, _caps())
     high_npv = float(compute_financial_kpis(high_df, high_econ)["npv_eur"])
 

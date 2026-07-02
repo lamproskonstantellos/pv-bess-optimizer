@@ -174,6 +174,61 @@ def _sync_param_sheet(ws: Worksheet, sheet_name: str) -> int:
     return len(template)
 
 
+def _migrate_legacy_bess_capex(ws: Worksheet) -> bool:
+    """Convert the legacy per-kW BESS CAPEX row to the per-kWh basis.
+
+    v1.0.0 prices BESS CAPEX per kWh of energy capacity
+    (``capex_bess_eur_per_kwh``); older workbooks carry
+    ``capex_bess_eur_per_kw`` on the power basis.  The conversion is
+    ``value_per_kwh = value_per_kw x bess_power_kw / bess_capacity_kwh``
+    and requires ``bess_capacity_kwh > 0`` on the same sheet.  Returns
+    True when a migration was performed.
+    """
+    key_col = _column_index(ws, "key")
+    value_col = _column_index(ws, "value")
+    if key_col is None or value_col is None:
+        return False
+    cells: dict[str, object] = {}
+    legacy_row: int | None = None
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+        key_cell = row[key_col - 1]
+        if not isinstance(key_cell.value, str) or not key_cell.value.strip():
+            continue
+        key = key_cell.value.strip()
+        cells[key] = row[value_col - 1].value
+        if key == "capex_bess_eur_per_kw":
+            legacy_row = key_cell.row
+    if legacy_row is None or "capex_bess_eur_per_kwh" in cells:
+        return False
+    try:
+        value_per_kw = float(cells.get("capex_bess_eur_per_kw") or 0.0)
+        power_kw = float(cells.get("bess_power_kw") or 0.0)
+        capacity_kwh = float(cells.get("bess_capacity_kwh") or 0.0)
+    except (TypeError, ValueError):
+        logger.warning(
+            "bess: cannot migrate legacy 'capex_bess_eur_per_kw' "
+            "(non-numeric inputs); dropping the row. Set "
+            "'capex_bess_eur_per_kwh' manually."
+        )
+        return False
+    if capacity_kwh <= 0.0:
+        logger.warning(
+            "bess: cannot migrate legacy 'capex_bess_eur_per_kw' "
+            "(bess_capacity_kwh is 0); dropping the row. Set "
+            "'capex_bess_eur_per_kwh' manually."
+        )
+        return False
+    value_per_kwh = value_per_kw * power_kw / capacity_kwh
+    ws.cell(row=legacy_row, column=key_col).value = "capex_bess_eur_per_kwh"
+    ws.cell(row=legacy_row, column=value_col).value = value_per_kwh
+    logger.info(
+        "bess: migrated legacy capex_bess_eur_per_kw=%s to "
+        "capex_bess_eur_per_kwh=%s (x %s kW / %s kWh).",
+        value_per_kw, value_per_kwh, power_kw, capacity_kwh,
+    )
+    return True
+
+
 def _center_header_row(ws: Worksheet) -> None:
     """Center-align every populated header cell of ``ws`` (row 1)."""
     for cell in ws[1]:
@@ -224,6 +279,8 @@ def polish_workbook(path: Path) -> dict[str, int]:
     wb = load_workbook(path)
     if "timeseries" in wb.sheetnames:
         _drop_legacy_pv_override(wb["timeseries"])
+    if "bess" in wb.sheetnames:
+        _migrate_legacy_bess_capex(wb["bess"])
     _ensure_parameter_sheets(wb)
     cleared_by_sheet: dict[str, int] = {}
     for sheet_name in wb.sheetnames:

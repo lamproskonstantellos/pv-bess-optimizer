@@ -45,7 +45,7 @@ def _base_typed() -> dict:
         "pv": dict(PV_SHEET_DEFAULTS, pv_nameplate_kwp=10000.0, capex_pv_eur_per_kw=500.0),
         "bess": dict(
             BESS_SHEET_DEFAULTS, bess_power_kw=5000.0, bess_capacity_kwh=10000.0,
-            capex_bess_eur_per_kw=200.0,
+            capex_bess_eur_per_kwh=200.0,
         ),
         "project": dict(PROJECT_SHEET_DEFAULTS, site_capex_eur=1000.0),
         "economics": dict(ECONOMICS_SHEET_DEFAULTS),
@@ -80,7 +80,7 @@ def test_apply_overrides_shorthand_and_capex_multiplier():
     assert typed["bess"]["bess_capacity_kwh"] == 6000
     assert typed["balancing"]["balancing_enabled"] is True
     assert typed["pv"]["capex_pv_eur_per_kw"] == pytest.approx(250.0)
-    assert typed["bess"]["capex_bess_eur_per_kw"] == pytest.approx(100.0)
+    assert typed["bess"]["capex_bess_eur_per_kwh"] == pytest.approx(100.0)
     assert typed["project"]["site_capex_eur"] == pytest.approx(500.0)
     assert base["pv"]["pv_nameplate_kwp"] == 10000.0  # base untouched
 

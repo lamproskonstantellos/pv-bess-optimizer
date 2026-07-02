@@ -135,8 +135,13 @@ Sheet ``bess``
 * ``soc_min_frac`` / ``soc_max_frac`` / ``initial_soc_frac`` /
   ``terminal_soc_equal`` / ``max_cycles_per_day`` — operating
   envelope.
-* ``capex_bess_eur_per_kw`` / ``devex_bess_eur_per_kw``
-  (default 30 EUR/kW) / ``opex_bess_eur_per_kw``.
+* ``capex_bess_eur_per_kwh`` (default 250 EUR/kWh) — full installed
+  BESS CAPEX per kWh of nameplate energy capacity (cells + PCS + BOP
+  + EPC; Lazard band 215-315 EUR/kWh).  Set 0 for an existing BESS.
+* ``devex_bess_eur_per_kw`` (default 30 EUR/kW) /
+  ``opex_bess_eur_per_kw`` (default 14 EUR/kW/yr) — development /
+  permitting and fixed O&M stay on the power basis: both scale with
+  the power block, not the energy capacity.
 * ``bess_replacement_year`` / ``bess_replacement_cost_pct`` —
   Year-N replacement (0 disables).
 * ``bess_degradation_annual_pct`` — linear calendar BESS capacity fade.

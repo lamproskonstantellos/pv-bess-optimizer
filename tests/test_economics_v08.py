@@ -29,7 +29,8 @@ def _econ() -> dict:
         "dam_inflation_pct": 2.0,
         "aggregator_fee_pct_revenue": 10.0,
         "capex_pv_eur_per_kw": 525.0,
-        "capex_bess_eur_per_kw": 200.0,
+        # 50 EUR/kWh x 20000 kWh = 1 000 000 (was 200 EUR/kW x 5000 kW).
+        "capex_bess_eur_per_kwh": 50.0,
         "devex_pv_eur_per_kw": 60.0,
         "devex_bess_eur_per_kw": 30.0,
         "opex_pv_eur_per_kwp": 7.0,
@@ -156,8 +157,8 @@ def test_baseline_reproducible_when_extras_off():
     econ["unavailability_pct"] = 0.0
     kpis = {"profit_total_eur": 100_000.0}
     df = build_yearly_cashflow(kpis, econ, _caps())
-    # Year-0 capex matches exactly (capex_pv*pv_kwp + capex_bess*bess_kw).
-    expected_capex_y0 = -(525.0 * 4500.0 + 200.0 * 5000.0)
+    # Year-0 capex matches exactly (capex_pv*pv_kwp + capex_bess*bess_kwh).
+    expected_capex_y0 = -(525.0 * 4500.0 + 50.0 * 20000.0)
     y0_capex = float(df.loc[df["project_year"] == 0, "capex_eur"].iloc[0])
     y0_devex = float(df.loc[df["project_year"] == 0, "devex_eur"].iloc[0])
     assert y0_capex == pytest.approx(expected_capex_y0)

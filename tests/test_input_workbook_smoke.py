@@ -191,11 +191,13 @@ def test_repo_input_xlsx_headline_kpis_pinned():
     )
 
     # Baseline (perfect-foresight, MIP gap 0.01, HiGHS, no-curtailment
-    # default).
+    # default).  Financial pins reflect the v1.0.0 energy-basis BESS
+    # CAPEX (250 EUR/kWh x 60 MWh); dispatch and profit are CAPEX-free
+    # and unchanged.
     assert abs(float(kpis["pv_generation_mwh"]) - 22_275.0) < 1.0e-2
     assert abs(
         float(kpis["bess_total_discharge_mwh"]) - 9_512.872_875
     ) < 1.0e-2
     assert abs(float(kpis["profit_total_eur"]) - 2_824_793.2746) < 1.0
-    assert abs(float(fin_kpis["npv_eur"]) - 8_014_317.02) < 1.0
-    assert abs(float(fin_kpis["irr_pct"]) - 15.1402) < 1.0e-2
+    assert abs(float(fin_kpis["npv_eur"]) - -7_035_778.73) < 1.0
+    assert abs(float(fin_kpis["irr_pct"]) - 2.6604) < 1.0e-2

@@ -63,7 +63,7 @@ _BESS_CONTRACT: dict[str, tuple[type, float | None, float | None]] = {
     "initial_soc_frac": (float, 0.0, 1.0),
     "terminal_soc_equal": (bool, None, None),
     "max_cycles_per_day": (float, 0.0, None),
-    "capex_bess_eur_per_kw": (float, 0.0, None),
+    "capex_bess_eur_per_kwh": (float, 0.0, None),
     "devex_bess_eur_per_kw": (float, 0.0, None),
     "opex_bess_eur_per_kw": (float, 0.0, None),
     "bess_replacement_year": (int, 0, 200),

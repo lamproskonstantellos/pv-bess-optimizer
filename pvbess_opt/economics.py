@@ -45,11 +45,11 @@ References for default values
 
 * PV CAPEX ~525 EUR/kWp (utility-scale ground mount, 2024) — IRENA
   *Renewable Power Generation Costs in 2023* (2024).
-* BESS CAPEX ~200 EUR/kW power block (DC + PCS, EU-utility, 2024) —
-  Lazard *Levelized Cost of Storage v9* (2024).  Note: the Lazard LCOS
-  benchmark band assumes the FULL installed cost (roughly
-  duration_h x 215-315 EUR/kWh); supply ``capex_bess_eur_per_kw`` on
-  that basis when comparing LCOS against the band.
+* BESS CAPEX ~250 EUR/kWh of nameplate energy capacity (full installed
+  cost: cells + PCS + BOP + EPC; EU-utility, 2024) — Lazard *Levelized
+  Cost of Storage v9* (2024), band 215-315 EUR/kWh.
+  ``capex_bess_eur_per_kwh`` multiplies ``bess_capacity_kwh`` directly;
+  BESS DEVEX and OPEX stay per kW of the power block.
 * PV degradation 2.5% Year-1 LID + 0.55%/yr linear — Tier-1 module
   warranty terms (Jinko / LONGi / Trina, 25-year linear ≤ 0.55%/yr).
 * BESS degradation 2%/yr linear (LFP, ~80% capacity at 10y) — typical
@@ -368,9 +368,13 @@ def build_yearly_cashflow(
 
     pv_kwp = float(capacities["pv_kwp"])
     bess_kw = float(capacities["bess_kw"])
+    bess_kwh = float(capacities["bess_kwh"])
 
     capex_pv_y0 = -float(econ["capex_pv_eur_per_kw"]) * pv_kwp
-    capex_bess_y0 = -float(econ["capex_bess_eur_per_kw"]) * bess_kw
+    # BESS CAPEX is an energy-basis cost: EUR/kWh x nameplate kWh.
+    # DEVEX and OPEX stay on the power basis (development, permitting
+    # and fixed O&M scale with the power block).
+    capex_bess_y0 = -float(econ["capex_bess_eur_per_kwh"]) * bess_kwh
     # Site-wide lump-sum CAPEX/DEVEX (substation, grid upgrades,
     # interconnection, environmental studies, ...) are not per-asset, so
     # they fold straight into the Year-0 outflow rows.
@@ -1290,8 +1294,8 @@ def compute_financial_kpis(
             bess_kw > 0.0 and bess_kwh > 0.0
             and "bess_discharge_mwh" in lifetime_yearly.columns
         ):
-            # BESS-attributable CAPEX share: BESS power-block + BESS DEVEX.
-            bess_capex_y0 = float(econ.get("capex_bess_eur_per_kw", 0.0)) * bess_kw
+            # BESS-attributable CAPEX share: BESS energy block + BESS DEVEX.
+            bess_capex_y0 = float(econ.get("capex_bess_eur_per_kwh", 0.0)) * bess_kwh
             bess_devex_y0 = (
                 float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
             )

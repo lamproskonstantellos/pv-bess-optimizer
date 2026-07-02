@@ -66,7 +66,7 @@ def test_bess_sheet_keys():
         "efficiency_charge", "efficiency_discharge",
         "soc_min_frac", "soc_max_frac", "initial_soc_frac",
         "terminal_soc_equal", "max_cycles_per_day",
-        "capex_bess_eur_per_kw", "devex_bess_eur_per_kw",
+        "capex_bess_eur_per_kwh", "devex_bess_eur_per_kw",
         "opex_bess_eur_per_kw",
         "bess_replacement_year", "bess_replacement_cost_pct",
         "bess_degradation_annual_pct", "bess_degradation_pct_per_cycle",

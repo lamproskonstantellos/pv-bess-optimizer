@@ -97,7 +97,7 @@ def _bess_only_econ() -> dict:
         "bess_replacement_year": 0,
         "bess_replacement_cost_pct": 50.0,
         "capex_pv_eur_per_kw": 0.0,
-        "capex_bess_eur_per_kw": 300.0,
+        "capex_bess_eur_per_kwh": 300.0,
         "devex_pv_eur_per_kw": 0.0,
         "devex_bess_eur_per_kw": 0.0,
         "opex_pv_eur_per_kwp": 0.0,
@@ -343,7 +343,7 @@ def test_unavailability_derate_is_symmetric_between_cashflow_and_lifetime():
     # independent of their magnitudes.
     econ.update({
         "capex_pv_eur_per_kw": 500.0,
-        "capex_bess_eur_per_kw": 200.0,
+        "capex_bess_eur_per_kwh": 200.0,
         "devex_pv_eur_per_kw": 0.0,
         "devex_bess_eur_per_kw": 0.0,
         "opex_pv_eur_per_kwp": 7.0,

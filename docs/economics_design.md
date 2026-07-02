@@ -46,7 +46,7 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | project | `unavailability_pct` | 1.0 | $a$ |
 | pv | `capex_pv_eur_per_kw`, `devex_pv_eur_per_kw`, `opex_pv_eur_per_kwp` | 525, 60, 7 | PV cost block |
 | pv | `pv_degradation_year1_pct`, `pv_degradation_annual_pct` | 2.5, 0.55 | $d_1$, $d_a$ |
-| bess | `capex_bess_eur_per_kw`, `devex_bess_eur_per_kw`, `opex_bess_eur_per_kw` | 200, 30, 14 | BESS cost block |
+| bess | `capex_bess_eur_per_kwh`, `devex_bess_eur_per_kw`, `opex_bess_eur_per_kw` | 250, 30, 14 | BESS cost block (CAPEX per kWh of energy capacity; DEVEX / OPEX per kW of the power block) |
 | bess | `bess_replacement_year`, `bess_replacement_cost_pct` | 0, 50 | replacement event |
 | bess | `bess_degradation_annual_pct`, `bess_degradation_pct_per_cycle` | 2.0, 0.008 | $d_B$, $d_c$ |
 | bess | `bess_eol_soh_pct` | 80 | diagnostic EOL threshold (degradation report) |
@@ -65,7 +65,7 @@ Project year $y = 0$ is the construction year, calendar
 revenue or OPEX.  Operating years $y = 1..Y$ map to calendar
 `project_start_year` + $y$ − 1:
 
-$$\mathrm{CAPEX}_0 = -\left(c^{PV} \cdot \mathrm{kWp} + c^{B} \cdot P^{B} + \mathrm{site\_capex}\right), \quad
+$$\mathrm{CAPEX}_0 = -\left(c^{PV} \cdot \mathrm{kWp} + c^{B} \cdot E^{\mathrm{cap}} + \mathrm{site\_capex}\right), \quad
 \mathrm{DEVEX}_0 = -\left(v^{PV} \cdot \mathrm{kWp} + v^{B} \cdot P^{B} + \mathrm{site\_devex}\right) \tag{E1}$$
 
 Escalation of a Year-1 base $X_1$ on index $i$ uses the
@@ -227,7 +227,7 @@ smaller assets; 0 for utility-scale BSPs that self-dispatch.
 OPEX, replacement CAPEX, and the net cashflow:
 
 $$O_y = -\left(o^{PV}\,\mathrm{kWp} + o^{B} P^{B}\right)(1+i_{\mathrm{opex}})^{y-1}, \qquad
-C_y = \begin{cases} c^{B} P^{B} \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
+C_y = \begin{cases} c^{B} E^{\mathrm{cap}} \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
 
 $$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
 
@@ -286,7 +286,7 @@ with identical capacities leaves LCOE/LCOS unchanged.
 
 $$\mathrm{LCOE} = \frac{(c^{PV}+v^{PV})\,\mathrm{kWp} \cdot D_0 + \sum_{y\ge1} D_y\, o^{PV}\mathrm{kWp}\,(1+i_{\mathrm{opex}})^{y-1}}{\sum_{y\ge1} D_y\, E^{PV}_y} \tag{E21}$$
 
-$$\mathrm{LCOS} = \frac{(c^{B}+v^{B})\,P^{B} D_0 + c^{B} P^{B}\frac{p_r}{100} D_{y_r} + \sum_{y\ge1} D_y\, o^{B} P^{B} (1+i_{\mathrm{opex}})^{y-1}}{\sum_{y\ge1} D_y\, E^{B}_y} \tag{E22}$$
+$$\mathrm{LCOS} = \frac{(c^{B} E^{\mathrm{cap}}+v^{B} P^{B}) D_0 + c^{B} E^{\mathrm{cap}}\frac{p_r}{100} D_{y_r} + \sum_{y\ge1} D_y\, o^{B} P^{B} (1+i_{\mathrm{opex}})^{y-1}}{\sum_{y\ge1} D_y\, E^{B}_y} \tag{E22}$$
 
 where $E^{PV}_y$ = `lifetime_yearly['pv_generation_mwh']` and $E^{B}_y$
 = `lifetime_yearly['bess_discharge_mwh']` (both degraded by

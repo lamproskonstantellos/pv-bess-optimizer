@@ -34,6 +34,7 @@ from .io import (
     _SHEET_DEFAULTS,
     _parse_grid_export_max,
     _parse_value,
+    reject_legacy_bess_capex_key,
     write_workbook,
 )
 
@@ -182,6 +183,10 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
             user = {}
         if not isinstance(user, dict):
             raise ValueError(f"Config section {section!r} must be a mapping.")
+        if section == "bess":
+            reject_legacy_bess_capex_key(
+                user, source=f"Config {path} (bess section)",
+            )
         known: dict[str, Any] = {}
         for key, value in user.items():
             if key in defaults:

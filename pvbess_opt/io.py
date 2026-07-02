@@ -181,7 +181,9 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "initial_soc_frac": 0.50,
     "terminal_soc_equal": True,
     "max_cycles_per_day": 1.0,
-    "capex_bess_eur_per_kw": 200.0,
+    # Full installed BESS cost per kWh of nameplate energy capacity
+    # (Lazard-style band 215-315 EUR/kWh).
+    "capex_bess_eur_per_kwh": 250.0,
     "devex_bess_eur_per_kw": 30.0,
     "opex_bess_eur_per_kw": 14.0,
     "bess_replacement_year": 0,
@@ -534,16 +536,18 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Cycle wear cost penalised per MWh discharged in the dispatch "
      "objective (0 = off). Derive from replacement cost / cycle-life / "
      "usable energy via pvbess_opt.degradation."),
-    ("capex_bess_eur_per_kw", 200, "EUR/kW",
-     "Per-kW BESS CAPEX. Set 0 if BESS already exists. For an LCOS "
-     "comparable to the Lazard benchmark band, use the FULL installed "
-     "cost per kW = duration_h x EUR/kWh (e.g. a 4-hour system at "
-     "250 EUR/kWh -> 1000 EUR/kW); a power-block-only figure (~200, "
-     "DC + PCS) understates LCOS against that band."),
+    ("capex_bess_eur_per_kwh", 250, "EUR/kWh",
+     "Full installed BESS CAPEX per kWh of nameplate energy capacity "
+     "(cells + PCS + BOP + EPC). Benchmark band 215-315 EUR/kWh "
+     "(Lazard LCOS, utility-scale 4-hour Li-ion). Set 0 if the BESS "
+     "already exists."),
     ("devex_bess_eur_per_kw", 30, "EUR/kW",
-     "Per-kW BESS DEVEX (development / permitting). Paid in Year 0."),
+     "Per-kW BESS DEVEX (development / permitting). Paid in Year 0. "
+     "Stays on the power basis: development and permitting effort "
+     "scales with the power block, not the energy capacity."),
     ("opex_bess_eur_per_kw", 14, "EUR/kW/yr",
-     "Annual O&M for BESS."),
+     "Annual O&M for BESS. Stays on the power basis: fixed O&M "
+     "contracts are quoted per kW of the power block."),
     ("bess_replacement_year", 0, "year",
      "Year of BESS cell replacement (0 = no replacement). Typical 10 or 15."),
     ("bess_replacement_cost_pct", 50, "%",
@@ -1260,6 +1264,34 @@ def _parse_grid_export_max(raw: Any, default: Any) -> float:
     return value
 
 
+#: Legacy v0.x key for the BESS CAPEX, priced per kW of power.  v1.0.0
+#: prices BESS CAPEX per kWh of energy capacity instead; the old key is
+#: rejected loudly so an old workbook cannot silently fall back to the
+#: new per-kWh default.
+LEGACY_BESS_CAPEX_KEY = "capex_bess_eur_per_kw"
+
+
+def reject_legacy_bess_capex_key(keys: Any, *, source: str) -> None:
+    """Raise ``ValueError`` when the legacy per-kW BESS CAPEX key is present.
+
+    ``keys`` is any iterable of key names from the bess section of a
+    workbook or structured config; ``source`` names the input for the
+    error message.  Conversion rule:
+    ``value_per_kwh = value_per_kw x bess_power_kw / bess_capacity_kwh``.
+    """
+    if LEGACY_BESS_CAPEX_KEY in set(keys):
+        raise ValueError(
+            f"{source} uses the legacy key '{LEGACY_BESS_CAPEX_KEY}' "
+            "(BESS CAPEX per kW of power). Since v1.0.0 BESS CAPEX is "
+            "priced per kWh of energy capacity via "
+            "'capex_bess_eur_per_kwh'. Convert the value with "
+            "value_per_kwh = value_per_kw x bess_power_kw / "
+            "bess_capacity_kwh, or run "
+            "scripts/polish_input_workbook.py to migrate the workbook "
+            "automatically."
+        )
+
+
 def _parse_kv_sheet(
     sheet_name: str, flat: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1835,7 +1867,7 @@ def validate_workbook_params(
         "bess_power_kw",
         "bess_capacity_kwh",
         "max_cycles_per_day",
-        "capex_bess_eur_per_kw",
+        "capex_bess_eur_per_kwh",
         "devex_bess_eur_per_kw",
         "opex_bess_eur_per_kw",
         "bess_replacement_cost_pct",
@@ -1997,6 +2029,10 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         flat = _flat_dict_from_sheet(
             pd.read_excel(xlsx_path, sheet_name=sheet_name),
         )
+        if sheet_name == "bess":
+            reject_legacy_bess_capex_key(
+                flat, source=f"Workbook {xlsx_path!s} (bess sheet)",
+            )
         typed[sheet_name] = _parse_kv_sheet(sheet_name, flat)
         if (
             sheet_name == "bess"

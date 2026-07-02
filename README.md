@@ -152,10 +152,12 @@ location".
 ### `bess`
 
 `bess_power_kw` (symmetric charge / discharge limit),
-`bess_capacity_kwh`, round-trip efficiencies, SOC bounds,
-`max_cycles_per_day`, calendar and per-cycle fade coefficients,
+`bess_capacity_kwh`, one-way efficiencies, SOC bounds,
+`max_cycles_per_day`, `capex_bess_eur_per_kwh` (full installed BESS
+CAPEX per kWh of nameplate energy capacity; DEVEX and OPEX stay per
+kW of the power block), calendar and per-cycle fade coefficients,
 replacement year and cost, the end-of-life SOH threshold, and the
-optional `bess_wear_cost_eur_per_mwh` dispatch shadow price.
+`bess_wear_cost_eur_per_mwh` dispatch shadow price.
 
 ### `economics`
 
@@ -424,10 +426,9 @@ lockstep:
 * **LCOE / LCOS** — Lazard-style: per-asset CAPEX / DEVEX / OPEX (plus
   discounted BESS replacement) over discounted delivered MWh.  Site-wide
   lump sums, balancing revenue, and PPA revenue are excluded by
-  convention.  For an LCOS comparable to the Lazard band, supply
-  `capex_bess_eur_per_kw` as the *full installed* cost
-  (duration_h × EUR/kWh) — a power-block-only figure understates LCOS
-  against that band.
+  convention.  `capex_bess_eur_per_kwh` is the full installed cost per
+  kWh of nameplate energy capacity, so the LCOS numerator is directly
+  comparable to the Lazard band.
 * **Battery wear cost** — an optional €/MWh shadow price that shapes
   dispatch only; it is never added to the cashflow, so degradation is
   not double-counted with the replacement CAPEX.

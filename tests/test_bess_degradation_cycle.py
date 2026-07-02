@@ -45,7 +45,9 @@ def _econ(d_cycle: float | None = None) -> dict:
         "dam_inflation_pct": 0.0,
         "aggregator_fee_pct_revenue": 10.0,
         "capex_pv_eur_per_kw": 525.0,
-        "capex_bess_eur_per_kw": 200.0,
+        # 50 EUR/kWh x 60,000 kWh == the fixture's original 200 EUR/kW x
+        # 15,000 kW == 3.0 MEUR, so the frozen kpi_baseline.json stays valid.
+        "capex_bess_eur_per_kwh": 50.0,
         "devex_pv_eur_per_kw": 60.0,
         "devex_bess_eur_per_kw": 30.0,
         "opex_pv_eur_per_kwp": 7.0,

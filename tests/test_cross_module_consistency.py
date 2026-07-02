@@ -57,7 +57,7 @@ def _econ(d_ann, d_cyc, repl, n_years, unav) -> dict:
         "retail_inflation_pct": 0.0,
         "dam_inflation_pct": 0.0,
         "capex_pv_eur_per_kw": 500.0,
-        "capex_bess_eur_per_kw": 200.0,
+        "capex_bess_eur_per_kwh": 200.0,
         "devex_pv_eur_per_kw": 0.0,
         "devex_bess_eur_per_kw": 0.0,
         "opex_pv_eur_per_kwp": 7.0,
@@ -174,7 +174,7 @@ def test_replacement_capex_charged_only_in_horizon(repl, expect_charge):
     charged_years = op.loc[op["capex_eur"] < 0, "project_year"].tolist()
     if expect_charge:
         assert charged_years == [repl]
-        expected = -(econ["capex_bess_eur_per_kw"] * caps["bess_kw"]) * (
+        expected = -(econ["capex_bess_eur_per_kwh"] * caps["bess_kwh"]) * (
             econ["bess_replacement_cost_pct"] / 100.0
         )
         actual = float(

@@ -102,7 +102,9 @@ Default values come from the public literature:
 
 * PV CAPEX ~525 EUR/kWp — IRENA *Renewable Power Generation Costs in
   2023* (2024).
-* BESS CAPEX ~200 EUR/kW — Lazard *Levelized Cost of Storage v9* (2024).
+* BESS CAPEX ~250 EUR/kWh of nameplate energy capacity (full installed
+  cost, band 215-315 EUR/kWh) — Lazard *Levelized Cost of Storage v9*
+  (2024).  BESS DEVEX and OPEX stay per kW of the power block.
 * PV degradation 2.5 % LID + 0.55 %/yr linear — Tier-1 module warranty
   terms.
 * BESS degradation 2 %/yr linear — typical Tier-1 LFP cell warranty.
