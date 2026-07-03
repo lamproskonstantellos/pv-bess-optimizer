@@ -65,7 +65,8 @@ A run writes to
                        rolling-horizon MC distribution
     04_financial_plots/ cumulative, waterfall, payback, tornados,
                        rolling_horizon_distribution
-    05_energy_plots/<calendar_year>/{daily,monthly,yearly}/...
+    05_energy_plots/   energy_sankey.pdf,
+                       <calendar_year>/{daily,monthly,yearly}/...,
                        lifetime_summary_<start>-<end>.pdf
     06_uncertainty_plots/ input forecast band, seasonal boxplot,
                        DAM heatmap, forecast-gap comparison

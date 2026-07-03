@@ -268,9 +268,10 @@ Each run writes a self-contained folder
                      balancing reservation + MC, lifetime cycles,
                      cumulative + monthly cashflow, payback, NPV/IRR
                      tornados, NPV waterfall, LCOE/LCOS, SOH, and the
-                     energy Sankey + 24/7-CFE duration curve when
-                     emissions accounting is on (full list below)
-05_energy_plots/     daily / monthly / yearly dispatch views per year
+                     24/7-CFE duration curve when emissions accounting
+                     is on (full list below)
+05_energy_plots/     Year-1 energy-flow diagram (every run) plus
+                     daily / monthly / yearly dispatch views per year
 06_uncertainty_plots/ forecast band, seasonal boxplot, DAM heatmap, diagnostics
 ```
 
@@ -338,13 +339,14 @@ Generated under `results/<run>/04_financial_plots/`:
 * Rolling-horizon Monte Carlo distribution.
 * Balancing reservation profile + Monte Carlo distribution per
   product.
-* Energy Sankey (PV / BESS / grid / load flows) and the 24/7
-  carbon-free energy duration curve, both emitted only when emissions
+* 24/7 carbon-free energy duration curve, emitted only when emissions
   accounting is on (`grid_co2_intensity_kg_per_mwh > 0`).
 
-Energy plots under `results/<run>/05_energy_plots/`: daily / monthly /
-yearly supply, surplus, combined, dispatch, SOC, and revenue, plus the
-merchant trio when the mode is `merchant`.
+Energy plots under `results/<run>/05_energy_plots/`: the Year-1
+energy-flow diagram (PV / BESS / grid / load flows, rendered for every
+run) plus daily / monthly / yearly supply, surplus, combined, dispatch,
+SOC, and revenue views, and the merchant trio when the mode is
+`merchant`.
 
 ## Results gallery
 
@@ -360,6 +362,13 @@ PV + BESS dispatching to the day-ahead market with FCR / aFRR / mFRR
 participation stacked on the battery and grid-charging arbitrage
 enabled (the battery may buy cheap hours and resell expensive ones).
 
+![Merchant energy flows](docs/assets/merchant_energy_flow.png)
+
+*Year-1 energy flows: PV generation and grid purchases routed through
+the battery to the grid, with curtailment and round-trip losses shown
+explicitly. Ribbon colours match the dispatch plots, so each flow
+reads the same across the whole report.*
+
 ![Merchant yearly revenue stack](docs/assets/merchant_revenue_stack.png)
 
 *Yearly revenue stack: PV-DAM and BESS-DAM exports plus the five
@@ -370,8 +379,9 @@ fee (shown here at a representative 10 % of balancing revenue).*
 ![BESS revenue waterfall](docs/assets/merchant_bess_revenue_waterfall.png)
 
 *BESS revenue waterfall: stepping from DAM arbitrage through each
-balancing product, then down by the balancing-aggregator (BSP) fee, to
-the total battery revenue.*
+balancing product, then down by the battery's exact share of the
+energy-aggregator fee and by the balancing-aggregator (BSP) fee, to
+the total battery revenue net of both route-to-market fees.*
 
 ![LCOS benchmark band](docs/assets/merchant_lcos_band.png)
 
@@ -415,6 +425,12 @@ Behind-the-meter PV + BESS serving a co-located load at the retail
 tariff and exporting only the surplus to the DAM, with no balancing.
 Grid charging is enabled, so the battery may also top up from the
 grid in cheap hours to cover later load.
+
+![Self-consumption energy flows](docs/assets/self_consumption_energy_flow.png)
+
+*Year-1 energy flows behind the meter: PV serving the load directly,
+charging the battery and exporting the surplus, grid imports covering
+the residual load, and the battery's round-trip losses made visible.*
 
 ![Self-consumption daily dispatch and SOC](docs/assets/self_consumption_daily_dispatch_soc.png)
 
