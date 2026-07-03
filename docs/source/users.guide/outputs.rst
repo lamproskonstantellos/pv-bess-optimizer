@@ -36,9 +36,9 @@ The IRR and NPV sensitivity tornados annotate each bar end with the
 absolute driver value that produced it, placed strictly outside the
 bar and anchored on the row centerline.  The metric itself is read
 off the x-axis.  The base case is marked once, by a dashed vertical
-line whose legend entry (``Base = 15.9%`` / ``Base = €9.0M``) carries
-the formatted base value, and each y-axis label carries the ±
-sensitivity range applied to that driver.
+line with the bare ``Base`` legend entry (the base value is read off
+the x-axis and quoted in SUMMARY.md), and each y-axis label carries
+the ± sensitivity range applied to that driver.
 
 All plots are PDF-only (IEEE preset) and titles are off by default;
 toggle with ``show_titles`` in the ``project`` sheet.

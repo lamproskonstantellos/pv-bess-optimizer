@@ -17,7 +17,6 @@ EUR axes use the compact ``EUR 12.3M`` / ``EUR 45k`` formatter via
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +30,6 @@ from ..sensitivity import DriverSensitivity, build_driver_sensitivities
 from ..theme import FINANCIAL_COLORS, apply_financial_legend, financial_color
 from ._currency import (
     euro_axis_formatter,
-    format_eur,
 )
 from ._currency import (
     resolve_currency_format as _resolve_currency_format,
@@ -166,10 +164,9 @@ def plot_cumulative_cashflow(
         linewidth=1.5, linestyle="--",
         label="Cumulative discounted cash-flow",
     )
-    ax.axhline(0.0, color="grey", linewidth=0.8, alpha=0.6)
+    ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
 
-    ax.set_xlabel("Calendar year" if "calendar_year" in yearly_cf.columns
-                  else "Project year")
+    ax.set_xlabel("Year")
     _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
@@ -226,10 +223,7 @@ def plot_yearly_cashflow_bars(
             marker="o", markersize=3, label="Net cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.8)
 
-    ax.set_xlabel(
-        "Calendar year" if "calendar_year" in yearly_cf.columns
-        else "Project year"
-    )
+    ax.set_xlabel("Year")
     _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
@@ -318,10 +312,7 @@ def plot_npv_waterfall(
     )
     ax.axhline(0.0, color="black", linewidth=0.8)
 
-    ax.set_xlabel(
-        "Calendar year" if "calendar_year" in yearly_cf.columns
-        else "Project year"
-    )
+    ax.set_xlabel("Year")
     _integer_year_axis(ax)
     ax.set_ylabel("Discounted EUR")
     _apply_eur_yaxis(ax, econ)
@@ -375,18 +366,15 @@ def plot_payback(
 
     if simple_payback_years is not None and not np.isnan(simple_payback_years):
         x = _to_axis(float(simple_payback_years))
-        # Label is year-annotated for legend readability; canonical
-        # ordering is recovered by apply_financial_legend's prefix match.
-        # The "(from CAPEX year)" suffix makes the reference frame
-        # explicit: the scalar value is years since project year 0
-        # (CAPEX commitment), not since the Commercial Operation Date.
+        # The payback value itself lives in SUMMARY.md and the KPI
+        # sheet; the legend names the marker only so the figure drops
+        # into a paper unchanged.  The reference frame is years since
+        # project year 0 (CAPEX commitment), not since the Commercial
+        # Operation Date.
         ax.axvline(
             x, color=financial_color("Simple payback"),
-            linewidth=0.8, linestyle=":", alpha=0.8,
-            label=(
-                f"Simple payback: {simple_payback_years:.1f} yr "
-                "(from CAPEX year)"
-            ),
+            linewidth=0.8, linestyle="--", alpha=0.8,
+            label="Simple payback",
         )
         ax.scatter(
             [x], [0.0], color=financial_color("Simple payback"),
@@ -399,18 +387,15 @@ def plot_payback(
         x = _to_axis(float(discounted_payback_years))
         ax.axvline(
             x, color=financial_color("Discounted payback"),
-            linewidth=0.8, linestyle=":", alpha=0.8,
-            label=(
-                f"Discounted payback: {discounted_payback_years:.1f} yr "
-                "(from CAPEX year)"
-            ),
+            linewidth=0.8, linestyle="--", alpha=0.8,
+            label="Discounted payback",
         )
         ax.scatter(
             [x], [0.0], color=financial_color("Discounted payback"),
             s=20, zorder=5,
         )
 
-    ax.set_xlabel("Calendar year" if using_calendar else "Project year")
+    ax.set_xlabel("Year")
     _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
@@ -570,7 +555,6 @@ def _dumbbell_plot(
     *,
     title: str,
     xlabel: str,
-    value_formatter: Callable[[float], str],
     drop_labels: tuple[str, ...] = (),
     apply_eur_xaxis: bool = False,
     econ: dict[str, Any] | None = None,
@@ -617,7 +601,7 @@ def _dumbbell_plot(
     ax = plt.gca()
     ax.axvline(
         base_value, color="black", linewidth=0.8, linestyle="--",
-        alpha=0.6, label=f"Base = {value_formatter(base_value)}",
+        alpha=0.6, label="Base",
     )
 
     red = FINANCIAL_COLORS["tornado_neg"]
@@ -799,12 +783,10 @@ def plot_npv_tornado(
     base_npv = float(base_kpis.get("npv_eur", 0.0))
     window = _econ_title_window(econ)
     title = f"NPV Sensitivity — {window}" if window else "NPV Sensitivity"
-    fmt_mode = _resolve_currency_format(econ)
     if sens_df.empty:
         return _dumbbell_plot(
             pd.DataFrame(), base_npv, out_path,
             title=title, xlabel="NPV (EUR)",
-            value_formatter=lambda v: format_eur(float(v), fmt_mode),
             apply_eur_xaxis=True, econ=econ,
         )
     pivot = _build_tornado_pivot(sens_df, "npv_eur", base_npv)
@@ -812,7 +794,6 @@ def plot_npv_tornado(
         pivot, base_npv, out_path,
         title=title,
         xlabel="NPV (EUR)",
-        value_formatter=lambda v: format_eur(float(v), fmt_mode),
         apply_eur_xaxis=True,
         econ=econ,
         drivers=build_driver_sensitivities(sens_df, "npv_eur"),
@@ -840,7 +821,6 @@ def plot_irr_tornado(
         return _dumbbell_plot(
             pd.DataFrame(), base_irr, out_path,
             title=title, xlabel="IRR (%)",
-            value_formatter=lambda v: f"{v:.1f}%",
             drop_labels=("Discount rate",),
         )
     pivot = _build_tornado_pivot(sens_df, "irr_pct", base_irr)
@@ -848,7 +828,6 @@ def plot_irr_tornado(
         pivot, base_irr, out_path,
         title=title,
         xlabel="IRR (%)",
-        value_formatter=lambda v: f"{v:.1f}%",
         drop_labels=("Discount rate",),
         drivers=build_driver_sensitivities(sens_df, "irr_pct"),
     )

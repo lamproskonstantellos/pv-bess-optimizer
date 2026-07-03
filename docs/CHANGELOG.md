@@ -51,13 +51,16 @@ Production release.
   `bess_equivalent_cycles_per_day` derate with unavailability alongside
   `bess_total_discharge_mwh`, so headline cycles reconcile with
   `bess_lifetime_cycles / years`.
-- SOH trajectory plot: fixed 0-100 percentage axis with headroom and
-  integer year ticks.
+- SOH trajectory plot: fixed 0-100 percentage axis with headroom,
+  major year ticks every 5 years and yearly minor ticks.
 - Rolling-horizon distribution plot: a degenerate ensemble (every seed
   on the same profit, e.g. a PV-only plant) renders a dedicated layout
-  with a readable window, whole-euro ticks, a collapsed legend and an
-  explanatory annotation instead of a single full-height bar with
-  sub-euro tick labels.
+  with a readable window, whole-euro ticks and a collapsed legend
+  instead of a single full-height bar with sub-euro tick labels.
+- Publication-ready figure text: legend entries carry series names
+  only (no computed values; the numbers live in SUMMARY.md and the
+  results workbook), explanatory annotation boxes are removed, and the
+  placeholder messages use parentheses instead of em dashes.
 
 ### Added
 

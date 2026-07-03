@@ -339,8 +339,9 @@ def test_levelized_range_returns_none_when_components_missing():
 # ---------------------------------------------------------------------------
 
 
-def test_simple_payback_label_carries_capex_year_clarification(tmp_path: Path):
-    """The plot_payback legend label suffix reads "(from CAPEX year)"."""
+def test_payback_plot_renders_with_bare_canonical_labels(tmp_path: Path):
+    """plot_payback renders and saves; its legend labels are the bare
+    canonical names (locked in test_financial_label_consistency)."""
     from pvbess_opt.plotting.financial import plot_payback
 
     cf = pd.DataFrame(

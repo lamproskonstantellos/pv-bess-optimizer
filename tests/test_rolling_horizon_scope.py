@@ -12,14 +12,12 @@ ensemble share one scope"):
    zero forecast noise the gap collapses to ~0 and with noise no seed
    beats the benchmark beyond solver tolerance.
 
-Plus the annotation contract of the distribution plot: legend values are
-rendered through the same EUR formatter family as the axis ticks and
-stay distinct on narrow ensembles.
+Plus the legend contract of the distribution plot: entries carry the
+bare marker names (P10 / P50 / P90 / Perfect foresight) with no euro
+values, so the figure drops into a paper unchanged.
 """
 
 from __future__ import annotations
-
-from itertools import pairwise
 
 import matplotlib
 
@@ -141,11 +139,11 @@ def test_no_seed_beats_pf_beyond_solver_slack(short_params, short_ts):
     assert float(mc["foresight_gap_pct"].quantile(0.5)) >= -0.2
 
 
-def test_distribution_plot_legend_units_match_axis(tmp_path):
-    """Legend P10/P50/P90/PF values use the EUR formatter family (axis
-    consistency) and stay pairwise distinct on a narrow ensemble."""
+def test_distribution_plot_legend_carries_bare_names(tmp_path):
+    """Legend entries are the bare marker names (P10 / P50 / P90 /
+    Perfect foresight): no euro values, no '=' annotations.  The
+    quoted numbers live in SUMMARY.md; the axis carries the units."""
     from pvbess_opt.plotting import uncertainty as unc_mod
-    from pvbess_opt.plotting._currency import format_eur_adaptive
 
     rng = np.random.default_rng(5)
     profits = 1_180_000.0 + rng.normal(0.0, 400.0, 30)
@@ -175,16 +173,5 @@ def test_distribution_plot_legend_units_match_axis(tmp_path):
     fig = captured["fig"]
     legend = fig.axes[0].get_legend()
     texts = [t.get_text() for t in legend.get_texts()]
-    quoted = [t.split("= ", 1)[1] for t in texts]
-    # Same formatter family as the axis ticks: euro sign + magnitude suffix.
-    assert all(q.startswith("€") for q in quoted), texts
-    # Narrow ensemble: the four quoted values must not collapse into
-    # identical strings (the old f"{v:,.0f}" never collapsed but did not
-    # match the axis units; format_eur_adaptive guarantees both).
-    assert len(set(quoted)) == len(quoted), texts
-    # And the PF entry matches the canonical adaptive rendering.
-    p10, p50, p90 = np.percentile(profits, [10, 50, 90])
-    values = sorted([p10, p50, p90, pf])
-    resolution = min(b - a for a, b in pairwise(values))
-    expected_pf = format_eur_adaptive(pf, resolution=resolution)
-    assert any(expected_pf in t for t in texts), (expected_pf, texts)
+    assert sorted(texts) == ["P10", "P50", "P90", "Perfect foresight"], texts
+    assert not any("€" in t or "=" in t for t in texts), texts

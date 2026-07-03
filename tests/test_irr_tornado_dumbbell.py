@@ -70,7 +70,6 @@ def test_dumbbell_drops_discount_rate(tmp_path):
         pivot, base_value=36.8, out_path=out,
         title="IRR test",
         xlabel="IRR (%)",
-        value_formatter=lambda v: f"{v:.1f}%",
         drop_labels=("Discount rate",),
     )
     assert out.exists()

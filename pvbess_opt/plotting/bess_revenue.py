@@ -116,7 +116,7 @@ def plot_bess_revenue_waterfall(
     ]
     if abs(bess_dam) <= 1e-9 and all(abs(v) <= 1e-9 for _, v, _ in products):
         return _empty_placeholder(
-            out_path, "No BESS revenue — waterfall not rendered.",
+            out_path, "No BESS revenue (waterfall not rendered).",
         )
 
     # Optional balancing-aggregator (BSP) fee — a deduction on GROSS
@@ -168,7 +168,7 @@ def plot_bess_revenue_waterfall(
         annotation_value = values[i] if i < len(values) - 1 else cumulative
         ax.text(
             x[i], b + h, format_eur(float(annotation_value), fmt_mode),
-            ha="center", va="bottom", fontsize=8,
+            ha="center", va="bottom", fontsize=7,
         )
 
     ax.axhline(0.0, color="black", linewidth=0.6)
@@ -215,7 +215,7 @@ def plot_bess_capacity_vs_activation_split(
     if all(abs(c) <= 1e-9 for c in cap) and all(abs(a) <= 1e-9 for a in act):
         return _empty_placeholder(
             out_path,
-            "No balancing revenue — capacity-vs-activation plot not rendered.",
+            "No balancing revenue (capacity-vs-activation plot not rendered).",
         )
 
     plt.figure(figsize=(7, 4))
@@ -306,7 +306,7 @@ def plot_bess_revenue_by_month(
             out_path, "No BESS revenue in any month.",
         )
 
-    plt.figure(figsize=(8, 4))
+    plt.figure(figsize=(7, 4))
     ax = plt.gca()
     # Match the house monthly-axis convention (mdates "%m-%Y") by using
     # the Year-1 calendar year extracted from the dispatch timestamp.
@@ -328,6 +328,7 @@ def plot_bess_revenue_by_month(
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xticks(x)
     ax.set_xticklabels(month_labels, rotation=30, ha="right")
+    ax.set_xlabel("Month")
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(resolve_currency_format(econ)))
     if show_titles():

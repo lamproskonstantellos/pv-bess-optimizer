@@ -16,7 +16,7 @@ __all__ = ["plot_scenario_comparison_bars", "plot_scenario_revenue_bridge"]
 
 def plot_scenario_comparison_bars(comparison: pd.DataFrame, out_path: Path) -> Path:
     """NPV bars per scenario with IRR markers on a secondary axis."""
-    _fig, ax = plt.subplots()
+    _fig, ax = plt.subplots(figsize=(7, 4))
     names = [str(n) for n in comparison["name"].tolist()]
     x = np.arange(len(names))
     ax.bar(
@@ -41,7 +41,7 @@ def plot_scenario_comparison_bars(comparison: pd.DataFrame, out_path: Path) -> P
 
 def plot_scenario_revenue_bridge(comparison: pd.DataFrame, out_path: Path) -> Path:
     """Per-revenue-stream delta between the first two scenarios."""
-    _fig, ax = plt.subplots()
+    _fig, ax = plt.subplots(figsize=(7, 4))
     streams = [
         c for c in comparison.columns
         if c.startswith("revenue_") and c.endswith("_eur")

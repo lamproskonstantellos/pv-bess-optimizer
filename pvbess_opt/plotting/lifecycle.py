@@ -393,9 +393,7 @@ def plot_revenue_stack_yearly(
             label="Real net revenue",
         )
 
-    ax.set_xlabel(
-        "Calendar year" if "calendar_year" in op.columns else "Project year"
-    )
+    ax.set_xlabel("Year")
     _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
@@ -420,7 +418,7 @@ def plot_lifetime_cycles(
     out_path = Path(out_path)
     if not bess_present or bess_kwh <= 0.0:
         return _empty_placeholder(
-            out_path, "BESS not part of this project — no cycle plot.",
+            out_path, "BESS not part of this project (no cycle plot).",
         )
     if lifetime_yearly.empty or "bess_discharge_mwh" not in lifetime_yearly.columns:
         return _empty_placeholder(out_path, "No lifetime data.")
@@ -440,9 +438,7 @@ def plot_lifetime_cycles(
            edgecolor="black", linewidth=0.4)
     total = float(df["cycles"].sum())
     ax.axhline(0.0, color="black", linewidth=0.6)
-    ax.set_xlabel(
-        "Calendar year" if "calendar_year" in df.columns else "Project year"
-    )
+    ax.set_xlabel("Year")
     _integer_year_axis(ax)
     ax.set_ylabel("Equivalent cycles per year")
     if show_titles():
@@ -560,7 +556,7 @@ def plot_lcoe_summary(
             if pv_present else float("nan")
         )
 
-    fig, ax = plt.subplots(figsize=(7, 2.5))
+    fig, ax = plt.subplots(figsize=(7, 3.0))
     _draw_benchmark_row(
         ax,
         base=base_lcoe,
@@ -623,7 +619,7 @@ def plot_lcos_summary(
             if bess_present else float("nan")
         )
 
-    fig, ax = plt.subplots(figsize=(7, 2.5))
+    fig, ax = plt.subplots(figsize=(7, 3.0))
     _draw_benchmark_row(
         ax,
         base=base_lcos,
@@ -684,47 +680,44 @@ def _draw_benchmark_row(
     bar_low = float(min(low, high))
     bar_high = float(max(low, high))
 
-    # Benchmark band behind the project bar.  Numeric range carried
-    # in the legend label.
+    # Benchmark band behind the project bar.  Legend entries carry
+    # names only; the band edges are readable off the EUR/MWh axis.
     ax.barh(
         [0], [bench_high - bench_low], left=bench_low, height=0.6,
         color=FINANCIAL_COLORS["benchmark_band"], alpha=0.45,
         edgecolor="grey", linewidth=0.4,
-        label=(
-            f"Lazard 2024 {label} band: "
-            f"{bench_low:.0f}–{bench_high:.0f} EUR/MWh"
-        ),
+        label=f"Lazard 2024 {label} band",
         zorder=1,
     )
 
-    # Project sensitivity range (saturated colour).  Numeric range
-    # carried in the legend label.
+    # Project sensitivity range (saturated colour).
     ax.barh(
         [0], [bar_high - bar_low], left=bar_low, height=0.35,
         color=bar_colour, alpha=0.85, edgecolor="black", linewidth=0.6,
-        label=(
-            f"{label} project range: "
-            f"{bar_low:.0f}–{bar_high:.0f} EUR/MWh"
-        ),
+        label=f"{label} project range",
         zorder=3,
     )
 
     # Base value drawn as a vertical line (no diamond, no marker-edge
-    # ring).  Numeric value carried in the legend label.
+    # ring).  Legend entries carry names only; the numeric values are
+    # readable off the axis and quoted in SUMMARY.md.
     ax.plot(
         [base, base], [-0.25, 0.25],
         color=FINANCIAL_COLORS["base_marker"], linewidth=1.4,
         solid_capstyle="butt", zorder=5,
-        label=f"Base {label}: {base:.0f} EUR/MWh",
+        label=f"Base {label}",
     )
 
     ax.set_yticks([])
-    ax.set_ylim(-0.6, 0.6)
+    # Top space is reserved explicitly: the single row spans y in
+    # [-0.25, 0.25] and the three-entry 7 pt legend needs the band
+    # above it clear (the 15 % pad of reserve_legend_headroom is not
+    # enough on this compact strip).
+    ax.set_ylim(-0.6, 1.1)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
-    reserve_legend_headroom(ax, loc="upper right")
-    ax.legend(loc="upper right", framealpha=0.9, fontsize=6, ncol=1)
+    ax.legend(loc="upper right", framealpha=0.9, ncol=1)
 
     # Per-row independent x-axis: span the union of (benchmark, project
     # range) with 12 % padding on each side so legend / labels never

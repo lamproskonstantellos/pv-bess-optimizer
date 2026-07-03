@@ -440,8 +440,9 @@ def test_uncertainty_family_legends_clear(plot_name, tmp_path):
 
 
 def test_coverage_ticks_end_at_probability_ceiling(tmp_path):
-    """The coverage panel may grow legend headroom above 1.0, but its
-    probability ticks must still end at 1.0."""
+    """The coverage panel keeps a bounded probability scale: ticks end
+    at 1.0 and the axis floor stays at 0 (the legend lives in the empty
+    lower-right half instead of a headroom band above 1.0)."""
     from pvbess_opt.plotting import inputs_uncertainty as iu
 
     ts = _uncertainty_ts()
@@ -503,3 +504,66 @@ def test_rolling_horizon_compare_sources_legend_clear(tmp_path):
     )
     assert fig is not None
     assert _family_overlap_issues(fig) == []
+
+
+def test_soh_replacement_legend_clear(tmp_path):
+    """The SOH trajectory's 'BESS replacement' legend sits clear of the
+    marker-carrying SOH curve for both early and late replacements."""
+    from pvbess_opt.plotting import degradation as deg_mod
+
+    def _render(frame: pd.DataFrame, out: Path):
+        return _capture(
+            deg_mod,
+            lambda: deg_mod.plot_soh_trajectory(frame, out),
+        )
+
+    for repl_year in (3, 10, 18):
+        rows, soh = [], 100.0
+        for y in range(1, 21):
+            if y == repl_year:
+                soh = 100.0
+            rows.append({
+                "project_year": y, "calendar_year": 2025 + y,
+                "soh_pct": soh, "capacity_fade_pct": 100.0 - soh,
+                "replacement": y == repl_year,
+            })
+            soh -= 2.4
+        fig = _render(pd.DataFrame(rows), tmp_path / f"soh_{repl_year}.pdf")
+        assert fig is not None
+        assert _legend_overlap_issues(fig.axes[0]) == [], (
+            f"replacement year {repl_year}"
+        )
+
+
+def test_coverage_legend_clear_of_curves(tmp_path):
+    """The coverage legend (lower right) never covers a vertex of the
+    three coverage curves."""
+    from pvbess_opt.plotting import inputs_uncertainty as iu
+
+    ts = _uncertainty_ts()
+    fig = _capture(
+        iu,
+        lambda: iu.plot_uncertainty_coverage_by_horizon(
+            ts, tmp_path / "cov.pdf", commit_steps=96,
+        ),
+    )
+    assert fig is not None
+    ax = fig.axes[0]
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    legend = ax.get_legend()
+    assert legend is not None
+    lbox = legend.get_window_extent(renderer=renderer)
+    for line in ax.lines:
+        if line.get_label() not in ("DAM", "PV", "Load"):
+            continue  # the nominal axhline spans the axis by design
+        pts = ax.transData.transform(
+            np.column_stack([line.get_xdata(), line.get_ydata()]),
+        )
+        inside = (
+            (pts[:, 0] >= lbox.x0) & (pts[:, 0] <= lbox.x1)
+            & (pts[:, 1] >= lbox.y0) & (pts[:, 1] <= lbox.y1)
+        )
+        assert not np.any(inside), (
+            f"coverage legend covers vertices of {line.get_label()!r}"
+        )

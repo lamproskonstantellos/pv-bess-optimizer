@@ -490,7 +490,7 @@ def plot_lifetime_summary(
                 color=color, linewidth=1.5, marker="o", markersize=3,
                 label=label,
             )
-    ax.set_xlabel("Calendar year")
+    ax.set_xlabel("Year")
     _integer_year_axis(ax)
     ax.set_ylabel("Energy (MWh/year)")
     if show_titles():

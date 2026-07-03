@@ -30,10 +30,10 @@ A family of plots is produced when the financial pipeline runs
    that produced it (CAPEX / OPEX / revenue in EUR, the discount rate
    as a percentage), placed strictly outside the bar and anchored on
    the row centerline.  The metric itself is read off the x-axis.  The
-   base case is marked once, by a dashed vertical line whose legend
-   entry (``Base = 15.9%`` / ``Base = €9.0M``) carries the formatted
-   base value.  Each y-axis label carries the ± sensitivity range used
-   for that driver.
+   base case is marked once, by a dashed vertical line with the bare
+   ``Base`` legend entry (the base value is read off the x-axis and
+   quoted in SUMMARY.md).  Each y-axis label carries the ± sensitivity
+   range used for that driver.
 8. ``rolling_horizon_distribution.pdf``: Monte Carlo profit histogram
    with vertical markers at P10 / P50 / P90 and a dashed marker at the
    perfect-foresight benchmark (only when ``--rolling-horizon
