@@ -262,9 +262,9 @@ def plot_revenue_stack_yearly(
         # one obscuring the other.
         ax.bar(
             years, agg_fee, bottom=cost,
-            color=financial_color("Aggregator fee"),
+            color=financial_color("Energy aggregator fee"),
             edgecolor="black", linewidth=0.4,
-            label="Aggregator fee",
+            label="Energy aggregator fee",
         )
     if np.any(bal_agg_fee < -1e-9):
         # The balancing-aggregator (BSP) fee sits below the energy
@@ -394,7 +394,6 @@ def plot_revenue_stack_yearly(
         )
 
     ax.set_xlabel("Year")
-    _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
     if show_titles():
@@ -403,6 +402,7 @@ def plot_revenue_stack_yearly(
     apply_financial_legend(ax)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
+    _integer_year_axis(ax, years, includes_year_zero=False)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -439,7 +439,6 @@ def plot_lifetime_cycles(
     total = float(df["cycles"].sum())
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xlabel("Year")
-    _integer_year_axis(ax)
     ax.set_ylabel("Equivalent cycles per year")
     if show_titles():
         ax.set_title(
@@ -448,6 +447,7 @@ def plot_lifetime_cycles(
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    _integer_year_axis(ax, years, includes_year_zero=False)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 

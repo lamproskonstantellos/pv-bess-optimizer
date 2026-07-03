@@ -41,6 +41,7 @@ from .helpers import title_prefix
 from .style import (
     apply_fine_ticks,
     apply_universal_margins,
+    attach_legend_clear_of_data,
     get_scenario_label,
     reserve_legend_headroom,
     save_figure,
@@ -160,8 +161,8 @@ def plot_bess_revenue_waterfall(
     ]
     if energy_fee < -1e-9:
         steps.append((
-            "Aggregator fee", energy_fee,
-            financial_color("Aggregator fee"),
+            "Energy aggregator fee", energy_fee,
+            financial_color("Energy aggregator fee"),
         ))
     if bal_fee < -1e-9:
         steps.append((
@@ -339,10 +340,6 @@ def plot_bess_revenue_by_month(
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
-    # Match the house monthly-axis convention (mdates "%m-%Y") by using
-    # the Year-1 calendar year extracted from the dispatch timestamp.
-    year_label = int(ts.dt.year.iloc[0])
-    month_labels = [f"{m:02d}-{year_label}" for m in range(1, 13)]
     x = np.arange(12)
     dam_arr = by_month_dam.to_numpy()
     ax.bar(x, dam_arr, color=_BESS_DAM_COLOUR,
@@ -382,7 +379,7 @@ def plot_bess_revenue_by_month(
     bal_fee_arr = -bal_fee_frac * np.maximum(bm_monthly_total, 0.0)
     neg_bottoms = np.zeros(12)
     for label, arr in (
-        ("Aggregator fee", energy_fee_arr),
+        ("Energy aggregator fee", energy_fee_arr),
         ("Balancing aggregator fee", bal_fee_arr),
     ):
         if abs(arr).sum() <= 1e-9:
@@ -393,8 +390,11 @@ def plot_bess_revenue_by_month(
         neg_bottoms = neg_bottoms + arr
 
     ax.axhline(0.0, color="black", linewidth=0.6)
+    # Financial-family month axis: plain month numbers, horizontal
+    # (same as the Year-1 monthly cashflow and the seasonal boxplot);
+    # the calendar year lives in the title / caption.
     ax.set_xticks(x)
-    ax.set_xticklabels(month_labels, rotation=30, ha="right")
+    ax.set_xticklabels([str(m) for m in range(1, 13)])
     ax.set_xlabel("Month")
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(resolve_currency_format(econ)))
@@ -410,17 +410,23 @@ def plot_bess_revenue_by_month(
     by_label = dict(zip(labels_drawn, handles, strict=True))
     ordered_labels = [_BESS_DAM_LABEL] + [
         label for _key, label, _colour_key in _BM_PRODUCTS
-    ] + ["Aggregator fee", "Balancing aggregator fee"]
+    ] + ["Energy aggregator fee", "Balancing aggregator fee"]
     ordered = [
         (by_label[lbl], lbl) for lbl in ordered_labels if lbl in by_label
     ]
-    if ordered:
-        reserve_legend_headroom(ax, loc="best")
-        ax.legend(
-            [h for h, _ in ordered], [lbl for _, lbl in ordered],
-            loc="best", fontsize=7,
-        )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
+    if ordered:
+        # Measured grow-until-clear placement (same guarantee as the
+        # apply_financial_legend plots) with the DAM-first entry order
+        # preserved; ticks stay pruned to the pre-growth ceiling so
+        # none renders behind the legend.
+        attach_legend_clear_of_data(
+            ax,
+            handles=[h for h, _ in ordered],
+            labels=[lbl for _, lbl in ordered],
+            loc="best", fontsize=7,
+            tick_ceiling=ax.get_ylim()[1],
+        )
     return save_figure(out_path)

@@ -52,7 +52,7 @@ Production release.
   `bess_total_discharge_mwh`, so headline cycles reconcile with
   `bess_lifetime_cycles / years`.
 - SOH trajectory plot: fixed 0-100 percentage axis with headroom and
-  labelled year ticks every 5 years.
+  the shared project-window year ticks.
 - Rolling-horizon distribution plot: a degenerate ensemble (every seed
   on the same profit, e.g. a PV-only plant) renders a dedicated layout
   with a readable window, whole-euro ticks and a collapsed legend
@@ -69,6 +69,20 @@ Production release.
   the canonical flow colours and renders for every run in both modes
   under the energy plots (it previously required emissions inputs and
   used a monochrome layout).
+- The energy aggregator fee renders as "Energy aggregator fee" in the
+  revenue stack, waterfall and by-month legends, symmetric with
+  "Balancing aggregator fee" so the two per-stream route-to-market
+  deductions read unambiguously side by side.
+- Every per-year figure (cumulative cashflow, yearly bars, NPV
+  waterfall, payback, revenue stack, lifetime cycles, lifetime
+  summary, SOH) shares one calendar axis: the window spans Year 0
+  through the final project year with ticks every 2 years anchored at
+  Year 0, so no tick lands on a year outside the project and the year
+  axes align across all figures.
+- The financial monthly figures (Year-1 monthly cashflow, BESS revenue
+  by month, seasonal boxplot) all label months as plain numbers 1-12,
+  horizontal; the by-month view previously used rotated "MM-YYYY"
+  labels borrowed from the energy plots' date axes.
 
 ### Added
 

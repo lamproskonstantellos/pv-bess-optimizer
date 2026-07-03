@@ -400,7 +400,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Export from BESS",
     "PPA revenue",
     "Grid-charging cost",
-    "Aggregator fee",
+    "Energy aggregator fee",
     "Balancing aggregator fee",
     # Balancing-product subcomponents (FCR / aFRR / mFRR)
     "FCR",
@@ -435,7 +435,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Export from BESS":                 "export_from_bess",
     "PPA revenue":                      "ppa_revenue",
     "Grid-charging cost":               "grid_charge_cost",
-    "Aggregator fee":                   "aggregator_fee",
+    "Energy aggregator fee":            "aggregator_fee",
     "Balancing aggregator fee":         "balancing_aggregator_fee",
     "FCR":                              "bm_fcr",
     "aFRR-up":                          "bm_afrr_up",
@@ -480,7 +480,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "DEVEX",
     "CAPEX",
     "Grid-charging cost",
-    "Aggregator fee",
+    "Energy aggregator fee",
     "Balancing aggregator fee",
 )
 

@@ -321,13 +321,16 @@ capacity / activation prices are perturbed separately by
 Generated under `results/<run>/04_financial_plots/`:
 
 * Yearly revenue stack (PV-load, BESS-load, PV-DAM, BESS-DAM, the PPA
-  contract leg when a contract is on, 5 balancing products, aggregator
-  fee, grid-charging cost) with net line.
+  contract leg when a contract is on, 5 balancing products, energy
+  aggregator fee, balancing aggregator fee when set, grid-charging
+  cost) with net line.
 * BESS revenue waterfall: one chart stepping from BESS-DAM through
-  every balancing product to the total BESS revenue.
+  every balancing product, then down by the battery's exact share of
+  each route-to-market fee, to the total BESS revenue.
 * BESS revenue capacity-vs-activation split: grouped bar per product.
 * BESS revenue by month: 12 stacked bars of BESS-DAM + 5 balancing
-  products per calendar month.
+  products per calendar month, with the two fee shares as negative
+  bars below zero.
 * Lifetime cycles per operating year.
 * Cumulative cashflow + payback marker.
 * Monthly cashflow Year 1 (CAPEX / DEVEX events booked in month 12, so
@@ -372,32 +375,16 @@ reads the same across the whole report.*
 ![Merchant yearly revenue stack](docs/assets/merchant_revenue_stack.png)
 
 *Yearly revenue stack: PV-DAM and BESS-DAM exports plus the five
-balancing products, net of the energy-aggregator fee, grid-charging
-cost, and the optional balancing-aggregator (BSP / route-to-market)
+balancing products, net of the energy aggregator fee, grid-charging
+cost, and the optional balancing aggregator (BSP / route-to-market)
 fee (shown here at a representative 10 % of balancing revenue).*
 
 ![BESS revenue waterfall](docs/assets/merchant_bess_revenue_waterfall.png)
 
 *BESS revenue waterfall: stepping from DAM arbitrage through each
 balancing product, then down by the battery's exact share of the
-energy-aggregator fee and by the balancing-aggregator (BSP) fee, to
+energy aggregator fee and by the balancing aggregator (BSP) fee, to
 the total battery revenue net of both route-to-market fees.*
-
-![LCOS benchmark band](docs/assets/merchant_lcos_band.png)
-
-*Levelised cost of storage against the Lazard 2024 LCOS benchmark
-band.*
-
-![LCOE benchmark band](docs/assets/merchant_lcoe_band.png)
-
-*Levelised cost of energy for the PV side against the Lazard 2024
-utility-scale PV band.*
-
-![NPV waterfall](docs/assets/merchant_npv_waterfall.png)
-
-*Discounted yearly contributions to the total NPV: the Year-0 CAPEX
-block, each operating year's discounted net cashflow, the year-10
-replacement dip, and the cumulative NPV line.*
 
 ![Merchant cumulative cashflow](docs/assets/merchant_cumulative_cashflow.png)
 
@@ -407,17 +394,33 @@ here the undiscounted curve pays back in 2039, while the discounted
 curve stays negative at the 7 % rate, so no discounted-payback marker
 exists.*
 
-![Battery state of health](docs/assets/merchant_soh_trajectory.png)
+![NPV waterfall](docs/assets/merchant_npv_waterfall.png)
 
-*Battery state of health over the project life: calendar plus cycle
-fade, with the scheduled year-10 replacement resetting the pack to
-100 %.*
+*Discounted yearly contributions to the total NPV: the Year-0 CAPEX
+block, each operating year's discounted net cashflow, the year-10
+replacement dip, and the cumulative NPV line.*
 
 ![NPV sensitivity tornado](docs/assets/merchant_npv_tornado.png)
 
 *NPV sensitivity tornado: one-at-a-time CAPEX, revenue, discount-rate
 and OPEX perturbations around the base case, with the absolute driver
 values annotated at the bar ends.*
+
+![LCOE benchmark band](docs/assets/merchant_lcoe_band.png)
+
+*Levelised cost of energy for the PV side against the Lazard 2024
+utility-scale PV band.*
+
+![LCOS benchmark band](docs/assets/merchant_lcos_band.png)
+
+*Levelised cost of storage against the Lazard 2024 LCOS benchmark
+band.*
+
+![Battery state of health](docs/assets/merchant_soh_trajectory.png)
+
+*Battery state of health over the project life: calendar plus cycle
+fade, with the scheduled year-10 replacement resetting the pack to
+100 %.*
 
 ### Self-consumption (`--mode self_consumption`, `allow_bess_grid_charging = TRUE`)
 
@@ -440,8 +443,8 @@ discharge, grid import / export, and the battery state of charge.*
 ![Self-consumption yearly revenue stack](docs/assets/self_consumption_revenue_stack.png)
 
 *Yearly revenue stack: retail-valued self-consumption (avoided cost)
-plus the DAM surplus-export leg, net of the aggregator fee and the
-grid-charging cost.*
+plus the DAM surplus-export leg, net of the energy aggregator fee and
+the grid-charging cost.*
 
 ![Self-consumption monthly cashflow](docs/assets/self_consumption_monthly_cashflow.png)
 
@@ -485,9 +488,11 @@ apply to every sheet, KPI, and plot:
   numerically identical.
 * **Availability.** `unavailability_pct` is applied once, post-solve,
   to the Year-1 energy / revenue KPIs and the lifetime aggregates.
-* **Aggregator fee.** A non-negative deduction applied once to the
-  gross DAM + retail revenue only; balancing revenue (TSO-settled) and
-  PPA revenue (bilateral offtake) never carry it.
+* **Energy aggregator fee.** A non-negative deduction applied once to
+  the gross DAM + retail revenue only; balancing revenue (TSO-settled)
+  and PPA revenue (bilateral offtake) never carry it. Balancing
+  revenue may instead carry its own optional route-to-market fee
+  (`balancing_aggregator_fee_pct_revenue`, default 0).
 * **PPA stream.** The contract leg is its own cashflow column with its
   own indexation. After `ppa_term_years` the covered volume's DAM
   value reverts into the DAM stream (where the fee applies), and a

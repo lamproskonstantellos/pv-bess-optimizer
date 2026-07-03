@@ -300,4 +300,4 @@ def test_aggregator_fee_bar_skipped_when_fee_is_zero(tmp_path: Path):
     fig = captured["fig"]
     ax = fig.axes[0]
     labels = [t.get_text() for t in ax.get_legend().get_texts()]
-    assert "Aggregator fee" not in labels
+    assert "Energy aggregator fee" not in labels

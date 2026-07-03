@@ -606,7 +606,7 @@ def test_waterfall_tick_labels_do_not_overlap(tmp_path):
     ticklabels = [t for t in ax.get_xticklabels() if t.get_text()]
     labels = [t.get_text() for t in ticklabels]
     assert len(labels) == 9, labels  # DAM + 5 products + 2 fees + total
-    assert "Aggregator fee" in labels
+    assert "Energy aggregator fee" in labels
     assert "Balancing aggregator fee" in labels
     for t in ticklabels:
         assert t.get_rotation() == pytest.approx(30.0), t.get_text()

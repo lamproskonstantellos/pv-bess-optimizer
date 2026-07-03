@@ -491,7 +491,6 @@ def plot_lifetime_summary(
                 label=label,
             )
     ax.set_xlabel("Year")
-    _integer_year_axis(ax)
     ax.set_ylabel("Energy (MWh/year)")
     if show_titles():
         ax.set_title(
@@ -500,4 +499,5 @@ def plot_lifetime_summary(
     attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
+    _integer_year_axis(ax, x, includes_year_zero=False)
     save_figure(out_path)
