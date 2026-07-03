@@ -6,6 +6,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.ticker import MaxNLocator
 
 from ..theme import FINANCIAL_COLORS
 from .style import apply_universal_margins, save_figure
@@ -35,6 +36,9 @@ def plot_soh_trajectory(degradation: pd.DataFrame, out_path: Path) -> Path:
             )
     ax.set_xlabel("Year")
     ax.set_ylabel("State of health (%)")
+    # Calendar years are integers; stop matplotlib from labelling
+    # fractional years like 2027.5.
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     # Pad the x-axis only: the y-axis is a fixed 0..100 percentage scale
     # (plus headroom), set explicitly AFTER the margin helper so the
     # padding cannot re-scale it.

@@ -161,8 +161,8 @@ Sheet ``bess``
   charged, in the first project year SOH falls to this level.  Ignored
   under a scheduled replacement year and under ``0`` (never replace).
 * ``bess_wear_cost_eur_per_mwh`` — cycle wear cost penalised per MWh
-  discharged in the dispatch objective (default 0 = off).  When set, the
-  optimizer only cycles when the price spread beats the wear cost.  It is
+  discharged in the dispatch objective (default 10; set 0 to disable).
+  The optimizer only cycles when the price spread beats the wear cost.  It is
   a behavioural shadow price: it shapes dispatch but is **not** added to
   the reported cashflow / NPV (the replacement CAPEX already charges
   degradation), so the cost is never double-counted.  The penalty

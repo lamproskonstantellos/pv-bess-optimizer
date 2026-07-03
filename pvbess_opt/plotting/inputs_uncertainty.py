@@ -412,10 +412,18 @@ def plot_uncertainty_crps_timeline(
         return _placeholder(out_path, "CRPS timeline: no data.")
 
     t = pd.to_datetime(ts["timestamp"])
-    plt.figure(figsize=(7, 4))
-    ax = plt.gca()
+    # One panel per source: the sources carry different units and
+    # magnitudes (DAM CRPS in EUR/MWh, PV / load CRPS in kWh), so a
+    # shared axis renders the smallest series as an invisible flat line
+    # that the legend still advertises.  Mirrors the stacked-panel
+    # layout of :func:`plot_uncertainty_residual_qq`.
+    fig, axes = plt.subplots(
+        len(panels), 1, figsize=(7, 2.4 * len(panels)), sharex=True,
+    )
+    if len(panels) == 1:
+        axes = [axes]
     rng = np.random.default_rng(base_seed)
-    for col, label, sigma, color in panels:
+    for ax, (col, label, sigma, color) in zip(axes, panels, strict=True):
         actual = ts[col].to_numpy(dtype=float)
         median, sigma_step, realised, valid = _forecast_vs_realised(actual, sigma, rng)
         crps = np.zeros_like(median)
@@ -425,14 +433,16 @@ def plot_uncertainty_crps_timeline(
             z * (2.0 * _norm_cdf(z) - 1.0) + 2.0 * _norm_pdf(z) - _INV_SQRT_PI
         )
         ax.plot(t, crps, color=color, linewidth=0.9, label=label)
-    ax.set_xlabel("Timestamp")
-    ax.set_ylabel("CRPS")
+        unit = "EUR/MWh" if "eur_per_mwh" in col else "kWh"
+        ax.set_ylabel(f"CRPS ({unit})")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        apply_universal_margins(ax)
+        attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
+    axes[-1].set_xlabel("Timestamp")
     if show_titles():
-        ax.set_title("Step-wise CRPS over the forecast band")
-    ax.grid(True, linestyle="--", alpha=0.5)
-    apply_house_date_axis(ax)
-    apply_universal_margins(ax)
-    attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
+        axes[0].set_title("Step-wise CRPS over the forecast band")
+    apply_house_date_axis(axes[-1])
+    fig.tight_layout()
     return save_figure(out_path)
 
 

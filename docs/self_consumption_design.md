@@ -54,13 +54,13 @@ full workbook reference: `docs/source/users.guide/inputs.rst`):
 | project | `p_grid_export_max_kw` | 5000.0 | export nameplate $P^{G}$ (empty/`inf` token disables the cap) |
 | project | `grid_cap_includes_load` | FALSE | cap basis: surplus export (default) vs total plant injection |
 | project | `allow_bess_grid_charging` | FALSE | enables `grid_to_bess` + the PV-gating binary |
-| bess | `efficiency_charge` / `efficiency_discharge` | 0.97 / 0.97 | $\eta_c$, $\eta_d$ |
+| bess | `efficiency_charge` / `efficiency_discharge` | 0.95 / 0.95 | $\eta_c$, $\eta_d$ |
 | bess | `soc_min_frac` / `soc_max_frac` | 0.20 / 0.95 | $\underline{e}$, $\overline{e}$ |
 | bess | `initial_soc_frac` | 0.50 | $E_0 / E^{\mathrm{cap}}$ |
 | bess | `terminal_soc_equal` | TRUE | year-close SOC condition |
 | bess | `max_cycles_per_day` | 1.0 | daily throughput cap |
 | bess | `bess_power_kw` / `bess_capacity_kwh` | 0 / 0 | $P^{B}$, $E^{\mathrm{cap}}$ |
-| bess | `bess_wear_cost_eur_per_mwh` | 0.0 | discharge-throughput shadow price |
+| bess | `bess_wear_cost_eur_per_mwh` | 10.0 | discharge-throughput shadow price |
 | timeseries | `load_kwh` | — | required in this mode (missing → `ValueError`) |
 | timeseries | `pv_kwh`, `dam_price_eur_per_mwh` | — | exogenous series |
 | max_injection_profile | 24×1 or 24×12 | 100 % | $\mu_t$ |

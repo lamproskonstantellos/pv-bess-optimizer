@@ -128,6 +128,23 @@ tariff is never perturbed (load noise is small, sigma 0.05, and
 irrelevant to the tariff), so only the DAM-exposed export and arbitrage
 slice degrades under the sigma 0.20 DAM noise.
 
+PV-only plants: rolling horizon equals perfect foresight
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On a plant without storage there are no look-ahead-dependent decisions:
+the committed slice of every window is solved on noise-free data (noise
+only perturbs rows beyond the commit horizon), and PV dispatch inside
+the commit window does not depend on anything the window cannot see.
+Every Monte Carlo seed therefore reproduces the perfect-foresight
+dispatch exactly — verified on a PV-only copy of the shipped workbook,
+where all seeds land on the same profit to the cent and the foresight
+gap is 0.00 %.  This identity is expected behaviour, not a bug.  The
+``rolling_horizon_distribution`` plot detects the degenerate ensemble
+(seed spread below max(1 EUR, 1e-6 x |P50|)) and renders a dedicated
+layout: one narrow bar at the common value, a readable x-window,
+whole-euro tick labels, a collapsed legend and an annotation stating
+that forecast noise has no effect on the configuration.
+
 Year-close SOC shortfall
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
