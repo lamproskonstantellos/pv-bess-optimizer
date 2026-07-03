@@ -564,10 +564,44 @@ def apply_financial_legend(ax: Any, *, max_rows: int = 2, loc: str = "best") -> 
 
     num_entries = len(ordered_labels)
     ncol = max(1, math.ceil(num_entries / max_rows))
-    ax.legend(
+    legend = ax.legend(
         ordered_handles, ordered_labels,
         loc=loc, framealpha=0.9, ncol=ncol, fontsize=7,
     )
+
+    # Measured fit: with many long entries (e.g. the merchant revenue
+    # stack with both fees and grid charging on) the requested column
+    # count can render the legend wider than the axes, overflowing the
+    # frame.  Narrow it column by column until it fits, then grow the
+    # top y-limit until the drawn legend clears every data artist (the
+    # same closed loop the uncertainty family uses).
+    from .plotting.style import legend_overlaps_data  # runtime: avoids an import cycle
+
+    fig = ax.figure
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    ax_width = ax.get_window_extent(renderer=renderer).width
+    while (
+        ncol > 1
+        and legend.get_window_extent(renderer=renderer).width > ax_width
+    ):
+        ncol -= 1
+        legend = ax.legend(
+            ordered_handles, ordered_labels,
+            loc=loc, framealpha=0.9, ncol=ncol, fontsize=7,
+        )
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+    ymin, ymax = ax.get_ylim()
+    span = ymax - ymin
+    if span > 0:
+        for _ in range(12):
+            if not legend_overlaps_data(ax, renderer=renderer):
+                break
+            ymax += 0.08 * span
+            ax.set_ylim(ymin, ymax)
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
 
 
 def assert_financial_label_color_coverage() -> None:
