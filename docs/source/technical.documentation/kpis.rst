@@ -8,14 +8,14 @@ throughout.  Selected keys:
 Dispatch metrics
 ----------------
 
-* ``e_cap_mwh`` — BESS energy capacity (MWh), pinned from
+* ``e_cap_mwh``: BESS energy capacity (MWh), pinned from
   ``bess_capacity_kwh`` at workbook load.
 * ``system_total_import_mwh`` / ``system_total_export_mwh``.
 * ``bess_total_charge_mwh`` / ``bess_total_discharge_mwh``.
 * ``pv_to_bess_mwh`` / ``bess_charge_grid_mwh``.
 * ``pv_generation_mwh`` / ``load_energy_mwh`` (load is 0 in merchant).
 * ``pv_direct_to_load_mwh`` / ``bess_to_load_mwh``.
-* ``bess_green_to_load_mwh`` / ``system_green_to_load_mwh`` —
+* ``bess_green_to_load_mwh`` / ``system_green_to_load_mwh``:
   PV-origin discharge attribution via FIFO-like running balance.
 * ``pv_energy_curtailed_mwh``.
 * ``soc_initial_pct`` / ``soc_min_pct`` / ``soc_max_pct`` /
@@ -76,10 +76,10 @@ EUR metrics
 * ``profit_total_eur``.
 
 The **nine canonical revenue aggregates** consumed by the financial
-pipeline and the plot stack — ``revenue_pv_dam_eur``,
+pipeline and the plot stack (``revenue_pv_dam_eur``,
 ``revenue_pv_ppa_eur``, ``revenue_bess_dam_eur``,
 ``revenue_self_consumption_eur``, and the five per-product
-``revenue_bess_<product>_eur`` balancing aggregates — are defined with
+``revenue_bess_<product>_eur`` balancing aggregates) are defined with
 their construction rules in ``docs/economics_design.md``; the
 balancing ``bm_*`` key families are catalogued in
 ``docs/balancing_market_design.md``.  Every revenue-bearing key is
@@ -90,5 +90,5 @@ Rolling-horizon metrics (only when ``--rolling-horizon`` is active)
 -------------------------------------------------------------------
 
 * ``foresight_gap_pct_p10`` / ``foresight_gap_pct_p50`` /
-  ``foresight_gap_pct_p90`` — Monte Carlo distribution percentiles.
+  ``foresight_gap_pct_p90``: Monte Carlo distribution percentiles.
 * ``mc_n_seeds`` / ``mc_window_hours`` / ``mc_commit_hours``.

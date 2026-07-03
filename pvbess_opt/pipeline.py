@@ -832,7 +832,7 @@ def _format_replacement_note(econ: dict[str, Any]) -> str | None:
         if second:
             note += (
                 f"; the fresh pack would cross the threshold again in "
-                f"year {second} — only the first replacement is charged"
+                f"year {second} (only the first replacement is charged)"
             )
         return note
     if source == "soh_threshold_not_reached":

@@ -1,7 +1,7 @@
 .. pv-bess-optimizer documentation master file
 
-pv-bess-optimizer — PV + BESS dispatch optimizer
-=================================================
+pv-bess-optimizer: PV + BESS dispatch optimizer
+================================================
 
 **pv-bess-optimizer** is a Mixed-Integer Linear Programming (MILP) model
 for sub-hourly dispatch optimization (15-minute canonical cadence,
@@ -11,8 +11,8 @@ and rolling-horizon Monte Carlo for uncertainty analysis.
 
 Two regulatory regimes are supported:
 
-* ``self_consumption`` — Greek Self-consumption with co-located load.
-* ``merchant`` — pure utility-scale dispatch with no co-located load.
+* ``self_consumption``: Greek Self-consumption with co-located load.
+* ``merchant``: pure utility-scale dispatch with no co-located load.
 
 The hard static max-injection cap on grid-bound flows is enforced in
 both modes per **MD YPEN/DAPEEK/53563/1556/2023**.

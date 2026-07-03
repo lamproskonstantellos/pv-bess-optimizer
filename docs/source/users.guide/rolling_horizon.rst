@@ -5,12 +5,12 @@ Why rolling horizon
 -------------------
 
 A single annual MILP with full visibility into every hour's DAM price,
-PV output, and load is a **perfect-foresight** model — it produces an
+PV output, and load is a **perfect-foresight** model: it produces an
 upper bound on achievable profit, not a realistic operating result.
 
 Industry tools (Aurora Chronos, Gridcog, Plexos with look-ahead) handle
 this via **rolling-horizon dispatch with imperfect foresight + Monte
-Carlo over forecast scenarios** — not full stochastic programming with
+Carlo over forecast scenarios**, not full stochastic programming with
 explicit scenario trees, which is overkill for a single-asset dispatch
 problem and harder to defend operationally.
 
@@ -40,7 +40,7 @@ For each window starting at hour :math:`t \in \{0, c, 2c, \ldots\}` where
 
 1. Slice ``ts[t : t + window_hours]``.
 2. Apply forecast noise beyond ``commit_hours`` (skipped if
-   ``forecast_seed=None`` — gives a deterministic rolling horizon).
+   ``forecast_seed=None``, which gives a deterministic rolling horizon).
 3. Solve the MILP with the noisy window; pin ``initial_soc`` to the
    SOC carried over from the previous window.
 4. Keep the first ``commit_hours`` of the dispatch as the committed
@@ -52,8 +52,8 @@ rolling-horizon windows (a window should not close its own cycle), but
 when the workbook sets ``terminal_soc_equal`` every window that reaches
 the end of the horizon pins its post-final-step SOC to the
 **year-initial** SOC.  The stitched dispatch then honours the same
-closed-cycle condition as the annual perfect-foresight benchmark —
-without it the final window would drain the battery for profit the
+closed-cycle condition as the annual perfect-foresight benchmark.
+Without it the final window would drain the battery for profit the
 benchmark is not allowed to take, biasing the foresight comparison.
 The BESS energy capacity ``e_cap`` is pinned at workbook
 load (the per-window MILP reads ``e_cap`` as a constant from the
@@ -63,7 +63,7 @@ Re-evaluation with actuals
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 When ``evaluate_with_actuals=True`` (default) the returned KPIs are
-recomputed against the **original** (noise-free) timeseries — this
+recomputed against the **original** (noise-free) timeseries: this
 reflects realised performance.  Otherwise KPIs reflect what the solver
 thought it was getting given the forecast.
 
@@ -85,8 +85,8 @@ computed from the existing single-MILP solve (the headline,
 unavailability-derated ``profit_total_eur``) and
 :math:`\text{rh\_profit}` carries the identical derate, so the gap is
 derate-invariant.  Positive values mean imperfect foresight reduces
-profit.  Because every seed's stitched dispatch — including the
-year-close SOC condition — is feasible for the perfect-foresight MILP,
+profit.  Because every seed's stitched dispatch (including the
+year-close SOC condition) is feasible for the perfect-foresight MILP,
 the gap cannot go negative beyond the solver's ``mip_gap`` slack; with
 zero forecast noise it reduces to the pure horizon-truncation cost
 (~0 on short single-window fixtures; measured 0.32 % on the shipped
@@ -108,7 +108,7 @@ noise (measured on the shipped workbook, 48 h window / 24 h commit):
 
 * **Tight-gap re-run.**  At ``mip_gap = 1e-5`` (PF benchmark
   2,849,785 EUR) a 5-seed ensemble produced gaps of 0.445 to 0.481 %
-  with a median of 0.464 % — the same magnitude as at the default
+  with a median of 0.464 %, the same magnitude as at the default
   ``mip_gap = 0.001`` (3 seeds: 0.440 / 0.462 / 0.476 %).  The gap is
   roughly 50x the combined solver slack, so it is not an optimality
   artifact.
@@ -136,7 +136,7 @@ the committed slice of every window is solved on noise-free data (noise
 only perturbs rows beyond the commit horizon), and PV dispatch inside
 the commit window does not depend on anything the window cannot see.
 Every Monte Carlo seed therefore reproduces the perfect-foresight
-dispatch exactly — verified on a PV-only copy of the shipped workbook,
+dispatch exactly, as verified on a PV-only copy of the shipped workbook,
 where all seeds land on the same profit to the cent and the foresight
 gap is 0.00 %.  This identity is expected behaviour, not a bug.  The
 ``rolling_horizon_distribution`` plot detects the degenerate ensemble
@@ -199,7 +199,7 @@ Output artifacts
   per seed: ``seed``, ``profit_total_eur``, ``grid_export_mwh``,
   ``grid_import_mwh``, ``pv_curtailed_mwh``, ``bess_cycles_total``,
   ``foresight_gap_pct``.
-* ``04_financial_plots/rolling_horizon_distribution.pdf`` — histogram
+* ``04_financial_plots/rolling_horizon_distribution.pdf``: histogram
   of MC profit values with vertical lines at P10 / P50 / P90 and a
   separate dashed marker at the perfect-foresight benchmark.
 * New KPI keys (only populated when ``--rolling-horizon`` is active):
@@ -210,14 +210,14 @@ Output artifacts
 Limitations
 -----------
 
-* **i.i.d. noise** — no temporal correlation in forecast errors
+* **i.i.d. noise**: no temporal correlation in forecast errors
   (consecutive hours are independently perturbed).
-* **Log-normal assumption** — multiplicative noise with an asymmetric
+* **Log-normal assumption**: multiplicative noise with an asymmetric
   long tail; preserves positivity for PV and load and the sign for DAM
   prices (sign-aware).
-* **No inter-asset correlation** — a high-PV hour does not depress the
+* **No inter-asset correlation**: a high-PV hour does not depress the
   DAM price in the noise model.
-* **Per-window cycle cap** — ``max_cycles_per_day`` binds inside each
+* **Per-window cycle cap**: ``max_cycles_per_day`` binds inside each
   window slice, not on the stitched year.  A window sees at most
   ``window_hours`` of horizon, so the cap it enforces is the pro-rata
   share of the daily budget for that slice; across the stitched year
@@ -225,7 +225,7 @@ Limitations
   perfect-foresight MILP would allow under the same cap.  The effect is
   small at the default 48 h window and shows up in the
   ``bess_cycles_total`` column of the MC sheet.
-* **Integer step counts required** — ``window_hours`` and
+* **Integer step counts required**: ``window_hours`` and
   ``commit_hours`` must be an integer number of steps at the input
   cadence; non-divisible combinations raise a ``ValueError`` instead of
   silently truncating the horizon.

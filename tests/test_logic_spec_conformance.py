@@ -39,7 +39,7 @@ BALANCING_VERIFICATION = ROOT / "docs" / "balancing_market_design.md"
 # the constraint names live as H3s ("### NAME(t)" or "### NAME, ...") and
 # the invariant names live as H3s under the "Nine audit invariants"
 # section.
-_CONSTRAINT_SECTION_HEADING = "Hard constraints — formal statements"
+_CONSTRAINT_SECTION_HEADING = "Hard constraints: formal statements"
 _INVARIANT_SECTION_HEADING = "Nine audit invariants"
 
 _BALANCING_SYMBOLS = (

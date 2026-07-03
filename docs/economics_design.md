@@ -1,4 +1,4 @@
-# Project-finance engine — design
+# Project-finance engine: design
 
 Domain design document for the multi-year economics layer: year
 conventions, escalation and discounting, the nine canonical revenue
@@ -11,7 +11,7 @@ the shared table in `docs/README.md`.
 The MILP (see `docs/self_consumption_design.md` /
 `docs/merchant_design.md`) solves a single Year-1 dispatch.  The
 economics layer projects that Year-1 result over the project lifecycle
-**analytically** — per-stream revenue bases are scaled by degradation
+**analytically**: per-stream revenue bases are scaled by degradation
 factors and inflation indices rather than re-solving N MILPs (the PV
 profile, prices, and load repeat by assumption, so a re-solve would
 reproduce the same dispatch shape scaled by capacity).  Scope:
@@ -92,9 +92,9 @@ event by construction.
 `bess_replacement_year` resolves to ONE effective replacement year
 before the finance layer runs
 (`pvbess_opt.lifetime.resolve_bess_replacement_year`), and every
-consumer — the yearly cashflow (E14), the monthly month-12 booking, the
+consumer (the yearly cashflow (E14), the monthly month-12 booking, the
 LCOS numerator, the lifetime projection reset and the degradation
-report — reads that single resolved value:
+report) reads that single resolved value:
 
 * **N (positive integer)**: scheduled replacement in project year N;
   `bess_eol_soh_pct` is ignored completely.
@@ -111,7 +111,7 @@ report — reads that single resolved value:
 Only the FIRST threshold crossing is charged.  If the fresh pack would
 cross the threshold again within the remaining horizon the run log
 carries a prominent warning and `SUMMARY.md` notes it, but the model
-does not charge a second replacement — projects whose battery wears
+does not charge a second replacement.  Projects whose battery wears
 through two packs need an explicit scheduled strategy.
 
 ### Wear cost vs replacement cost (no double counting)
@@ -189,7 +189,7 @@ comparisons are derate-invariant (`docs/uncertainty_design.md`).
 ### Year-1 revenue bases and the nine canonical aggregates
 
 `kpis.add_economic_columns` writes the per-step EUR columns
-(Eqs. S30–S32 in `docs/self_consumption_design.md`; PPA carve-out per
+(Eqs. S30-S32 in `docs/self_consumption_design.md`; PPA carve-out per
 `docs/ppa_design.md`).  Summed over Year 1 and availability-derated,
 they produce the **nine canonical revenue aggregates**
 (`kpis._compute_canonical_revenue_aggregates` + the PPA column sum):
@@ -198,7 +198,7 @@ they produce the **nine canonical revenue aggregates**
 |---|---|
 | `revenue_pv_dam_eur` | $\sum_t \pi^{\mathrm{DAM}}_t x^{pg}_t/1000$ (uncovered share only under a physical PPA) |
 | `revenue_pv_ppa_eur` | PPA contract leg (the ninth aggregate; see `docs/ppa_design.md`) |
-| `revenue_bess_dam_eur` | $\sum_t \pi^{\mathrm{DAM}}_t x^{bg}_t/1000 - \sum_t \pi^{\mathrm{DAM}}_t x^{gb}_t/1000$ (grid-charge expense bundled into the BESS-DAM stream — `pvbess_opt/conventions.md`) |
+| `revenue_bess_dam_eur` | $\sum_t \pi^{\mathrm{DAM}}_t x^{bg}_t/1000 - \sum_t \pi^{\mathrm{DAM}}_t x^{gb}_t/1000$ (grid-charge expense bundled into the BESS-DAM stream, per `pvbess_opt/conventions.md`) |
 | `revenue_self_consumption_eur` | $\sum_t \pi^{\mathrm{ret}}_t (x^{pl}_t + x^{bl}_t)/1000$; ≡ 0 in merchant mode |
 | `revenue_bess_fcr_eur` | FCR capacity revenue (no activation payment) |
 | `revenue_bess_afrr_up_eur` | aFRR-up capacity + activation revenue (`docs/balancing_market_design.md`) |
@@ -208,7 +208,7 @@ they produce the **nine canonical revenue aggregates**
 
 Scope identity (regression-guarded): `profit_total_eur` is the
 per-step DAM + retail + PPA profit, i.e. exactly the sum of the four
-non-balancing aggregates — balancing revenue settles per window via
+non-balancing aggregates.  Balancing revenue settles per window via
 expected values, never enters the per-step `profit_*` columns, and
 joins the project economics through its own cashflow column
 (`kpis._compute_balancing_kpis` denominator note;
@@ -228,7 +228,7 @@ with $R^{\mathrm{DAM,B}}_1 = $ `profit_export_from_bess_eur` −
 `expense_charge_bess_grid_eur` (the bundling convention) and
 $V^{\mathrm{cov}}_1$ = `ppa_covered_dam_value_eur` (the covered
 volume's counterfactual DAM value, which **reverts into the DAM
-stream after the contract term** under physical settlement — where the
+stream after the contract term** under physical settlement, where the
 aggregator fee then applies to it as market revenue).
 
 Balancing (both legs on the BESS fade curve, indexed by
@@ -250,16 +250,17 @@ under physical settlement, `revenue_pv_ppa_eur` +
 `ppa_covered_dam_value_eur` under CfD (reconstructing strike × covered
 from the two-way difference leg).
 
-Energy-aggregator fee — applied **once**, to the gross DAM + retail
-revenue only, clamped so a negative gross never flips the fee into a
-rebate; PPA revenue carries **no** fee (bilateral-offtake settlement):
+The energy-aggregator fee is applied **once**, to the gross DAM +
+retail revenue only, and is clamped so a negative gross never flips
+the fee into a rebate; PPA revenue carries **no** fee
+(bilateral-offtake settlement):
 
 $$F_y = -\varphi \cdot \max\!\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y,\; 0\right) \tag{E13}$$
 
 The fee is split across the retail/DAM net columns pro-rata to their
 gross contribution so per-stream nets sum exactly to `revenue_eur`.
 
-Balancing-aggregator fee — balancing revenue carries **no**
+Balancing-aggregator fee: balancing revenue carries **no**
 energy-aggregator fee (ancillary services settle directly with the TSO),
 but it **may** carry an optional, separate route-to-market (BSP /
 balancing-aggregator) fee when participation is routed through an
@@ -273,7 +274,7 @@ It is escalated with the balancing revenue it deducts from (the gross is
 already on the BESS fade curve indexed by $i_{\mathrm{bm}}$), surfaces as
 its own signed `balancing_aggregator_fee_eur` cashflow column, and is
 **excluded from LCOE/LCOS** by the same convention that excludes
-balancing revenue. A realistic range is ~5–20 % for behind-the-meter /
+balancing revenue. A realistic range is ~5-20 % for behind-the-meter /
 smaller assets; 0 for utility-scale BSPs that self-dispatch.
 
 OPEX, replacement CAPEX, and the net cashflow:
@@ -294,7 +295,7 @@ $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$
 
 $$\mathrm{IRR}: \;\; \sum_{y=0}^{Y} \frac{\mathrm{CF}_y}{(1+\mathrm{IRR})^{y}} = 0 \tag{E17}$$
 
-solved by Newton–Raphson with bisection fallback over
+solved by Newton-Raphson with bisection fallback over
 $(-0.999, 10]$ (`economics.calculate_irr`); NaN when all flows share a
 sign.
 
@@ -342,7 +343,7 @@ $$\mathrm{LCOS} = \frac{(c^{B} E^{\mathrm{cap}}+v^{B} P^{B}) D_0 + c^{B} E^{\mat
 
 where $E^{PV}_y$ = `lifetime_yearly['pv_generation_mwh']` and $E^{B}_y$
 = `lifetime_yearly['bess_discharge_mwh']` (both degraded by
-Eqs. E5–E6 and availability-derated upstream).  The discounted
+Eqs. E5-E6 and availability-derated upstream).  The discounted
 numerator/denominator components are exported
 (`lcoe_disc_pv_capex_eur` …) so the sensitivity plot computes exact
 ranges instead of a multiplicative approximation.  Auxiliary:
@@ -371,7 +372,7 @@ yearly row to months:
 * **OPEX** is flat 1/12 of the year's row.
 * **Balancing** is allocated by the Year-1 monthly sum of the
   aggregate `bm_reservation_<product>_kw` columns (flat 1/12 fallback
-  when reservations are absent or all-zero) — the same weighting as
+  when reservations are absent or all-zero), the same weighting as
   the BESS-revenue-by-month plot.
 * **PPA** is allocated by the Year-1 monthly |contract-leg| magnitude
   (stable under CfD sign flips), flat 1/12 fallback.
@@ -410,45 +411,45 @@ quarterly aggregates by $q = \lceil m/3 \rceil$.
 | Equation | Implementing symbol |
 |---|---|
 | (E1) | `economics.build_yearly_cashflow` (Year-0 rows) |
-| (E2)–(E3) | `build_yearly_cashflow` escalation / `discount_factor` column |
+| (E2)-(E3) | `build_yearly_cashflow` escalation / `discount_factor` column |
 | (E4) | `economics.derive_monthly_cashflow` (end-of-month exponent) |
 | (E5) | `lifetime._pv_factor` (mirrored inline in `build_yearly_cashflow`) |
-| (E6)–(E7) | `lifetime._bess_factor` + the cumulative-cycles loop in `build_yearly_cashflow` / `lifetime.build_lifetime_dispatch` |
+| (E6)-(E7) | `lifetime._bess_factor` + the cumulative-cycles loop in `build_yearly_cashflow` / `lifetime.build_lifetime_dispatch` |
 | (E8) | `availability.availability_factor`, `availability.apply_unavailability_derate` |
-| (E9)–(E12) | `build_yearly_cashflow` stream loop |
+| (E9)-(E12) | `build_yearly_cashflow` stream loop |
 | (E13) | `build_yearly_cashflow` fee clamp |
-| (E14)–(E15) | `build_yearly_cashflow` OPEX/replacement/net rows |
-| (E16)–(E19) | `economics.compute_financial_kpis`, `economics.calculate_irr`, `economics._payback_year` |
+| (E14)-(E15) | `build_yearly_cashflow` OPEX/replacement/net rows |
+| (E16)-(E19) | `economics.compute_financial_kpis`, `economics.calculate_irr`, `economics._payback_year` |
 | (E20) | `economics._amortization_schedule`, `_leverage_kpis`, `build_debt_schedule` |
-| (E21)–(E23) | `compute_financial_kpis` LCOE/LCOS block |
+| (E21)-(E23) | `compute_financial_kpis` LCOE/LCOS block |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests
 
-* Year convention & calendar mapping —
+* Year convention & calendar mapping:
   `tests/test_year0_convention.py`, `tests/test_economics.py`.
-* Stream escalation, fee scope and clamp, balancing/PPA exemption —
+* Stream escalation, fee scope and clamp, balancing/PPA exemption:
   `tests/test_economics_retail_dam_split.py`,
   `tests/test_financial_kpis_balancing.py`,
   `tests/test_ppa_engine.py` (cent-level locks),
   `tests/test_monthly_discounting_conventions.py`.
-* Monthly/yearly reconciliation incl. replacement year —
+* Monthly/yearly reconciliation incl. replacement year:
   `tests/test_monthly_cashflow_reconciliation.py`.
-* Degradation factors & cycle fade —
+* Degradation factors & cycle fade:
   `tests/test_bess_degradation_cycle.py`, `tests/test_lifetime.py`,
   `tests/test_degradation.py`.
-* LCOE/LCOS exclusions — `tests/test_lcoe_lcos_summary.py`,
+* LCOE/LCOS exclusions: `tests/test_lcoe_lcos_summary.py`,
   `tests/test_site_lump_sum_costs.py`,
   `tests/test_site_lump_sums_cent_level.py`,
   `tests/test_balancing_lifetime_cashflow.py`.
-* IRR/NPV/payback — `tests/test_financial_kpis.py`,
+* IRR/NPV/payback: `tests/test_financial_kpis.py`,
   `tests/test_financial_reference.py` (independent reference
   implementation), `tests/test_cumulative_payback_dedup.py`,
   `tests/test_economic_model_acceptance.py`.
-* Debt layer — `tests/test_finance_leverage.py`.
-* Availability single-application —
+* Debt layer: `tests/test_finance_leverage.py`.
+* Availability single-application:
   `tests/test_unavailability_derate_symmetry.py`.
-* Emissions/CFE — `tests/test_emissions_cfe.py`.
+* Emissions/CFE: `tests/test_emissions_cfe.py`.
 
 ## Worked example
 
@@ -462,14 +463,14 @@ DCF₁ = 400/1.1 = 363.64.
 Year 2: $f^{PV}_2 = 0.98$; retail = 300·0.98·1.02 = 299.88; DAM =
 200·0.98 = 196; gross = 495.88; fee = −49.59; CF₂ = 396.29; DCF₂ =
 396.29/1.21 = 327.51.  NPV = −1000 + 363.64 + 327.51 = −308.85.
-Cumulative CF: −1000, −600, −203.71 — no crossing, payback = NaN
-(Eq. E19).  IRR solves $-1000 + 400/(1+x) + 396.29/(1+x)^2 = 0$ →
+Cumulative CF: −1000, −600, −203.71.  There is no crossing, so
+payback = NaN (Eq. E19).  IRR solves $-1000 + 400/(1+x) + 396.29/(1+x)^2 = 0$ →
 $x \approx -13.95\%$ (the positive root $u = 1/(1+x) \approx 1.162$ of
 $396.29\,u^2 + 400\,u - 1000 = 0$).
 
 ## Assumptions & limitations
 
-* Years 2..N are analytic projections of the Year-1 dispatch — no
+* Years 2..N are analytic projections of the Year-1 dispatch: no
   re-optimization against degraded capacity or evolved prices;
   per-stream inflation indices are deterministic single rates.
 * The cycle-fade term uses the Year-1 cycle count scaled by the fade
@@ -479,17 +480,17 @@ $396.29\,u^2 + 400\,u - 1000 = 0$).
 * Debt sizes on gearing × Year-0 outlay only (no DSCR-sculpted
   sizing); interest during construction is not modelled.
 * No tax, depreciation, or working-capital layers.
-* LCOE/LCOS exclude site-wide lump sums and all revenue — they are
-  comparability metrics, not project-cost accounting.
+* LCOE/LCOS exclude site-wide lump sums and all revenue, because they
+  are comparability metrics, not project-cost accounting.
 
 ## References
 
 * Lazard, *Levelized Cost of Energy v17* (2024) and *Levelized Cost
-  of Storage v9* (2024) — benchmark bands and LCOE/LCOS scoping.
-* IRENA, *Renewable Power Generation Costs in 2023* (2024) — default
+  of Storage v9* (2024): benchmark bands and LCOE/LCOS scoping.
+* IRENA, *Renewable Power Generation Costs in 2023* (2024): default
   cost levels.
-* NREL ATB 2024 — availability benchmark (~99 % fixed-tilt PV).
-* `pvbess_opt/conventions.md` — stream-bundling, fee, lifetime-scope
+* NREL ATB 2024: availability benchmark (~99 % fixed-tilt PV).
+* `pvbess_opt/conventions.md`: stream-bundling, fee, lifetime-scope
   and derate contracts.
-* `docs/ppa_design.md`, `docs/balancing_market_design.md` — stream
+* `docs/ppa_design.md`, `docs/balancing_market_design.md`: stream
   origins.

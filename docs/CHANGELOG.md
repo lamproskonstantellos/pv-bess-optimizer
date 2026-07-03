@@ -1,11 +1,11 @@
 # Changelog
 
-## 0.9.0 — 2026-06-27
+## 0.9.0 (2026-06-27)
 
 First production release.  No prior versions have shipped; no
 compatibility surface is maintained.
 
-### Added (revenue-stacking economics — independent audit)
+### Added (revenue-stacking economics, independent audit)
 
 - **Balancing-aggregator (BSP) fee.** New optional
   `balancing_aggregator_fee_pct_revenue` key on the `economics` sheet
@@ -32,7 +32,7 @@ compatibility surface is maintained.
   (`aggregator_fee_pct_revenue` and the new
   `balancing_aggregator_fee_pct_revenue`) are now range-checked to
   `[0, 100]` and rejected loudly when out of range, instead of the energy
-  fee being silently clamped — consistent with `gearing_pct`.
+  fee being silently clamped.  This is consistent with `gearing_pct`.
 
 ### Production-readiness hardening
 
@@ -70,7 +70,7 @@ compatibility surface is maintained.
   `total_capex_eur` / `total_capex_devex_eur` are now documented as
   replacement-inclusive.
 - `roi_pct` switched to the standard total-return form: operating net
-  cashflow (Years 1..N) over `|initial_investment_eur|` — previously
+  cashflow (Years 1..N) over `|initial_investment_eur|`.  Previously
   the denominator was Year-0 CAPEX alone, excluding DEVEX.  Reported
   ROI values change accordingly.
 - The NPV/IRR tornado CAPEX driver value now reports the Year-0 outlay

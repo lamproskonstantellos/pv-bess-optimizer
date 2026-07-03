@@ -2503,10 +2503,10 @@ def write_summary_md(
 
     lines.append("## Where to look next")
     lines.append("")
-    lines.append("- `03_results.xlsx` — KPIs, cashflows, sensitivity, lifetime")
-    lines.append("- `02_dispatch/dispatch_timeseries.xlsx` — per-step dispatch")
-    lines.append("- `04_financial_plots/` and `05_energy_plots/` — figures")
-    lines.append("- `00_summary/run_log.txt` — full run log")
+    lines.append("- `03_results.xlsx`: KPIs, cashflows, sensitivity, lifetime")
+    lines.append("- `02_dispatch/dispatch_timeseries.xlsx`: per-step dispatch")
+    lines.append("- `04_financial_plots/` and `05_energy_plots/`: figures")
+    lines.append("- `00_summary/run_log.txt`: full run log")
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out_path
 

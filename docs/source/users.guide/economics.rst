@@ -16,12 +16,12 @@ The ``economics`` sheet drives the project-finance pipeline:
   ``rev_retail_y = (retail_pv_1 * pv_factor + retail_bess_1 *
   bess_factor) * (1 + retail_infl)^(y-1)`` and
   ``rev_dam_y = (dam_pv_1 * pv_factor + dam_bess_1 * bess_factor) *
-  (1 + dam_infl)^(y-1)`` — the grid-charging expense is bundled into
+  (1 + dam_infl)^(y-1)``.  The grid-charging expense is bundled into
   the BESS-DAM component by convention (``pvbess_opt/conventions.md``).
 * **BESS replacement** is optional (``bess_replacement_year > 0``).
 
-BESS capacity fade — calendar plus cycle
-----------------------------------------
+BESS capacity fade: calendar plus cycle
+---------------------------------------
 
 The BESS capacity factor combines two terms:
 
@@ -37,9 +37,9 @@ The BESS capacity factor combines two terms:
    - d_{\text{per\_cycle}} \cdot \text{cumulative\_cycles}\right)
 
 The cycle term is driven by the ``bess`` sheet key
-``bess_degradation_pct_per_cycle`` — the capacity lost per full
+``bess_degradation_pct_per_cycle``: the capacity lost per full
 equivalent cycle, in percent.  The LFP default is ``0.008`` (typical
-range 0.005–0.010; NMC chemistries sit higher, ~0.010–0.020).  A more
+range 0.005-0.010; NMC chemistries sit higher, ~0.010-0.020).  A more
 heavily cycled battery therefore degrades faster than an idle one.
 
 Setting ``bess_degradation_pct_per_cycle = 0`` removes the cycle term
@@ -53,11 +53,11 @@ load unchanged and default it to 0.
 Why analytical scaling instead of solving N MILPs?
 --------------------------------------------------
 
-Industry tools — Gridcog, Aurora Energy Research, HOMER Pro — use a
+Industry tools (Gridcog, Aurora Energy Research, HOMER Pro) use a
 pragmatic recipe: solve the dispatch optimisation **once** for a
 representative Year 1, then derive Years 2..N analytically.  Re-solving
 25 MILPs would be ~25× slower for negligible accuracy gain in financial
-planning — the noise from price-curve forecasts dwarfs the numerical
+planning, because the noise from price-curve forecasts dwarfs the numerical
 difference between an analytically-scaled Year 5 and a freshly re-solved
 Year 5.
 
@@ -76,9 +76,9 @@ Site-wide lump-sum CAPEX / DEVEX
 Two ``project``-sheet keys capture costs that are not naturally
 per-kWp or per-kW:
 
-* ``site_capex_eur`` — substation construction, MV/HV grid upgrades,
+* ``site_capex_eur``: substation construction, MV/HV grid upgrades,
   interconnection works, and similar absolute-EUR items.
-* ``site_devex_eur`` — environmental impact studies, land acquisition
+* ``site_devex_eur``: environmental impact studies, land acquisition
   fees, and permits not expressed per-kW.
 
 Both default to 0, are paid in Year 0, and fold straight into the
@@ -100,16 +100,16 @@ Default values
 
 Default values come from the public literature:
 
-* PV CAPEX ~525 EUR/kWp — IRENA *Renewable Power Generation Costs in
+* PV CAPEX ~525 EUR/kWp, per IRENA *Renewable Power Generation Costs in
   2023* (2024).
 * BESS CAPEX ~250 EUR/kWh of nameplate energy capacity (full installed
-  cost, band 215-315 EUR/kWh) — Lazard *Levelized Cost of Storage v9*
+  cost, band 215-315 EUR/kWh), per Lazard *Levelized Cost of Storage v9*
   (2024).  BESS DEVEX and OPEX stay per kW of the power block.
-* PV degradation 2.5 % LID + 0.55 %/yr linear — Tier-1 module warranty
+* PV degradation 2.5 % LID + 0.55 %/yr linear, per Tier-1 module warranty
   terms.
-* BESS degradation 2 %/yr linear — typical Tier-1 LFP cell warranty.
-* Discount rate 7 % — typical EU renewable WACC band 6-8 %.
-* Retail / DAM indexation — user-supplied annual percentages.  The
+* BESS degradation 2 %/yr linear, a typical Tier-1 LFP cell warranty.
+* Discount rate 7 %, within the typical EU renewable WACC band of 6-8 %.
+* Retail / DAM indexation: user-supplied annual percentages.  The
   workbook ships with both indexation rates set to 0 (no indexation)
   so the user has to opt in explicitly.
 
@@ -121,17 +121,17 @@ Headline financial KPIs returned by
 
 * ``npv_eur``
 * ``irr_pct``
-* ``roi_pct`` — sum of operating net cashflow (Years 1..N) over the
+* ``roi_pct``: sum of operating net cashflow (Years 1..N) over the
   initial investment ``|Year-0 CAPEX + DEVEX|``
 * ``bcr``
 * ``simple_payback_years``
 * ``discounted_payback_years``
-* ``initial_investment_eur`` — the Year-0 outlay only (per-asset CAPEX
+* ``initial_investment_eur``: the Year-0 outlay only (per-asset CAPEX
   + DEVEX + site lump sums); matches the Year-0 bar in the plots
-* ``total_capex_eur`` — lifecycle total; includes the BESS replacement
+* ``total_capex_eur``: lifecycle total; includes the BESS replacement
   CAPEX when ``bess_replacement_year > 0``
 * ``total_opex_eur_lifecycle``
 * ``total_revenue_eur_lifecycle``
 * ``project_start_year`` / ``project_end_year``
 * ``bess_calendar_fade_pct_y_final`` / ``bess_cycle_fade_pct_y_final`` /
-  ``bess_total_fade_pct_y_final`` — year-N BESS capacity-fade split
+  ``bess_total_fade_pct_y_final``: year-N BESS capacity-fade split

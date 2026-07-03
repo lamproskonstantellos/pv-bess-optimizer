@@ -1,4 +1,4 @@
-# PPA contract engine — design
+# PPA contract engine: design
 
 Domain design document for the pay-as-produced power purchase
 agreement: contract structure, physical vs CfD settlement, the
@@ -7,8 +7,8 @@ follows the shared table in `docs/README.md`.
 
 ## Purpose & scope
 
-Maps the PPA modelling concepts of two reference products — Energy
-Exemplar PLEXOS and Gridcog — onto the knobs this package implements,
+Maps the PPA modelling concepts of two reference products (Energy
+Exemplar PLEXOS and Gridcog) onto the knobs this package implements,
 and records the design decisions (structure, settlement, dispatch
 treatment, fee and LCOE scope) with their rationale.
 
@@ -40,7 +40,7 @@ pattern (7 keys; shipped disabled):
 
 | Key | Default | Role |
 |---|---|---|
-| `ppa_enabled` | FALSE | master switch — disabled runs are bit-identical to a build without the feature |
+| `ppa_enabled` | FALSE | master switch: disabled runs are bit-identical to a build without the feature |
 | `ppa_structure` | `pay_as_produced` | `baseload` parses (old workbooks load) but validation rejects it with guidance |
 | `ppa_settlement` | `physical` | `physical` (sleeved) or `cfd` (two-way) |
 | `ppa_price_eur_per_mwh` | 65.0 | strike $\pi^{\mathrm{PPA}}$ on the covered volume |
@@ -63,7 +63,7 @@ per step, for $T^{\mathrm{PPA}}$ operating years:
 
 * The basis is PV *export*, not generation: self-consumed PV settles
   at the retail tariff and is not offtake volume.  BESS export is not
-  covered — this is a PV offtake contract (a BESS toll is a different
+  covered: this is a PV offtake contract (a BESS toll is a different
   instrument).
 * The share applies pro-rata per step; a first-x-MW tranche would
   need a per-step ordering rule and is out of scope.
@@ -72,22 +72,23 @@ per step, for $T^{\mathrm{PPA}}$ operating years:
 
 ### Settlement decomposition (per step)
 
-Physical (sleeved) — the covered volume is paid the strike and never
-touches the DAM:
+Under physical (sleeved) settlement the covered volume is paid the
+strike and never touches the DAM:
 
 $$\mathrm{revenue\_pv\_ppa\_eur}_t = s\, \frac{x^{pg}_t}{1000}\, \pi^{\mathrm{PPA}}, \qquad
 \mathrm{profit\_export\_from\_pv\_eur}_t = (1-s)\, \frac{x^{pg}_t}{1000}\, \pi^{\mathrm{DAM}}_t \tag{P1}$$
 
-CfD (virtual / financial) — all PV export sells at DAM; the covered
-volume adds a two-way difference leg, negative whenever the DAM
+Under CfD (virtual / financial) settlement all PV export sells at
+DAM; the covered volume adds a two-way difference leg, negative
+whenever the DAM
 exceeds the strike:
 
 $$\mathrm{revenue\_pv\_ppa\_eur}_t = s\, \frac{x^{pg}_t}{1000} \left(\pi^{\mathrm{PPA}} - \pi^{\mathrm{DAM}}_t\right), \qquad
 \mathrm{profit\_export\_from\_pv\_eur}_t = \frac{x^{pg}_t}{1000}\, \pi^{\mathrm{DAM}}_t \tag{P2}$$
 
 Both settlements pay $s \cdot E \cdot \pi^{\mathrm{PPA}}$ on the
-covered volume in total — the standard sleeved-PPA ⇔ two-way-CfD
-equivalence on metered export — so the dispatch problem is identical
+covered volume in total (the standard sleeved-PPA ⇔ two-way-CfD
+equivalence on metered export), so the dispatch problem is identical
 and only the revenue decomposition differs.  The counterfactual market
 value of the covered volume is carried alongside for the multi-year
 cashflow's post-term reversion:
@@ -105,7 +106,7 @@ Consequences:
 
 * In **negative-DAM hours** the uncovered share curtails (merchant
   rational) while the covered share keeps exporting as long as
-  $p^{\mathrm{eff}}_t > 0$ — exactly the documented behaviour of
+  $p^{\mathrm{eff}}_t > 0$, exactly the documented behaviour of
   as-produced, generation-settled contracts.  Deliberate: the engine
   models the contract the user signed, distortion included.
 * Storage arbitrage and curtailment decisions see the contract price,
@@ -117,8 +118,8 @@ Consequences:
 The yearly cashflow's `ppa_revenue_eur` column implements Eq. (E12)
 (`docs/economics_design.md`): within the term the strike leg
 escalates at $i_{\mathrm{PPA}}$ on the PV fade curve; the CfD's DAM
-leg at $i_{\mathrm{DAM}}$; after the term the stream is zero and —
-for physical settlement — the covered volume's DAM value (Eq. P3
+leg at $i_{\mathrm{DAM}}$; after the term the stream is zero and,
+for physical settlement, the covered volume's DAM value (Eq. P3
 base) rejoins the DAM revenue stream, where the aggregator fee
 applies to it like any other market revenue:
 
@@ -131,36 +132,37 @@ S_1 f^{PV}_y (1+i_{\mathrm{PPA}})^{y-1} - V^{\mathrm{cov}}_1 f^{PV}_y (1+i_{\mat
 with $S_1$ the Year-1 strike-leg value (under CfD reconstructed as
 contract leg + covered DAM value) and $V^{\mathrm{cov}}_1$ the Year-1
 covered DAM value.  `ppa_inflation_pct` is the contract's own
-indexation knob — deliberately independent of `retail_inflation_pct`
+indexation knob, deliberately independent of `retail_inflation_pct`
 (CPI-linked tariffs) and `dam_inflation_pct` (wholesale view).
 
-Scope rules (one scope across every consumer —
+Scope rules (one scope across every consumer, per
 `pvbess_opt/conventions.md` "PPA stream scope"):
 
-* **Aggregator fee** — the energy-aggregator fee is NOT applied to PPA
-  revenue while under contract: a bilateral offtake settles directly with
-  the offtaker.  PPA carries neither the energy-aggregator fee nor the
-  optional balancing-aggregator (BSP) fee — only balancing revenue may
-  carry the latter.  The energy fee continues to apply to DAM/retail
-  market revenue, including the post-term reverted volume.
-* **LCOE/LCOS** — unchanged: Lazard-style cost-per-MWh metrics are
+* **Aggregator fee**: the energy-aggregator fee is NOT applied to PPA
+  revenue while under contract, because a bilateral offtake settles
+  directly with the offtaker.  PPA carries neither the
+  energy-aggregator fee nor the optional balancing-aggregator (BSP)
+  fee.  Only balancing revenue may carry the latter.  The energy fee
+  continues to apply to DAM/retail market revenue, including the
+  post-term reverted volume.
+* **LCOE/LCOS** are unchanged: Lazard-style cost-per-MWh metrics are
   revenue-agnostic, so the PPA (like balancing revenue) never enters
   them.
-* **Lifetime frame** — both per-step columns are PV-origin
+* **Lifetime frame**: both per-step columns are PV-origin
   (`lifetime._PV_REVENUE_COLUMNS`, scale on $f^{PV}_y$) and stay out
   of the frame's `revenue_eur_dam_retail` (per-step DAM+retail scope).
-* **Monthly cashflow** — `ppa_revenue_eur` allocates to months by the
+* **Monthly cashflow**: `ppa_revenue_eur` allocates to months by the
   Year-1 monthly |contract-leg| magnitude (flat 1/12 fallback);
   monthly nets reconcile to the yearly rows exactly.
 
 ## KPI definitions
 
-* `revenue_pv_ppa_eur` — the **ninth canonical revenue aggregate**
+* `revenue_pv_ppa_eur`: the **ninth canonical revenue aggregate**
   (Year-1 sum of the per-step contract leg, availability-derated);
   `profit_total_eur` includes it.
-* `ppa_covered_dam_value_eur` — Year-1 sum of Eq. (P3), derated, the
+* `ppa_covered_dam_value_eur`: Year-1 sum of Eq. (P3), derated, the
   post-term reversion base.
-* `total_ppa_revenue_eur_lifecycle` — lifecycle sum of the cashflow
+* `total_ppa_revenue_eur_lifecycle`: lifecycle sum of the cashflow
   column.
 * Both per-step columns are members of `kpis.ECONOMIC_COLUMNS` and
   the availability-derate list (derate exactly once); they are
@@ -172,7 +174,7 @@ Scope rules (one scope across every consumer —
 | Equation | Implementing symbol |
 |---|---|
 | config resolution | `ppa.PpaConfig`, `ppa.resolve_ppa_config` (`active` = enabled ∧ share>0 ∧ term≥1) |
-| (P1)–(P3) | `kpis.add_economic_columns` PPA branch |
+| (P1)-(P3) | `kpis.add_economic_columns` PPA branch |
 | (P4) | `optimization.build_model` PV-export price (`pv_export_price`) |
 | (P5) | `economics.build_yearly_cashflow` PPA rows (term cutoff + physical post-term reversion) |
 | ninth aggregate | `kpis.compute_kpis` (direct column sum; see `kpis._compute_canonical_revenue_aggregates` docstring) |
@@ -185,21 +187,22 @@ Scope rules (one scope across every consumer —
 
 ## Validation & tests
 
-* `tests/test_ppa_engine.py` — cent-level locks on Eqs. (P1)–(P5):
-  settlement decompositions, equivalence of total covered value,
-  term cutoff, post-term reversion, fee exemption, escalation.
-* `tests/test_ppa_surface.py` — workbook/YAML/scenario surface,
+* `tests/test_ppa_engine.py`: cent-level locks on Eqs. (P1)-(P5),
+  covering settlement decompositions, equivalence of total covered
+  value, term cutoff, post-term reversion, fee exemption, and
+  escalation.
+* `tests/test_ppa_surface.py`: workbook/YAML/scenario surface,
   baseload rejection with guidance, knob validation,
   `test_disabled_ppa_run_is_numerically_identical` (the bit-identity
   lock), revenue-stack bar reconciliation, negative-stack rendering,
   `test_ppa_price_tornado_driver_present_and_monotonic` /
   `test_ppa_price_driver_absent_when_disabled`,
   SUMMARY.md row gating.
-* `tests/test_input_surface_parity.py` — `ppa.<key>` dotted targets
+* `tests/test_input_surface_parity.py`: `ppa.<key>` dotted targets
   resolve on both scenario surfaces; the disabled
   "Merchant hybrid + PPA" example ships in the workbook scenarios
   sheet and `examples/scenarios.yaml`.
-* `tests/test_lcoe_lcos_summary.py`, `tests/test_devex_availability_fees.py` —
+* `tests/test_lcoe_lcos_summary.py`, `tests/test_devex_availability_fees.py`:
   LCOE/LCOS exclusion holds with the contract on.
 
 ## Worked example
@@ -210,9 +213,9 @@ $\pi^{\mathrm{PPA}} = 65$, $s = 0.8$:
 * Physical (P1): contract leg $0.8 \cdot 1 \cdot 65 = 52$ EUR; market
   leg $0.2 \cdot 1 \cdot 80 = 16$ EUR; total 68 EUR.
 * CfD (P2): market leg $1 \cdot 80 = 80$ EUR; difference leg
-  $0.8 \cdot (65 - 80) = -12$ EUR; total 68 EUR — identical, as the
-  equivalence requires; the CfD leg is negative because DAM > strike.
-* Covered DAM value (P3): $0.8 \cdot 80 = 64$ EUR — under physical
+  $0.8 \cdot (65 - 80) = -12$ EUR; total 68 EUR (identical, as the
+  equivalence requires); the CfD leg is negative because DAM > strike.
+* Covered DAM value (P3): $0.8 \cdot 80 = 64$ EUR.  Under physical
   settlement this is what reverts to the DAM stream after the term.
 * Dispatch price (P4): $0.2 \cdot 80 + 0.8 \cdot 65 = 68$ EUR/MWh.
 
@@ -230,7 +233,7 @@ $\pi^{\mathrm{PPA}} = 65$, $s = 0.8$:
   incentive and are left as follow-ups.
 * The Year-1 dispatch is optimised under the contract and Years 2..N
   reuse its shape (the analytic projection), so a contract expiring
-  mid-horizon does not re-shape post-term *physical* dispatch — only
+  mid-horizon does not re-shape post-term *physical* dispatch.  Only
   the cashflow reverts the covered volume to DAM value.
 * Single offtaker, single strike; no volume floors/caps or
   availability guarantees.

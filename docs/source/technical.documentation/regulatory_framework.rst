@@ -35,7 +35,7 @@ Optional strict total-injection cap
 By default the cap above binds only on **surplus export**
 (``pv_to_grid + bess_dis_grid``).  Under Virtual Net-Billing, however,
 the energy *virtually allocated* to a remote load is **physically
-injected** at the plant connection point too — so the regulatory limit
+injected** at the plant connection point too, so the regulatory limit
 can equally be read as a cap on the **total plant injection**, not only
 on surplus export.  Setting the project input
 ``grid_cap_includes_load = TRUE`` switches the cap basis to
@@ -53,7 +53,7 @@ strict but shares the cap: its floor becomes
 :math:`\min(\text{pv}_t, l_t, \text{cap}_t)`, so the load takes all
 available injection capacity before any surplus export.  When the cap
 cannot fit the full load the uncovered remainder is served from the grid
-at the retail tariff and surplus PV is curtailed — the run is never
+at the retail tariff and surplus PV is curtailed; the run is never
 infeasible, it degrades to the maximum feasible coverage.  Leaving the
 input at its default ``FALSE`` keeps the surplus-export cap and is
 bit-for-bit backward compatible.
@@ -64,8 +64,8 @@ Per-source injection sub-caps
 The cap can additionally be split by origin via two optional inputs,
 ``max_injection_profile_pv`` and ``max_injection_profile_bess``, on the
 same ``p_grid_export_max_kw`` nameplate.  Each binds the corresponding
-origin's injection — PV (``pv→load`` + ``pv→grid``) and BESS
-(``bess→load`` + ``bess→grid``) — at
+origin's injection, PV (``pv→load`` + ``pv→grid``) or BESS
+(``bess→load`` + ``bess→grid``), at
 :math:`p^{\text{export\_max}} \cdot \Delta t \cdot \text{mi\_pct}_{\text{src}}/100`,
 with the load-serving terms counted only under
 ``grid_cap_includes_load = TRUE`` (surplus export alone otherwise).  Each

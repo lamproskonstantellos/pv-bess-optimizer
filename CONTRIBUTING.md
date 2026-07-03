@@ -47,9 +47,9 @@ sensitivity, availability), `uncertainty/` (rolling_horizon),
 
 ## Workbook schema
 
-The input workbook carries nine core sheets — `timeseries`,
+The input workbook carries nine core sheets (`timeseries`,
 `project`, `pv`, `bess`, `economics`, `simulation`, `balancing`,
-`ppa`, `max_injection_profile` — plus the optional per-source sub-cap
+`ppa`, `max_injection_profile`) plus the optional per-source sub-cap
 sheets (`max_injection_profile_pv` / `max_injection_profile_bess`) and
 the `sizing` / `scenarios` sweep sheets.  See
 `docs/source/users.guide/inputs.rst` for the full reference.
@@ -81,7 +81,7 @@ lane runs on pushes to the default branch and on the nightly schedule.
 ## Naming conventions
 
 Everything lowercase snake_case.  No camelCase.  No PascalCase except
-class names.  No abbreviations like `eta_ch`/`eta_dis` — use the full
+class names.  No abbreviations like `eta_ch`/`eta_dis`: use the full
 form `efficiency_charge` / `efficiency_discharge`.
 
 ## Plot style
