@@ -1,12 +1,12 @@
-"""Regression tests for the Pass-2 P2 hardening items.
+"""Hardening tests for internal helpers.
 
-* **P2.4** — ``_balancing_invariants`` reads ``soc_min_frac`` /
+* ``_balancing_invariants`` reads ``soc_min_frac`` /
   ``soc_max_frac`` strictly so a hand-built ``params`` dict missing the
   keys surfaces a ``KeyError`` rather than silently passing.
-* **P2.7** — ``_scale_revenue`` clamps perturbed gross at zero before
+* ``_scale_revenue`` clamps perturbed gross at zero before
   applying the aggregator fee, matching the base build's sign
   convention when perturbed gross is negative.
-* **P2.8** — ``_has_feasible_incumbent`` probes the named ``soc``
+* ``_has_feasible_incumbent`` probes the named ``soc``
   variable, so refactors that change variable declaration order do not
   flip the verdict.
 """
@@ -26,7 +26,7 @@ from pvbess_opt.optimization import (
 from pvbess_opt.sensitivity import _scale_revenue
 
 # ---------------------------------------------------------------------------
-# P2.4 — strict params access in _balancing_invariants
+# Strict params access in _balancing_invariants
 # ---------------------------------------------------------------------------
 
 
@@ -72,7 +72,7 @@ def _balancing_enabled_params() -> dict:
 
 
 def test_balancing_invariants_strict_soc_keys():
-    """A params dict missing ``soc_min_frac`` triggers KeyError now."""
+    """A params dict missing ``soc_min_frac`` triggers KeyError."""
     params = _balancing_enabled_params()
     # Intentionally omit soc_min_frac / soc_max_frac.
     res = _minimal_dispatch_frame()
@@ -93,7 +93,7 @@ def test_balancing_invariants_strict_soc_keys_pass_when_present():
 
 
 # ---------------------------------------------------------------------------
-# P2.7 — _scale_revenue clamps negative gross
+# _scale_revenue clamps negative gross
 # ---------------------------------------------------------------------------
 
 
@@ -131,7 +131,7 @@ def test_scale_revenue_clamps_negative_gross_to_zero_fee():
 
 
 # ---------------------------------------------------------------------------
-# P2.8 — _has_feasible_incumbent probes a named variable
+# _has_feasible_incumbent probes a named variable
 # ---------------------------------------------------------------------------
 
 
@@ -156,7 +156,7 @@ def test_has_feasible_incumbent_false_when_soc_unloaded():
 
 
 def test_inflation_defaults_documented_near_each_other():
-    """P2.5: ``bm_inflation_pct`` and ``dam_inflation_pct`` defaults
+    """``bm_inflation_pct`` and ``dam_inflation_pct`` defaults
     differ.  conventions.md must reference both within 50 lines of
     each other so the rationale is colocated."""
     from pathlib import Path
@@ -184,7 +184,7 @@ def test_has_feasible_incumbent_fallback_for_models_without_soc():
 
 
 # ---------------------------------------------------------------------------
-# B1 — dt_minutes build-path guard (defense-in-depth)
+# dt_minutes build-path guard (defense-in-depth)
 #
 # build_model / model_to_dataframe raise ValueError("dt_minutes must be
 # positive") when dt_hours_from(params) <= 0.  The loader rejects dt <= 0

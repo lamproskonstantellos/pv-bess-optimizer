@@ -226,7 +226,7 @@ def test_misplaced_key_routes_warning_to_correct_sheet(caplog):
 
 def test_max_injection_profile_missing_logs_info(tmp_path, caplog):
     typed = _build_minimal_typed()
-    dst = tmp_path / "v08_no_max_inj.xlsx"
+    dst = tmp_path / "no_max_inj.xlsx"
     write_workbook(typed, dst)
     # Re-open and drop the max_injection_profile sheet.
     with pd.ExcelFile(dst) as xls:

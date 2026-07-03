@@ -1239,7 +1239,7 @@ def compute_financial_kpis(
             # Numerator must NOT include BESS CAPEX, BESS DEVEX, BESS OPEX
             # or BESS replacement.  Denominator uses derated PV generation
             # (the lifetime_yearly column is already unavailability-derated
-            # upstream in main._build_financials).
+            # upstream in pvbess_opt.pipeline._build_financials).
             ly = lifetime_yearly.set_index("project_year") \
                 if "project_year" in lifetime_yearly.columns else None
             disc_series = df.set_index(project_year_col)["discount_factor"]

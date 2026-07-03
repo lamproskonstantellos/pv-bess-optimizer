@@ -199,7 +199,7 @@ Scope rules (one scope across every consumer —
   resolve on both scenario surfaces; the disabled
   "Merchant hybrid + PPA" example ships in the workbook scenarios
   sheet and `examples/scenarios.yaml`.
-* `tests/test_lcoe_lcos_summary.py`, `tests/test_economics_v08.py` —
+* `tests/test_lcoe_lcos_summary.py`, `tests/test_devex_availability_fees.py` —
   LCOE/LCOS exclusion holds with the contract on.
 
 ## Worked example

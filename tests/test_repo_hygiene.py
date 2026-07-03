@@ -51,14 +51,6 @@ FORBIDDEN = (
 SCAN_GLOBS = ("**/*.py", "**/*.md", "**/*.rst")
 ALLOWED_PATHS = {
     "tests/test_repo_hygiene.py",
-    # The production-readiness report is a process/audit artifact (not an
-    # evergreen user surface); it necessarily records phase and
-    # finding-number annotations as data, so — like this file — it
-    # allow-lists itself out of the version/phase regex scan.
-    "docs/production_readiness_report.md",
-    # The independent audit (v2) report is the same kind of process/audit
-    # artifact: it records its own phase/finding annotations as data.
-    "docs/independent_audit_v2_report.md",
 }
 SKIP_DIR_PARTS = {
     "__pycache__", "build", ".git", "_static", "_templates",
@@ -116,9 +108,6 @@ FORBIDDEN_ALLOWED: frozenset[Path] = frozenset(
     Path(p) for p in (
         "tests/test_plot_scopes.py",
         "tests/test_repo_hygiene.py",
-        # Audit artifact: records phase / finding-number tokens as data.
-        "docs/production_readiness_report.md",
-        "docs/independent_audit_v2_report.md",
     )
 )
 
@@ -197,7 +186,7 @@ REQUIRED_FILES: tuple[str, ...] = (
     "docs/source/technical.documentation/asset_modes.rst",
     "docs/CHANGELOG.md",
     "pvbess_opt/plotting/lifecycle.py",
-    "tests/test_io_v08_schema.py",
+    "tests/test_workbook_schema.py",
     "tests/test_year0_convention.py",
     "tests/test_asset_modes.py",
     "tests/test_uncertainty_config.py",

@@ -1,10 +1,9 @@
-"""Grep audits enforcing the plot universality rules.
+"""Source-level checks enforcing the plot universality rules.
 
-These tests run command-line-style grep audits as automated
-checks.  Each test runs the same regex over every public
-plotting module and fails if a forbidden pattern reappears.  Module
-state is not introspected — we look directly at the source so the
-audits survive even when a function is unused at runtime.
+Each test runs a regex over every public plotting module and fails if
+a forbidden pattern reappears.  Module state is not introspected — we
+look directly at the source so the checks survive even when a
+function is unused at runtime.
 """
 
 from __future__ import annotations
@@ -38,13 +37,13 @@ def _strip_comments(src: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Audit 1 — inline ax.annotate(...bbox=...) with a numeric value
-# Audit 2 — inline ax.text(...bbox=...) with a numeric value
+# Rule 1 — inline ax.annotate(...bbox=...) with a numeric value
+# Rule 2 — inline ax.text(...bbox=...) with a numeric value
 # (combined; either form is forbidden outside annotate_value_safe)
 # ---------------------------------------------------------------------------
 
 
-def test_audit_1_2_no_inline_annotate_or_text_with_bbox():
+def test_rule_1_2_no_inline_annotate_or_text_with_bbox():
     pattern = re.compile(
         r'\bax\d*\.(annotate|text)\([^)]*bbox\s*=', re.DOTALL,
     )
@@ -60,11 +59,11 @@ def test_audit_1_2_no_inline_annotate_or_text_with_bbox():
 
 
 # ---------------------------------------------------------------------------
-# Audit 3 — no markeredgecolor='white' anywhere in plotting code
+# Rule 3 — no markeredgecolor='white' anywhere in plotting code
 # ---------------------------------------------------------------------------
 
 
-def test_audit_3_no_white_marker_edge():
+def test_rule_3_no_white_marker_edge():
     pattern = re.compile(r'markeredgecolor\s*=\s*["\']white["\']')
     offenders: list[str] = []
     for path, src in _plotting_sources().items():
@@ -77,11 +76,11 @@ def test_audit_3_no_white_marker_edge():
 
 
 # ---------------------------------------------------------------------------
-# Audit 4 — no italic prose captions (fontstyle='italic')
+# Rule 4 — no italic prose captions (fontstyle='italic')
 # ---------------------------------------------------------------------------
 
 
-def test_audit_4_no_italic_prose_captions():
+def test_rule_4_no_italic_prose_captions():
     pattern = re.compile(r'fontstyle\s*=\s*["\']italic["\']')
     offenders: list[str] = []
     for path, src in _plotting_sources().items():
@@ -94,7 +93,7 @@ def test_audit_4_no_italic_prose_captions():
 
 
 # ---------------------------------------------------------------------------
-# Audit 5 — date format strings match the plot resolution
+# Rule 5 — date format strings match the plot resolution
 # ---------------------------------------------------------------------------
 
 
@@ -103,7 +102,7 @@ def test_audit_4_no_italic_prose_captions():
     ("monthly.py", ('"%d-%m-%Y"', "'%d-%m-%Y'")),
     ("yearly.py",  ('"%m-%Y"', "'%m-%Y'")),
 ])
-def test_audit_5_date_formats_match_resolution(filename, allowed):
+def test_rule_5_date_formats_match_resolution(filename, allowed):
     """Every DateFormatter(...) call in a resolution-specific module
     uses the format string that matches the plot's resolution."""
     src = (PLOTTING_DIR / filename).read_text(encoding="utf-8")
@@ -117,11 +116,11 @@ def test_audit_5_date_formats_match_resolution(filename, allowed):
 
 
 # ---------------------------------------------------------------------------
-# Audit 6 — no inline hex colour literals in plotting code
+# Rule 6 — no inline hex colour literals in plotting code
 # ---------------------------------------------------------------------------
 
 
-def test_audit_6_no_inline_hex_colour_literals():
+def test_rule_6_no_inline_hex_colour_literals():
     pattern = re.compile(r'["\']#[0-9A-Fa-f]{6}["\']')
     offenders: dict[str, list[str]] = {}
     for path, src in _plotting_sources().items():
@@ -136,15 +135,15 @@ def test_audit_6_no_inline_hex_colour_literals():
 
 
 # ---------------------------------------------------------------------------
-# Audit 7 — financial / lifecycle / uncertainty plot labels are
+# Rule 7 — financial / lifecycle / uncertainty plot labels are
 # canonical (informational; routed through apply_financial_legend).
 # ---------------------------------------------------------------------------
 
 
-def test_audit_7_financial_labels_route_through_legend_helper():
+def test_rule_7_financial_labels_route_through_legend_helper():
     """Each module that emits canonical financial labels also imports
     ``apply_financial_legend`` so legend ordering is governed by the
-    single source of truth.  This is the soft side of Audit 7 — the
+    single source of truth.  This is the soft side of Rule 7 — the
     strict label match is enforced at render time by
     :func:`pvbess_opt.theme.apply_financial_legend` itself, which
     logs warnings for non-canonical entries (covered by

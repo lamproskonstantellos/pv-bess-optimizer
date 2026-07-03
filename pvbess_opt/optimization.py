@@ -1390,8 +1390,8 @@ def run_scenario(
 
 # Names of the six balancing-invariant residual keys returned by
 # :func:`verify_dispatch_invariants`.  Anchored as a tuple so
-# downstream consumers (``main._check_strict_invariants``) can refer to
-# the canonical list without re-declaring the names.
+# downstream consumers (``pvbess_opt.pipeline._check_strict_invariants``)
+# can refer to the canonical list without re-declaring the names.
 BALANCING_INVARIANT_KEYS: tuple[str, ...] = (
     "invariant_b1_capacity_share_sum_pct_excess",
     "invariant_b2_reservation_share_cap_excess_kw",
@@ -1539,7 +1539,7 @@ def verify_dispatch_invariants(
 
     Verifies the nine general-dispatch invariants plus, when the
     balancing block fired, the six INV-B1..INV-B6 balancing-market
-    invariants.  Returns a dict of named residuals; ``main.py``'s
+    invariants.  Returns a dict of named residuals; the pipeline's
     ``--strict`` mode rejects any residual above the energy tolerance.
 
     Returns

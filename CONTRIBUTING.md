@@ -2,32 +2,42 @@
 
 ## Package layout
 
-The `pvbess_opt/` package keeps a **flat module layout**.  The historical
-≤ 12-module ceiling is now **advisory** — the count has grown past it as
-the model gained features; re-evaluate subpackaging into `solve/` /
-`finance/` / `uncertainty/` / `plotting/` if the flat layout becomes hard
-to navigate.
+The `pvbess_opt/` package keeps a **flat module layout** plus two
+subpackages (`plotting/` for the figure stack, `resource/` for the
+PVGIS fetch).  Re-evaluate subpackaging into `solve/` / `finance/` /
+`uncertainty/` if the flat layout becomes hard to navigate.
 
-Current modules (14 + plotting subpackage):
+Current top-level modules (24 + the `plotting/` and `resource/`
+subpackages):
 
 ```
 pvbess_opt/
 ├── __init__.py
-├── theme.py
-├── constants.py
-├── io.py
-├── optimization.py
+├── availability.py
 ├── balancing.py
-├── modes.py
+├── cli.py
+├── constants.py
+├── degradation.py
+├── economics.py
+├── emissions.py
+├── io.py
+├── io_read.py
+├── io_style.py
 ├── kpis.py
 ├── lifetime.py
-├── economics.py
-├── sensitivity.py
-├── rolling_horizon.py
-├── availability.py
 ├── max_injection.py
+├── modes.py
+├── optimization.py
+├── pipeline.py
+├── ppa.py
+├── rolling_horizon.py
+├── scenarios.py
+├── sensitivity.py
+├── sizing.py
+├── theme.py
 ├── timeutils.py
-└── plotting/
+├── plotting/
+└── resource/
 ```
 
 A future subpackaging would group by responsibility: `solve/`
@@ -37,9 +47,11 @@ sensitivity, availability), `uncertainty/` (rolling_horizon),
 
 ## Workbook schema
 
-The input workbook is split across **eight themed sheets**:
-`timeseries`, `project`, `pv`, `bess`, `economics`, `simulation`,
-`balancing`, `max_injection_profile`.  See
+The input workbook carries nine core sheets — `timeseries`,
+`project`, `pv`, `bess`, `economics`, `simulation`, `balancing`,
+`ppa`, `max_injection_profile` — plus the optional per-source sub-cap
+sheets (`max_injection_profile_pv` / `max_injection_profile_bess`) and
+the `sizing` / `scenarios` sweep sheets.  See
 `docs/source/users.guide/inputs.rst` for the full reference.
 
 ## Style
@@ -63,8 +75,8 @@ python -m pytest tests/ -q
 ```
 
 CI runs ruff, mypy, and vulture, then the fast-lane pytest across
-Python 3.11 / 3.12, all on Ubuntu.  The slow lane runs on pushes to the
-default branch and on the nightly schedule.
+Python 3.11 / 3.12, all on Ubuntu, plus a Sphinx docs build.  The slow
+lane runs on pushes to the default branch and on the nightly schedule.
 
 ## Naming conventions
 

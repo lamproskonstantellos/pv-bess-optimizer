@@ -522,6 +522,7 @@ labels, `€` in prices, Greek-letter docstring math).
 
 ## Quality
 
-The test suite is the executable specification; see
-[`docs/audit_test_index.md`](docs/audit_test_index.md) for how `tests/`
-is organized and how to run the fast and slow lanes.
+The behavior of every module is pinned by the test suite in `tests/`
+(fast lane: `python -m pytest`; slow lane: `python -m pytest -m slow`).
+CI runs ruff, mypy, vulture, the fast test lane on every push, the
+slow lane nightly, and a docs build.

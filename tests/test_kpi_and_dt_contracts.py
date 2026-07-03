@@ -1,12 +1,12 @@
-"""Regression tests for the P2 documentation / refactor items.
+"""Contract tests for balancing-KPI shapes and dt-hours conversion.
 
 Covers:
 
-* P2.11 -- ``bm_revenue_share_pct`` denominator does not double-count
+* ``bm_revenue_share_pct`` denominator does not double-count
   balancing.
-* P2.17 -- every previously inline ``dt_minutes / 60.0`` site now
-  routes through :func:`pvbess_opt.timeutils.dt_hours_from`.
-* P2.19 -- ``_compute_balancing_kpis``' zero-initialised dict shape
+* every ``dt_minutes / 60.0`` conversion routes through
+  :func:`pvbess_opt.timeutils.dt_hours_from`.
+* ``_compute_balancing_kpis``' zero-initialised dict shape
   matches the fully-populated path.
 """
 
@@ -22,7 +22,7 @@ from pvbess_opt.kpis import _compute_balancing_kpis
 from pvbess_opt.timeutils import dt_hours_from
 
 # ---------------------------------------------------------------------------
-# P2.17 -- dt_hours_from helper
+# dt_hours_from helper
 # ---------------------------------------------------------------------------
 
 
@@ -43,8 +43,8 @@ def test_dt_hours_from_clamps_negative():
 
 
 def test_no_remaining_inline_dt_minutes_literals():
-    """grep guard: every site that previously computed
-    ``params['dt_minutes'] / 60.0`` routes through the helper now.
+    """grep guard: no module computes ``params['dt_minutes'] / 60.0``
+    inline; every site routes through the helper.
 
     The helper's own definition is exempted; every other module must
     delegate.
@@ -78,7 +78,7 @@ def test_no_remaining_inline_dt_minutes_literals():
 
 
 # ---------------------------------------------------------------------------
-# P2.19 -- balancing-KPI dict shape is stable
+# Balancing-KPI dict shape is stable
 # ---------------------------------------------------------------------------
 
 
@@ -131,7 +131,7 @@ def test_balancing_kpi_dict_shape_matches_off_and_on():
 
 
 # ---------------------------------------------------------------------------
-# P2.11 -- bm_revenue_share_pct denominator does not double-count balancing
+# bm_revenue_share_pct denominator does not double-count balancing
 # ---------------------------------------------------------------------------
 
 

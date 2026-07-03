@@ -1,6 +1,6 @@
-"""Regression locks for the pre-publication audit fixes in economics.py.
+"""Regression locks for the monthly-cashflow conventions in economics.py.
 
-Three fixes are locked here:
+Three behaviours are locked here:
 
 1. ``derive_monthly_cashflow`` discounts month ``m`` of year ``y`` at
    ``t = (y - 1) + m/12`` (end-of-month convention).  Previously it used
@@ -87,7 +87,7 @@ def _kpis(avail: float = 1.0, revenue_eur: float = 100_000.0) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Fix 1 — end-of-month discounting
+# End-of-month discounting
 # ---------------------------------------------------------------------------
 
 
@@ -137,7 +137,7 @@ def test_monthly_dcf_sum_refines_yearly_dcf_upward():
 
 
 # ---------------------------------------------------------------------------
-# Fix 2 — pv_production_mwh derated by availability
+# pv_production_mwh derated by availability
 # ---------------------------------------------------------------------------
 
 
@@ -168,7 +168,7 @@ def test_monthly_pv_production_unchanged_at_full_availability():
 
 
 # ---------------------------------------------------------------------------
-# Fix 3 — read_economic_params merges the balancing sheet
+# read_economic_params merges the balancing sheet
 # ---------------------------------------------------------------------------
 
 

@@ -1,17 +1,17 @@
-"""Cross-module correctness locks from the release audit sweep.
+"""Cross-module correctness locks.
 
-Four findings locked here:
+Four behaviours locked here:
 
-1. ``derive_monthly_cashflow`` dropped investment EVENTS — in a BESS
-   replacement year, the monthly (and quarterly) net summed exactly one
+1. ``derive_monthly_cashflow`` carries investment events: the monthly
+   (and quarterly) frames book ``capex_eur`` / ``devex_eur`` in
+   month 12 (the end-of-year placement matches the yearly
+   ``1/(1+r)^y`` discounting), so monthly sums reconcile to the yearly
+   net in EVERY operating year.  A regression that drops the events
+   would leave a BESS replacement year's monthly net exactly one
    replacement CAPEX above the yearly row, silently contradicting the
-   yearly sheet in the shipped default configuration
-   (``bess_replacement_year = 10``).  The frames now carry
-   ``capex_eur`` / ``devex_eur`` booked in month 12 (the end-of-year
-   placement matches the yearly ``1/(1+r)^y`` discounting), so monthly
-   sums reconcile to the yearly net in EVERY operating year.
+   yearly sheet.
 2. ``aggregate_lifetime_to_yearly``'s revenue scope: the column is the
-   PRE-fee gross (the old docstring claimed post-fee).  Locked as
+   PRE-fee gross (not the post-fee net).  Locked as
    ``revenue_eur_dam_retail == revenue_eur - aggregator_fee_eur`` at
    zero DAM/retail indexation with a non-zero fee.
 3. The BESS degradation curve has one owner (``lifetime._bess_factor``)
@@ -19,9 +19,9 @@ Four findings locked here:
    replacement year (set / unset / at horizon / beyond horizon) keeps
    the cashflow factor, the lifetime-frame scaling, and the SOH
    diagnostic numerically identical.
-4. ``monte_carlo_balancing`` joins the pipeline (the README's report
-   list promised the reservation profile + MC distribution, but no
-   caller existed): the ``availability_factor`` hook scales the whole
+4. ``monte_carlo_balancing`` is wired into the pipeline (the README's
+   report list promises the reservation profile + MC distribution):
+   the ``availability_factor`` hook scales the whole
    distribution into the same derated scope as the deterministic
    ``bm_*`` KPIs, and ``bm_mc_scenarios`` parameterizes the ensemble.
 """
@@ -217,7 +217,7 @@ def test_lifetime_aggregate_is_pre_fee_gross():
     assert np.allclose(merged["revenue_eur_dam_retail"], gross, atol=0.01), (
         merged[["project_year", "revenue_eur_dam_retail"]].assign(gross=gross)
     )
-    # And it is NOT the post-fee net (the old docstring's claim).
+    # And it is NOT the post-fee net.
     assert (
         (merged["revenue_eur_dam_retail"] - merged["revenue_eur"]).abs().max()
         > 1.0

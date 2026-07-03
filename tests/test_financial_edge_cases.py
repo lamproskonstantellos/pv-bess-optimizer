@@ -1,13 +1,13 @@
-"""Regression tests for the P2 correctness-adjacent items.
+"""Regression tests for financial edge cases.
 
 Covers:
 
-* P2.4 -- ``aggregator_fee_eur`` is non-positive (a deduction) even in
+* ``aggregator_fee_eur`` is non-positive (a deduction) even in
   years where ``revenue_gross_y`` is negative.
-* P2.5 -- ``plot_revenue_stack_yearly`` does not crash on a negative
+* ``plot_revenue_stack_yearly`` does not crash on a negative
   Year-1 DAM stream and emits a debug-level fallback message.
-* P2.6 -- ``_payback_year`` returns NaN when no real crossing exists.
-* P2.15 -- LCOE / LCOS sensitivity range matches the analytical
+* ``_payback_year`` returns NaN when no real crossing exists.
+* LCOE / LCOS sensitivity range matches the analytical
   ``(disc_capex * (1 +/- capex_d) + disc_opex * (1 +/- opex_d)) /
   disc_mwh`` decomposition rather than the multiplicative
   approximation.
@@ -35,7 +35,7 @@ from pvbess_opt.plotting.lifecycle import (
 )
 
 # ---------------------------------------------------------------------------
-# P2.6 -- _payback_year NaN fallthrough
+# _payback_year NaN fallthrough
 # ---------------------------------------------------------------------------
 
 
@@ -57,11 +57,11 @@ def test_payback_year_returns_nan_for_flat_cumulative_at_zero():
 
 
 def test_payback_year_nan_when_cumulative_starts_at_zero_with_zero_flows():
-    """Pass-2 P2.1: the docstring promises NaN for the
-    cumulative-stuck-at-zero case, but the previous ``i == 0`` branch
-    returned ``years[0]`` whenever ``cumulative[0] >= 0`` without
-    checking ``incremental[0]``.  An all-zero project (no CAPEX, no
-    revenue) therefore reported a 0-year payback."""
+    """``_payback_year`` promises NaN for the cumulative-stuck-at-zero
+    case.  A previous ``i == 0`` branch returned ``years[0]`` whenever
+    ``cumulative[0] >= 0`` without checking ``incremental[0]``, so an
+    all-zero project (no CAPEX, no revenue) reported a 0-year
+    payback."""
     years = np.array([0, 1, 2], dtype=float)
     cum = np.array([0.0, 0.0, 0.0], dtype=float)
     inc = np.array([0.0, 0.0, 0.0], dtype=float)
@@ -97,7 +97,7 @@ def test_payback_year_interpolates_on_normal_crossing():
 
 
 # ---------------------------------------------------------------------------
-# P2.4 -- aggregator fee never flips to a revenue
+# Aggregator fee never flips to a revenue
 # ---------------------------------------------------------------------------
 
 
@@ -167,7 +167,7 @@ def test_aggregator_fee_normal_case_unchanged():
 
 
 # ---------------------------------------------------------------------------
-# P2.5 -- negative DAM ratio guard
+# Negative DAM ratio guard
 # ---------------------------------------------------------------------------
 
 
@@ -223,7 +223,7 @@ def test_revenue_stack_plot_handles_negative_dam_without_crashing(
 
 
 # ---------------------------------------------------------------------------
-# P2.15 -- LCOE / LCOS sensitivity range matches the analytical formula
+# LCOE / LCOS sensitivity range matches the analytical formula
 # ---------------------------------------------------------------------------
 
 
@@ -264,11 +264,11 @@ def test_lcoe_sensitivity_range_matches_analytical_formula():
 
 
 def test_lcoe_analytical_range_differs_from_multiplicative_approximation():
-    """The new range is NOT the same as base * (1+/-d)(1+/-d) when both deltas nonzero.
+    """The range is NOT the same as base * (1+/-d)(1+/-d) when both deltas nonzero.
 
-    The previous formula squared the deltas via the cross term; the
-    new one is linear in each delta with weights given by the CAPEX
-    vs OPEX share of the discounted numerator.
+    A multiplicative formula would square the deltas via the cross
+    term; the analytical range is linear in each delta with weights
+    given by the CAPEX vs OPEX share of the discounted numerator.
     """
     fin = _sample_fin_kpis()
     capex_d, opex_d = 0.20, 0.40  # asymmetric to expose the difference
@@ -292,7 +292,7 @@ def test_lcoe_analytical_range_differs_from_multiplicative_approximation():
 
 
 def test_lcoe_summary_plot_runs(tmp_path: Path):
-    """End-to-end: ``plot_lcoe_summary`` runs against the new keys."""
+    """End-to-end: ``plot_lcoe_summary`` runs against the discounted-component keys."""
     fin = _sample_fin_kpis()
     econ = {
         "sensitivity_capex_delta_pct": 20.0,
@@ -307,7 +307,7 @@ def test_lcoe_summary_plot_runs(tmp_path: Path):
 
 
 def test_lcos_summary_plot_runs(tmp_path: Path):
-    """End-to-end: ``plot_lcos_summary`` runs against the new keys."""
+    """End-to-end: ``plot_lcos_summary`` runs against the discounted-component keys."""
     fin = _sample_fin_kpis()
     econ = {
         "sensitivity_capex_delta_pct": 20.0,
@@ -322,7 +322,7 @@ def test_lcos_summary_plot_runs(tmp_path: Path):
 
 
 def test_levelized_range_returns_none_when_components_missing():
-    """Older KPI dicts (no discounted components) -> None (fallback path)."""
+    """KPI dicts without the discounted components -> None (fallback path)."""
     fin = {"lcoe_eur_per_mwh": 50.0}
     rng = _levelized_sensitivity_range(
         fin,
@@ -335,7 +335,7 @@ def test_levelized_range_returns_none_when_components_missing():
 
 
 # ---------------------------------------------------------------------------
-# P2.2 / P2.3 -- legend label + share-denominator docstring smoke
+# Legend label + sensitivity-delta default smoke
 # ---------------------------------------------------------------------------
 
 

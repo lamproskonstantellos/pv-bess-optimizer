@@ -20,9 +20,8 @@ mathematics.
 | [`economics_design.md`](economics_design.md) | The project-finance engine: Year-0/Year-y conventions, per-stream escalation and end-of-year/monthly discounting, the nine canonical revenue aggregates, the aggregator-fee clamp, PV/BESS degradation factors with cycle fade and replacement reset, debt layer, NPV/IRR/ROI/BCR/payback, and Lazard-style LCOE/LCOS with their exclusions. (Equations E1–E23.) |
 | [`uncertainty_design.md`](uncertainty_design.md) | The uncertainty machinery: rolling-horizon dispatch with unit-mean log-normal forecast noise, the Monte Carlo ensemble and the foresight gap 100·(1−RH/PF), the four-source comparison, the balancing-revenue Monte Carlo with revenue/SOC coupling, the sensitivity tornado drivers, and the availability derate symmetry. (Equations U1–U5.) |
 
-Also in this directory: [`CHANGELOG.md`](CHANGELOG.md) (release log)
-and [`audit_test_index.md`](audit_test_index.md) (test-suite
-overview).  Cross-module lockstep rules live in
+Also in this directory: [`CHANGELOG.md`](CHANGELOG.md) (release log).
+Cross-module lockstep rules live in
 [`pvbess_opt/conventions.md`](../pvbess_opt/conventions.md).
 
 ## Shared notation

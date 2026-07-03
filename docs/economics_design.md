@@ -212,7 +212,7 @@ non-balancing aggregates — balancing revenue settles per window via
 expected values, never enters the per-step `profit_*` columns, and
 joins the project economics through its own cashflow column
 (`kpis._compute_balancing_kpis` denominator note;
-`tests/test_p2_docs_and_refactor.py`).  The Σ of all nine aggregates
+`tests/test_kpi_and_dt_contracts.py`).  The Σ of all nine aggregates
 therefore equals `profit_total_eur` + `bm_total_balancing_revenue_eur`.
 
 ### Yearly cashflow
@@ -431,7 +431,7 @@ quarterly aggregates by $q = \lceil m/3 \rceil$.
   `tests/test_economics_retail_dam_split.py`,
   `tests/test_financial_kpis_balancing.py`,
   `tests/test_ppa_engine.py` (cent-level locks),
-  `tests/test_economics_audit_fixes.py`.
+  `tests/test_monthly_discounting_conventions.py`.
 * Monthly/yearly reconciliation incl. replacement year —
   `tests/test_monthly_cashflow_reconciliation.py`.
 * Degradation factors & cycle fade —

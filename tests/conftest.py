@@ -51,7 +51,7 @@ def _make_short_ts(n_hours: int = 48, *, with_load: bool = True, seed: int = 0) 
 
 
 def _short_params(mode: str = "self_consumption") -> dict:
-    """Minimal valid param dict for a 48-hour test (v0.8 schema)."""
+    """Minimal valid param dict for a 48-hour test."""
     return {
         "dt_minutes": 60,
         "efficiency_charge": 0.97,

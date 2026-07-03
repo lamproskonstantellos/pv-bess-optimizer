@@ -184,7 +184,7 @@ Test anchors: `tests/test_balancing_module.py` (config/data model),
 (B8, LCOE/LCOS exclusion), `tests/test_balancing_bess_only.py`,
 `tests/test_balancing_runtime_invariants.py`,
 `tests/test_logic_spec_conformance.py::test_balancing_verification_symbols_present`
-(symbols on a built model), `tests/test_p2_docs_and_refactor.py`
+(symbols on a built model), `tests/test_kpi_and_dt_contracts.py`
 (`bm_revenue_share_pct` denominator, KPI key-set parity off-vs-on).
 
 ## Worked example

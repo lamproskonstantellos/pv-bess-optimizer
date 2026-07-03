@@ -170,7 +170,7 @@ scaling, LCOE/LCOS and debt algebra are mode-agnostic.
 * `tests/test_merchant_plots.py` — the merchant energy-plot trio.
 * `tests/test_ppa_engine.py`, `tests/test_ppa_surface.py` — the
   PPA-adjusted export price and merchant + PPA revenue stack.
-* `tests/test_grep_audits.py` (plot-layer invariants) and
+* `tests/test_plotting_source_rules.py` (plot-layer invariants) and
   `tests/test_logic_spec_conformance.py` (constraint symbols, via the
   SC spec whose shared constraints merchant reuses).
 

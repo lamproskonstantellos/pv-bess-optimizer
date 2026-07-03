@@ -140,7 +140,8 @@ dispatch exactly — verified on a PV-only copy of the shipped workbook,
 where all seeds land on the same profit to the cent and the foresight
 gap is 0.00 %.  This identity is expected behaviour, not a bug.  The
 ``rolling_horizon_distribution`` plot detects the degenerate ensemble
-(seed spread below max(1 EUR, 1e-6 x |P50|)) and renders a dedicated
+(seed spread below 1 EUR or one millionth of the median profit,
+whichever is larger) and renders a dedicated
 layout: one narrow bar at the common value, a readable x-window,
 whole-euro tick labels, a collapsed legend and an annotation stating
 that forecast noise has no effect on the configuration.
