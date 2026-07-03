@@ -156,12 +156,13 @@ def plot_cumulative_cashflow(
     ax.plot(
         years, cum,
         color=financial_color("Cumulative cash-flow"),
-        linewidth=1.5, label="Cumulative cash-flow",
+        linewidth=1.5, marker="o", markersize=3,
+        label="Cumulative cash-flow",
     )
     ax.plot(
         years, cum_disc,
         color=financial_color("Cumulative discounted cash-flow"),
-        linewidth=1.5, linestyle="--",
+        linewidth=1.5, linestyle="--", marker="o", markersize=3,
         label="Cumulative discounted cash-flow",
     )
     ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
@@ -347,9 +348,10 @@ def plot_payback(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     ax.plot(years, cum, color=financial_color("Cumulative cash-flow"),
-            linewidth=1.5, label="Cumulative cash-flow")
+            linewidth=1.5, marker="o", markersize=3,
+            label="Cumulative cash-flow")
     ax.plot(years, cum_disc, color=financial_color("Cumulative discounted cash-flow"),
-            linewidth=1.5, linestyle="--",
+            linewidth=1.5, linestyle="--", marker="o", markersize=3,
             label="Cumulative discounted cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.6)
 
@@ -376,10 +378,6 @@ def plot_payback(
             linewidth=0.8, linestyle="--", alpha=0.8,
             label="Simple payback",
         )
-        ax.scatter(
-            [x], [0.0], color=financial_color("Simple payback"),
-            s=20, zorder=5,
-        )
     if (
         discounted_payback_years is not None
         and not np.isnan(discounted_payback_years)
@@ -389,10 +387,6 @@ def plot_payback(
             x, color=financial_color("Discounted payback"),
             linewidth=0.8, linestyle="--", alpha=0.8,
             label="Discounted payback",
-        )
-        ax.scatter(
-            [x], [0.0], color=financial_color("Discounted payback"),
-            s=20, zorder=5,
         )
 
     ax.set_xlabel("Year")

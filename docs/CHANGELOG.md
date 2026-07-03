@@ -51,8 +51,8 @@ Production release.
   `bess_equivalent_cycles_per_day` derate with unavailability alongside
   `bess_total_discharge_mwh`, so headline cycles reconcile with
   `bess_lifetime_cycles / years`.
-- SOH trajectory plot: fixed 0-100 percentage axis with headroom,
-  major year ticks every 5 years and yearly minor ticks.
+- SOH trajectory plot: fixed 0-100 percentage axis with headroom and
+  labelled year ticks every 5 years.
 - Rolling-horizon distribution plot: a degenerate ensemble (every seed
   on the same profit, e.g. a PV-only plant) renders a dedicated layout
   with a readable window, whole-euro ticks and a collapsed legend

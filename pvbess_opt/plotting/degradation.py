@@ -41,11 +41,12 @@ def plot_soh_trajectory(degradation: pd.DataFrame, out_path: Path) -> Path:
         ax.legend(loc="best")
     ax.set_xlabel("Year")
     ax.set_ylabel("State of health (%)")
-    # Publication-style year axis: major ticks every 5 years (works for
-    # calendar years, 2025/2030/..., and for project years, 0/5/10/...)
-    # with unlabelled yearly minor ticks in between.
+    # Publication-style year axis: ticks only at the labelled 5-year
+    # positions (2025/2030/... for calendar years, 0/5/10/... for
+    # project years), matching the labelled-ticks-only convention of
+    # every other year axis in the package.  The annual data points
+    # are already marked on the curve itself.
     ax.xaxis.set_major_locator(MultipleLocator(5))
-    ax.xaxis.set_minor_locator(MultipleLocator(1))
     # Pad the x-axis only: the y-axis is a fixed 0..100 percentage scale
     # (plus headroom), set explicitly AFTER the margin helper so the
     # padding cannot re-scale it.

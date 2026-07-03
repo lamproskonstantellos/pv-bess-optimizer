@@ -8,12 +8,20 @@ is forked — and copies a small curated set into ``docs/assets/`` with
 descriptive names.
 
 Scenarios (both on the shipped ``inputs/input.xlsx``: PV 15 MWp,
-BESS 15 MW / 60 MWh, 20-year horizon, 7 % discount):
+BESS 15 MW / 60 MWh, 20-year horizon, 7 % discount, BESS grid
+charging enabled):
 
 * **Merchant + balancing** — DAM dispatch with FCR/aFRR/mFRR
   participation on; yields the revenue stack (with balancing products),
-  the BESS-revenue waterfall, the LCOS band, and the cumulative-cashflow
-  / payback chart.
+  the BESS-revenue waterfall, the LCOS and LCOE bands, the
+  cumulative-cashflow / payback chart, the NPV waterfall, the SOH
+  trajectory and the NPV tornado.
+
+The foresight-gap distribution figure in the gallery is NOT produced
+here: it comes from a rolling-horizon Monte Carlo run
+(``pvbess inputs/input.xlsx --rolling-horizon --monte-carlo 8``),
+whose ``rolling_horizon_distribution`` figure is exported to
+``docs/assets/self_consumption_foresight_distribution.png``.
 * **Self-consumption** — retail-settled load coverage, no balancing;
   yields the daily dispatch + SOC trace and the revenue stack.
 
@@ -57,10 +65,16 @@ _MERCHANT_FIGURES = {
     "04_financial_plots/lcos_summary.png": "merchant_lcos_band.png",
     "04_financial_plots/cumulative_cashflow_with_payback_*.png":
         "merchant_cumulative_cashflow.png",
+    "04_financial_plots/soh_trajectory.png": "merchant_soh_trajectory.png",
+    "04_financial_plots/sensitivity_npv_tornado.png": "merchant_npv_tornado.png",
+    "04_financial_plots/lcoe_summary.png": "merchant_lcoe_band.png",
+    "04_financial_plots/npv_waterfall_*.png": "merchant_npv_waterfall.png",
 }
 _SELF_CONSUMPTION_FINANCIAL_FIGURES = {
     "04_financial_plots/revenue_stack_yearly_*.png":
         "self_consumption_revenue_stack.png",
+    "04_financial_plots/monthly_cashflow_*.png":
+        "self_consumption_monthly_cashflow.png",
 }
 _SELF_CONSUMPTION_DAILY_FIGURES = {
     "05_energy_plots/**/daily_combined_with_soc_*.png":
@@ -87,6 +101,10 @@ def _build_workbook(
     """
     typed = read_workbook(REPO_ROOT / "inputs" / "input.xlsx")
     typed["project"]["mode"] = mode
+    # Grid charging on in every gallery scenario so the figures show the
+    # complete feature set: grid->BESS flows in the dispatch trace and
+    # the Grid-charging cost bar in the revenue stacks.
+    typed["project"]["allow_bess_grid_charging"] = True
     typed["balancing"]["balancing_enabled"] = balancing
     typed["economics"]["balancing_aggregator_fee_pct_revenue"] = (
         balancing_aggregator_fee_pct

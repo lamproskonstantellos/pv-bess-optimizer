@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
+from matplotlib.ticker import MaxNLocator
 
 from ..theme import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
 from ._currency import euro_axis_formatter
@@ -110,6 +111,7 @@ def plot_rolling_horizon_distribution(
             )
             ax.set_xlabel("Profit (EUR)")
             ax.set_ylabel("Frequency (seeds)")
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
             ax.xaxis.set_major_formatter(
                 euro_axis_formatter(currency_format, min_resolution_eur=1.0),
             )
@@ -142,6 +144,7 @@ def plot_rolling_horizon_distribution(
             )
         ax.set_xlabel("Profit (EUR)")
         ax.set_ylabel("Frequency (seeds)")
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax.xaxis.set_major_formatter(
             euro_axis_formatter(currency_format, min_resolution_eur=1.0),
         )
@@ -166,6 +169,7 @@ def plot_rolling_horizon_distribution(
         )
         ax.set_xlabel("Profit (EUR)")
         ax.set_ylabel("Frequency (seeds)")
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax.xaxis.set_major_formatter(
             euro_axis_formatter(currency_format, min_resolution_eur=1.0),
         )
@@ -195,6 +199,7 @@ def plot_rolling_horizon_distribution(
 
     ax.set_xlabel("Profit (EUR)")
     ax.set_ylabel("Frequency (seeds)")
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.xaxis.set_major_formatter(
         euro_axis_formatter(currency_format, min_resolution_eur=1.0),
     )

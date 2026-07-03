@@ -173,7 +173,9 @@ def plot_bess_revenue_waterfall(
 
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=0, ha="center")
+    # Rotated ticks: with all five balancing products plus the fee and
+    # total columns present, horizontal labels collide at 7x4 inches.
+    ax.set_xticklabels(labels, rotation=30, ha="right")
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(fmt_mode))
     if show_titles():
@@ -238,7 +240,7 @@ def plot_bess_capacity_vs_activation_split(
                    label="Capacity (FCR)" if i == 0 else None)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(labels)
+    ax.set_xticklabels(labels, rotation=30, ha="right")
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(resolve_currency_format(econ)))
     if show_titles():

@@ -567,3 +567,62 @@ def test_coverage_legend_clear_of_curves(tmp_path):
         assert not np.any(inside), (
             f"coverage legend covers vertices of {line.get_label()!r}"
         )
+
+
+def test_waterfall_tick_labels_do_not_overlap(tmp_path):
+    """With every column present (DAM, five balancing products, the
+    BSP fee and the total), the category labels cannot collide.
+
+    Same-angle rotated single-line labels sit in parallel lanes whose
+    perpendicular separation is ``column_spacing * sin(rotation)``;
+    with 30 degrees on the 7x4 canvas that is far above the glyph
+    height, so collisions are geometrically impossible.  Horizontal
+    labels (rotation 0) DID collide here — this locks the rotation,
+    the right-anchoring and the single-line shape it relies on.
+    """
+    from pvbess_opt.plotting.bess_revenue import plot_bess_revenue_waterfall
+
+    kpis = {
+        "revenue_bess_dam_eur": 2_000_000.0,
+        "revenue_bess_fcr_eur": 102_000.0,
+        "revenue_bess_afrr_up_eur": 249_000.0,
+        "revenue_bess_afrr_dn_eur": 87_000.0,
+        "revenue_bess_mfrr_up_eur": 23_000.0,
+        "revenue_bess_mfrr_dn_eur": 6_000.0,
+    }
+    econ = {"balancing_aggregator_fee_pct_revenue": 10.0}
+    fig = _capture(
+        bess_revenue_mod,
+        lambda: plot_bess_revenue_waterfall(
+            kpis, tmp_path / "wf.pdf", econ=econ,
+        ),
+    )
+    assert fig is not None
+    ax = fig.axes[0]
+    ticklabels = [t for t in ax.get_xticklabels() if t.get_text()]
+    labels = [t.get_text() for t in ticklabels]
+    assert len(labels) == 8, labels  # DAM + 5 products + fee + total
+    for t in ticklabels:
+        assert t.get_rotation() == pytest.approx(30.0), t.get_text()
+        assert t.get_horizontalalignment() == "right", t.get_text()
+        assert "\n" not in t.get_text(), t.get_text()
+
+
+def test_no_tick_inside_reserved_legend_band(tmp_path):
+    """apply_fine_ticks must not re-introduce a tick inside the band
+    reserve_legend_headroom cleared for the legend (it renders
+    half-hidden behind the legend frame)."""
+    fig = _capture(
+        lifecycle_mod,
+        lambda: plot_revenue_stack_yearly(
+            _yearly_cf(), _year1_kpis(), tmp_path / "rs.pdf",
+            econ={"retail_inflation_pct": 2.0},
+        ),
+    )
+    assert fig is not None
+    ax = fig.axes[0]
+    ceiling = getattr(ax, "_legend_headroom_ceiling", None)
+    assert ceiling is not None, "revenue stack must reserve legend headroom"
+    assert max(ax.get_yticks()) <= ceiling + 1e-9, (
+        ceiling, list(ax.get_yticks()),
+    )
