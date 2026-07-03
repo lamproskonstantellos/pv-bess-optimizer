@@ -443,9 +443,18 @@ def reserve_legend_headroom(
         else:
             upward = max(ymax, 0.0)
             ax.set_ylim(ymin, ymax + frac * (upward if upward > 0 else span))
+        # The reserved band exists for the legend; a tick that the
+        # auto-locator drops into it renders half-hidden behind the
+        # legend frame.  Pin the ticks to those at or below the
+        # pre-extension ceiling, and remember the ceiling so a later
+        # locator swap (apply_fine_ticks) can re-apply the prune.
+        ax._legend_headroom_ceiling = ymax
+        ax.set_yticks([t for t in ax.get_yticks() if t <= ymax + 1e-12])
     elif loc in lower_locs:
         if ymin < 0:
             ax.set_ylim(ymin - frac * span, ymax)
+            ax._legend_headroom_floor = ymin
+            ax.set_yticks([t for t in ax.get_yticks() if t >= ymin - 1e-12])
 
     ax._legend_headroom_applied = True
 
@@ -635,6 +644,15 @@ def apply_fine_ticks(
     locator = MaxNLocator(nbins=nbins, steps=[1, 2, 5, 10])
     if axis == "y":
         ax.yaxis.set_major_locator(locator)
+        # Re-apply the legend-headroom prune: the fresh locator would
+        # otherwise drop a tick into the band reserved by
+        # reserve_legend_headroom, rendering it behind the legend.
+        ceiling = getattr(ax, "_legend_headroom_ceiling", None)
+        if ceiling is not None:
+            ax.set_yticks([t for t in ax.get_yticks() if t <= ceiling + 1e-12])
+        floor = getattr(ax, "_legend_headroom_floor", None)
+        if floor is not None:
+            ax.set_yticks([t for t in ax.get_yticks() if t >= floor - 1e-12])
     elif axis == "x":
         ax.xaxis.set_major_locator(locator)
     else:

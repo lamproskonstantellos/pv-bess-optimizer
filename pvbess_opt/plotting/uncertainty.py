@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from itertools import pairwise
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
+from matplotlib.ticker import MaxNLocator
 
 from ..theme import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
-from ._currency import euro_axis_formatter, format_eur_adaptive
+from ._currency import euro_axis_formatter
 from .style import (
     apply_universal_margins,
     attach_legend_clear_of_data,
@@ -28,19 +28,6 @@ __all__ = [
 ]
 
 
-def _legend_resolution(values: list[float]) -> float:
-    """Smallest pairwise gap between the quoted legend values.
-
-    Drives :func:`format_eur_adaptive` so P10 / P50 / P90 / PF legend
-    entries stay distinct on narrow ensembles — the same escalation rule
-    the EUR axis formatter applies to its ticks, keeping annotation
-    units consistent with the axis.
-    """
-    finite = sorted(v for v in values if v is not None and np.isfinite(v))
-    gaps = [b - a for a, b in pairwise(finite) if b > a]
-    return min(gaps) if gaps else 0.0
-
-
 def _degenerate_spread_threshold(p50: float) -> float:
     """Spread below which an MC ensemble renders as degenerate."""
     return max(1.0, 1e-6 * abs(float(p50)))
@@ -51,15 +38,17 @@ def _render_degenerate_ensemble(
     profits: np.ndarray,
     *,
     pf_profit_eur: float | None,
-    currency_format: str,
 ) -> None:
     """Dedicated layout when every seed lands on the same profit.
 
     A histogram of a zero-width distribution renders as one full-height
     bar with sub-euro tick labels — misleading noise.  Instead: a single
     narrow bar at the common value, a readable x-window around it,
-    whole-euro tick labels, one collapsed legend entry, the
-    perfect-foresight marker, and an annotation explaining the identity.
+    whole-euro tick labels, one collapsed legend entry and the
+    perfect-foresight marker.  Legend entries carry series names only
+    (no computed values) so the figure drops into a paper unchanged;
+    the common value is readable off the x-axis and quoted in
+    SUMMARY.md.
     """
     value = float(np.median(profits))
     # Readable window: +/- 2 % of the value with a 1 000 EUR minimum span.
@@ -70,45 +59,18 @@ def _render_degenerate_ensemble(
         [value], [len(profits)], width=bar_width,
         color=COLORS["BESS to grid"], edgecolor="black", linewidth=0.4,
         alpha=0.85,
-        label=(
-            "all seeds equal "
-            + format_eur_adaptive(
-                value, resolution=1.0, format_mode=currency_format,
-            )
-        ),
-    )
-    matches_pf = (
-        pf_profit_eur is not None
-        and not np.isnan(pf_profit_eur)
-        and abs(value - float(pf_profit_eur))
-        <= _degenerate_spread_threshold(value)
+        label="MC seeds (all equal)",
     )
     if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
         ax.axvline(
             float(pf_profit_eur),
             color=FINANCIAL_COLORS["perfect_foresight"], linewidth=1.0,
-            linestyle="-.",
-            label="Perfect-foresight = " + format_eur_adaptive(
-                float(pf_profit_eur),
-                resolution=1.0, format_mode=currency_format,
-            ),
+            linestyle="--",
+            label="Perfect foresight",
         )
         lo = min(lo, float(pf_profit_eur) - 0.1 * half_span)
         hi = max(hi, float(pf_profit_eur) + 0.1 * half_span)
-    if matches_pf:
-        note = (
-            "Every seed matches the perfect-foresight result:\n"
-            "forecast noise has no effect on this configuration."
-        )
-    else:
-        note = "Every Monte Carlo seed lands on the same profit."
     ax.set_xlim(lo, hi)
-    ax.annotate(
-        note, xy=(0.02, 0.92), xycoords="axes fraction",
-        fontsize=7, va="top",
-        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white",
-              "edgecolor": "0.7", "alpha": 0.9},
-    )
 
 
 def plot_rolling_horizon_distribution(
@@ -145,12 +107,11 @@ def plot_rolling_horizon_distribution(
             # histograms carry no information — collapse to the shared
             # degenerate layout.
             _render_degenerate_ensemble(
-                ax, all_profits,
-                pf_profit_eur=pf_profit_eur,
-                currency_format=currency_format,
+                ax, all_profits, pf_profit_eur=pf_profit_eur,
             )
             ax.set_xlabel("Profit (EUR)")
             ax.set_ylabel("Frequency (seeds)")
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
             ax.xaxis.set_major_formatter(
                 euro_axis_formatter(currency_format, min_resolution_eur=1.0),
             )
@@ -165,39 +126,25 @@ def plot_rolling_horizon_distribution(
             )
             return save_figure(out_path)
         fallback_colour = COLORS["BESS to grid"]
-        medians = [
-            float(np.median(g["profit_total_eur"].astype(float)))
-            for _s, g in mc_df.groupby("source_set")
-        ]
-        if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
-            medians.append(float(pf_profit_eur))
-        resolution = max(_legend_resolution(medians), 1.0)
         for source_set, group in mc_df.groupby("source_set"):
             profits = group["profit_total_eur"].astype(float).to_numpy()
             colour = UNCERTAINTY_SOURCE_COLORS.get(str(source_set), fallback_colour)
-            p50_label = format_eur_adaptive(
-                float(np.median(profits)),
-                resolution=resolution, format_mode=currency_format,
-            )
             ax.hist(
                 profits,
                 bins=max(10, len(profits) // 3),
                 color=colour, edgecolor="black", linewidth=0.4,
                 alpha=0.45,
-                label=f"{source_set} (P50 = {p50_label})",
+                label=str(source_set),
             )
         if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
-            pf_label = format_eur_adaptive(
-                float(pf_profit_eur),
-                resolution=resolution, format_mode=currency_format,
-            )
             ax.axvline(
                 float(pf_profit_eur), color="black", linewidth=1.0,
-                linestyle="-.",
-                label=f"Perfect-foresight = {pf_label}",
+                linestyle="--",
+                label="Perfect foresight",
             )
         ax.set_xlabel("Profit (EUR)")
         ax.set_ylabel("Frequency (seeds)")
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax.xaxis.set_major_formatter(
             euro_axis_formatter(currency_format, min_resolution_eur=1.0),
         )
@@ -218,11 +165,11 @@ def plot_rolling_horizon_distribution(
         # Near-degenerate ensemble: every seed on (numerically) the same
         # profit.  The P10/P50/P90 legend collapses to a single entry.
         _render_degenerate_ensemble(
-            ax, profits,
-            pf_profit_eur=pf_profit_eur, currency_format=currency_format,
+            ax, profits, pf_profit_eur=pf_profit_eur,
         )
         ax.set_xlabel("Profit (EUR)")
         ax.set_ylabel("Frequency (seeds)")
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
         ax.xaxis.set_major_formatter(
             euro_axis_formatter(currency_format, min_resolution_eur=1.0),
         )
@@ -233,38 +180,26 @@ def plot_rolling_horizon_distribution(
         attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
         return save_figure(out_path)
 
-    quoted = [float(p10), float(p50), float(p90)]
-    if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
-        quoted.append(float(pf_profit_eur))
-    resolution = max(_legend_resolution(quoted), 1.0)
-
-    def _q(value: float) -> str:
-        return format_eur_adaptive(
-            value, resolution=resolution, format_mode=currency_format,
-        )
-
     ax.hist(profits, bins=max(10, len(profits) // 3),
             color=COLORS["BESS to grid"],
             edgecolor="black", linewidth=0.4, alpha=0.85)
     ax.axvline(p10, color=FINANCIAL_COLORS["percentile_p10"],
-               linewidth=1.0, linestyle=":",
-               label=f"P10 = {_q(float(p10))}")
+               linewidth=1.0, linestyle="--", label="P10")
     ax.axvline(p50, color=FINANCIAL_COLORS["percentile_p50"],
-               linewidth=1.2, linestyle="--",
-               label=f"P50 = {_q(float(p50))}")
+               linewidth=1.0, linestyle="--", label="P50")
     ax.axvline(p90, color=FINANCIAL_COLORS["percentile_p90"],
-               linewidth=1.0, linestyle=":",
-               label=f"P90 = {_q(float(p90))}")
+               linewidth=1.0, linestyle="--", label="P90")
     if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
         ax.axvline(
             float(pf_profit_eur),
             color=FINANCIAL_COLORS["perfect_foresight"], linewidth=1.0,
-            linestyle="-.",
-            label=f"Perfect-foresight = {_q(float(pf_profit_eur))}",
+            linestyle="--",
+            label="Perfect foresight",
         )
 
     ax.set_xlabel("Profit (EUR)")
     ax.set_ylabel("Frequency (seeds)")
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.xaxis.set_major_formatter(
         euro_axis_formatter(currency_format, min_resolution_eur=1.0),
     )
@@ -324,7 +259,7 @@ def plot_foresight_gap_comparison(
     for median in bplot["medians"]:
         median.set_color("black")
 
-    ax.axvline(0.0, color="grey", linewidth=0.8, alpha=0.6)
+    ax.axvline(0.0, color="black", linewidth=0.8, alpha=0.6)
     ax.set_xlabel("Foresight gap (%)")
     ax.set_ylabel("Source set")
     if show_titles():

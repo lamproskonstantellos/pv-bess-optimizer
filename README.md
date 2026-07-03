@@ -350,14 +350,15 @@ merchant trio when the mode is `merchant`.
 
 Real output from two runs on the shipped `inputs/input.xlsx`
 (PV 15 MWp, BESS 15 MW / 60 MWh, 20-year horizon, 7 % discount,
-retail 120 EUR/MWh). Regenerate with
+retail 120 EUR/MWh, BESS grid charging enabled). Regenerate with
 `python scripts/export_readme_figures.py`, which renders the PDF
 report figures as PNG through the same styler (`set_figure_format`).
 
-### Merchant + balancing (`--mode merchant`, `balancing_enabled = TRUE`)
+### Merchant + balancing (`--mode merchant`, `balancing_enabled = TRUE`, `allow_bess_grid_charging = TRUE`)
 
 PV + BESS dispatching to the day-ahead market with FCR / aFRR / mFRR
-participation stacked on the battery.
+participation stacked on the battery and grid-charging arbitrage
+enabled (the battery may buy cheap hours and resell expensive ones).
 
 ![Merchant yearly revenue stack](docs/assets/merchant_revenue_stack.png)
 
@@ -377,16 +378,43 @@ the total battery revenue.*
 *Levelised cost of storage against the Lazard 2024 LCOS benchmark
 band.*
 
+![LCOE benchmark band](docs/assets/merchant_lcoe_band.png)
+
+*Levelised cost of energy for the PV side against the Lazard 2024
+utility-scale PV band.*
+
+![NPV waterfall](docs/assets/merchant_npv_waterfall.png)
+
+*Discounted yearly contributions to the total NPV: the Year-0 CAPEX
+block, each operating year's discounted net cashflow, the year-10
+replacement dip, and the cumulative NPV line.*
+
 ![Merchant cumulative cashflow](docs/assets/merchant_cumulative_cashflow.png)
 
-*Cumulative discounted cashflow over the project life, with the
-payback marker (or none, when the discounted cashflow never crosses
-zero).*
+*Cumulative undiscounted and discounted cashflow over the project
+life. Each payback marker is drawn only when its curve crosses zero:
+here the undiscounted curve pays back in 2039, while the discounted
+curve stays negative at the 7 % rate, so no discounted-payback marker
+exists.*
 
-### Self-consumption (`--mode self_consumption`)
+![Battery state of health](docs/assets/merchant_soh_trajectory.png)
+
+*Battery state of health over the project life: calendar plus cycle
+fade, with the scheduled year-10 replacement resetting the pack to
+100 %.*
+
+![NPV sensitivity tornado](docs/assets/merchant_npv_tornado.png)
+
+*NPV sensitivity tornado: one-at-a-time CAPEX, revenue, discount-rate
+and OPEX perturbations around the base case, with the absolute driver
+values annotated at the bar ends.*
+
+### Self-consumption (`--mode self_consumption`, `allow_bess_grid_charging = TRUE`)
 
 Behind-the-meter PV + BESS serving a co-located load at the retail
 tariff and exporting only the surplus to the DAM, with no balancing.
+Grid charging is enabled, so the battery may also top up from the
+grid in cheap hours to cover later load.
 
 ![Self-consumption daily dispatch and SOC](docs/assets/self_consumption_daily_dispatch_soc.png)
 
@@ -396,7 +424,22 @@ discharge, grid import / export, and the battery state of charge.*
 ![Self-consumption yearly revenue stack](docs/assets/self_consumption_revenue_stack.png)
 
 *Yearly revenue stack: retail-valued self-consumption (avoided cost)
-plus the DAM surplus-export leg, net of the aggregator fee.*
+plus the DAM surplus-export leg, net of the aggregator fee and the
+grid-charging cost.*
+
+![Self-consumption monthly cashflow](docs/assets/self_consumption_monthly_cashflow.png)
+
+*Year-1 monthly net cashflow: revenue and OPEX bars with the net
+line, showing the summer-peaking seasonality of the PV-driven
+savings.*
+
+![Foresight-gap distribution](docs/assets/self_consumption_foresight_distribution.png)
+
+*Rolling-horizon Monte Carlo profit distribution (8 seeds, 48 h
+window / 24 h commit) against the perfect-foresight benchmark: the
+realistic-forecast dispatch lands within about half a percent of the
+theoretical optimum. Produced by a `--rolling-horizon --monte-carlo 8`
+run rather than the gallery export script.*
 
 ## Methodology & conventions
 

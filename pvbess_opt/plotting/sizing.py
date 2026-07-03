@@ -9,7 +9,11 @@ import numpy as np
 import pandas as pd
 
 from ..theme import FINANCIAL_COLORS
-from .style import apply_universal_margins, save_figure
+from .style import (
+    apply_universal_margins,
+    attach_legend_clear_of_data,
+    save_figure,
+)
 
 __all__ = ["plot_efficient_frontier", "plot_npv_vs_capacity"]
 
@@ -17,7 +21,7 @@ __all__ = ["plot_efficient_frontier", "plot_npv_vs_capacity"]
 def plot_efficient_frontier(frontier: pd.DataFrame, out_path: Path) -> Path:
     """Scatter NPV vs IRR across the swept sizes; marker area scales with
     BESS energy (MWh)."""
-    _fig, ax = plt.subplots()
+    _fig, ax = plt.subplots(figsize=(7, 4))
     irr = frontier["irr_pct"].to_numpy(dtype=float)
     npv = frontier["npv_eur"].to_numpy(dtype=float)
     cap = frontier["bess_capacity_mwh"].to_numpy(dtype=float)
@@ -39,21 +43,23 @@ def plot_npv_vs_capacity(
     frontier: pd.DataFrame, breakeven_mwh: float, out_path: Path,
 ) -> Path:
     """NPV vs BESS energy (MWh); marks the oversizing break-even."""
-    _fig, ax = plt.subplots()
+    _fig, ax = plt.subplots(figsize=(7, 4))
     ordered = frontier.sort_values("bess_capacity_mwh")
     mwh = ordered["bess_capacity_mwh"].to_numpy(dtype=float)
     npv = ordered["npv_eur"].to_numpy(dtype=float)
     ax.plot(mwh, npv, color=FINANCIAL_COLORS["net"], marker="o")
-    if breakeven_mwh is not None and np.isfinite(breakeven_mwh):
+    has_legend = breakeven_mwh is not None and np.isfinite(breakeven_mwh)
+    if has_legend:
         ax.axvline(
             float(breakeven_mwh),
             color=FINANCIAL_COLORS["tornado_neg"],
             linewidth=1.0,
             linestyle="--",
-            label="oversizing break-even",
+            label="Oversizing break-even",
         )
-        ax.legend(loc="best", fontsize=7)
     ax.set_xlabel("BESS energy (MWh)")
     ax.set_ylabel("NPV (EUR)")
     apply_universal_margins(ax)
+    if has_legend:
+        attach_legend_clear_of_data(ax, loc="upper right")
     return save_figure(out_path)

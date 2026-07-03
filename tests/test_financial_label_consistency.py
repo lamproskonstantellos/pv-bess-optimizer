@@ -171,9 +171,9 @@ def test_all_financial_plots_emit_only_canonical_labels(tmp_path, caplog):
     """Render every centralised financial plot and assert no
     non-canonical legend warnings are logged.
 
-    Year-annotated payback labels (e.g. "Simple payback: 5.0 yr") are
-    accepted via the prefix-match path in
-    :func:`apply_financial_legend`.
+    Every rendered legend label is an exact canonical name; the
+    prefix-match fallback for annotated labels is locked separately by
+    :func:`test_apply_financial_legend_accepts_year_annotated_payback`.
     """
     yc = _yearly_cf()
     mc = _monthly_cf()
@@ -202,6 +202,21 @@ def test_all_financial_plots_emit_only_canonical_labels(tmp_path, caplog):
         "Non-canonical financial labels rendered:\n"
         + "\n".join(rec.getMessage() for rec in non_canonical)
     )
+
+
+def test_payback_legend_labels_are_bare_canonical_names(tmp_path):
+    """The payback markers carry the bare canonical names with no
+    numeric annotation: the values live in SUMMARY.md and the KPI
+    sheet, so the figure drops into a paper unchanged."""
+    fig = _render_with_open_figure(
+        plot_payback, _yearly_cf(), tmp_path / "pb.pdf",
+        simple_payback_years=5.0, discounted_payback_years=7.0,
+    )
+    ax = fig.axes[0]
+    _, labels = ax.get_legend_handles_labels()
+    assert "Simple payback" in labels, labels
+    assert "Discounted payback" in labels, labels
+    assert not any("yr" in lbl or ":" in lbl for lbl in labels), labels
 
 
 def test_net_revenue_line_uses_iee_charcoal():

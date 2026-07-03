@@ -141,7 +141,7 @@ def test_benchmark_constants_are_tuples_of_two_floats():
 
 
 # ---------------------------------------------------------------------------
-# Legend still carries the numeric values
+# Legend carries bare series names (values live on the EUR/MWh axis)
 # ---------------------------------------------------------------------------
 
 
@@ -153,8 +153,10 @@ def test_lcoe_legend_carries_lazard_band_and_base(tmp_path: Path):
     legend = ax.get_legend()
     assert legend is not None
     labels = [t.get_text() for t in legend.get_texts()]
-    assert any("Lazard" in lab and "EUR/MWh" in lab for lab in labels)
-    assert any("Base LCOE" in lab and "EUR/MWh" in lab for lab in labels)
+    assert "Lazard 2024 LCOE band" in labels
+    assert "Base LCOE" in labels
+    # Paper contract: no numeric values or units inside legend entries.
+    assert not any("EUR/MWh" in lab or ":" in lab for lab in labels), labels
 
 
 def test_lcos_legend_carries_lazard_band_and_base(tmp_path: Path):
@@ -165,8 +167,9 @@ def test_lcos_legend_carries_lazard_band_and_base(tmp_path: Path):
     legend = ax.get_legend()
     assert legend is not None
     labels = [t.get_text() for t in legend.get_texts()]
-    assert any("Lazard" in lab and "EUR/MWh" in lab for lab in labels)
-    assert any("Base LCOS" in lab and "EUR/MWh" in lab for lab in labels)
+    assert "Lazard 2024 LCOS band" in labels
+    assert "Base LCOS" in labels
+    assert not any("EUR/MWh" in lab or ":" in lab for lab in labels), labels
 
 
 def test_no_diamond_marker_drawn(tmp_path: Path):

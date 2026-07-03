@@ -440,8 +440,9 @@ def test_uncertainty_family_legends_clear(plot_name, tmp_path):
 
 
 def test_coverage_ticks_end_at_probability_ceiling(tmp_path):
-    """The coverage panel may grow legend headroom above 1.0, but its
-    probability ticks must still end at 1.0."""
+    """The coverage panel keeps a bounded probability scale: ticks end
+    at 1.0 and the axis floor stays at 0 (the legend lives in the empty
+    lower-right half instead of a headroom band above 1.0)."""
     from pvbess_opt.plotting import inputs_uncertainty as iu
 
     ts = _uncertainty_ts()
@@ -503,3 +504,125 @@ def test_rolling_horizon_compare_sources_legend_clear(tmp_path):
     )
     assert fig is not None
     assert _family_overlap_issues(fig) == []
+
+
+def test_soh_replacement_legend_clear(tmp_path):
+    """The SOH trajectory's 'BESS replacement' legend sits clear of the
+    marker-carrying SOH curve for both early and late replacements."""
+    from pvbess_opt.plotting import degradation as deg_mod
+
+    def _render(frame: pd.DataFrame, out: Path):
+        return _capture(
+            deg_mod,
+            lambda: deg_mod.plot_soh_trajectory(frame, out),
+        )
+
+    for repl_year in (3, 10, 18):
+        rows, soh = [], 100.0
+        for y in range(1, 21):
+            if y == repl_year:
+                soh = 100.0
+            rows.append({
+                "project_year": y, "calendar_year": 2025 + y,
+                "soh_pct": soh, "capacity_fade_pct": 100.0 - soh,
+                "replacement": y == repl_year,
+            })
+            soh -= 2.4
+        fig = _render(pd.DataFrame(rows), tmp_path / f"soh_{repl_year}.pdf")
+        assert fig is not None
+        assert _legend_overlap_issues(fig.axes[0]) == [], (
+            f"replacement year {repl_year}"
+        )
+
+
+def test_coverage_legend_clear_of_curves(tmp_path):
+    """The coverage legend (lower right) never covers a vertex of the
+    three coverage curves."""
+    from pvbess_opt.plotting import inputs_uncertainty as iu
+
+    ts = _uncertainty_ts()
+    fig = _capture(
+        iu,
+        lambda: iu.plot_uncertainty_coverage_by_horizon(
+            ts, tmp_path / "cov.pdf", commit_steps=96,
+        ),
+    )
+    assert fig is not None
+    ax = fig.axes[0]
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    legend = ax.get_legend()
+    assert legend is not None
+    lbox = legend.get_window_extent(renderer=renderer)
+    for line in ax.lines:
+        if line.get_label() not in ("DAM", "PV", "Load"):
+            continue  # the nominal axhline spans the axis by design
+        pts = ax.transData.transform(
+            np.column_stack([line.get_xdata(), line.get_ydata()]),
+        )
+        inside = (
+            (pts[:, 0] >= lbox.x0) & (pts[:, 0] <= lbox.x1)
+            & (pts[:, 1] >= lbox.y0) & (pts[:, 1] <= lbox.y1)
+        )
+        assert not np.any(inside), (
+            f"coverage legend covers vertices of {line.get_label()!r}"
+        )
+
+
+def test_waterfall_tick_labels_do_not_overlap(tmp_path):
+    """With every column present (DAM, five balancing products, the
+    BSP fee and the total), the category labels cannot collide.
+
+    Same-angle rotated single-line labels sit in parallel lanes whose
+    perpendicular separation is ``column_spacing * sin(rotation)``;
+    with 30 degrees on the 7x4 canvas that is far above the glyph
+    height, so collisions are geometrically impossible.  Horizontal
+    labels (rotation 0) DID collide here — this locks the rotation,
+    the right-anchoring and the single-line shape it relies on.
+    """
+    from pvbess_opt.plotting.bess_revenue import plot_bess_revenue_waterfall
+
+    kpis = {
+        "revenue_bess_dam_eur": 2_000_000.0,
+        "revenue_bess_fcr_eur": 102_000.0,
+        "revenue_bess_afrr_up_eur": 249_000.0,
+        "revenue_bess_afrr_dn_eur": 87_000.0,
+        "revenue_bess_mfrr_up_eur": 23_000.0,
+        "revenue_bess_mfrr_dn_eur": 6_000.0,
+    }
+    econ = {"balancing_aggregator_fee_pct_revenue": 10.0}
+    fig = _capture(
+        bess_revenue_mod,
+        lambda: plot_bess_revenue_waterfall(
+            kpis, tmp_path / "wf.pdf", econ=econ,
+        ),
+    )
+    assert fig is not None
+    ax = fig.axes[0]
+    ticklabels = [t for t in ax.get_xticklabels() if t.get_text()]
+    labels = [t.get_text() for t in ticklabels]
+    assert len(labels) == 8, labels  # DAM + 5 products + fee + total
+    for t in ticklabels:
+        assert t.get_rotation() == pytest.approx(30.0), t.get_text()
+        assert t.get_horizontalalignment() == "right", t.get_text()
+        assert "\n" not in t.get_text(), t.get_text()
+
+
+def test_no_tick_inside_reserved_legend_band(tmp_path):
+    """apply_fine_ticks must not re-introduce a tick inside the band
+    reserve_legend_headroom cleared for the legend (it renders
+    half-hidden behind the legend frame)."""
+    fig = _capture(
+        lifecycle_mod,
+        lambda: plot_revenue_stack_yearly(
+            _yearly_cf(), _year1_kpis(), tmp_path / "rs.pdf",
+            econ={"retail_inflation_pct": 2.0},
+        ),
+    )
+    assert fig is not None
+    ax = fig.axes[0]
+    ceiling = getattr(ax, "_legend_headroom_ceiling", None)
+    assert ceiling is not None, "revenue stack must reserve legend headroom"
+    assert max(ax.get_yticks()) <= ceiling + 1e-9, (
+        ceiling, list(ax.get_yticks()),
+    )

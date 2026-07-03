@@ -509,10 +509,11 @@ def _canonical_match_key(label: str) -> str | None:
     """Return the canonical legend-order key for ``label``, or None.
 
     Exact matches in :data:`FINANCIAL_LEGEND_ORDER` win first.  As a
-    fallback we accept the ``"<canonical>: ..."`` pattern used by
-    :func:`pvbess_opt.plotting.financial.plot_payback`, where the
-    suffix carries a numeric annotation (e.g. ``"Simple payback: 5.0 yr"``)
-    that should not break canonical ordering.
+    fallback we accept the ``"<canonical>: ..."`` pattern, where the
+    suffix carries a numeric annotation (e.g. ``"Simple payback: 5.0
+    yr"``) that should not break canonical ordering.  The shipped
+    plots emit bare canonical names (legend entries carry no computed
+    values); the fallback is kept for robustness.
     """
     if label in FINANCIAL_LEGEND_ORDER:
         return label

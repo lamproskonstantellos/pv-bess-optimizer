@@ -44,7 +44,7 @@ _Z90 = 1.2816  # Phi^{-1}(0.90)
 # figure: the drawn legend is measured against the data artists and the
 # panel grows top headroom until the two no longer intersect.
 LEGEND_LOC = "upper right"
-LEGEND_KWARGS = dict(loc=LEGEND_LOC, framealpha=0.85, fontsize=9)
+LEGEND_KWARGS = dict(loc=LEGEND_LOC, framealpha=0.85, fontsize=7)
 
 __all__ = [
     "LEGEND_KWARGS",
@@ -119,7 +119,7 @@ def plot_input_forecast_band(
         else:
             low, high = _lognormal_band(np.maximum(actual, 0.0), sigma)
         ax.fill_between(t, low, high, color=color, alpha=0.20,
-                        label=f"P10–P90 (σ={sigma:.2f})")
+                        label=f"P10-P90 (σ={sigma:.2f})")
         ax.plot(t, actual, color=color, linewidth=1.0, label="Actual")
         ax.set_ylabel(ylabel)
         ax.grid(True, linestyle="--", alpha=0.5)
@@ -340,17 +340,21 @@ def plot_uncertainty_coverage_by_horizon(
         if hours:
             ax.plot(hours, cover, color=color, linewidth=1.2, label=label)
     ax.axhline(0.80, color="grey", linestyle="--", linewidth=1.0,
-               label="Nominal P10–P90 = 0.80")
+               label="Nominal P10-P90 coverage")
     ax.set_xlabel("Horizon (hours ahead)")
     ax.set_ylabel("Empirical coverage")
-    ax.set_ylim(0.0, 1.0)
+    # Bounded probability axis: keep the 0..1 scale intact and put the
+    # legend in the lower-right half, which the coverage curves (pinned
+    # near the 0.80 nominal line) leave empty — no headroom band above
+    # 1.0 distorting the scale.  Ticks are pinned so the auto-locator
+    # cannot emit one beyond the probability ceiling.
+    ax.set_ylim(0.0, 1.05)
+    ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
     if show_titles():
         ax.set_title("P10–P90 coverage by forecast horizon")
     ax.grid(True, linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
-    # The probability axis may grow headroom above 1.0 for the legend,
-    # but its ticks end at 1.0 so the scale still reads 0..1.
-    attach_legend_clear_of_data(ax, tick_ceiling=1.0, **LEGEND_KWARGS)
+    apply_universal_margins(ax, skip_y=True)
+    ax.legend(loc="lower right", framealpha=LEGEND_KWARGS["framealpha"])
     return save_figure(out_path)
 
 
@@ -384,7 +388,9 @@ def plot_uncertainty_pit_histogram(
                 label=f"{label} (n={pit.size})")
         ideal = pit.size / 20.0 if pit.size else 0.0
         ax.axhline(ideal, color="grey", linestyle="--", linewidth=1.0)
-        ax.set_ylabel(label)
+        # The panel's series identity lives in the legend; the y axis
+        # counts samples per PIT bin.
+        ax.set_ylabel("Count")
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     axes[-1].set_xlabel("PIT value")
     if show_titles():
@@ -478,7 +484,9 @@ def plot_uncertainty_residual_qq(
             lim = float(max(abs(theoretical).max(), abs(resid).max(), 1.0))
             ax.plot([-lim, lim], [-lim, lim], color="grey", linestyle="--",
                     linewidth=1.0, label="Standard normal")
-        ax.set_ylabel(label)
+        # The panel's series identity lives in the legend; the y axis
+        # is the empirical quantile of the normalised residuals.
+        ax.set_ylabel("Empirical quantile")
         ax.grid(True, linestyle="--", alpha=0.5)
     axes[-1].set_xlabel("Theoretical normal quantile")
     if show_titles():

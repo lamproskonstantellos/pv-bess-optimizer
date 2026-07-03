@@ -60,7 +60,8 @@ def test_soh_axis_fixed_zero_to_hundred_with_headroom(
 
 @pytest.mark.parametrize("replacement_year", [10, 0])
 def test_soh_plot_axes_state_before_save(monkeypatch, tmp_path, replacement_year):
-    """Capture the real axes at save time: fixed limits and ticks."""
+    """Capture the real axes at save time: fixed limits and ticks, and
+    the publication-style year axis (5-year labelled ticks only)."""
     captured: dict = {}
 
     import pvbess_opt.plotting.degradation as deg_mod
@@ -71,6 +72,8 @@ def test_soh_plot_axes_state_before_save(monkeypatch, tmp_path, replacement_year
         ax = plt.gcf().axes[0]
         captured["ylim"] = ax.get_ylim()
         captured["yticks"] = list(ax.get_yticks())
+        captured["xticks"] = list(ax.get_xticks())
+        captured["xminor"] = list(ax.get_xticks(minor=True))
         return real_save(out_path)
 
     monkeypatch.setattr(deg_mod, "save_figure", _spy)
@@ -78,3 +81,9 @@ def test_soh_plot_axes_state_before_save(monkeypatch, tmp_path, replacement_year
     plot_soh_trajectory(_frame(replacement_year), out)
     assert captured["ylim"] == (0.0, 105.0)
     assert captured["yticks"] == [float(v) for v in range(0, 101, 10)]
+    # Ticks only at the labelled 5-year positions: no minor ticks, in
+    # line with the labelled-ticks-only convention of every other year
+    # axis in the package.
+    assert captured["xticks"], "no major x ticks captured"
+    assert all(t % 5 == 0 for t in captured["xticks"]), captured["xticks"]
+    assert not captured["xminor"], captured["xminor"]

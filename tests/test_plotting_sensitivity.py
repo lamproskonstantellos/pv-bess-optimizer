@@ -204,27 +204,29 @@ def test_tornado_base_line_drawn(tmp_path, monkeypatch):
 
 
 def test_tornado_base_annotation_present(tmp_path, monkeypatch):
-    """The Base value appears in the legend (from the dashed axvline)
-    and nowhere else on the chart — no annotation above the top bar."""
+    """The Base marker appears in the legend (from the dashed axvline)
+    and nowhere else on the chart — no annotation above the top bar.
+    The legend entry is the bare name: the base value is readable off
+    the x-axis and quoted in SUMMARY.md."""
     captured = _capture(monkeypatch)
     plot_irr_tornado(_irr_sens_df(), {"irr_pct": 15.9}, _econ(),
                      tmp_path / "irr.pdf")
     ax = captured["fig"].axes[0]
     legend_texts = [t.get_text() for t in ax.get_legend().get_texts()]
-    assert any(t.startswith("Base = ") and "15.9%" in t
-               for t in legend_texts), legend_texts
+    assert any(t == "Base" for t in legend_texts), legend_texts
+    assert not any("=" in t for t in legend_texts), legend_texts
     bbox_texts = [t.get_text() for t in _bbox_texts(ax)]
-    assert not any(t.startswith("Base = ") for t in bbox_texts), bbox_texts
+    assert not any(t.startswith("Base") for t in bbox_texts), bbox_texts
 
     captured = _capture(monkeypatch)
     plot_npv_tornado(_npv_sens_df(), {"npv_eur": 9.0e6}, _econ(),
                      tmp_path / "npv.pdf")
     ax = captured["fig"].axes[0]
     legend_texts = [t.get_text() for t in ax.get_legend().get_texts()]
-    assert any(t.startswith("Base = ") and "€9.0M" in t
-               for t in legend_texts), legend_texts
+    assert any(t == "Base" for t in legend_texts), legend_texts
+    assert not any("=" in t for t in legend_texts), legend_texts
     bbox_texts = [t.get_text() for t in _bbox_texts(ax)]
-    assert not any(t.startswith("Base = ") for t in bbox_texts), bbox_texts
+    assert not any(t.startswith("Base") for t in bbox_texts), bbox_texts
 
 
 def test_tornado_y_axis_labels_include_range(tmp_path, monkeypatch):
@@ -322,7 +324,7 @@ def test_tornado_minimal_frame(tmp_path, monkeypatch):
     """A frame without driver-value metadata renders zero endpoint
     labels: no driver-value labels (no metadata to draw from) and no
     metric labels either (the metric is read from the x-axis).  The
-    ``Base = ...`` legend entry from the dashed axvline is still
+    bare ``Base`` legend entry from the dashed axvline is still
     present; the y-axis ticks omit the ``±range`` suffix."""
     captured = _capture(monkeypatch)
     out = plot_irr_tornado(_minimal_sens_df(), {"irr_pct": 15.0}, _econ(),
@@ -332,11 +334,11 @@ def test_tornado_minimal_frame(tmp_path, monkeypatch):
     ylabels = [t.get_text() for t in ax.get_yticklabels()]
     assert not any("±" in lbl for lbl in ylabels), ylabels
     annotations = [t.get_text() for t in _bbox_texts(ax)]
-    assert not any(a.startswith("Base = ") for a in annotations), annotations
+    assert not any(a.startswith("Base") for a in annotations), annotations
     # No endpoint labels at all — dots + x-axis carry the information.
     assert _endpoint_texts(ax) == [], (
         f"unexpected endpoint labels: "
         f"{[t.get_text() for t in _endpoint_texts(ax)]}"
     )
     legend_texts = [t.get_text() for t in ax.get_legend().get_texts()]
-    assert any(t.startswith("Base = ") for t in legend_texts), legend_texts
+    assert any(t == "Base" for t in legend_texts), legend_texts
