@@ -80,8 +80,8 @@ Plot behaviour
   missing asset's stacks.
 * Every energy-plot title carries a project-mode suffix —
   ``(self_consumption; PV-only)``, ``(merchant; BESS-only)``, etc — driven by the
-  ``set_project_mode_label`` setter that ``main.py`` calls before
-  the plot fan-out.
+  ``set_project_mode_label`` setter that ``pvbess_opt.pipeline`` calls
+  before the plot fan-out.
 * The merchant-mode ``plot_*_soc`` helpers skip rendering when the BESS
   is absent (no SOC trajectory worth plotting).
 * The lifecycle ``plot_lifetime_cycles``, ``plot_lcoe_summary``, and
