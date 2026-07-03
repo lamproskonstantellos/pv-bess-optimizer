@@ -192,8 +192,8 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     # LFP cycle-fade default (matches the canonical workbook row in
     # _BESS_ROWS and the schema default); range 0.005-0.010.
     "bess_degradation_pct_per_cycle": 0.008,
-    # End-of-life SOH threshold (%) for the diagnostic replacement
-    # schedule when no bess_replacement_year is set.
+    # End-of-life SOH threshold (%) driving the automatic replacement
+    # when bess_replacement_year is blank / 'auto'.
     "bess_eol_soh_pct": 80.0,
     # Per-MWh-throughput cycle wear cost in the dispatch objective (0 = off).
     "bess_wear_cost_eur_per_mwh": 0.0,
@@ -553,9 +553,17 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Annual O&M for BESS. Stays on the power basis: fixed O&M "
      "contracts are quoted per kW of the power block."),
     ("bess_replacement_year", 0, "year",
-     "Year of BESS cell replacement (0 = no replacement). Typical 10 or 15."),
+     "BESS replacement policy. N (positive integer) = replace in project "
+     "year N; bess_eol_soh_pct is then ignored. Blank cell or 'auto' = "
+     "replace in the first year state-of-health falls to "
+     "bess_eol_soh_pct (the replacement CAPEX is charged in the "
+     "cashflow in that year). 0 = never replace. Typical scheduled "
+     "values 10 or 15. Only ONE replacement is ever charged; if a "
+     "second SOH crossing would occur after an auto replacement the "
+     "run log warns."),
     ("bess_replacement_cost_pct", 50, "%",
-     "Replacement cost as percent of original BESS CAPEX."),
+     "Replacement cost as percent of original BESS CAPEX. Charged in "
+     "the effective replacement year (scheduled or auto)."),
     ("bess_degradation_annual_pct", 2.0, "%",
      "Linear BESS capacity fade. Approximate Tier-1 LFP cell warranty."),
     ("bess_degradation_pct_per_cycle", 0.008, "%",
@@ -563,11 +571,12 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "percent. LFP default 0.008 (range 0.005-0.010). Set to 0 to "
      "disable cycle aging (calendar-only mode)."),
     ("bess_eol_soh_pct", 80.0, "%",
-     "End-of-life state-of-health threshold for the SOH diagnostic: "
-     "when no bess_replacement_year is scheduled, the degradation "
-     "report swaps in a fresh pack the first year SOH falls to this "
-     "level. Diagnostic only — the cashflow charges replacement CAPEX "
-     "only for a scheduled bess_replacement_year."),
+     "End-of-life state-of-health threshold driving the automatic "
+     "replacement when bess_replacement_year is blank or 'auto': the "
+     "battery is replaced (and the replacement CAPEX charged in the "
+     "cashflow) in the first project year SOH falls to this level. "
+     "Ignored when a replacement year is scheduled explicitly, and "
+     "when bess_replacement_year = 0 (never replace)."),
 )
 
 _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -1210,6 +1219,8 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         # Free-form PVGIS strings: a blank cell resolves to the default
         # (None); a non-blank cell is taken verbatim (stripped).
         return _parse_pv_path(raw, default)
+    if key == "bess_replacement_year":
+        return _parse_bess_replacement_year(raw, default)
     if key in _INT_KEYS:
         coerced = _coerce(raw, int, default)
         if coerced is _COERCE_FAILED:
@@ -1294,6 +1305,60 @@ def reject_legacy_bess_capex_key(keys: Any, *, source: str) -> None:
             "scripts/polish_input_workbook.py to migrate the workbook "
             "automatically."
         )
+
+
+#: Sentinel value for the SOH-threshold automatic BESS replacement.
+BESS_REPLACEMENT_AUTO = "auto"
+
+
+def _parse_bess_replacement_year(raw: Any, default: Any) -> int | str:
+    """Parse ``bess_replacement_year`` with three-way semantics.
+
+    * blank cell or the literal string ``auto`` (case-insensitive) →
+      :data:`BESS_REPLACEMENT_AUTO`: replace in the first project year
+      whose SOH falls to ``bess_eol_soh_pct`` (resolved once by
+      :func:`pvbess_opt.lifetime.resolve_bess_replacement_year`);
+    * ``0`` → never replace;
+    * a positive integer → scheduled replacement in that project year.
+
+    Negative or non-integer values raise ``ValueError`` — this key must
+    not fall back silently (the v0.x parser collapsed a blank cell into
+    the default 0, silently disabling replacement).
+    """
+    _ = default  # three-way semantics leave no room for a fallback
+    if raw is None:
+        return BESS_REPLACEMENT_AUTO
+    if isinstance(raw, float) and np.isnan(raw):
+        return BESS_REPLACEMENT_AUTO
+    if isinstance(raw, str):
+        token = raw.strip().lower()
+        if token == "" or token == BESS_REPLACEMENT_AUTO:
+            return BESS_REPLACEMENT_AUTO
+        try:
+            value = float(token)
+        except ValueError:
+            raise ValueError(
+                f"'bess_replacement_year' must be a non-negative integer, "
+                f"blank, or 'auto'; got {raw!r}."
+            ) from None
+    else:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"'bess_replacement_year' must be a non-negative integer, "
+                f"blank, or 'auto'; got {raw!r}."
+            ) from None
+    if not float(value).is_integer():
+        raise ValueError(
+            f"'bess_replacement_year' must be a whole year; got {raw!r}."
+        )
+    year = int(value)
+    if year < 0:
+        raise ValueError(
+            f"'bess_replacement_year' must be non-negative; got {raw!r}."
+        )
+    return year
 
 
 def _parse_kv_sheet(
@@ -2376,6 +2441,7 @@ def write_summary_md(
     financial_kpis: dict[str, Any] | None,
     params: dict[str, Any],
     solver_name: str | None = None,
+    replacement_note: str | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -2401,6 +2467,8 @@ def write_summary_md(
         "- Grid charging: "
         f"{'on' if params.get('allow_bess_grid_charging') else 'off'}"
     )
+    if replacement_note:
+        lines.append(f"- BESS replacement: {replacement_note}")
     if solver_name:
         lines.append(f"- Solver: `{solver_name}`")
     lines.append("")

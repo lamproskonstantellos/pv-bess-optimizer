@@ -58,6 +58,8 @@ __all__ = [
     "aggregate_lifetime_to_yearly",
     "bess_capacity_factors",
     "build_lifetime_dispatch",
+    "effective_bess_replacement_year",
+    "resolve_bess_replacement_year",
 ]
 
 # Columns scaled by the PV degradation curve.
@@ -115,6 +117,102 @@ _BALANCING_RESERVATION_COLUMNS: tuple[str, ...] = (
     "bm_reservation_mfrr_up_kw",
     "bm_reservation_mfrr_dn_kw",
 )
+
+
+def resolve_bess_replacement_year(
+    econ: dict[str, Any],
+    *,
+    year1_discharge_mwh: float,
+    capacity_mwh: float,
+) -> tuple[int, str, int]:
+    """Resolve ``bess_replacement_year`` to one effective project year.
+
+    Three-way semantics (see the workbook help text):
+
+    * a positive integer N schedules the replacement in year N and the
+      SOH threshold ``bess_eol_soh_pct`` is ignored completely;
+    * the ``auto`` sentinel (blank cell or the literal string) replaces
+      in the first project year whose SOH falls to
+      ``bess_eol_soh_pct``, resolved analytically with
+      :func:`bess_capacity_factors`; no crossing within the lifecycle
+      means no replacement;
+    * 0 never replaces.
+
+    Returns ``(effective_year, source, second_crossing_year)`` where
+    ``source`` is ``"scheduled"``, ``"soh_threshold"``,
+    ``"soh_threshold_not_reached"`` or ``"never"``, and
+    ``second_crossing_year`` is the first year the POST-replacement pack
+    would cross the threshold again (0 = none).  Only one replacement is
+    ever charged; callers surface the second crossing as a warning.
+    The resolved value is stored by the pipeline as
+    ``econ['bess_replacement_year_effective']`` so every consumer
+    (cashflow, lifetime projection, LCOS, degradation report) reads one
+    source of truth via :func:`effective_bess_replacement_year`.
+    """
+    raw = econ.get("bess_replacement_year", 0)
+    n_years = int(
+        econ.get(
+            "project_lifecycle_years",
+            PROJECT_SHEET_DEFAULTS["project_lifecycle_years"],
+        )
+        or PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]
+    )
+    d_annual = float(econ.get("bess_degradation_annual_pct", 0.0) or 0.0) / 100.0
+    d_cycle = float(
+        econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
+    ) / 100.0
+    threshold = float(econ.get("bess_eol_soh_pct", 80.0) or 80.0) / 100.0
+
+    def _first_crossing(replacement_year: int, from_year: int) -> int:
+        factors = bess_capacity_factors(
+            n_years,
+            d_bess_annual=d_annual,
+            d_bess_per_cycle=d_cycle,
+            year1_discharge_mwh=float(year1_discharge_mwh),
+            capacity_mwh=float(capacity_mwh),
+            replacement_year=replacement_year,
+        )
+        for y in range(from_year, n_years + 1):
+            if factors[y - 1] <= threshold + 1e-12:
+                return y
+        return 0
+
+    is_auto = isinstance(raw, str) and raw.strip().lower() == "auto"
+    if not is_auto:
+        scheduled = int(raw or 0)
+        if scheduled > 0:
+            return scheduled, "scheduled", 0
+        return 0, "never", 0
+
+    effective = _first_crossing(0, 1)
+    if effective <= 0:
+        return 0, "soh_threshold_not_reached", 0
+    second = _first_crossing(effective, effective + 1)
+    return effective, "soh_threshold", second
+
+
+def effective_bess_replacement_year(econ: dict[str, Any]) -> int:
+    """Return the effective replacement year for finance-layer consumers.
+
+    Prefers the pipeline-resolved ``bess_replacement_year_effective``;
+    falls back to a plain integer ``bess_replacement_year``.  An
+    unresolved ``auto`` sentinel raises: the AUTO resolution must happen
+    exactly once (:func:`resolve_bess_replacement_year`), never
+    implicitly inside a consumer.
+    """
+    if "bess_replacement_year_effective" in econ:
+        return int(econ.get("bess_replacement_year_effective") or 0)
+    raw = econ.get("bess_replacement_year", 0)
+    if isinstance(raw, str):
+        if raw.strip().lower() == "auto":
+            raise ValueError(
+                "bess_replacement_year='auto' has not been resolved; call "
+                "resolve_bess_replacement_year() and store the result as "
+                "econ['bess_replacement_year_effective'] before the "
+                "finance layer runs."
+            )
+        return int(float(raw))
+    return int(raw or 0)
 
 
 def _pv_factor(y: int, lid: float, d_annual: float) -> float:
@@ -255,7 +353,7 @@ def build_lifetime_dispatch(
     d_bess_per_cycle = float(
         econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
     ) / 100.0
-    bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
+    bess_repl_year = effective_bess_replacement_year(econ)
 
     # Full equivalent cycle convention: discharge-only FEC, matching
     # ``compute_financial_kpis`` (bess_lifetime_cycles = discharge MWh /

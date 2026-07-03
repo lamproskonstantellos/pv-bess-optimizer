@@ -61,7 +61,12 @@ from pvbess_opt.kpis import (
     compute_monthly_kpis,
     verify_energy_balance,
 )
-from pvbess_opt.lifetime import aggregate_lifetime_to_yearly, build_lifetime_dispatch
+from pvbess_opt.lifetime import (
+    aggregate_lifetime_to_yearly,
+    build_lifetime_dispatch,
+    effective_bess_replacement_year,
+    resolve_bess_replacement_year,
+)
 from pvbess_opt.modes import resolve_mode
 from pvbess_opt.optimization import (
     BALANCING_INVARIANT_KEYS,
@@ -600,16 +605,42 @@ def _build_financials(
         )
 
     capacities = derive_asset_capacities(econ, params, ts)
-    yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
-    monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
-    # Symmetric cycle-count input: build_yearly_cashflow already
-    # reads bess_total_discharge_mwh from the derated kpis dict, so
-    # feed the same number into build_lifetime_dispatch.  Without this
-    # the two paths run separate cycle counters that drift by
-    # ``unavailability_pct`` over the lifecycle.
+    # Symmetric cycle-count input: build_yearly_cashflow reads
+    # bess_total_discharge_mwh from the derated kpis dict, so feed the
+    # same number into build_lifetime_dispatch and the replacement
+    # resolver.  Without this the paths run separate cycle counters
+    # that drift by ``unavailability_pct`` over the lifecycle.
     year1_discharge_for_cycles = float(
         kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
     )
+    # Resolve the three-way replacement semantics exactly once; every
+    # downstream consumer (cashflow, LCOS, lifetime projection,
+    # degradation report) reads the stored effective year.
+    repl_year, repl_source, repl_second = resolve_bess_replacement_year(
+        econ,
+        year1_discharge_mwh=year1_discharge_for_cycles,
+        capacity_mwh=float(capacities.get("bess_kwh", 0.0) or 0.0) / 1000.0,
+    )
+    econ["bess_replacement_year_effective"] = int(repl_year)
+    econ["bess_replacement_year_source"] = repl_source
+    if repl_source == "soh_threshold":
+        logger.info(
+            "[financials] BESS replacement resolved from the SOH "
+            "threshold (bess_eol_soh_pct=%s %%): effective year %d.",
+            econ.get("bess_eol_soh_pct", 80.0), repl_year,
+        )
+    if repl_second:
+        econ["bess_replacement_second_crossing_year"] = int(repl_second)
+        logger.warning(
+            "[financials] After the automatic replacement in year %d the "
+            "fresh pack would cross the %s %% SOH threshold again in "
+            "year %d. Only the FIRST replacement is charged; the model "
+            "does not charge a second replacement within the project "
+            "lifecycle.",
+            repl_year, econ.get("bess_eol_soh_pct", 80.0), repl_second,
+        )
+    yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
+    monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
     lifetime_df = build_lifetime_dispatch(
         res, econ, capacities,
         year1_discharge_mwh=year1_discharge_for_cycles,
@@ -703,8 +734,10 @@ def _build_degradation_report(
                      PROJECT_SHEET_DEFAULTS["project_start_year"])
             or PROJECT_SHEET_DEFAULTS["project_start_year"]
         ),
-        end_of_life_soh_pct=float(econ.get("bess_eol_soh_pct", 80.0) or 80.0),
-        replacement_year=int(econ.get("bess_replacement_year", 0) or 0),
+        # The single resolved replacement year (scheduled, SOH-threshold
+        # auto, or 0 = never) — set by _build_financials, which runs
+        # before this report in the pipeline.
+        replacement_year=effective_bess_replacement_year(econ),
     )
 
 
@@ -782,6 +815,29 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
             "Strict-mode invariant violations: "
             + ", ".join(f"{k}={v:.6g}" for k, v in offenders.items())
         )
+
+
+def _format_replacement_note(econ: dict[str, Any]) -> str | None:
+    """One-line SUMMARY.md digest of the resolved replacement semantics."""
+    if "bess_replacement_year_effective" not in econ:
+        return None
+    year = int(econ.get("bess_replacement_year_effective") or 0)
+    source = str(econ.get("bess_replacement_year_source", "") or "")
+    eol = econ.get("bess_eol_soh_pct", 80.0)
+    if source == "scheduled":
+        return f"year {year} (scheduled)"
+    if source == "soh_threshold":
+        note = f"year {year} (auto: SOH reaches {eol} %)"
+        second = int(econ.get("bess_replacement_second_crossing_year", 0) or 0)
+        if second:
+            note += (
+                f"; the fresh pack would cross the threshold again in "
+                f"year {second} — only the first replacement is charged"
+            )
+        return note
+    if source == "soh_threshold_not_reached":
+        return f"none (auto: SOH stays above {eol} % for the whole lifecycle)"
+    return "none"
 
 
 def _check_strict_energy_balance(residuals: dict[str, float]) -> None:
@@ -1226,6 +1282,7 @@ def _run_one(
             financial_kpis=bundle.get("fin_kpis"),
             params=params,
             solver_name=resolved_solver,
+            replacement_note=_format_replacement_note(econ),
         )
 
         # Balancing plot pair promised by the README's report list; both

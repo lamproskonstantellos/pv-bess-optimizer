@@ -143,17 +143,23 @@ Sheet ``bess``
   permitting and fixed O&M stay on the power basis: both scale with
   the power block, not the energy capacity.
 * ``bess_replacement_year`` / ``bess_replacement_cost_pct`` —
-  Year-N replacement (0 disables).
+  replacement policy and cost.  Three-way semantics: a positive integer
+  N schedules the replacement in project year N (the SOH threshold is
+  then ignored); a blank cell or the literal ``auto`` replaces in the
+  first year state-of-health falls to ``bess_eol_soh_pct``, with the
+  replacement CAPEX charged in the cashflow in that year; ``0`` never
+  replaces.  Only one replacement is ever charged — if the fresh pack
+  would cross the threshold again the run log warns.
 * ``bess_degradation_annual_pct`` — linear calendar BESS capacity fade.
 * ``bess_degradation_pct_per_cycle`` — cycle-based capacity fade per
   full equivalent cycle, in percent (LFP default 0.008, range
   0.005–0.010; NMC ~0.010–0.020).  Layered additively on the calendar
   fade.  Set to 0 — or omit the row — to use calendar-only fade.
-* ``bess_eol_soh_pct`` (default 80) — end-of-life SOH threshold for the
-  degradation diagnostic: when no ``bess_replacement_year`` is
-  scheduled, the SOH report swaps in a fresh pack the first year SOH
-  falls to this level.  Diagnostic only — the cashflow charges
-  replacement CAPEX only for a scheduled ``bess_replacement_year``.
+* ``bess_eol_soh_pct`` (default 80) — end-of-life SOH threshold that
+  drives the automatic replacement when ``bess_replacement_year`` is
+  blank or ``auto``: the battery is replaced, and the replacement CAPEX
+  charged, in the first project year SOH falls to this level.  Ignored
+  under a scheduled replacement year and under ``0`` (never replace).
 * ``bess_wear_cost_eur_per_mwh`` — cycle wear cost penalised per MWh
   discharged in the dispatch objective (default 0 = off).  When set, the
   optimizer only cycles when the price spread beats the wear cost.  It is

@@ -53,23 +53,45 @@ def test_derive_wear_cost():
 
 
 def test_build_degradation_report_fades_and_replaces():
-    # No scheduled replacement: calendar + cycle fade drive the curve down to
-    # the end-of-life threshold, where the pack is swapped (SOH back to 100).
+    # Auto mode: the resolver finds the first SOH crossing of the
+    # threshold, and the report swaps the pack in exactly that year
+    # (SOH back to 100) — the same year the cashflow charges the
+    # replacement CAPEX.
+    from pvbess_opt.lifetime import resolve_bess_replacement_year
+
+    econ = {
+        "bess_replacement_year": "auto",
+        "bess_eol_soh_pct": 80.0,
+        "bess_degradation_annual_pct": 2.0,
+        "bess_degradation_pct_per_cycle": 0.1,
+        "project_lifecycle_years": 10,
+    }
+    effective, source, _second = resolve_bess_replacement_year(
+        econ, year1_discharge_mwh=50.0, capacity_mwh=1.0,
+    )
+    assert source == "soh_threshold"
+    assert effective > 1
+
     soc = np.append(np.tile([0.0, 1000.0], 50), 0.0)  # 50 full cycles, closed
     report = build_degradation_report(
         soc,
         capacity_kwh=1000.0, soc_min_frac=0.0, soc_max_frac=1.0,
         degradation_pct_per_cycle=0.1, degradation_annual_pct=2.0,
         year1_discharge_mwh=50.0, project_years=10, start_year=2026,
-        end_of_life_soh_pct=80.0,
+        replacement_year=effective,
     )
     assert len(report) == 10
     assert report["equivalent_full_cycles"].iloc[0] == pytest.approx(50.0)
     # Year 1 is a fresh pack: no fade yet (matches the finance bess_factor).
     assert report["soh_pct"].iloc[0] == pytest.approx(100.0)
-    # SOH declines thereafter and crosses EoL within the horizon.
+    # SOH declines, crosses the threshold at the resolved year, and the
+    # swap happens there and only there.
     assert report["soh_pct"].iloc[1] < 100.0
-    assert bool(report["replacement"].any())
+    repl_years = report.loc[report["replacement"], "project_year"].tolist()
+    assert repl_years == [effective]
+    assert report["soh_pct"].iloc[effective - 1] == pytest.approx(100.0)
+    # The year BEFORE the swap is the first crossing of the threshold.
+    assert report["soh_pct"].iloc[effective - 2] > 80.0 or effective == 2
     assert (report["soh_pct"] >= 0.0).all()
 
 

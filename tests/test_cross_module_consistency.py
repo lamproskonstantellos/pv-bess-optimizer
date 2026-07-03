@@ -135,7 +135,6 @@ def test_bess_factor_single_source_of_truth(d_ann, d_cyc, repl, n_years, unav):
         soc_max_frac=1.0, degradation_pct_per_cycle=d_cyc,
         degradation_annual_pct=d_ann, year1_discharge_mwh=derated_dis_mwh,
         project_years=n_years, start_year=2026, replacement_year=repl,
-        end_of_life_soh_pct=-1.0,
     )
     soh = rep.set_index("project_year")["soh_pct"]
     for y in range(1, n_years + 1):

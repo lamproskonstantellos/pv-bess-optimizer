@@ -47,9 +47,9 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | pv | `capex_pv_eur_per_kw`, `devex_pv_eur_per_kw`, `opex_pv_eur_per_kwp` | 525, 60, 7 | PV cost block |
 | pv | `pv_degradation_year1_pct`, `pv_degradation_annual_pct` | 2.5, 0.55 | $d_1$, $d_a$ |
 | bess | `capex_bess_eur_per_kwh`, `devex_bess_eur_per_kw`, `opex_bess_eur_per_kw` | 250, 30, 14 | BESS cost block (CAPEX per kWh of energy capacity; DEVEX / OPEX per kW of the power block) |
-| bess | `bess_replacement_year`, `bess_replacement_cost_pct` | 0, 50 | replacement event |
+| bess | `bess_replacement_year`, `bess_replacement_cost_pct` | 0, 50 | replacement event: N = scheduled year, blank/`auto` = first year SOH reaches `bess_eol_soh_pct` (charged), 0 = never |
 | bess | `bess_degradation_annual_pct`, `bess_degradation_pct_per_cycle` | 2.0, 0.008 | $d_B$, $d_c$ |
-| bess | `bess_eol_soh_pct` | 80 | diagnostic EOL threshold (degradation report) |
+| bess | `bess_eol_soh_pct` | 80 | EOL SOH threshold driving the `auto` replacement |
 | balancing | `bm_inflation_pct` | 2.0 | $i_{\mathrm{bm}}$ (balancing sheet key; tracks CPI by default) |
 | ppa | `ppa_inflation_pct`, `ppa_term_years`, `ppa_settlement` | 0, 10, physical | PPA stream wiring (`docs/ppa_design.md`) |
 
@@ -86,6 +86,33 @@ $$D_{y,m} = \frac{1}{(1+\rho)^{\,(y-1)+m/12}} \tag{E4}$$
 Investment events inside an operating year (the BESS replacement) are
 booked in **month 12**, so the monthly and yearly DCFs agree on the
 event by construction.
+
+### Replacement semantics
+
+`bess_replacement_year` resolves to ONE effective replacement year
+before the finance layer runs
+(`pvbess_opt.lifetime.resolve_bess_replacement_year`), and every
+consumer — the yearly cashflow (E14), the monthly month-12 booking, the
+LCOS numerator, the lifetime projection reset and the degradation
+report — reads that single resolved value:
+
+* **N (positive integer)**: scheduled replacement in project year N;
+  `bess_eol_soh_pct` is ignored completely.
+* **blank / `auto`**: automatic replacement in the first project year
+  the analytic SOH curve falls to `bess_eol_soh_pct`.  This is a real
+  replacement: the CAPEX is charged in the cashflow, the fade
+  accumulator and the lifetime dispatch projection reset, and the
+  degradation report shows the swap in the same year.  If the curve
+  never reaches the threshold within the lifecycle, no replacement
+  happens.
+* **0**: never replace; the SOH report shows the fade continuing below
+  the threshold without a swap.
+
+Only the FIRST threshold crossing is charged.  If the fresh pack would
+cross the threshold again within the remaining horizon the run log
+carries a prominent warning and `SUMMARY.md` notes it, but the model
+does not charge a second replacement — projects whose battery wears
+through two packs need an explicit scheduled strategy.
 
 ### Wear cost vs replacement cost (no double counting)
 

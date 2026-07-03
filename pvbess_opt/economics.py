@@ -78,7 +78,7 @@ from .constants import (
 )
 from .io import PROJECT_SHEET_DEFAULTS, read_workbook
 from .kpis import require_economic_columns
-from .lifetime import bess_capacity_factors
+from .lifetime import bess_capacity_factors, effective_bess_replacement_year
 
 logger = logging.getLogger(__name__)
 
@@ -523,7 +523,7 @@ def build_yearly_cashflow(
     else:
         ppa_strike_value_1 = rev1_ppa
 
-    bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
+    bess_repl_year = effective_bess_replacement_year(econ)
     bess_repl_cost_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
 
     # BESS capacity factors from the shared reset-at-replacement
@@ -1296,7 +1296,7 @@ def compute_financial_kpis(
             bess_devex_y0 = (
                 float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
             )
-            bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
+            bess_repl_year = effective_bess_replacement_year(econ)
             bess_repl_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
 
             disc_y0 = float(
@@ -1384,7 +1384,7 @@ def compute_financial_kpis(
         d_cycle_fade = float(
             econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
         ) / 100.0
-        repl_fade = int(econ.get("bess_replacement_year", 0) or 0)
+        repl_fade = effective_bess_replacement_year(econ)
         if repl_fade > 0 and n_op_years >= repl_fade:
             years_since_final = n_op_years - repl_fade
             reset_start = repl_fade

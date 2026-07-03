@@ -56,8 +56,14 @@ Scaling rules (per year :math:`y`)
   identically.
 
   The replacement CAPEX line is added separately by
-  :func:`pvbess_opt.economics.build_yearly_cashflow` at year
-  ``bess_replacement_year``.
+  :func:`pvbess_opt.economics.build_yearly_cashflow` at the EFFECTIVE
+  replacement year: ``bess_replacement_year`` resolves once via
+  :func:`pvbess_opt.lifetime.resolve_bess_replacement_year` (N =
+  scheduled year, blank / ``auto`` = the first year the analytic SOH
+  curve falls to ``bess_eol_soh_pct``, 0 = never), and the fade
+  sequence itself comes from the shared
+  :func:`pvbess_opt.lifetime.bess_capacity_factors` accumulator used by
+  the cashflow, the lifetime projection and the degradation report.
 
 * **Load** and **grid prices** are unchanged across years.
 * **Mixed flows** (``grid_to_load_kwh``) pass through Year-1 values;

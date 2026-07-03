@@ -156,8 +156,10 @@ location".
 `max_cycles_per_day`, `capex_bess_eur_per_kwh` (full installed BESS
 CAPEX per kWh of nameplate energy capacity; DEVEX and OPEX stay per
 kW of the power block), calendar and per-cycle fade coefficients,
-replacement year and cost, the end-of-life SOH threshold, and the
-`bess_wear_cost_eur_per_mwh` dispatch shadow price.
+the replacement policy (`bess_replacement_year`: N = scheduled year,
+blank or `auto` = replace when SOH first reaches `bess_eol_soh_pct`
+with the CAPEX charged in the cashflow, 0 = never), the replacement
+cost, and the `bess_wear_cost_eur_per_mwh` dispatch shadow price.
 
 ### `economics`
 

@@ -664,6 +664,12 @@ def config_json_schema() -> dict[str, Any]:
             props[key] = spec
         if section == "pv":
             props.update(_pv_schema_overrides())
+        if section == "bess":
+            # Three-way replacement semantics: a non-negative integer
+            # (0 = never, N = scheduled year) or the literal 'auto'.
+            props["bess_replacement_year"] = {
+                "type": ["integer", "string"],
+            }
         properties[section] = {
             "type": "object",
             "properties": props,
@@ -682,7 +688,9 @@ def config_json_schema() -> dict[str, Any]:
     }
 
 
-def _type_matches(value: Any, json_type: str | None) -> bool:
+def _type_matches(value: Any, json_type: str | list[str] | None) -> bool:
+    if isinstance(json_type, (list, tuple)):
+        return any(_type_matches(value, jt) for jt in json_type)
     if json_type == "number":
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     if json_type == "integer":
