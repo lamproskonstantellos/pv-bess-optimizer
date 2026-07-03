@@ -1,7 +1,7 @@
 # PV & BESS Optimizer
 
 [![license](https://img.shields.io/badge/license-All%20Rights%20Reserved-red)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.9.0-blue)](pvbess_opt/__init__.py)
+[![version](https://img.shields.io/badge/version-1.0.0-blue)](pvbess_opt/__init__.py)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
 
@@ -487,7 +487,7 @@ in [`pvbess_opt/conventions.md`](pvbess_opt/conventions.md).
 If this tool contributes to academic work, please cite it as:
 
 ```
-Konstantellos, L. (2026). PV & BESS Optimizer (v0.9.0): MILP dispatch
+Konstantellos, L. (2026). PV & BESS Optimizer (v1.0.0): MILP dispatch
 and project-finance pipeline for co-located PV + battery systems.
 https://github.com/lamproskonstantellos/pv-bess-optimizer
 ```
@@ -500,7 +500,7 @@ BibTeX:
   title   = {{PV} \& {BESS} Optimizer: {MILP} dispatch and
              project-finance pipeline for co-located {PV} + battery
              systems},
-  version = {0.9.0},
+  version = {1.0.0},
   year    = {2026},
   url     = {https://github.com/lamproskonstantellos/pv-bess-optimizer}
 }

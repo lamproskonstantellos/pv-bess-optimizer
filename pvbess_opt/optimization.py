@@ -206,7 +206,7 @@ def _has_feasible_incumbent(model: pyo.ConcreteModel | None) -> bool:
     ``var.value``, which we treat as "no incumbent".  Probing a named
     variable instead of "first var encountered via
     ``component_data_objects``" makes the check robust to refactors that
-    change the declaration order (Pass-2 P2.8).
+    change the declaration order.
     """
     if model is None:
         return False
@@ -1448,7 +1448,7 @@ def _balancing_invariants(
     # / params["soc_max_frac"] directly, so the loader always populates
     # both keys (io._typed_to_flat).  A silent .get fallback here would let
     # a hand-built ``params`` dict bypass the invariant check that build
-    # would have rejected with KeyError.  Pass-2 P2.4.
+    # would have rejected with KeyError.
     soc_min = float(params["soc_min_frac"]) * bess_kwh
     soc_max = float(params["soc_max_frac"]) * bess_kwh
     h_buf = cfg.bm_soc_headroom_pct / 100.0

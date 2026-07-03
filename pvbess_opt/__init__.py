@@ -56,4 +56,4 @@ from .pipeline import Results, RunConfig, run
 
 __all__ = ["Results", "RunConfig", "__version__", "run"]
 
-__version__ = "0.9.0"
+__version__ = "1.0.0"

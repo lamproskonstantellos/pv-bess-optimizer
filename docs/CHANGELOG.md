@@ -1,8 +1,88 @@
 # Changelog
 
+## 1.0.0 (2026-07-03)
+
+Production release.
+
+### Changed (breaking)
+
+- BESS CAPEX is priced per kWh of nameplate energy capacity:
+  `capex_bess_eur_per_kw` is renamed to `capex_bess_eur_per_kwh`
+  (default 250, full installed cost, Lazard band 215-315 EUR/kWh) and
+  multiplies `bess_capacity_kwh` instead of `bess_power_kw` in the
+  Year-0 CAPEX and the LCOS numerator; the replacement charge inherits
+  the basis. `devex_bess_eur_per_kw` and `opex_bess_eur_per_kw` stay on
+  the power basis. Workbooks and configs carrying the legacy key are
+  rejected with a conversion message (value_per_kwh = value_per_kw x
+  bess_power_kw / bess_capacity_kwh); `scripts/polish_input_workbook.py`
+  migrates them automatically.
+- `bess_replacement_year` has three-way semantics resolved identically
+  across the cashflow, the LCOS numerator, the lifetime projection and
+  the degradation report: a positive integer N schedules the
+  replacement in year N (the SOH threshold is ignored); a blank cell or
+  `auto` replaces in the first project year state-of-health falls to
+  `bess_eol_soh_pct`, with the replacement CAPEX charged in the
+  cashflow; 0 never replaces. A blank cell no longer collapses silently
+  into 0. Only the first threshold crossing is charged; a second
+  crossing logs a prominent warning. `SUMMARY.md` and the
+  economic_assumptions sheet report the effective year and its source.
+- New default assumptions: `efficiency_charge` and
+  `efficiency_discharge` move from 0.97 to 0.95 (round-trip 0.9025) and
+  `bess_wear_cost_eur_per_mwh` from 0 to 10 (a dispatch shadow price,
+  never charged in the cashflow).
+
+### Fixed
+
+- Rolling horizon: SOC carry-over across fully committed windows now
+  includes the expected balancing-activation drift (shared helper
+  mirroring the model's terminal SOC expression) and is clamped into
+  the SOC envelope; the year-close SOC target is relaxed by a heavily
+  penalised shortfall variable so a physically unreachable target
+  (winter year end, surplus-only charging) no longer aborts the run;
+  non-divisible window/cadence combinations raise instead of silently
+  truncating the horizon; a runtime guard warns (or errors under
+  `--strict`) when any Monte Carlo seed beats the perfect-foresight
+  bound beyond solver tolerance.
+- Lifetime projection: `grid_export_total_kwh` is rebuilt from its
+  scaled components so the identity export_total = pv_to_grid +
+  bess_dis_grid holds in every projected year when the PV and BESS fade
+  curves diverge.
+- Cycle KPIs: `bess_equivalent_cycles_total` and
+  `bess_equivalent_cycles_per_day` derate with unavailability alongside
+  `bess_total_discharge_mwh`, so headline cycles reconcile with
+  `bess_lifetime_cycles / years`.
+- SOH trajectory plot: fixed 0-100 percentage axis with headroom and
+  integer year ticks.
+- Rolling-horizon distribution plot: a degenerate ensemble (every seed
+  on the same profit, e.g. a PV-only plant) renders a dedicated layout
+  with a readable window, whole-euro ticks, a collapsed legend and an
+  explanatory annotation instead of a single full-height bar with
+  sub-euro tick labels.
+
+### Added
+
+- Validation of the self-consumption foresight gap: at mip_gap 1e-5 the
+  5-seed median gap is 0.464 % against a 2,849,785 EUR perfect-foresight
+  benchmark; the sigma-zero run isolates a 0.324 % horizon-truncation
+  component, documented in the rolling-horizon guide.
+- Cost-accounting invariant tests: the battery wear cost enters the
+  optimization objective only, the replacement CAPEX books exactly once
+  in the effective replacement year of the cashflow, and no KPI
+  subtracts wear again.
+- A Sphinx docs job in CI (warnings are errors).
+- `--strict` also promotes energy-balance residuals above the energy
+  tolerance to hard errors.
+
+### Removed
+
+- The one-off audit and readiness process documents; audit-flavored
+  test files are renamed to behavior names. The README and every
+  shipped guide are rewritten as plain, factual product documentation,
+  and the gallery figures are regenerated for the new economics.
+
 ## 0.9.0 (2026-06-27)
 
-First production release.  No prior versions have shipped; no
+First public release.  No prior versions have shipped; no
 compatibility surface is maintained.
 
 ### Added (revenue-stacking economics, independent audit)

@@ -5,8 +5,8 @@ title: "PV & BESS Optimizer: MILP dispatch and project-finance pipeline for co-l
 authors:
   - family-names: "Konstantellos"
     given-names: "Lampros"
-version: "0.9.0"
-date-released: "2026-06-27"
+version: "1.0.0"
+date-released: "2026-07-03"
 repository-code: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
 url: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
 abstract: >-
