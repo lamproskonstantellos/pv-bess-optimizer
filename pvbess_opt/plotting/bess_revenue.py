@@ -105,8 +105,11 @@ def plot_bess_revenue_waterfall(
 
     The first bar is the BESS's DAM-arbitrage segment (exports net of
     grid-charging expense, labelled ``DAM``); each subsequent bar is
-    the per-product capacity + activation revenue.  The final bar is
-    the cumulative total in a distinct shade.
+    the per-product capacity + activation revenue.  When the fees are
+    on, the battery's exact share of the energy-aggregator fee (a flat
+    percentage of its gross DAM export revenue) and the BSP fee on
+    gross balancing revenue step the total down before the final bar,
+    so ``Total BESS revenue`` is net of both route-to-market fees.
     """
     out_path = Path(out_path)
     bess_dam = float(year1_kpis.get("revenue_bess_dam_eur", 0.0) or 0.0)
@@ -118,6 +121,23 @@ def plot_bess_revenue_waterfall(
         return _empty_placeholder(
             out_path, "No BESS revenue (waterfall not rendered).",
         )
+
+    # Energy-aggregator fee share attributable to the battery's DAM
+    # exports.  The fee is a flat percentage of energy revenue, so the
+    # per-source attribution is exact: fee_pct x the battery's GROSS
+    # DAM export revenue (the grid-charging expense is a cost, not
+    # revenue, and carries no fee).  Absent when the fee is off.
+    energy_fee_frac = 0.0
+    if econ is not None:
+        energy_fee_frac = max(0.0, min(
+            1.0,
+            float(econ.get("aggregator_fee_pct_revenue", 0.0) or 0.0)
+            / 100.0,
+        ))
+    bess_dam_gross = float(
+        year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0
+    )
+    energy_fee = -energy_fee_frac * max(bess_dam_gross, 0.0)
 
     # Optional balancing-aggregator (BSP) fee — a deduction on GROSS
     # balancing revenue (the five products; the DAM-arbitrage segment is
@@ -138,6 +158,11 @@ def plot_bess_revenue_waterfall(
         (_BESS_DAM_LABEL, bess_dam, _BESS_DAM_COLOUR),
         *((label, v, BM_COLOURS[ck]) for label, v, ck in products),
     ]
+    if energy_fee < -1e-9:
+        steps.append((
+            "Aggregator fee", energy_fee,
+            financial_color("Aggregator fee"),
+        ))
     if bal_fee < -1e-9:
         steps.append((
             "Balancing aggregator fee", bal_fee,
@@ -270,7 +295,11 @@ def plot_bess_revenue_by_month(
     ``expense_charge_bess_grid_eur``).  Each balancing product's annual
     revenue is allocated to months in proportion to the per-step
     reservation profile so the per-month breakdown reflects when
-    capacity was reserved, not a flat split.
+    capacity was reserved, not a flat split.  When the route-to-market
+    fees are on, their exact monthly shares (flat percentages of the
+    gross monthly DAM export revenue and of the monthly balancing
+    allocation) draw as negative bars below zero, mirroring the
+    waterfall's net total.
     """
     out_path = Path(out_path)
     if res_year1.empty or "timestamp" not in res_year1.columns:
@@ -327,6 +356,42 @@ def plot_bess_revenue_by_month(
                edgecolor="black", linewidth=0.4, label=label)
         bottoms = bottoms + arr
 
+    # Monthly shares of the two route-to-market fees, mirroring the
+    # waterfall so the twelve months sum to the same net total.  Both
+    # fees are flat percentages, so the monthly attribution is exact:
+    # the energy-aggregator fee follows the battery's gross monthly DAM
+    # export revenue and the BSP fee follows the monthly balancing
+    # allocation.  Drawn as negative bars below the zero line.
+    energy_fee_frac = 0.0
+    bal_fee_frac = 0.0
+    if econ is not None:
+        energy_fee_frac = max(0.0, min(1.0, float(
+            econ.get("aggregator_fee_pct_revenue", 0.0) or 0.0) / 100.0))
+        bal_fee_frac = max(0.0, min(1.0, float(
+            econ.get("balancing_aggregator_fee_pct_revenue", 0.0) or 0.0)
+            / 100.0))
+    dam_gross_monthly = pd.Series(
+        res_year1.get("profit_export_from_bess_eur", 0.0)
+        .astype(float).to_numpy(),
+        index=months.to_numpy(),
+    ).groupby(level=0).sum().reindex(range(1, 13), fill_value=0.0).to_numpy()
+    bm_monthly_total = np.sum(
+        [bm_per_month[label] for _k, label, _c in _BM_PRODUCTS], axis=0,
+    )
+    energy_fee_arr = -energy_fee_frac * np.maximum(dam_gross_monthly, 0.0)
+    bal_fee_arr = -bal_fee_frac * np.maximum(bm_monthly_total, 0.0)
+    neg_bottoms = np.zeros(12)
+    for label, arr in (
+        ("Aggregator fee", energy_fee_arr),
+        ("Balancing aggregator fee", bal_fee_arr),
+    ):
+        if abs(arr).sum() <= 1e-9:
+            continue
+        ax.bar(x, arr, bottom=neg_bottoms,
+               color=financial_color(label),
+               edgecolor="black", linewidth=0.4, label=label)
+        neg_bottoms = neg_bottoms + arr
+
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xticks(x)
     ax.set_xticklabels(month_labels, rotation=30, ha="right")
@@ -339,12 +404,13 @@ def plot_bess_revenue_by_month(
             f"(Year 1)"
         )
     # Enforce the canonical legend order: DAM first, then each balancing
-    # product in _BM_PRODUCTS order. Independent of stacking order.
+    # product in _BM_PRODUCTS order, then the fee deductions.
+    # Independent of stacking order.
     handles, labels_drawn = ax.get_legend_handles_labels()
     by_label = dict(zip(labels_drawn, handles, strict=True))
     ordered_labels = [_BESS_DAM_LABEL] + [
         label for _key, label, _colour_key in _BM_PRODUCTS
-    ]
+    ] + ["Aggregator fee", "Balancing aggregator fee"]
     ordered = [
         (by_label[lbl], lbl) for lbl in ordered_labels if lbl in by_label
     ]

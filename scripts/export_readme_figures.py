@@ -69,12 +69,15 @@ _MERCHANT_FIGURES = {
     "04_financial_plots/sensitivity_npv_tornado.png": "merchant_npv_tornado.png",
     "04_financial_plots/lcoe_summary.png": "merchant_lcoe_band.png",
     "04_financial_plots/npv_waterfall_*.png": "merchant_npv_waterfall.png",
+    "05_energy_plots/energy_sankey.png": "merchant_energy_flow.png",
 }
 _SELF_CONSUMPTION_FINANCIAL_FIGURES = {
     "04_financial_plots/revenue_stack_yearly_*.png":
         "self_consumption_revenue_stack.png",
     "04_financial_plots/monthly_cashflow_*.png":
         "self_consumption_monthly_cashflow.png",
+    "05_energy_plots/energy_sankey.png":
+        "self_consumption_energy_flow.png",
 }
 _SELF_CONSUMPTION_DAILY_FIGURES = {
     "05_energy_plots/**/daily_combined_with_soc_*.png":

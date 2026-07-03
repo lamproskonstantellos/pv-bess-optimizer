@@ -188,8 +188,15 @@ def test_emissions_full_run_sheet_and_finance_unchanged(tmp_path):
     for c in range(1, ws.max_column + 1):
         dim = ws.column_dimensions.get(get_column_letter(c))
         assert dim is not None and COL_WIDTH_MIN <= float(dim.width) <= COL_WIDTH_MAX
-    # The two CFE / emissions figures are emitted only for the configured run.
-    plots = r1.out_dir / "04_financial_plots"
-    assert (plots / "energy_sankey.pdf").exists()
-    assert (plots / "cfe_duration_curve.pdf").exists()
-    assert not (r0.out_dir / "04_financial_plots" / "energy_sankey.pdf").exists()
+    # The CFE curve is emitted only for the emissions-configured run;
+    # the energy-flow diagram is a standard output of every run and
+    # lives with the energy plots.
+    assert (r1.out_dir / "04_financial_plots" / "cfe_duration_curve.pdf").exists()
+    assert not (
+        r0.out_dir / "04_financial_plots" / "cfe_duration_curve.pdf"
+    ).exists()
+    for r in (r0, r1):
+        assert (r.out_dir / "05_energy_plots" / "energy_sankey.pdf").exists()
+        assert not (
+            r.out_dir / "04_financial_plots" / "energy_sankey.pdf"
+        ).exists()

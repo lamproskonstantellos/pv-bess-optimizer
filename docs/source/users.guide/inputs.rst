@@ -289,9 +289,10 @@ report, off by default so an unconfigured run is unchanged:
 When an intensity is configured the run writes a styled ``emissions``
 sheet to ``03_results.xlsx`` (per project year: the 24/7 CFE score, load,
 carbon-free supply, grid import, clean energy delivered, and avoided /
-induced / net / residual emissions in tonnes CO2e) plus two figures in
-``04_financial_plots/``: an annual energy-balance Sankey and the
-carbon-free-energy duration curve.  The **24/7 CFE score** is the
+induced / net / residual emissions in tonnes CO2e) plus the
+carbon-free-energy duration curve in ``04_financial_plots/``.  The
+Year-1 energy-flow diagram (``05_energy_plots/energy_sankey.pdf``) is a
+standard output of every run, with or without emissions accounting.  The **24/7 CFE score** is the
 time-coincident match of the load by carbon-free supply (PV direct plus
 the PV-sourced share of battery discharge); grid-charged battery energy is
 not counted as carbon-free, so the score is stricter than a loose annual

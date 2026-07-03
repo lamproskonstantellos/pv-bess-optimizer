@@ -18,9 +18,10 @@ A run produces a single result directory under ``results/``.
 * ``04_financial_plots/``: cumulative cashflow, yearly bars, NPV
   waterfall, payback visualisation, monthly cashflow Year-1, NPV /
   IRR tornados, rolling-horizon distribution (when active).
-* ``05_energy_plots/<calendar_year>/``: daily / monthly / yearly
-  PDFs.  Each resolution is gated by its scope flag on the
-  ``simulation`` sheet (``plot_daily_scope`` /
+* ``05_energy_plots/``: the Year-1 energy-flow diagram
+  (``energy_sankey.pdf``, every run) plus daily / monthly / yearly
+  PDFs under ``<calendar_year>/``.  Each resolution is gated by its
+  scope flag on the ``simulation`` sheet (``plot_daily_scope`` /
   ``plot_monthly_scope`` / ``plot_yearly_scope``); each accepts
   ``none`` | ``year1_only`` | ``all``.
 

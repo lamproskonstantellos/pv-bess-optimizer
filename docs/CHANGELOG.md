@@ -61,6 +61,14 @@ Production release.
   only (no computed values; the numbers live in SUMMARY.md and the
   results workbook), explanatory annotation boxes are removed, and the
   placeholder messages use parentheses instead of em dashes.
+- The BESS revenue waterfall and by-month views carry the battery's
+  exact shares of both route-to-market fees (flat percentages of the
+  gross DAM export and gross balancing revenue), so their totals are
+  net of the same deductions the cashflow applies.
+- The energy-flow diagram is rebuilt as a layered Year-1 Sankey using
+  the canonical flow colours and renders for every run in both modes
+  under the energy plots (it previously required emissions inputs and
+  used a monochrome layout).
 
 ### Added
 

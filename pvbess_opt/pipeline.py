@@ -1304,11 +1304,17 @@ def _run_one(
             plot_soh_trajectory(
                 degradation_df, layout["financial_plots"] / "soh_trajectory.pdf",
             )
+        # The annual energy-flow diagram needs only the dispatch frame,
+        # so it renders for every run in both modes; the CFE view stays
+        # tied to the emissions configuration.
+        try:
+            plot_energy_sankey(
+                res, layout["energy_plots"] / "energy_sankey.pdf",
+            )
+        except Exception:
+            logger.exception("Energy-flow diagram generation failed")
         if emissions_df is not None and not emissions_df.empty:
             try:
-                plot_energy_sankey(
-                    res, layout["financial_plots"] / "energy_sankey.pdf",
-                )
                 plot_cfe_duration_curve(
                     res, layout["financial_plots"] / "cfe_duration_curve.pdf",
                 )

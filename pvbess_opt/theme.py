@@ -106,6 +106,8 @@ COLORS: dict[str, str] = {
     # Grid-origin flows (slate)
     "Grid to load": "#607D8B",
     "Grid to BESS": "#B0BEC5",
+    # Battery round-trip losses (energy-flow diagram sink)
+    "BESS losses": "#9E9E9E",
 }
 
 # ---------------------------------------------------------------------------

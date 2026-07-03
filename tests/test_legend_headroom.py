@@ -584,13 +584,17 @@ def test_waterfall_tick_labels_do_not_overlap(tmp_path):
 
     kpis = {
         "revenue_bess_dam_eur": 2_000_000.0,
+        "profit_export_from_bess_eur": 2_100_000.0,
         "revenue_bess_fcr_eur": 102_000.0,
         "revenue_bess_afrr_up_eur": 249_000.0,
         "revenue_bess_afrr_dn_eur": 87_000.0,
         "revenue_bess_mfrr_up_eur": 23_000.0,
         "revenue_bess_mfrr_dn_eur": 6_000.0,
     }
-    econ = {"balancing_aggregator_fee_pct_revenue": 10.0}
+    econ = {
+        "aggregator_fee_pct_revenue": 10.0,
+        "balancing_aggregator_fee_pct_revenue": 10.0,
+    }
     fig = _capture(
         bess_revenue_mod,
         lambda: plot_bess_revenue_waterfall(
@@ -601,7 +605,9 @@ def test_waterfall_tick_labels_do_not_overlap(tmp_path):
     ax = fig.axes[0]
     ticklabels = [t for t in ax.get_xticklabels() if t.get_text()]
     labels = [t.get_text() for t in ticklabels]
-    assert len(labels) == 8, labels  # DAM + 5 products + fee + total
+    assert len(labels) == 9, labels  # DAM + 5 products + 2 fees + total
+    assert "Aggregator fee" in labels
+    assert "Balancing aggregator fee" in labels
     for t in ticklabels:
         assert t.get_rotation() == pytest.approx(30.0), t.get_text()
         assert t.get_horizontalalignment() == "right", t.get_text()

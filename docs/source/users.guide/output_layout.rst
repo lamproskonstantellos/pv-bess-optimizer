@@ -24,6 +24,7 @@ See :doc:`outputs` for the full reference.  Quick summary::
     │   ├── balancing_mc_distribution.pdf       # balancing on
     │   └── rolling_horizon_distribution.pdf
     ├── 05_energy_plots/
+    │   ├── energy_sankey.pdf                 # Year-1 energy-flow diagram
     │   └── <calendar_year>/{daily,monthly,yearly}/...
     └── 06_uncertainty_plots/
         ├── inputs_forecast_band.pdf
