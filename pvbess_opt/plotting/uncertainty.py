@@ -8,6 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.axes import Axes
 
 from ..theme import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
 from ._currency import euro_axis_formatter, format_eur_adaptive
@@ -40,6 +41,76 @@ def _legend_resolution(values: list[float]) -> float:
     return min(gaps) if gaps else 0.0
 
 
+def _degenerate_spread_threshold(p50: float) -> float:
+    """Spread below which an MC ensemble renders as degenerate."""
+    return max(1.0, 1e-6 * abs(float(p50)))
+
+
+def _render_degenerate_ensemble(
+    ax: Axes,
+    profits: np.ndarray,
+    *,
+    pf_profit_eur: float | None,
+    currency_format: str,
+) -> None:
+    """Dedicated layout when every seed lands on the same profit.
+
+    A histogram of a zero-width distribution renders as one full-height
+    bar with sub-euro tick labels — misleading noise.  Instead: a single
+    narrow bar at the common value, a readable x-window around it,
+    whole-euro tick labels, one collapsed legend entry, the
+    perfect-foresight marker, and an annotation explaining the identity.
+    """
+    value = float(np.median(profits))
+    # Readable window: +/- 2 % of the value with a 1 000 EUR minimum span.
+    half_span = max(0.02 * abs(value), 500.0)
+    lo, hi = value - half_span, value + half_span
+    bar_width = 2.0 * half_span * 0.02
+    ax.bar(
+        [value], [len(profits)], width=bar_width,
+        color=COLORS["BESS to grid"], edgecolor="black", linewidth=0.4,
+        alpha=0.85,
+        label=(
+            "all seeds equal "
+            + format_eur_adaptive(
+                value, resolution=1.0, format_mode=currency_format,
+            )
+        ),
+    )
+    matches_pf = (
+        pf_profit_eur is not None
+        and not np.isnan(pf_profit_eur)
+        and abs(value - float(pf_profit_eur))
+        <= _degenerate_spread_threshold(value)
+    )
+    if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
+        ax.axvline(
+            float(pf_profit_eur),
+            color=FINANCIAL_COLORS["perfect_foresight"], linewidth=1.0,
+            linestyle="-.",
+            label="Perfect-foresight = " + format_eur_adaptive(
+                float(pf_profit_eur),
+                resolution=1.0, format_mode=currency_format,
+            ),
+        )
+        lo = min(lo, float(pf_profit_eur) - 0.1 * half_span)
+        hi = max(hi, float(pf_profit_eur) + 0.1 * half_span)
+    if matches_pf:
+        note = (
+            "Every seed matches the perfect-foresight result:\n"
+            "forecast noise has no effect on this configuration."
+        )
+    else:
+        note = "Every Monte Carlo seed lands on the same profit."
+    ax.set_xlim(lo, hi)
+    ax.annotate(
+        note, xy=(0.02, 0.92), xycoords="axes fraction",
+        fontsize=7, va="top",
+        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white",
+              "edgecolor": "0.7", "alpha": 0.9},
+    )
+
+
 def plot_rolling_horizon_distribution(
     mc_df: pd.DataFrame,
     out_path: Path,
@@ -64,6 +135,35 @@ def plot_rolling_horizon_distribution(
     if "source_set" in mc_df.columns:
         plt.figure(figsize=(7, 4))
         ax = plt.gca()
+        all_profits = mc_df["profit_total_eur"].astype(float).to_numpy()
+        all_spread = float(all_profits.max() - all_profits.min())
+        if all_spread < _degenerate_spread_threshold(
+            float(np.median(all_profits)),
+        ):
+            # Every seed of every source set lands on the same profit
+            # (e.g. a PV-only plant): four overlapping identical
+            # histograms carry no information — collapse to the shared
+            # degenerate layout.
+            _render_degenerate_ensemble(
+                ax, all_profits,
+                pf_profit_eur=pf_profit_eur,
+                currency_format=currency_format,
+            )
+            ax.set_xlabel("Profit (EUR)")
+            ax.set_ylabel("Frequency (seeds)")
+            ax.xaxis.set_major_formatter(
+                euro_axis_formatter(currency_format, min_resolution_eur=1.0),
+            )
+            if show_titles():
+                ax.set_title(
+                    "Rolling-horizon MC profit distribution by source set",
+                )
+            ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+            apply_universal_margins(ax, skip_x=True, skip_y=True)
+            attach_legend_clear_of_data(
+                ax, loc="best", framealpha=0.9, fontsize=7,
+            )
+            return save_figure(out_path)
         fallback_colour = COLORS["BESS to grid"]
         medians = [
             float(np.median(g["profit_total_eur"].astype(float)))
@@ -71,7 +171,7 @@ def plot_rolling_horizon_distribution(
         ]
         if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
             medians.append(float(pf_profit_eur))
-        resolution = _legend_resolution(medians)
+        resolution = max(_legend_resolution(medians), 1.0)
         for source_set, group in mc_df.groupby("source_set"):
             profits = group["profit_total_eur"].astype(float).to_numpy()
             colour = UNCERTAINTY_SOURCE_COLORS.get(str(source_set), fallback_colour)
@@ -98,7 +198,9 @@ def plot_rolling_horizon_distribution(
             )
         ax.set_xlabel("Profit (EUR)")
         ax.set_ylabel("Frequency (seeds)")
-        ax.xaxis.set_major_formatter(euro_axis_formatter(currency_format))
+        ax.xaxis.set_major_formatter(
+            euro_axis_formatter(currency_format, min_resolution_eur=1.0),
+        )
         if show_titles():
             ax.set_title("Rolling-horizon MC profit distribution by source set")
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
@@ -108,18 +210,39 @@ def plot_rolling_horizon_distribution(
 
     profits = mc_df["profit_total_eur"].astype(float).to_numpy()
     p10, p50, p90 = np.percentile(profits, [10, 50, 90])
+    spread = float(profits.max() - profits.min())
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    if spread < _degenerate_spread_threshold(float(p50)):
+        # Near-degenerate ensemble: every seed on (numerically) the same
+        # profit.  The P10/P50/P90 legend collapses to a single entry.
+        _render_degenerate_ensemble(
+            ax, profits,
+            pf_profit_eur=pf_profit_eur, currency_format=currency_format,
+        )
+        ax.set_xlabel("Profit (EUR)")
+        ax.set_ylabel("Frequency (seeds)")
+        ax.xaxis.set_major_formatter(
+            euro_axis_formatter(currency_format, min_resolution_eur=1.0),
+        )
+        if show_titles():
+            ax.set_title("Rolling-horizon Monte Carlo profit distribution")
+        ax.grid(True, axis="y", linestyle="--", alpha=0.5)
+        apply_universal_margins(ax, skip_x=True, skip_y=True)
+        attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
+        return save_figure(out_path)
+
     quoted = [float(p10), float(p50), float(p90)]
     if pf_profit_eur is not None and not np.isnan(pf_profit_eur):
         quoted.append(float(pf_profit_eur))
-    resolution = _legend_resolution(quoted)
+    resolution = max(_legend_resolution(quoted), 1.0)
 
     def _q(value: float) -> str:
         return format_eur_adaptive(
             value, resolution=resolution, format_mode=currency_format,
         )
 
-    plt.figure(figsize=(7, 4))
-    ax = plt.gca()
     ax.hist(profits, bins=max(10, len(profits) // 3),
             color=COLORS["BESS to grid"],
             edgecolor="black", linewidth=0.4, alpha=0.85)
@@ -142,7 +265,9 @@ def plot_rolling_horizon_distribution(
 
     ax.set_xlabel("Profit (EUR)")
     ax.set_ylabel("Frequency (seeds)")
-    ax.xaxis.set_major_formatter(euro_axis_formatter(currency_format))
+    ax.xaxis.set_major_formatter(
+        euro_axis_formatter(currency_format, min_resolution_eur=1.0),
+    )
     if show_titles():
         ax.set_title("Rolling-horizon Monte Carlo profit distribution")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)

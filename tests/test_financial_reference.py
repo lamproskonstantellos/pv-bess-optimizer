@@ -3,7 +3,7 @@
 A 3-year project small enough to solve with pencil and paper.  Inputs:
 
 * PV 1000 kWp @ 500 EUR/kW CAPEX + 50 EUR/kW DEVEX,
-  BESS 500 kW / 2000 kWh @ 200 EUR/kW CAPEX + 20 EUR/kW DEVEX,
+  BESS 500 kW / 2000 kWh @ 50 EUR/kWh CAPEX + 20 EUR/kW DEVEX,
   site lump sums 10 000 (CAPEX) + 5 000 (DEVEX)
   -> Year 0 = -(610 000 + 65 000) = -675 000.
 * Year-1 revenue 300 000 split: retail 200 000 (PV-origin),
@@ -54,7 +54,8 @@ def _econ(**overrides) -> dict:
         "retail_inflation_pct": 2.0,
         "dam_inflation_pct": 1.0,
         "capex_pv_eur_per_kw": 500.0,
-        "capex_bess_eur_per_kw": 200.0,
+        # 50 EUR/kWh x 2000 kWh = 100 000 (was 200 EUR/kW x 500 kW).
+        "capex_bess_eur_per_kwh": 50.0,
         "devex_pv_eur_per_kw": 50.0,
         "devex_bess_eur_per_kw": 20.0,
         "site_capex_eur": 10_000.0,
@@ -200,7 +201,7 @@ def test_initial_investment_vs_lifecycle_capex_totals():
     # lifecycle total carries the extra -50 000; Year 0 is unchanged.
     fin_r = _fin_kpis(_econ(bess_replacement_year=2))
     assert fin_r["initial_investment_eur"] == pytest.approx(-675_000.0, abs=0.01)
-    repl = -(200.0 * 500.0) * 0.50
+    repl = -(50.0 * 2000.0) * 0.50
     assert fin_r["total_capex_devex_eur"] == pytest.approx(
         fin_r["initial_investment_eur"] + repl, abs=0.01,
     )

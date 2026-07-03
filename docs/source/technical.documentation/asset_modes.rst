@@ -1,7 +1,7 @@
-Asset modes — PV-only / BESS-only / hybrid
+Asset modes: PV-only / BESS-only / hybrid
 ==========================================
 
-The loader reads zero literally — there is no inference from the
+The loader reads zero literally: there is no inference from the
 timeseries or from a power-key fallback.  The four cases are:
 
 .. list-table::
@@ -21,7 +21,7 @@ timeseries or from a power-key fallback.  The four cases are:
      - BESS-only (only meaningful with ``allow_bess_grid_charging = TRUE``).
    * - = 0
      - = 0
-     - Invalid — ``read_inputs`` raises ``ValueError``.
+     - Invalid; ``read_inputs`` raises ``ValueError``.
 
 The chosen mode is reflected as a subtitle on every energy-plot title
 ("PV-only project" / "BESS-only project" / "Hybrid PV+BESS project")
@@ -50,7 +50,7 @@ zeros out ``soc``, ``pv_to_bess``, ``grid_to_bess``, ``bess_dis_load``,
 BESS-only constraints (``EP``, ``CYC``, ``SOC_INIT``, ``SOC_TERM*``,
 ``MODE_LINK``, ``CH_LIM``, ``DIS_LIM``, ``GRID_CHARGE_GATE``,
 ``GRID_CHG_PV_GATE``).  The self_consumption-mode ``LOAD_BAL`` constraint stays
-active — the load is still served by some combination of PV and grid
+active; the load is still served by some combination of PV and grid
 even when the BESS is absent.
 
 Capacity helper
@@ -78,10 +78,10 @@ Plot behaviour
 * The existing ``plot_stack_filtered`` helper drops zero series, so the
   self_consumption-mode supply / surplus / combined plots naturally hide the
   missing asset's stacks.
-* Every energy-plot title carries a project-mode suffix —
-  ``(self_consumption; PV-only)``, ``(merchant; BESS-only)``, etc — driven by the
-  ``set_project_mode_label`` setter that ``main.py`` calls before
-  the plot fan-out.
+* Every energy-plot title carries a project-mode suffix such as
+  ``(self_consumption; PV-only)`` or ``(merchant; BESS-only)``, driven by the
+  ``set_project_mode_label`` setter that ``pvbess_opt.pipeline`` calls
+  before the plot fan-out.
 * The merchant-mode ``plot_*_soc`` helpers skip rendering when the BESS
   is absent (no SOC trajectory worth plotting).
 * The lifecycle ``plot_lifetime_cycles``, ``plot_lcoe_summary``, and
@@ -92,7 +92,7 @@ Lifetime dispatch
 -----------------
 
 ``pvbess_opt.lifetime.build_lifetime_dispatch`` works unchanged for the
-three modes — when an asset's per-step columns are identically zero,
+three modes: when an asset's per-step columns are identically zero,
 multiplying by the degradation factor is a no-op.  The timestamp
 shift always applies regardless of ``pv_kwp`` or ``bess_kw``, so
 ``02_dispatch/dispatch_timeseries.xlsx`` is internally consistent.

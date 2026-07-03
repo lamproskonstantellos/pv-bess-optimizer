@@ -100,7 +100,7 @@ def test_unlimited_zero_curtailment(short_ts, short_params, short_params_merchan
     assert kpis["pv_energy_curtailed_mwh"] == 0.0
     inv = verify_dispatch_invariants(res, params, mode=mode)
     # No cap-driven curtailment: invariant 7 (cap slack ⇒ curtail 0) holds.
-    assert inv["invariant_7_curtail_behavior_kwh"] == 0.0
+    assert inv["invariant_7_curtail_behavior_count"] == 0.0
     assert float(res["pv_curtail_kwh"].sum()) == pytest.approx(0.0, abs=1e-6)
 
 

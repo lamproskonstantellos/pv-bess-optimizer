@@ -28,7 +28,7 @@ def _econ() -> dict:
         "dam_inflation_pct": 0.0,
         "bm_inflation_pct": 2.0,
         "capex_pv_eur_per_kw": 525.0,
-        "capex_bess_eur_per_kw": 200.0,
+        "capex_bess_eur_per_kwh": 200.0,
         "devex_pv_eur_per_kw": 60.0,
         "devex_bess_eur_per_kw": 30.0,
         "opex_pv_eur_per_kwp": 7.0,

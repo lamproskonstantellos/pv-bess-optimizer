@@ -28,6 +28,7 @@ import pandas as pd
 from matplotlib.ticker import ScalarFormatter
 
 from ..theme import COLORS, FINANCIAL_COLORS, XTICK_ROT
+from ._currency import euro_axis_formatter
 from .financial import _integer_year_axis
 from .helpers import (
     bar_stacked_bins,
@@ -41,6 +42,7 @@ from .helpers import (
 from .style import (
     apply_legend,
     apply_universal_margins,
+    attach_legend_clear_of_data,
     get_scenario_label,
     save_figure,
     show_titles,
@@ -453,6 +455,7 @@ def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
         )
     ax.set_xlabel("Month")
     ax.set_ylabel("EUR/month")
+    ax.yaxis.set_major_formatter(euro_axis_formatter("auto"))
     _setup_month_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="yearly")
     apply_universal_margins(ax, skip_x=True)
@@ -494,7 +497,7 @@ def plot_lifetime_summary(
         ax.set_title(
             f"Lifetime Energy Summary — {int(x[0])}-{int(x[-1])}"
         )
-    ax.legend(loc="best", framealpha=0.9, fontsize=7)
+    attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
     save_figure(out_path)

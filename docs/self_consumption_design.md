@@ -1,4 +1,4 @@
-# Self-consumption mode — design
+# Self-consumption mode: design
 
 Domain design document for the `mode = self_consumption` regulatory
 regime: inputs, decision variables, every hard constraint, the
@@ -9,7 +9,7 @@ carve-outs relative to `merchant` mode (see
 
 The companion conformance test
 `tests/test_logic_spec_conformance.py` parses the constraint headings
-under "Hard constraints — formal statements" and the invariant headings
+under "Hard constraints: formal statements" and the invariant headings
 under "Nine audit invariants" out of THIS file and asserts each symbol
 is attached to a freshly built Pyomo model, so the document cannot
 drift from the code without breaking CI.
@@ -54,17 +54,17 @@ full workbook reference: `docs/source/users.guide/inputs.rst`):
 | project | `p_grid_export_max_kw` | 5000.0 | export nameplate $P^{G}$ (empty/`inf` token disables the cap) |
 | project | `grid_cap_includes_load` | FALSE | cap basis: surplus export (default) vs total plant injection |
 | project | `allow_bess_grid_charging` | FALSE | enables `grid_to_bess` + the PV-gating binary |
-| bess | `efficiency_charge` / `efficiency_discharge` | 0.97 / 0.97 | $\eta_c$, $\eta_d$ |
+| bess | `efficiency_charge` / `efficiency_discharge` | 0.95 / 0.95 | $\eta_c$, $\eta_d$ |
 | bess | `soc_min_frac` / `soc_max_frac` | 0.20 / 0.95 | $\underline{e}$, $\overline{e}$ |
 | bess | `initial_soc_frac` | 0.50 | $E_0 / E^{\mathrm{cap}}$ |
 | bess | `terminal_soc_equal` | TRUE | year-close SOC condition |
 | bess | `max_cycles_per_day` | 1.0 | daily throughput cap |
 | bess | `bess_power_kw` / `bess_capacity_kwh` | 0 / 0 | $P^{B}$, $E^{\mathrm{cap}}$ |
-| bess | `bess_wear_cost_eur_per_mwh` | 0.0 | discharge-throughput shadow price |
-| timeseries | `load_kwh` | — | required in this mode (missing → `ValueError`) |
-| timeseries | `pv_kwh`, `dam_price_eur_per_mwh` | — | exogenous series |
+| bess | `bess_wear_cost_eur_per_mwh` | 10.0 | discharge-throughput shadow price |
+| timeseries | `load_kwh` | n/a | required in this mode (missing → `ValueError`) |
+| timeseries | `pv_kwh`, `dam_price_eur_per_mwh` | n/a | exogenous series |
 | max_injection_profile | 24×1 or 24×12 | 100 % | $\mu_t$ |
-| max_injection_profile_pv / _bess | optional | — | per-source sub-cap fractions |
+| max_injection_profile_pv / _bess | optional | n/a | per-source sub-cap fractions |
 | balancing / ppa sheets | see their design docs | off | optional opt-in blocks |
 
 ## Mathematical formulation
@@ -115,7 +115,7 @@ $$C^{\mathrm{chg}} = \sum_t \pi^{\mathrm{DAM}}_t\, x^{gb}_t / 1000, \qquad C^{\m
 
 where $p^{\mathrm{eff}}_t = (1-s)\,\pi^{\mathrm{DAM}}_t + s\,\pi^{\mathrm{PPA}}$
 is the PPA-adjusted PV export price (equal to $\pi^{\mathrm{DAM}}_t$
-when no contract is active — `docs/ppa_design.md`),
+when no contract is active; see `docs/ppa_design.md`),
 $c^{w}$ = `bess_wear_cost_eur_per_mwh` (a dispatch shadow price, never
 added to the reported cashflow), $R^{\mathrm{bm}}$ is the expected
 balancing revenue (`docs/balancing_market_design.md`), and
@@ -123,7 +123,7 @@ $\varepsilon = 10^{-5}$ EUR/kWh is the curtailment tie-breaker
 (`_WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH`, module-private, not a
 workbook knob).
 
-> **Balancing under self-consumption — practical caveat.**
+> **Balancing under self-consumption: a practical caveat.**
 > Balancing-market participation ($R^{\mathrm{bm}}$, opt-in via
 > `balancing_enabled`, off by default) is valid in **both**
 > `self_consumption` and `merchant` mode; the activation gate keys on
@@ -137,7 +137,7 @@ workbook knob).
 > consider the optional `balancing_aggregator_fee_pct_revenue`
 > route-to-market cost (default 0). See `docs/balancing_market_design.md`.
 
-## Hard constraints — formal statements
+## Hard constraints: formal statements
 
 Each subsection states the constraint and its active scope.  Constraint
 names match the Pyomo attribute names on the model so the conformance
@@ -166,7 +166,7 @@ $$x^{pl}_t \ge \mathrm{floor}_t, \qquad
 \end{cases} \tag{S7}$$
 
 Combined with `PV_SPLIT` and `LOAD_BAL` this forces
-$x^{pl}_t = \mathrm{floor}_t$ exactly — the Section 2 hard
+$x^{pl}_t = \mathrm{floor}_t$ exactly, which is the Section 2 hard
 load-coverage priority from the MD.  In the default mode the floor is
 $\min(G_t, L_t)$: the load-serving flow sits behind the meter and never
 crosses the capped connection point.  Under the strict total-injection
@@ -228,7 +228,7 @@ $$x^{pb}_t + x^{gb}_t \le P^{B} \Delta t\, u^{c}_t, \qquad
 x^{bl}_t + x^{bg}_t \le P^{B} \Delta t\, u^{d}_t, \qquad
 u^{c}_t + u^{d}_t \le 1 \tag{S14}$$
 
-The charge/discharge limit is the symmetric `bess_power_kw` — an
+The charge/discharge limit is the symmetric `bess_power_kw`; an
 asymmetric pair is not supported.  `MODE_LINK` is the Section 4
 simultaneity rule from the MD.
 
@@ -236,23 +236,23 @@ simultaneity rule from the MD.
 
 $$g_t \le P^{G} \Delta t\, \mu_t \tag{S15}$$
 
-Active in **both** modes — the regulatory grid-connection limit from
+Active in **both** modes, as the regulatory grid-connection limit from
 MD YPEN/DAPEEK/53563/1556/2023; merchant mode does not skip it.  The
 cap basis $g_t$ (`grid_injection_total`) is selected by
 `grid_cap_includes_load`:
 
-* **Default** (`FALSE`) — surplus export only:
+* **Default** (`FALSE`) selects surplus export only:
   $g_t = x^{pg}_t + x^{bg}_t$.  Historical behaviour, bit-for-bit
   backward compatible.
-* **Strict** (`TRUE`, `self_consumption` only) — total plant injection
-  at the connection point:
+* **Strict** (`TRUE`, `self_consumption` only) selects total plant
+  injection at the connection point:
   $g_t = x^{pl}_t + x^{bl}_t + x^{pg}_t + x^{bg}_t$.  Under Virtual
   Net-Billing the energy virtually allocated to the remote load is
   physically injected at the plant, so the cap models a physical
   plant-injection limit.  Load priority shares the cap
   (Eq. (S7) floor); when the cap cannot fit the full load the
   uncovered remainder is met by $x^{gl}_t$ at retail while surplus PV
-  is curtailed / stored — the run degrades to maximum feasible
+  is curtailed / stored; the run degrades to maximum feasible
   coverage, never infeasibility.  Merchant mode has no co-located
   load, so the basis collapses to surplus export and the flag is a
   no-op (a once-per-process warning records this).
@@ -275,7 +275,7 @@ nameplate.
 $$x^{gl}_t + x^{gb}_t \le M_{\mathrm{imp}}\, u^{io}_t, \qquad
 x^{pg}_t + x^{bg}_t \le M_{\mathrm{exp}} \left(1 - u^{io}_t\right) \tag{S17}$$
 
-Active in `self_consumption` only — the audit verified that
+Active in `self_consumption` only.  The audit verified that
 simultaneous import/export does not occur in `merchant` dispatch, so
 the big-M overhead is omitted there.  Tight big-Ms
 (`derive_tight_big_m`):
@@ -347,7 +347,7 @@ $$\#\left\{t : \left(x^{pg}_t + x^{bg}_t > \tau\right) \wedge \left(x^{gl}_t > \
 
 A count, not a residual.  `self_consumption` only.
 
-### invariant_7_curtail_behavior_kwh
+### invariant_7_curtail_behavior_count
 
 $$\#\left\{t : \left(\mathrm{cap}_t - g_t > \tau\right) \wedge \left(x^{pc}_t > \tau\right) \wedge \left(\pi^{\mathrm{DAM}}_t > 0\right)\right\} \tag{S27}$$
 
@@ -371,8 +371,8 @@ $$\max_t \left|x^{pl}_t - \mathrm{floor}_t\right| \tag{S29}$$
 ## Settlement & cashflow equations
 
 Per-step EUR columns are written by `kpis.add_economic_columns` (always
-run `compute_kpis` before the financial pipeline — ordering contract in
-`pvbess_opt/conventions.md`):
+run `compute_kpis` before the financial pipeline; the ordering contract
+is in `pvbess_opt/conventions.md`):
 
 $$\mathrm{savings\_self\_consumption\_eur}_t = \pi^{\mathrm{ret}}_t \left(x^{pl}_t + x^{bl}_t\right)/1000 \tag{S30}$$
 
@@ -413,44 +413,44 @@ in `docs/economics_design.md`.
 
 | Equation | Implementing symbol |
 |---|---|
-| (S1)–(S4) objective | `optimization.build_model` → `OBJ` |
+| (S1)-(S4) objective | `optimization.build_model` → `OBJ` |
 | (S5) | `optimization.build_model` → `PV_SPLIT` |
 | (S6) | `LOAD_BAL` |
 | (S7) | `LOAD_PV_PRIORITY` |
 | (S8) | `LOAD_PRIORITY_SLACK_DEF` |
 | (S9) | `LOAD_PRIORITY_EXPORT` |
 | (S10) | `SOC_DYN` (+ `SOC_MIN`, `SOC_MAX`) |
-| (S11)–(S13) | `SOC_INIT`, `SOC_TERM`, `SOC_TERM_MIN`, `SOC_TERM_MAX` |
+| (S11)-(S13) | `SOC_INIT`, `SOC_TERM`, `SOC_TERM_MIN`, `SOC_TERM_MAX` |
 | (S14) | `CH_LIM`, `DIS_LIM`, `MODE_LINK` |
 | (S15) | `EXPORT_CAP` over `grid_injection_total` |
 | (S16) | `EXPORT_CAP_PV`, `EXPORT_CAP_BESS` |
-| (S17)–(S18) | `NO_SIM_GRID_IMPORT`, `NO_SIM_GRID_EXPORT`; `derive_tight_big_m` |
+| (S17)-(S18) | `NO_SIM_GRID_IMPORT`, `NO_SIM_GRID_EXPORT`; `derive_tight_big_m` |
 | (S19) | `CYC` |
 | (S20) | `GRID_CHARGE_GATE`, `GRID_CHG_PV_GATE` |
-| (S21)–(S29) | `optimization.verify_dispatch_invariants` |
-| (S30)–(S32) | `kpis.add_economic_columns` |
-| (S33)–(S34) | `kpis.compute_kpis`, `kpis.attribute_green_discharge` |
+| (S21)-(S29) | `optimization.verify_dispatch_invariants` |
+| (S30)-(S32) | `kpis.add_economic_columns` |
+| (S33)-(S34) | `kpis.compute_kpis`, `kpis.attribute_green_discharge` |
 
 ## Validation & tests
 
-* `tests/test_logic_spec_conformance.py` — parses the constraint H3s
-  under "Hard constraints — formal statements" (≥ 12 names) and the
+* `tests/test_logic_spec_conformance.py`: parses the constraint H3s
+  under "Hard constraints: formal statements" (≥ 12 names) and the
   invariant H3s under "Nine audit invariants" (exactly 9) out of this
   file; asserts every constraint is attached to a freshly built
   `self_consumption` model and every invariant is reported within
   `ENERGY_TOLERANCE` after a real solve.
-* `tests/test_optimization.py`, `tests/test_dispatch_analytic.py` —
+* `tests/test_optimization.py`, `tests/test_dispatch_analytic.py`:
   constraint-level behaviour against hand-computed dispatches.
 * `tests/test_dispatch_invariant_hardening.py`,
-  `tests/test_realscale_all_combos.py` — the nine invariants across
+  `tests/test_realscale_all_combos.py`: the nine invariants across
   all mode × asset combinations (1-day fast lane; full-year slow lane).
-* `tests/test_logic_spec_conformance.py::test_balancing_verification_symbols_present`
-  — balancing symbols on a balancing-enabled model (appendix of
+* `tests/test_logic_spec_conformance.py::test_balancing_verification_symbols_present`:
+  balancing symbols on a balancing-enabled model (appendix of
   `docs/balancing_market_design.md`).
 * `tests/test_max_injection_default_is_no_curtailment.py`,
-  `tests/test_max_injection_profile.py` — Eq. (S15) default and
+  `tests/test_max_injection_profile.py`: Eq. (S15) default and
   profile semantics.
-* `tests/test_mode_switch_matrix.py` — mode carve-outs of
+* `tests/test_mode_switch_matrix.py`: mode carve-outs of
   "Assumptions & limitations" below.
 
 ## Worked example

@@ -4,7 +4,7 @@ A by-hand case with site sums (1.5 MEUR) three orders of magnitude above
 the per-asset sums (2,150 EUR) so any output that drops them is
 unmissable.  Every expectation below is hand-computed:
 
-    Year-0 CAPEX  = -(10 kWp x 100 + 5 kW x 200 + 1,000,000) = -1,002,000
+    Year-0 CAPEX  = -(10 kWp x 100 + 10 kWh x 100 + 1,000,000) = -1,002,000
     Year-0 DEVEX  = -(10 x 10 + 5 x 10 + 500,000)            =   -500,150
     initial_investment_eur                                    = -1,502,150
     revenue 700,000 EUR/yr flat, opex 0, 3 years, r = 10 %.
@@ -36,7 +36,7 @@ from pvbess_opt.economics import (
 from pvbess_opt.io import write_summary_md
 from pvbess_opt.sensitivity import run_sensitivity_analysis
 
-Y0_CAPEX = -(10 * 100.0 + 5 * 200.0 + 1_000_000.0)   # -1,002,000
+Y0_CAPEX = -(10 * 100.0 + 10 * 100.0 + 1_000_000.0)  # -1,002,000
 Y0_DEVEX = -(10 * 10.0 + 5 * 10.0 + 500_000.0)       # -500,150
 Y0 = Y0_CAPEX + Y0_DEVEX                              # -1,502,150
 REV = 700_000.0
@@ -52,7 +52,9 @@ def _econ() -> dict:
         "retail_inflation_pct": 0.0,
         "dam_inflation_pct": 0.0,
         "capex_pv_eur_per_kw": 100.0,
-        "capex_bess_eur_per_kw": 200.0,
+        # 100 EUR/kWh x 10 kWh == the original 200 EUR/kW x 5 kW = 1,000 EUR,
+        # so every hand-computed total below is unchanged.
+        "capex_bess_eur_per_kwh": 100.0,
         "devex_pv_eur_per_kw": 10.0,
         "devex_bess_eur_per_kw": 10.0,
         "opex_pv_eur_per_kwp": 0.0,

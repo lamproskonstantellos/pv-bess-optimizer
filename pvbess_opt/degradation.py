@@ -27,6 +27,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .lifetime import bess_capacity_factors
+
 
 def _reversals(series: Any) -> list[float]:
     """Return the turning points (peaks/valleys) of ``series``."""
@@ -106,45 +108,41 @@ def build_degradation_report(
     start_year: int,
     degradation_annual_pct: float = 0.0,
     year1_discharge_mwh: float | None = None,
-    end_of_life_soh_pct: float = 80.0,
     replacement_year: int = 0,
 ) -> pd.DataFrame:
     """Project the SOH / capacity-fade trajectory and replacement schedule.
 
-    The state-of-health curve is the **same capacity-fade model the finance
-    layer uses** (:func:`pvbess_opt.lifetime._bess_factor`): a multiplicative
-    calendar fade minus an additive cycle fade, so the plotted SOH agrees
-    with the ``bess_factor`` that scales dispatch / revenue and with the
-    ``bess_total_fade_pct_y_final`` KPI::
+    The state-of-health curve is the **same capacity-fade sequence the
+    finance layer uses** (:func:`pvbess_opt.lifetime.bess_capacity_factors`),
+    a multiplicative calendar fade minus an additive cycle fade::
 
         soh = (1 - degradation_annual_pct/100) ** years_since_install
               - (degradation_pct_per_cycle/100) * cumulative_full_cycles
 
+    so the plotted SOH agrees with the ``bess_factor`` that scales
+    dispatch / revenue and with the ``bess_total_fade_pct_y_final`` KPI.
     ``cumulative_full_cycles`` accrues the degraded annual discharge
     throughput (``year1_discharge_mwh`` scaled by the running capacity
-    factor) over nameplate energy, matching
-    :func:`pvbess_opt.economics.build_yearly_cashflow`.  When the discharge
-    throughput is not supplied it falls back to the Rainflow throughput so
-    the cycle term is still populated.  The DoD-weighted Rainflow
-    ``equivalent_full_cycles`` from the SOC trace is reported as a separate
-    diagnostic column; it does not drive the SOH curve.
+    factor) over nameplate energy.  When the discharge throughput is not
+    supplied it falls back to the Rainflow throughput so the cycle term
+    is still populated.  The DoD-weighted Rainflow
+    ``equivalent_full_cycles`` from the SOC trace is reported as a
+    separate diagnostic column; it does not drive the SOH curve.
 
-    The capacity resets to a fresh 100 % pack on a replacement, governed by:
-
-    * **A scheduled replacement** -- when ``replacement_year > 0`` the curve
-      resets in that project year and degrades fresh from there, exactly as
-      ``_bess_factor`` resets the calendar fade at ``bess_replacement_year``
-      (the cashflow charges the replacement CAPEX in the same year), so the
-      SOH plot stays consistent regardless of how lightly the battery cycles.
-    * **End of life** -- when no replacement year is configured
-      (``replacement_year <= 0``) the pack is instead swapped the first year
-      SOH falls to ``end_of_life_soh_pct``.
+    ``replacement_year`` is the EFFECTIVE replacement year — the single
+    resolved value from
+    :func:`pvbess_opt.lifetime.resolve_bess_replacement_year` (a
+    scheduled year, the resolved SOH-threshold year in auto mode, or 0
+    for never).  The report swaps in a fresh 100 % pack in exactly that
+    year, so it always agrees with the year the cashflow charges the
+    replacement CAPEX; with 0 the SOH keeps fading below any threshold
+    without a swap.
     """
     usable_kwh = float(capacity_kwh) * (float(soc_max_frac) - float(soc_min_frac))
     efc_year = equivalent_full_cycles(soc_kwh, usable_kwh)
     d_annual = float(degradation_annual_pct) / 100.0
     d_cycle = float(degradation_pct_per_cycle) / 100.0
-    scheduled_year = int(replacement_year or 0)
+    effective_year = int(replacement_year or 0)
     capacity_mwh = float(capacity_kwh) / 1000.0
     # Throughput driving the cycle-fade term.  Prefer the dispatch discharge
     # (keeps the curve identical to the finance layer's bess_factor); fall
@@ -154,44 +152,25 @@ def build_degradation_report(
     else:
         throughput_mwh = float(year1_discharge_mwh)
 
+    factors = bess_capacity_factors(
+        max(int(project_years), 0),
+        d_bess_annual=d_annual,
+        d_bess_per_cycle=d_cycle,
+        year1_discharge_mwh=throughput_mwh,
+        capacity_mwh=capacity_mwh,
+        replacement_year=effective_year,
+    )
     rows: list[dict[str, Any]] = []
-    install_year = 1          # project year the in-service pack was installed
-    cumulative_cycles = 0.0   # full-equivalent cycles accrued since install
-    for i in range(max(int(project_years), 0)):
+    for i, factor in enumerate(factors):
         year = i + 1
-        # A scheduled replacement is known up front: install a fresh pack at
-        # the start of that year so the calendar and cycle fade restart
-        # there, exactly as _bess_factor does in lifetime.py / economics.py.
-        if scheduled_year > 0 and year == scheduled_year:
-            install_year = year
-            cumulative_cycles = 0.0
-        # Capacity fade = multiplicative calendar fade minus additive cycle
-        # fade -- mirror of pvbess_opt.lifetime._bess_factor (keep in sync).
-        calendar = (1.0 - d_annual) ** (year - install_year)
-        factor = max(0.0, calendar - d_cycle * cumulative_cycles)
         soh = factor * 100.0
-        # End-of-life replacement only applies when no scheduled year is set:
-        # the pack is swapped the year it reaches EoL, so that year already
-        # shows a fresh 100 %.
-        if scheduled_year <= 0 and soh <= float(end_of_life_soh_pct):
-            install_year = year
-            cumulative_cycles = 0.0
-            factor = 1.0
-            soh = 100.0
-            replaced = True
-        else:
-            replaced = scheduled_year > 0 and year == scheduled_year
-        # Accrue this year's degraded throughput for next year's cycle term,
-        # matching economics.py: cumulative += discharge * factor / capacity.
-        if capacity_mwh > 1e-12:
-            cumulative_cycles += throughput_mwh * factor / capacity_mwh
         rows.append({
             "project_year": year,
             "calendar_year": int(start_year) + i,
             "equivalent_full_cycles": round(efc_year, 4),
             "soh_pct": round(soh, 4),
             "capacity_fade_pct": round(100.0 - soh, 4),
-            "replacement": bool(replaced),
+            "replacement": bool(year == effective_year),
         })
     return pd.DataFrame(
         rows,

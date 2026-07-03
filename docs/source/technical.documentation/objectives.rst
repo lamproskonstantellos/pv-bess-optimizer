@@ -1,7 +1,7 @@
 Objective: profit (single)
 ==========================
 
-The optimiser ships with a **single objective** — profit maximisation.
+The optimiser ships with a **single objective**: profit maximisation.
 
 Why not "max-green" or a blended objective?
 -------------------------------------------

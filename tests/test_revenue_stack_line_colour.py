@@ -217,10 +217,10 @@ def _y1_kpis_with_balancing() -> dict:
 
 
 def test_revenue_stack_sums_to_net_line_with_balancing(tmp_path: Path):
-    """Reconciliation under a balancing-enabled fixture — would have
-    caught P0.1 (balancing bars collapsed when ``revenue_dam_eur`` was
-    zero) and P1.2 (balancing growth tracked the DAM ratio instead of
-    ``bm_inflation_pct``)."""
+    """Reconciliation under a balancing-enabled fixture guards two
+    regressions: balancing bars collapsing when ``revenue_dam_eur`` is
+    zero, and balancing growth tracking the DAM ratio instead of
+    ``bm_inflation_pct``."""
     plt.close("all")
 
     import pvbess_opt.plotting.lifecycle as life_mod

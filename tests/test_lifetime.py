@@ -97,7 +97,7 @@ def _bess_only_econ() -> dict:
         "bess_replacement_year": 0,
         "bess_replacement_cost_pct": 50.0,
         "capex_pv_eur_per_kw": 0.0,
-        "capex_bess_eur_per_kw": 300.0,
+        "capex_bess_eur_per_kwh": 300.0,
         "devex_pv_eur_per_kw": 0.0,
         "devex_bess_eur_per_kw": 0.0,
         "opex_pv_eur_per_kwp": 0.0,
@@ -343,7 +343,7 @@ def test_unavailability_derate_is_symmetric_between_cashflow_and_lifetime():
     # independent of their magnitudes.
     econ.update({
         "capex_pv_eur_per_kw": 500.0,
-        "capex_bess_eur_per_kw": 200.0,
+        "capex_bess_eur_per_kwh": 200.0,
         "devex_pv_eur_per_kw": 0.0,
         "devex_bess_eur_per_kw": 0.0,
         "opex_pv_eur_per_kwp": 7.0,
@@ -402,3 +402,72 @@ def test_unavailability_derate_is_symmetric_between_cashflow_and_lifetime():
         # multiplication; the cycle counter is identical because both
         # paths see year1_discharge_mwh = raw_year1_with_derate.
         del raw_year1_with_derate
+
+
+def test_grid_export_total_identity_holds_in_late_years():
+    """grid_export_total = pv_to_grid + bess_dis_grid in EVERY projected
+    year, including late years where the PV and BESS fade curves diverge.
+
+    Regression: the total used to be scaled by the BESS factor alone, so
+    the identity broke from year 2 on whenever pv_factor != bess_factor.
+    """
+    res1 = _make_year1_dispatch()
+    econ = _econ()
+    # Unequal fade rates and a long horizon so the factors diverge.
+    econ["project_lifecycle_years"] = 20
+    econ["pv_degradation_annual_pct"] = 0.4
+    econ["bess_degradation_annual_pct"] = 3.0
+    capacities = {"pv_kwp": 4500.0, "bess_kw": 5000.0, "bess_kwh": 20000.0}
+    lifetime = build_lifetime_dispatch(res1, econ, capacities)
+
+    last_year = int(lifetime["project_year"].max())
+    assert last_year >= 15
+    for y in (2, 10, last_year):
+        sub = lifetime.loc[lifetime["project_year"] == y]
+        expected = (
+            sub["pv_to_grid_kwh"].to_numpy() + sub["bess_dis_grid_kwh"].to_numpy()
+        )
+        actual = sub["grid_export_total_kwh"].to_numpy()
+        assert np.abs(actual - expected).max() < 1e-9, (
+            f"export identity broken in year {y}"
+        )
+    # The yearly aggregate inherits the identity.
+    yearly = aggregate_lifetime_to_yearly(lifetime)
+    lhs = yearly["export_total_mwh"].to_numpy()
+    rhs = (
+        yearly["pv_to_grid_mwh"].to_numpy()
+        + lifetime.groupby("calendar_year")["bess_dis_grid_kwh"].sum()
+        .to_numpy() / 1000.0
+    )
+    assert np.abs(lhs - rhs).max() < 1e-9
+
+
+def test_bess_capacity_factors_matches_inline_accumulator():
+    """The shared helper reproduces the reset-at-replacement reference
+    sequence (hand-computed with the documented recurrence)."""
+    from pvbess_opt.lifetime import bess_capacity_factors
+
+    n_years, d_ann, d_cyc = 8, 0.02, 0.0008
+    year1_mwh, cap_mwh, repl = 3000.0, 20.0, 5
+
+    factors = bess_capacity_factors(
+        n_years, d_bess_annual=d_ann, d_bess_per_cycle=d_cyc,
+        year1_discharge_mwh=year1_mwh, capacity_mwh=cap_mwh,
+        replacement_year=repl,
+    )
+    expected = []
+    cumulative = 0.0
+    for y in range(1, n_years + 1):
+        if repl > 0 and y == repl:
+            cumulative = 0.0
+        f = _bess_factor(
+            y, d_ann, replacement_year=repl,
+            d_bess_per_cycle=d_cyc, cumulative_cycles_through=cumulative,
+        )
+        cumulative += (year1_mwh * f) / cap_mwh
+        expected.append(f)
+    assert factors == pytest.approx(expected)
+    # SOH question for the Phase-5 resolver: factor of year y given a
+    # replacement in year r is factors[y-1].
+    assert factors[repl - 1] == pytest.approx(1.0)
+    assert factors[repl] < 1.0

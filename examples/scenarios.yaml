@@ -25,9 +25,21 @@ scenarios:
     pv: { nameplate_kwp: 0 }
     project: { mode: merchant, allow_bess_grid_charging: true }
 
+  # capex_multiplier scales capex_pv_eur_per_kw, capex_bess_eur_per_kwh
+  # and site_capex_eur together.
   - name: "Cheap CAPEX (merchant hybrid)"
     inherits: "Merchant hybrid"
     capex_multiplier: 0.8
+
+  # BESS replacement triggered by state of health instead of a fixed
+  # year: "auto" replaces in the first year SOH falls to bess_eol_soh_pct
+  # (a blank workbook cell means the same thing; 0 means never replace).
+  - name: "SOH-triggered replacement (merchant hybrid)"
+    inherits: "Merchant hybrid"
+    bess:
+      capex_bess_eur_per_kwh: 200
+      bess_replacement_year: auto
+      bess_eol_soh_pct: 80
 
   - name: "Merchant hybrid + PPA"
     inherits: "Merchant hybrid"

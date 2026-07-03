@@ -36,6 +36,7 @@ import numpy as np
 import pandas as pd
 
 from ..theme import FINANCIAL_COLORS, XTICK_ROT
+from ._currency import euro_axis_formatter
 from .helpers import (
     fill_stacked_above,
     line_if_nonzero,
@@ -519,7 +520,7 @@ def plot_daily_combined_with_soc(
             f"Daily Energy Flows + SOC{title_prefix(get_scenario_label())} "
             f"— {pretty_date(date_str)}"
         )
-    plt.xlabel("Time (HH:mm)")
+    ax.set_xlabel("Time (HH:mm)")
     ax.set_ylabel("Energy (kWh)")
     _setup_day_axes(ax, start, end)
     _apply_combined_with_soc_legend(ax, ax2)
@@ -583,7 +584,7 @@ def plot_daily_combined_merchant_with_soc(
             f"{title_prefix(get_scenario_label())} "
             f"— {pretty_date(date_str)}"
         )
-    plt.xlabel("Time (HH:mm)")
+    ax.set_xlabel("Time (HH:mm)")
     ax.set_ylabel("Energy (kWh)")
     _setup_day_axes(ax, start, end)
     _apply_combined_with_soc_legend(ax, ax2)
@@ -640,6 +641,7 @@ def plot_daily_revenue(
         )
     ax.set_xlabel("Time (HH:mm)")
     ax.set_ylabel("EUR")
+    ax.yaxis.set_major_formatter(euro_axis_formatter("auto"))
     _setup_day_axes(ax, start, end)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="daily")
     apply_universal_margins(ax, skip_x=True)

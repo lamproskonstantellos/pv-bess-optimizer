@@ -43,7 +43,7 @@ Scaling rules (per year :math:`y`)
   ``bess_degradation_annual_pct`` and ``bess_degradation_pct_per_cycle``.
 
   ``cumulative_cycles(y-1)`` is the full equivalent cycles accrued
-  **through year y − 1** — the lag avoids a circular dependency, since
+  **through year y − 1**; the lag avoids a circular dependency, since
   year-:math:`y` dispatch is what determines year-:math:`y` cycles.
   Full equivalent cycles use the discharge-only convention
   (``discharge_mwh / capacity_mwh``) shared with
@@ -56,8 +56,14 @@ Scaling rules (per year :math:`y`)
   identically.
 
   The replacement CAPEX line is added separately by
-  :func:`pvbess_opt.economics.build_yearly_cashflow` at year
-  ``bess_replacement_year``.
+  :func:`pvbess_opt.economics.build_yearly_cashflow` at the EFFECTIVE
+  replacement year: ``bess_replacement_year`` resolves once via
+  :func:`pvbess_opt.lifetime.resolve_bess_replacement_year` (N =
+  scheduled year, blank / ``auto`` = the first year the analytic SOH
+  curve falls to ``bess_eol_soh_pct``, 0 = never), and the fade
+  sequence itself comes from the shared
+  :func:`pvbess_opt.lifetime.bess_capacity_factors` accumulator used by
+  the cashflow, the lifetime projection and the degradation report.
 
 * **Load** and **grid prices** are unchanged across years.
 * **Mixed flows** (``grid_to_load_kwh``) pass through Year-1 values;
@@ -87,7 +93,7 @@ fade and the cycle fade sum to the total fade,
    = \underbrace{1 - \text{bess\_factor}(y)}_{\text{total fade}}
 
 with exact equality whenever the :math:`\max(0, \cdot)` floor in
-``bess_factor`` is inactive — the normal case.  Equality only breaks
+``bess_factor`` is inactive (the normal case).  Equality only breaks
 when pathological cycling would otherwise drive the factor negative,
 where the floor clamps the total fade at 100 %.
 
@@ -105,4 +111,4 @@ Calendar mapping
 A 20-year run with ``project_start_year = 2026`` therefore produces
 21 yearly cashflow rows: Year 0 = 2025 (CAPEX only); Years 1..20 =
 2026..2045.  ``02_dispatch/dispatch_timeseries.xlsx`` covers operating
-years only (2026..2045) — there is no 2025 sheet.
+years only (2026..2045); there is no 2025 sheet.

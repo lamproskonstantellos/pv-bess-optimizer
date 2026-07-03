@@ -28,6 +28,7 @@ import pandas as pd
 from matplotlib.ticker import ScalarFormatter
 
 from ..theme import FINANCIAL_COLORS, XTICK_ROT
+from ._currency import euro_axis_formatter
 from .helpers import (
     bar_stacked_bins,
     edges_and_widths_monthly,
@@ -469,6 +470,7 @@ def plot_monthly_revenue(
         )
     ax.set_xlabel("Day")
     ax.set_ylabel("EUR/day")
+    ax.yaxis.set_major_formatter(euro_axis_formatter("auto"))
     _setup_day_axis(ax, left, width_days)
     apply_legend(ax, max_rows=2, custom_order=False, plot_type="monthly")
     apply_universal_margins(ax, skip_x=True)

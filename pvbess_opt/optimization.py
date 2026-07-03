@@ -114,6 +114,14 @@ _MERCHANT_CAP_FLAG_WARNED = False
 # subtracted in the objective; see pvbess_opt.degradation for the
 # calibration helper.
 
+# Penalty on missing the rolling-horizon year-close SOC target, per kWh
+# of shortfall.  Far above any plausible energy value (DAM/retail are
+# ~0.05-0.30 EUR/kWh), so the shortfall stays at the physical minimum:
+# it activates ONLY when the target is unreachable (e.g. a winter year
+# end where the remaining PV surplus cannot recharge the battery and
+# grid charging is off), where a hard equality would be infeasible.
+YEAR_CLOSE_SHORTFALL_PENALTY_EUR_PER_KWH: float = 10.0
+
 
 # ---------------------------------------------------------------------------
 # Solver helpers
@@ -198,7 +206,7 @@ def _has_feasible_incumbent(model: pyo.ConcreteModel | None) -> bool:
     ``var.value``, which we treat as "no incumbent".  Probing a named
     variable instead of "first var encountered via
     ``component_data_objects``" makes the check robust to refactors that
-    change the declaration order (Pass-2 P2.8).
+    change the declaration order.
     """
     if model is None:
         return False
@@ -788,8 +796,19 @@ def build_model(
             # Rolling-horizon year-close: the window's own soc[0] is the
             # carried-over SOC, so the closed-cycle condition must pin the
             # terminal state to the explicit year-initial target instead.
+            # The target is relaxed by a heavily penalised shortfall
+            # variable: a hard equality is infeasible when the remaining
+            # horizon physically cannot recharge to the target (winter
+            # year end, surplus-only charging).  The penalty keeps the
+            # shortfall at its physical minimum (zero whenever the
+            # target is reachable), so the reachable case is unchanged.
+            m.year_close_shortfall = pyo.Var(
+                domain=pyo.NonNegativeReals,
+                bounds=(0.0, float(params["soc_max_frac"]) * e_cap_param),
+            )
             m.SOC_TERM = pyo.Constraint(
-                expr=final_soc_expr == float(terminal_soc_target_kwh),
+                expr=final_soc_expr
+                == float(terminal_soc_target_kwh) - m.year_close_shortfall,
             )
         elif not terminal_soc_free:
             m.SOC_TERM = pyo.Constraint(expr=final_soc_expr == m.soc[0])
@@ -1096,6 +1115,13 @@ def build_model(
         )
         profit_eur = profit_eur + m.balancing_revenue_expr
 
+    if hasattr(m, "year_close_shortfall"):
+        # Missing the year-close SOC target costs far more than any
+        # energy price, so the shortfall stays at its physical minimum.
+        profit_eur = profit_eur - (
+            YEAR_CLOSE_SHORTFALL_PENALTY_EUR_PER_KWH * m.year_close_shortfall
+        )
+
     m.OBJ = pyo.Objective(
         expr=profit_eur - curtail_tiebreak_term, sense=pyo.maximize,
     )
@@ -1364,8 +1390,8 @@ def run_scenario(
 
 # Names of the six balancing-invariant residual keys returned by
 # :func:`verify_dispatch_invariants`.  Anchored as a tuple so
-# downstream consumers (``main._check_strict_invariants``) can refer to
-# the canonical list without re-declaring the names.
+# downstream consumers (``pvbess_opt.pipeline._check_strict_invariants``)
+# can refer to the canonical list without re-declaring the names.
 BALANCING_INVARIANT_KEYS: tuple[str, ...] = (
     "invariant_b1_capacity_share_sum_pct_excess",
     "invariant_b2_reservation_share_cap_excess_kw",
@@ -1422,7 +1448,7 @@ def _balancing_invariants(
     # / params["soc_max_frac"] directly, so the loader always populates
     # both keys (io._typed_to_flat).  A silent .get fallback here would let
     # a hand-built ``params`` dict bypass the invariant check that build
-    # would have rejected with KeyError.  Pass-2 P2.4.
+    # would have rejected with KeyError.
     soc_min = float(params["soc_min_frac"]) * bess_kwh
     soc_max = float(params["soc_max_frac"]) * bess_kwh
     h_buf = cfg.bm_soc_headroom_pct / 100.0
@@ -1513,7 +1539,7 @@ def verify_dispatch_invariants(
 
     Verifies the nine general-dispatch invariants plus, when the
     balancing block fired, the six INV-B1..INV-B6 balancing-market
-    invariants.  Returns a dict of named residuals; ``main.py``'s
+    invariants.  Returns a dict of named residuals; the pipeline's
     ``--strict`` mode rejects any residual above the energy tolerance.
 
     Returns
@@ -1527,7 +1553,7 @@ def verify_dispatch_invariants(
         * ``invariant_4_rte_bound_excess_kwh``
         * ``invariant_5_no_sim_grid_io_max_product_kwh2`` (self_consumption only)
         * ``invariant_6_load_priority_violations`` (self_consumption only)
-        * ``invariant_7_curtail_behavior_kwh`` (BOTH modes)
+        * ``invariant_7_curtail_behavior_count`` (BOTH modes)
         * ``invariant_8_soc_closed_cycle_kwh`` (when terminal_soc_equal)
         * ``invariant_9_pv_load_priority_kwh`` (self_consumption only; Section 2)
 
@@ -1710,7 +1736,7 @@ def verify_dispatch_invariants(
         "invariant_4_rte_bound_excess_kwh": inv_4,
         "invariant_5_no_sim_grid_io_max_product_kwh2": inv_5,
         "invariant_6_load_priority_violations": inv_6,
-        "invariant_7_curtail_behavior_kwh": inv_7,
+        "invariant_7_curtail_behavior_count": inv_7,
         "invariant_8_soc_closed_cycle_kwh": inv_8,
         "invariant_9_pv_load_priority_kwh": inv_9,
     }

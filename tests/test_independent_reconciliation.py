@@ -89,7 +89,7 @@ def _econ(**kw):
         bm_inflation_pct=0.0,
         pv_degradation_year1_pct=0.0, pv_degradation_annual_pct=0.0,
         bess_degradation_annual_pct=0.0, bess_degradation_pct_per_cycle=0.0,
-        capex_pv_eur_per_kw=0.0, capex_bess_eur_per_kw=1.0,  # 1000 kW -> -1000
+        capex_pv_eur_per_kw=0.0, capex_bess_eur_per_kwh=0.25,  # 4000 kWh -> -1000
         devex_pv_eur_per_kw=0.0, devex_bess_eur_per_kw=0.0,
         site_capex_eur=0.0, site_devex_eur=0.0,
         opex_pv_eur_per_kwp=0.0, opex_bess_eur_per_kw=0.0,

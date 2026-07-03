@@ -174,14 +174,16 @@ PV_SHEET_DEFAULTS: dict[str, Any] = {
 BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "bess_power_kw": 0.0,
     "bess_capacity_kwh": 0.0,
-    "efficiency_charge": 0.97,
-    "efficiency_discharge": 0.97,
+    "efficiency_charge": 0.95,
+    "efficiency_discharge": 0.95,
     "soc_min_frac": 0.20,
     "soc_max_frac": 0.95,
     "initial_soc_frac": 0.50,
     "terminal_soc_equal": True,
     "max_cycles_per_day": 1.0,
-    "capex_bess_eur_per_kw": 200.0,
+    # Full installed BESS cost per kWh of nameplate energy capacity
+    # (Lazard-style band 215-315 EUR/kWh).
+    "capex_bess_eur_per_kwh": 250.0,
     "devex_bess_eur_per_kw": 30.0,
     "opex_bess_eur_per_kw": 14.0,
     "bess_replacement_year": 0,
@@ -190,11 +192,13 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     # LFP cycle-fade default (matches the canonical workbook row in
     # _BESS_ROWS and the schema default); range 0.005-0.010.
     "bess_degradation_pct_per_cycle": 0.008,
-    # End-of-life SOH threshold (%) for the diagnostic replacement
-    # schedule when no bess_replacement_year is set.
+    # End-of-life SOH threshold (%) driving the automatic replacement
+    # when bess_replacement_year is blank / 'auto'.
     "bess_eol_soh_pct": 80.0,
-    # Per-MWh-throughput cycle wear cost in the dispatch objective (0 = off).
-    "bess_wear_cost_eur_per_mwh": 0.0,
+    # Per-MWh-throughput cycle wear cost in the dispatch objective
+    # (0 = off).  Default 10: the optimizer skips marginal cycles whose
+    # spread does not beat the degradation cost.
+    "bess_wear_cost_eur_per_mwh": 10.0,
 }
 
 ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
@@ -515,10 +519,10 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("bess_capacity_kwh", 0, "kWh",
      "BESS energy capacity. Pinned to the workbook value (industry "
      "standard for sizing-as-input projects)."),
-    ("efficiency_charge", 0.97, "-",
+    ("efficiency_charge", 0.95, "-",
      "Charge efficiency (0..1). Round-trip = "
-     "efficiency_charge * efficiency_discharge."),
-    ("efficiency_discharge", 0.97, "-",
+     "efficiency_charge * efficiency_discharge (0.95 x 0.95 = 0.9025)."),
+    ("efficiency_discharge", 0.95, "-",
      "Discharge efficiency (0..1)."),
     ("soc_min_frac", 0.20, "-",
      "Minimum SOC as fraction of nominal capacity (0.20 = 20 %)."),
@@ -530,24 +534,39 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "If TRUE, force final SOC == initial SOC (closed cycle)."),
     ("max_cycles_per_day", 1.0, "-",
      "Daily equivalent-cycle cap (sum of discharge / capacity)."),
-    ("bess_wear_cost_eur_per_mwh", 0.0, "EUR/MWh",
+    ("bess_wear_cost_eur_per_mwh", 10.0, "EUR/MWh",
      "Cycle wear cost penalised per MWh discharged in the dispatch "
-     "objective (0 = off). Derive from replacement cost / cycle-life / "
-     "usable energy via pvbess_opt.degradation."),
-    ("capex_bess_eur_per_kw", 200, "EUR/kW",
-     "Per-kW BESS CAPEX. Set 0 if BESS already exists. For an LCOS "
-     "comparable to the Lazard benchmark band, use the FULL installed "
-     "cost per kW = duration_h x EUR/kWh (e.g. a 4-hour system at "
-     "250 EUR/kWh -> 1000 EUR/kW); a power-block-only figure (~200, "
-     "DC + PCS) understates LCOS against that band."),
+     "objective (default 10; 0 = off). A dispatch shadow price only: "
+     "never charged in the cashflow (the replacement CAPEX carries "
+     "degradation cost), so it is not double-counted. Applies to DAM "
+     "and self-consumption discharge; expected balancing-activation "
+     "throughput carries no wear penalty by design. Derive from "
+     "replacement cost / cycle-life / usable energy via "
+     "pvbess_opt.degradation."),
+    ("capex_bess_eur_per_kwh", 250, "EUR/kWh",
+     "Full installed BESS CAPEX per kWh of nameplate energy capacity "
+     "(cells + PCS + BOP + EPC). Benchmark band 215-315 EUR/kWh "
+     "(Lazard LCOS, utility-scale 4-hour Li-ion). Set 0 if the BESS "
+     "already exists."),
     ("devex_bess_eur_per_kw", 30, "EUR/kW",
-     "Per-kW BESS DEVEX (development / permitting). Paid in Year 0."),
+     "Per-kW BESS DEVEX (development / permitting). Paid in Year 0. "
+     "Stays on the power basis: development and permitting effort "
+     "scales with the power block, not the energy capacity."),
     ("opex_bess_eur_per_kw", 14, "EUR/kW/yr",
-     "Annual O&M for BESS."),
+     "Annual O&M for BESS. Stays on the power basis: fixed O&M "
+     "contracts are quoted per kW of the power block."),
     ("bess_replacement_year", 0, "year",
-     "Year of BESS cell replacement (0 = no replacement). Typical 10 or 15."),
+     "BESS replacement policy. N (positive integer) = replace in project "
+     "year N; bess_eol_soh_pct is then ignored. Blank cell or 'auto' = "
+     "replace in the first year state-of-health falls to "
+     "bess_eol_soh_pct (the replacement CAPEX is charged in the "
+     "cashflow in that year). 0 = never replace. Typical scheduled "
+     "values 10 or 15. Only ONE replacement is ever charged; if a "
+     "second SOH crossing would occur after an auto replacement the "
+     "run log warns."),
     ("bess_replacement_cost_pct", 50, "%",
-     "Replacement cost as percent of original BESS CAPEX."),
+     "Replacement cost as percent of original BESS CAPEX. Charged in "
+     "the effective replacement year (scheduled or auto)."),
     ("bess_degradation_annual_pct", 2.0, "%",
      "Linear BESS capacity fade. Approximate Tier-1 LFP cell warranty."),
     ("bess_degradation_pct_per_cycle", 0.008, "%",
@@ -555,11 +574,12 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "percent. LFP default 0.008 (range 0.005-0.010). Set to 0 to "
      "disable cycle aging (calendar-only mode)."),
     ("bess_eol_soh_pct", 80.0, "%",
-     "End-of-life state-of-health threshold for the SOH diagnostic: "
-     "when no bess_replacement_year is scheduled, the degradation "
-     "report swaps in a fresh pack the first year SOH falls to this "
-     "level. Diagnostic only — the cashflow charges replacement CAPEX "
-     "only for a scheduled bess_replacement_year."),
+     "End-of-life state-of-health threshold driving the automatic "
+     "replacement when bess_replacement_year is blank or 'auto': the "
+     "battery is replaced (and the replacement CAPEX charged in the "
+     "cashflow) in the first project year SOH falls to this level. "
+     "Ignored when a replacement year is scheduled explicitly, and "
+     "when bess_replacement_year = 0 (never replace)."),
 )
 
 _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
@@ -1202,6 +1222,8 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         # Free-form PVGIS strings: a blank cell resolves to the default
         # (None); a non-blank cell is taken verbatim (stripped).
         return _parse_pv_path(raw, default)
+    if key == "bess_replacement_year":
+        return _parse_bess_replacement_year(raw, default)
     if key in _INT_KEYS:
         coerced = _coerce(raw, int, default)
         if coerced is _COERCE_FAILED:
@@ -1258,6 +1280,88 @@ def _parse_grid_export_max(raw: Any, default: Any) -> float:
     if np.isinf(value):
         return float("inf")
     return value
+
+
+#: Legacy v0.x key for the BESS CAPEX, priced per kW of power.  v1.0.0
+#: prices BESS CAPEX per kWh of energy capacity instead; the old key is
+#: rejected loudly so an old workbook cannot silently fall back to the
+#: new per-kWh default.
+LEGACY_BESS_CAPEX_KEY = "capex_bess_eur_per_kw"
+
+
+def reject_legacy_bess_capex_key(keys: Any, *, source: str) -> None:
+    """Raise ``ValueError`` when the legacy per-kW BESS CAPEX key is present.
+
+    ``keys`` is any iterable of key names from the bess section of a
+    workbook or structured config; ``source`` names the input for the
+    error message.  Conversion rule:
+    ``value_per_kwh = value_per_kw x bess_power_kw / bess_capacity_kwh``.
+    """
+    if LEGACY_BESS_CAPEX_KEY in set(keys):
+        raise ValueError(
+            f"{source} uses the legacy key '{LEGACY_BESS_CAPEX_KEY}' "
+            "(BESS CAPEX per kW of power). Since v1.0.0 BESS CAPEX is "
+            "priced per kWh of energy capacity via "
+            "'capex_bess_eur_per_kwh'. Convert the value with "
+            "value_per_kwh = value_per_kw x bess_power_kw / "
+            "bess_capacity_kwh, or run "
+            "scripts/polish_input_workbook.py to migrate the workbook "
+            "automatically."
+        )
+
+
+#: Sentinel value for the SOH-threshold automatic BESS replacement.
+BESS_REPLACEMENT_AUTO = "auto"
+
+
+def _parse_bess_replacement_year(raw: Any, default: Any) -> int | str:
+    """Parse ``bess_replacement_year`` with three-way semantics.
+
+    * blank cell or the literal string ``auto`` (case-insensitive) →
+      :data:`BESS_REPLACEMENT_AUTO`: replace in the first project year
+      whose SOH falls to ``bess_eol_soh_pct`` (resolved once by
+      :func:`pvbess_opt.lifetime.resolve_bess_replacement_year`);
+    * ``0`` → never replace;
+    * a positive integer → scheduled replacement in that project year.
+
+    Negative or non-integer values raise ``ValueError`` — this key must
+    not fall back silently (the v0.x parser collapsed a blank cell into
+    the default 0, silently disabling replacement).
+    """
+    _ = default  # three-way semantics leave no room for a fallback
+    if raw is None:
+        return BESS_REPLACEMENT_AUTO
+    if isinstance(raw, float) and np.isnan(raw):
+        return BESS_REPLACEMENT_AUTO
+    if isinstance(raw, str):
+        token = raw.strip().lower()
+        if token == "" or token == BESS_REPLACEMENT_AUTO:
+            return BESS_REPLACEMENT_AUTO
+        try:
+            value = float(token)
+        except ValueError:
+            raise ValueError(
+                f"'bess_replacement_year' must be a non-negative integer, "
+                f"blank, or 'auto'; got {raw!r}."
+            ) from None
+    else:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"'bess_replacement_year' must be a non-negative integer, "
+                f"blank, or 'auto'; got {raw!r}."
+            ) from None
+    if not float(value).is_integer():
+        raise ValueError(
+            f"'bess_replacement_year' must be a whole year; got {raw!r}."
+        )
+    year = int(value)
+    if year < 0:
+        raise ValueError(
+            f"'bess_replacement_year' must be non-negative; got {raw!r}."
+        )
+    return year
 
 
 def _parse_kv_sheet(
@@ -1835,7 +1939,7 @@ def validate_workbook_params(
         "bess_power_kw",
         "bess_capacity_kwh",
         "max_cycles_per_day",
-        "capex_bess_eur_per_kw",
+        "capex_bess_eur_per_kwh",
         "devex_bess_eur_per_kw",
         "opex_bess_eur_per_kw",
         "bess_replacement_cost_pct",
@@ -1997,6 +2101,10 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         flat = _flat_dict_from_sheet(
             pd.read_excel(xlsx_path, sheet_name=sheet_name),
         )
+        if sheet_name == "bess":
+            reject_legacy_bess_capex_key(
+                flat, source=f"Workbook {xlsx_path!s} (bess sheet)",
+            )
         typed[sheet_name] = _parse_kv_sheet(sheet_name, flat)
         if (
             sheet_name == "bess"
@@ -2336,6 +2444,7 @@ def write_summary_md(
     financial_kpis: dict[str, Any] | None,
     params: dict[str, Any],
     solver_name: str | None = None,
+    replacement_note: str | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -2361,6 +2470,8 @@ def write_summary_md(
         "- Grid charging: "
         f"{'on' if params.get('allow_bess_grid_charging') else 'off'}"
     )
+    if replacement_note:
+        lines.append(f"- BESS replacement: {replacement_note}")
     if solver_name:
         lines.append(f"- Solver: `{solver_name}`")
     lines.append("")
@@ -2392,10 +2503,10 @@ def write_summary_md(
 
     lines.append("## Where to look next")
     lines.append("")
-    lines.append("- `03_results.xlsx` — KPIs, cashflows, sensitivity, lifetime")
-    lines.append("- `02_dispatch/dispatch_timeseries.xlsx` — per-step dispatch")
-    lines.append("- `04_financial_plots/` and `05_energy_plots/` — figures")
-    lines.append("- `00_summary/run_log.txt` — full run log")
+    lines.append("- `03_results.xlsx`: KPIs, cashflows, sensitivity, lifetime")
+    lines.append("- `02_dispatch/dispatch_timeseries.xlsx`: per-step dispatch")
+    lines.append("- `04_financial_plots/` and `05_energy_plots/`: figures")
+    lines.append("- `00_summary/run_log.txt`: full run log")
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out_path
 

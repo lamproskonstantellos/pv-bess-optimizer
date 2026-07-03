@@ -8,10 +8,10 @@ and ignores it like any unknown key, and the polish script migrates old
 workbooks by dropping the row.
 
 Direction 2 (model -> workbook): every tunable the model reads is
-parameterizable.  ``end_of_life_soh_pct`` (the SOH diagnostic's
-replacement threshold) was hardcoded at 80 — it is now the
-``bess_eol_soh_pct`` workbook key, validated to (0, 100], and threaded
-from the economics dict into ``build_degradation_report``.
+parameterizable.  ``bess_eol_soh_pct`` (the SOH threshold that drives
+the automatic replacement when ``bess_replacement_year`` is 'auto') is
+a workbook key validated to (0, 100] and consumed by the replacement
+resolver (``pvbess_opt.lifetime.resolve_bess_replacement_year``).
 """
 
 from __future__ import annotations
@@ -134,16 +134,25 @@ def test_bess_eol_threshold_drives_the_degradation_diagnostic():
         "bess_degradation_annual_pct": 5.0,
         "project_lifecycle_years": 20,
         "project_start_year": 2026,
-        "bess_replacement_year": 0,
+        "bess_replacement_year": "auto",
     }
-    low = _build_degradation_report(
-        res, params, dict(base_econ, bess_eol_soh_pct=60.0),
-        kpis={"bess_total_discharge_mwh": 0.0},
-    )
-    high = _build_degradation_report(
-        res, params, dict(base_econ, bess_eol_soh_pct=90.0),
-        kpis={"bess_total_discharge_mwh": 0.0},
-    )
+
+    def _report_with_threshold(eol_pct: float):
+        # Mirror the pipeline: resolve the auto sentinel once, store the
+        # effective year, then build the report from it.
+        from pvbess_opt.lifetime import resolve_bess_replacement_year
+
+        econ = dict(base_econ, bess_eol_soh_pct=eol_pct)
+        effective, _source, _second = resolve_bess_replacement_year(
+            econ, year1_discharge_mwh=0.0, capacity_mwh=20.0,
+        )
+        econ["bess_replacement_year_effective"] = effective
+        return _build_degradation_report(
+            res, params, econ, kpis={"bess_total_discharge_mwh": 0.0},
+        )
+
+    low = _report_with_threshold(60.0)
+    high = _report_with_threshold(90.0)
     first_low = int(low.loc[low["replacement"], "project_year"].min())
     first_high = int(high.loc[high["replacement"], "project_year"].min())
     # 5 %/yr calendar fade: SOH hits 90 % within ~3 years but needs ~10

@@ -145,9 +145,19 @@ class _EuroTickFormatter(Formatter):
     axes fall back to the fixed default precision.
     """
 
-    def __init__(self, format_mode: str = "auto", *, decimals: int = 1) -> None:
+    def __init__(
+        self, format_mode: str = "auto", *, decimals: int = 1,
+        min_resolution_eur: float | None = None,
+    ) -> None:
         self._mode = format_mode
         self._decimals = int(decimals)
+        # Optional floor on the rendered resolution: tick labels never
+        # show finer than this many EUR (caps the adaptive escalation on
+        # near-degenerate axes, e.g. a Monte Carlo ensemble whose seeds
+        # all land on the same profit).
+        self._min_resolution_eur = (
+            float(min_resolution_eur) if min_resolution_eur else None
+        )
 
     def _tick_spacing(self) -> float | None:
         axis = getattr(self, "axis", None)
@@ -181,6 +191,16 @@ class _EuroTickFormatter(Formatter):
             # (scale * 10^-dec) to be at most the tick spacing.
             needed = math.ceil(-math.log10(spacing / scale) - 1e-9)
             dec = min(max(default_dec, needed), default_dec + _MAX_EXTRA_DECIMALS)
+        if (
+            self._min_resolution_eur is not None
+            and scale >= self._min_resolution_eur
+        ):
+            # Rendered resolution is scale * 10^-dec EUR; cap dec so it
+            # never drops below the configured floor.
+            dec_cap = math.floor(
+                math.log10(scale / self._min_resolution_eur) + 1e-9
+            )
+            dec = min(dec, max(dec_cap, 0))
         if scale >= 1e6 and self._mode != "raw":
             return format_eur(value, self._mode, decimals=dec)
         return format_eur(
@@ -190,6 +210,7 @@ class _EuroTickFormatter(Formatter):
 
 def euro_axis_formatter(
     format_mode: str = "auto", *, decimals: int = 1,
+    min_resolution_eur: float | None = None,
 ) -> Formatter:
     """Return a matplotlib ``Formatter`` rendering ticks via :func:`format_eur`.
 
@@ -204,4 +225,6 @@ def euro_axis_formatter(
     spacing is too narrow for the default — see
     :class:`_EuroTickFormatter`.
     """
-    return _EuroTickFormatter(format_mode, decimals=decimals)
+    return _EuroTickFormatter(
+        format_mode, decimals=decimals, min_resolution_eur=min_resolution_eur,
+    )

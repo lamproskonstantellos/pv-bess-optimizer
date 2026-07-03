@@ -47,7 +47,7 @@ def _base_typed() -> dict:
             "efficiency_charge": 0.97,
             "efficiency_discharge": 0.97,
             "max_cycles_per_day": 1.0,
-            "capex_bess_eur_per_kw": 200.0,
+            "capex_bess_eur_per_kwh": 200.0,
             "devex_bess_eur_per_kw": 30.0,
             "opex_bess_eur_per_kw": 14.0,
             "bess_replacement_cost_pct": 50.0,
@@ -99,8 +99,8 @@ def test_negative_capex_pv_rejected():
 
 def test_negative_capex_bess_rejected():
     t = _base_typed()
-    t["bess"]["capex_bess_eur_per_kw"] = -50.0
-    _assert_raises_containing(t, fragment="capex_bess_eur_per_kw")
+    t["bess"]["capex_bess_eur_per_kwh"] = -50.0
+    _assert_raises_containing(t, fragment="capex_bess_eur_per_kwh")
 
 
 def test_negative_opex_pv_rejected():

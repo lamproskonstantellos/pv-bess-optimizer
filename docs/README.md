@@ -1,11 +1,11 @@
 # Documentation index
 
 The domain design documents below are the authoritative mathematical
-specification of `pvbess_opt`.  Every document follows one template —
-Purpose & scope → Inputs → Mathematical formulation → Settlement &
+specification of `pvbess_opt`.  Every document follows one template
+(Purpose & scope → Inputs → Mathematical formulation → Settlement &
 cashflow equations → KPI definitions → Implementation map →
 Validation & tests → Worked example → Assumptions & limitations →
-References — and every numbered equation cites the implementing
+References), and every numbered equation cites the implementing
 module/symbol, so the documents can be cited directly and verified
 against the code.  The Sphinx manual under `docs/source/` (user's
 guide + technical pages) links here rather than duplicating the
@@ -13,16 +13,15 @@ mathematics.
 
 | Document | One-paragraph summary |
 |---|---|
-| [`self_consumption_design.md`](self_consumption_design.md) | The `self_consumption` regulatory regime (MD YPEN/DAPEEK/93976/2772/2024): decision variables, the profit objective, every hard constraint as a formal statement (load balance, exact PV→load priority, surplus-only export, no simultaneous grid I/O, SOC dynamics and year-close, injection caps), and the nine post-solve audit invariants.  Machine-checked: `tests/test_logic_spec_conformance.py` parses its constraint and invariant headings and asserts each symbol on a built model. (Equations S1–S34.) |
-| [`merchant_design.md`](merchant_design.md) | The `merchant` regime: pure utility-scale DAM dispatch with no co-located load — the three load-flow pinning constraints, which self-consumption constraints are absent vs shared, the cap-basis no-op of `grid_cap_includes_load`, the merchant objective with the PPA-adjusted export price, negative-price behaviour, and the three asset configurations. (Equations M1–M3.) |
-| [`balancing_market_design.md`](balancing_market_design.md) | Stochastic FCR/aFRR/mFRR participation: per-product reservations as decision variables, power-budget and SOC-headroom constraints, expected-activation SOC drift, the expected-revenue objective terms, cashflow/fee/LCOE scope, the 34-key workbook surface, and the six balancing invariants — with the full verification and falsification log as an appendix. (Equations B1–B8.) |
-| [`ppa_design.md`](ppa_design.md) | The pay-as-produced PPA contract engine: covered share of PV export, physical vs two-way-CfD settlement and their equivalence, the PPA-adjusted dispatch price (1−s)·DAM + s·strike, term cutoff and post-term reversion, fee exemption and LCOE/LCOS exclusion, and the baseload design decision. (Equations P1–P5.) |
-| [`economics_design.md`](economics_design.md) | The project-finance engine: Year-0/Year-y conventions, per-stream escalation and end-of-year/monthly discounting, the nine canonical revenue aggregates, the aggregator-fee clamp, PV/BESS degradation factors with cycle fade and replacement reset, debt layer, NPV/IRR/ROI/BCR/payback, and Lazard-style LCOE/LCOS with their exclusions. (Equations E1–E23.) |
-| [`uncertainty_design.md`](uncertainty_design.md) | The uncertainty machinery: rolling-horizon dispatch with unit-mean log-normal forecast noise, the Monte Carlo ensemble and the foresight gap 100·(1−RH/PF), the four-source comparison, the balancing-revenue Monte Carlo with revenue/SOC coupling, the sensitivity tornado drivers, and the availability derate symmetry. (Equations U1–U5.) |
+| [`self_consumption_design.md`](self_consumption_design.md) | The `self_consumption` regulatory regime (MD YPEN/DAPEEK/93976/2772/2024): decision variables, the profit objective, every hard constraint as a formal statement (load balance, exact PV→load priority, surplus-only export, no simultaneous grid I/O, SOC dynamics and year-close, injection caps), and the nine post-solve audit invariants.  Machine-checked: `tests/test_logic_spec_conformance.py` parses its constraint and invariant headings and asserts each symbol on a built model. (Equations S1-S34.) |
+| [`merchant_design.md`](merchant_design.md) | The `merchant` regime: pure utility-scale DAM dispatch with no co-located load.  Covers the three load-flow pinning constraints, which self-consumption constraints are absent vs shared, the cap-basis no-op of `grid_cap_includes_load`, the merchant objective with the PPA-adjusted export price, negative-price behaviour, and the three asset configurations. (Equations M1-M3.) |
+| [`balancing_market_design.md`](balancing_market_design.md) | Stochastic FCR/aFRR/mFRR participation: per-product reservations as decision variables, power-budget and SOC-headroom constraints, expected-activation SOC drift, the expected-revenue objective terms, cashflow/fee/LCOE scope, the 34-key workbook surface, and the six balancing invariants, with the full verification and falsification log as an appendix. (Equations B1-B8.) |
+| [`ppa_design.md`](ppa_design.md) | The pay-as-produced PPA contract engine: covered share of PV export, physical vs two-way-CfD settlement and their equivalence, the PPA-adjusted dispatch price (1−s)·DAM + s·strike, term cutoff and post-term reversion, fee exemption and LCOE/LCOS exclusion, and the baseload design decision. (Equations P1-P5.) |
+| [`economics_design.md`](economics_design.md) | The project-finance engine: Year-0/Year-y conventions, per-stream escalation and end-of-year/monthly discounting, the nine canonical revenue aggregates, the aggregator-fee clamp, PV/BESS degradation factors with cycle fade and replacement reset, debt layer, NPV/IRR/ROI/BCR/payback, and Lazard-style LCOE/LCOS with their exclusions. (Equations E1-E23.) |
+| [`uncertainty_design.md`](uncertainty_design.md) | The uncertainty machinery: rolling-horizon dispatch with unit-mean log-normal forecast noise, the Monte Carlo ensemble and the foresight gap 100·(1−RH/PF), the four-source comparison, the balancing-revenue Monte Carlo with revenue/SOC coupling, the sensitivity tornado drivers, and the availability derate symmetry. (Equations U1-U5.) |
 
-Also in this directory: [`CHANGELOG.md`](CHANGELOG.md) (release log)
-and [`audit_test_index.md`](audit_test_index.md) (test-suite
-overview).  Cross-module lockstep rules live in
+Also in this directory: [`CHANGELOG.md`](CHANGELOG.md) (release log).
+Cross-module lockstep rules live in
 [`pvbess_opt/conventions.md`](../pvbess_opt/conventions.md).
 
 ## Shared notation
@@ -89,7 +88,7 @@ verbatim in each document's Inputs section.
 
 ### Conventions
 
-Energies in kWh, powers in kW, prices in EUR/MWh — EUR terms therefore
+Energies in kWh, powers in kW, prices in EUR/MWh.  EUR terms therefore
 carry an explicit /1000.  Equations are numbered per document with a
 domain prefix: S (self-consumption), M (merchant), B (balancing),
 P (PPA), E (economics), U (uncertainty).  Constraint names in SMALL

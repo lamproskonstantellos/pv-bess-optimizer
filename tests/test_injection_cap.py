@@ -222,7 +222,7 @@ def test_strict_partial_offset_when_cap_below_load():
     inv = verify_dispatch_invariants(full, params_t)
     assert inv["invariant_9_pv_load_priority_kwh"] == pytest.approx(0.0, abs=1e-6)
     assert inv["invariant_2_load_balance_kwh"] == pytest.approx(0.0, abs=1e-6)
-    assert inv["invariant_7_curtail_behavior_kwh"] == pytest.approx(0.0, abs=1e-9)
+    assert inv["invariant_7_curtail_behavior_count"] == pytest.approx(0.0, abs=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +282,7 @@ def test_dispatch_invariants_clean_in_both_cap_modes(flag):
             5.0, abs=1e-4,
         )
     inv = verify_dispatch_invariants(full, params)
-    assert inv["invariant_7_curtail_behavior_kwh"] == pytest.approx(0.0, abs=1e-9)
+    assert inv["invariant_7_curtail_behavior_count"] == pytest.approx(0.0, abs=1e-9)
     assert inv["invariant_9_pv_load_priority_kwh"] == pytest.approx(0.0, abs=1e-6)
     assert inv["invariant_1_pv_balance_kwh"] == pytest.approx(0.0, abs=1e-6)
 
@@ -465,7 +465,7 @@ def test_invariants_clean_with_binding_pv_sub_cap(flag):
     # The PV sub-cap is surfaced for the checks.
     assert "grid_export_cap_pv_kwh" in full.columns
     inv = verify_dispatch_invariants(full, params)
-    assert inv["invariant_7_curtail_behavior_kwh"] == pytest.approx(0.0, abs=1e-9)
+    assert inv["invariant_7_curtail_behavior_count"] == pytest.approx(0.0, abs=1e-9)
     assert inv["invariant_9_pv_load_priority_kwh"] == pytest.approx(0.0, abs=1e-6)
     assert inv["invariant_1_pv_balance_kwh"] == pytest.approx(0.0, abs=1e-6)
     assert inv["invariant_2_load_balance_kwh"] == pytest.approx(0.0, abs=1e-6)

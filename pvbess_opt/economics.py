@@ -45,11 +45,11 @@ References for default values
 
 * PV CAPEX ~525 EUR/kWp (utility-scale ground mount, 2024) — IRENA
   *Renewable Power Generation Costs in 2023* (2024).
-* BESS CAPEX ~200 EUR/kW power block (DC + PCS, EU-utility, 2024) —
-  Lazard *Levelized Cost of Storage v9* (2024).  Note: the Lazard LCOS
-  benchmark band assumes the FULL installed cost (roughly
-  duration_h x 215-315 EUR/kWh); supply ``capex_bess_eur_per_kw`` on
-  that basis when comparing LCOS against the band.
+* BESS CAPEX ~250 EUR/kWh of nameplate energy capacity (full installed
+  cost: cells + PCS + BOP + EPC; EU-utility, 2024) — Lazard *Levelized
+  Cost of Storage v9* (2024), band 215-315 EUR/kWh.
+  ``capex_bess_eur_per_kwh`` multiplies ``bess_capacity_kwh`` directly;
+  BESS DEVEX and OPEX stay per kW of the power block.
 * PV degradation 2.5% Year-1 LID + 0.55%/yr linear — Tier-1 module
   warranty terms (Jinko / LONGi / Trina, 25-year linear ≤ 0.55%/yr).
 * BESS degradation 2%/yr linear (LFP, ~80% capacity at 10y) — typical
@@ -78,7 +78,7 @@ from .constants import (
 )
 from .io import PROJECT_SHEET_DEFAULTS, read_workbook
 from .kpis import require_economic_columns
-from .lifetime import _bess_factor
+from .lifetime import bess_capacity_factors, effective_bess_replacement_year
 
 logger = logging.getLogger(__name__)
 
@@ -368,9 +368,13 @@ def build_yearly_cashflow(
 
     pv_kwp = float(capacities["pv_kwp"])
     bess_kw = float(capacities["bess_kw"])
+    bess_kwh = float(capacities["bess_kwh"])
 
     capex_pv_y0 = -float(econ["capex_pv_eur_per_kw"]) * pv_kwp
-    capex_bess_y0 = -float(econ["capex_bess_eur_per_kw"]) * bess_kw
+    # BESS CAPEX is an energy-basis cost: EUR/kWh x nameplate kWh.
+    # DEVEX and OPEX stay on the power basis (development, permitting
+    # and fixed O&M scale with the power block).
+    capex_bess_y0 = -float(econ["capex_bess_eur_per_kwh"]) * bess_kwh
     # Site-wide lump-sum CAPEX/DEVEX (substation, grid upgrades,
     # interconnection, environmental studies, ...) are not per-asset, so
     # they fold straight into the Year-0 outflow rows.
@@ -519,18 +523,25 @@ def build_yearly_cashflow(
     else:
         ppa_strike_value_1 = rev1_ppa
 
-    bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
+    bess_repl_year = effective_bess_replacement_year(econ)
     bess_repl_cost_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
 
-    # Cumulative full-equivalent-cycle accumulator for the cycle-fade
-    # term.  Convention matches compute_financial_kpis' bess_lifetime_cycles
-    # (discharge MWh / capacity MWh).  Resets at project start and at
-    # bess_replacement_year.
+    # BESS capacity factors from the shared reset-at-replacement
+    # cycle-fade accumulator (single source of truth in lifetime.py).
+    # Cycle convention matches compute_financial_kpis'
+    # bess_lifetime_cycles (discharge MWh / capacity MWh).
     capacity_mwh = float(capacities.get("bess_kwh", 0.0) or 0.0) / 1000.0
     year1_discharge_mwh = float(
         year1_kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
     )
-    cumulative_cycles = 0.0
+    bess_factors = bess_capacity_factors(
+        n_years,
+        d_bess_annual=bess_deg_annual,
+        d_bess_per_cycle=bess_deg_per_cycle,
+        year1_discharge_mwh=year1_discharge_mwh,
+        capacity_mwh=capacity_mwh,
+        replacement_year=bess_repl_year,
+    )
 
     rows: list[dict[str, float]] = []
     for y in range(0, n_years + 1):
@@ -553,17 +564,7 @@ def build_yearly_cashflow(
                 pv_factor = 1.0
             else:
                 pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
-            if bess_repl_year > 0 and y == bess_repl_year:
-                cumulative_cycles = 0.0
-            bess_factor = _bess_factor(
-                y, bess_deg_annual, replacement_year=bess_repl_year,
-                d_bess_per_cycle=bess_deg_per_cycle,
-                cumulative_cycles_through=cumulative_cycles,
-            )
-            if capacity_mwh > 1e-12:
-                cumulative_cycles += (
-                    year1_discharge_mwh * bess_factor / capacity_mwh
-                )
+            bess_factor = bess_factors[y - 1]
             # Degrade PV-origin revenue on pv_factor and BESS-origin
             # revenue on bess_factor, mirroring build_lifetime_dispatch's
             # per-year factor loop so the
@@ -1238,7 +1239,7 @@ def compute_financial_kpis(
             # Numerator must NOT include BESS CAPEX, BESS DEVEX, BESS OPEX
             # or BESS replacement.  Denominator uses derated PV generation
             # (the lifetime_yearly column is already unavailability-derated
-            # upstream in main._build_financials).
+            # upstream in pvbess_opt.pipeline._build_financials).
             ly = lifetime_yearly.set_index("project_year") \
                 if "project_year" in lifetime_yearly.columns else None
             disc_series = df.set_index(project_year_col)["discount_factor"]
@@ -1290,12 +1291,12 @@ def compute_financial_kpis(
             bess_kw > 0.0 and bess_kwh > 0.0
             and "bess_discharge_mwh" in lifetime_yearly.columns
         ):
-            # BESS-attributable CAPEX share: BESS power-block + BESS DEVEX.
-            bess_capex_y0 = float(econ.get("capex_bess_eur_per_kw", 0.0)) * bess_kw
+            # BESS-attributable CAPEX share: BESS energy block + BESS DEVEX.
+            bess_capex_y0 = float(econ.get("capex_bess_eur_per_kwh", 0.0)) * bess_kwh
             bess_devex_y0 = (
                 float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
             )
-            bess_repl_year = int(econ.get("bess_replacement_year", 0) or 0)
+            bess_repl_year = effective_bess_replacement_year(econ)
             bess_repl_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
 
             disc_y0 = float(
@@ -1383,7 +1384,7 @@ def compute_financial_kpis(
         d_cycle_fade = float(
             econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
         ) / 100.0
-        repl_fade = int(econ.get("bess_replacement_year", 0) or 0)
+        repl_fade = effective_bess_replacement_year(econ)
         if repl_fade > 0 and n_op_years >= repl_fade:
             years_since_final = n_op_years - repl_fade
             reset_start = repl_fade

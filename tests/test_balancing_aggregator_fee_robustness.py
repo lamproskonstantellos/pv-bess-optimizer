@@ -25,7 +25,8 @@ def _econ(**kw):
         retail_inflation_pct=0.0, dam_inflation_pct=0.0, bm_inflation_pct=0.0,
         pv_degradation_year1_pct=0.0, pv_degradation_annual_pct=0.0,
         bess_degradation_annual_pct=0.0, bess_degradation_pct_per_cycle=0.0,
-        capex_pv_eur_per_kw=0.0, capex_bess_eur_per_kw=1.0,
+        # 0.25 EUR/kWh x 4000 kWh == the old 1 EUR/kW x 1000 kW total.
+        capex_pv_eur_per_kw=0.0, capex_bess_eur_per_kwh=0.25,
         devex_pv_eur_per_kw=0.0, devex_bess_eur_per_kw=0.0,
         site_capex_eur=0.0, site_devex_eur=0.0,
         opex_pv_eur_per_kwp=0.0, opex_bess_eur_per_kw=0.0,
@@ -81,7 +82,7 @@ def test_fee_is_noop_for_pv_only_project():
     }
     caps_pv_only = {"pv_kwp": 1000.0, "bess_kw": 0.0, "bess_kwh": 0.0}
     df = build_yearly_cashflow(
-        y1, _econ(capex_bess_eur_per_kw=0.0,
+        y1, _econ(capex_bess_eur_per_kwh=0.0,
                   balancing_aggregator_fee_pct_revenue=25.0), caps_pv_only,
     )
     assert (df["balancing_aggregator_fee_eur"].abs() < 1e-12).all()

@@ -268,7 +268,7 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     # 399-405): the aggregator fee is a non-negative deduction; BSPs do not
     # rebate negative-gross dispatches.  Without the clamp the perturbed
     # cashflow would flip the fee sign whenever the perturbed gross turns
-    # negative, which the base build never does.  Pass-2 P2.7.
+    # negative, which the base build never does.
     gross = float(factor) * gross_base
     fee = -frac * gross.clip(lower=0.0)
     df["aggregator_fee_eur"] = fee

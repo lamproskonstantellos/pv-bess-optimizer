@@ -212,8 +212,8 @@ def _apply_scenario_overrides(
         typed["pv"]["capex_pv_eur_per_kw"] = (
             _to_float(typed["pv"].get("capex_pv_eur_per_kw", 0.0)) * m
         )
-        typed["bess"]["capex_bess_eur_per_kw"] = (
-            _to_float(typed["bess"].get("capex_bess_eur_per_kw", 0.0)) * m
+        typed["bess"]["capex_bess_eur_per_kwh"] = (
+            _to_float(typed["bess"].get("capex_bess_eur_per_kwh", 0.0)) * m
         )
         typed["project"]["site_capex_eur"] = (
             _to_float(typed["project"].get("site_capex_eur", 0.0)) * m

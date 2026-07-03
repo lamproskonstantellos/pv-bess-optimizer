@@ -1,4 +1,4 @@
-Uncertainty modelling — rolling-horizon Monte Carlo
+Uncertainty modelling: rolling-horizon Monte Carlo
 ===================================================
 
 The annual MILP solved by ``pvbess_opt.optimization.run_scenario`` is a
@@ -6,7 +6,7 @@ The annual MILP solved by ``pvbess_opt.optimization.run_scenario`` is a
 output, and load and produces an upper bound on achievable profit.
 Real operators never have that visibility.  The package supplies a
 workbook-driven rolling-horizon Monte Carlo so the foresight gap is
-quantifiable.  The authoritative formulation (equations U1–U5, noise
+quantifiable.  The authoritative formulation (equations U1-U5, noise
 construction, foresight gap, balancing Monte Carlo, sensitivity
 drivers) is ``docs/uncertainty_design.md``; this page matches it and
 adds the workbook/CLI plumbing.
@@ -42,7 +42,7 @@ negative-price hour stays negative.
 
 ``pvbess_opt.rolling_horizon.add_forecast_noise`` exposes per-source
 ``enable_dam`` / ``enable_pv`` / ``enable_load`` flags.  Disabling a
-source clamps its sigma to 0 internally — the column is left exactly
+source clamps its sigma to 0 internally; the column is left exactly
 as in the input.
 
 Workbook configuration (the ``# uncertainty`` group)
@@ -142,11 +142,11 @@ land on ``03_results.xlsx → financial_kpis``:
 
 Two new plots are emitted:
 
-* ``04_financial_plots/rolling_horizon_distribution_compare.pdf`` —
+* ``04_financial_plots/rolling_horizon_distribution_compare.pdf``:
   one tinted histogram per source set, colours from a colour-blind-
   friendly palette.
-* ``06_uncertainty_plots/rolling_horizon_foresight_gap_comparison.pdf``
-  — horizontal box-plot per source set, sorted by median.
+* ``06_uncertainty_plots/rolling_horizon_foresight_gap_comparison.pdf``:
+  horizontal box-plot per source set, sorted by median.
 
 In merchant mode the load is pinned to zero, so
 ``uncertainty_load_enabled`` is forced FALSE internally and an INFO
@@ -156,12 +156,12 @@ mode then degenerates to a noiseless run for that source.
 When to use what
 ----------------
 
-* **Single ensemble** (``uncertainty_compare_sources = FALSE``) —
+* **Single ensemble** (``uncertainty_compare_sources = FALSE``):
   fastest diagnostic of overall foresight gap.  Use the per-source
   enable flags to silence sources that are not realistic for the asset
   (e.g. ``uncertainty_load_enabled = FALSE`` for a customer with
   perfectly forecastable load).
-* **Compare-sources mode** — slower (4× the seeds) but the only way
+* **Compare-sources mode**: slower (4× the seeds) but the only way
   to allocate the foresight gap to its drivers.  Useful when a
   client asks "is most of my profit risk price risk or generation
   risk?"
@@ -172,7 +172,7 @@ Implementation notes
 * The BESS energy capacity is pinned to ``bess_capacity_kwh`` inside
   ``build_model``, so every window automatically operates against the
   same physical asset.
-* SOC carryover happens at the end of each committed slice — there is
+* SOC carryover happens at the end of each committed slice; there is
   no closed-cycle constraint *within* a window, but when
   ``terminal_soc_equal`` is TRUE the window reaching the end of the
   horizon pins its post-final-step SOC back to the year-initial SOC,

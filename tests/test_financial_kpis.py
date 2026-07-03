@@ -3,7 +3,7 @@
 Hand-checked tiny scenario:
 
 * PV: 1000 kWp at 500 EUR/kWp -> 500 000 EUR Year-0 CAPEX
-* BESS: 500 kW / 2000 kWh at 200 EUR/kW -> 100 000 EUR Year-0 CAPEX
+* BESS: 500 kW / 2000 kWh at 50 EUR/kWh -> 100 000 EUR Year-0 CAPEX
 * PV DEVEX: 60 EUR/kWp * 1000 = 60 000 EUR Year-0
 * BESS DEVEX: 30 EUR/kW * 500 = 15 000 EUR Year-0
 * OPEX: PV 7 EUR/kWp = 7 000; BESS 14 EUR/kW = 7 000 -> 14 000/yr (no inflation)
@@ -31,7 +31,8 @@ def _hand_econ() -> dict:
         "retail_inflation_pct": 0.0,
         "dam_inflation_pct": 0.0,
         "capex_pv_eur_per_kw": 500.0,
-        "capex_bess_eur_per_kw": 200.0,
+        # 50 EUR/kWh x 2000 kWh = 100 000 (was 200 EUR/kW x 500 kW).
+        "capex_bess_eur_per_kwh": 50.0,
         "devex_pv_eur_per_kw": 60.0,
         "devex_bess_eur_per_kw": 30.0,
         "opex_pv_eur_per_kwp": 7.0,
@@ -163,7 +164,7 @@ def test_lcos_formula_hand_checked():
     )
     r = 0.07
     disc = [(1 / (1 + r) ** y) for y in range(0, 6)]
-    bess_capex_y0 = 200.0 * 500.0  # 100 000
+    bess_capex_y0 = 50.0 * 2000.0  # 100 000
     bess_devex_y0 = 30.0 * 500.0   # 15 000
     disc_bess_capex = (bess_capex_y0 + bess_devex_y0) * disc[0]
     disc_bess_opex = sum(14.0 * 500.0 * disc[y] for y in range(1, 6))

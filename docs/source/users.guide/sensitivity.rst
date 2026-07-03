@@ -10,10 +10,10 @@ Drivers
 Four canonical drivers (all default to symmetric ±10 % envelopes
 except the discount rate, which uses ±2 percentage points):
 
-* **Total CAPEX** — symmetric +/-10 % on the Year-0 CAPEX line.
-* **Total annual OPEX** — symmetric +/-10 % on the Year-1 OPEX line.
-* **Year-1 revenue base** — symmetric +/-10 % on the Year-1 revenue.
-* **Discount rate** — symmetric +/-2 pp on ``discount_rate_pct``.
+* **Total CAPEX**: symmetric +/-10 % on the Year-0 CAPEX line.
+* **Total annual OPEX**: symmetric +/-10 % on the Year-1 OPEX line.
+* **Year-1 revenue base**: symmetric +/-10 % on the Year-1 revenue.
+* **Discount rate**: symmetric +/-2 pp on ``discount_rate_pct``.
 
 The IRR tornado drops the discount-rate row (the IRR is by definition
 the rate that zeros the NPV, so varying the discount rate does not
@@ -22,9 +22,9 @@ move the IRR).
 Variable spec
 -------------
 
-* :func:`pvbess_opt.sensitivity.variables_for_npv_sensitivity` — the
+* :func:`pvbess_opt.sensitivity.variables_for_npv_sensitivity`: the
   four drivers above.
-* :func:`pvbess_opt.sensitivity.variables_for_irr_sensitivity` — the
+* :func:`pvbess_opt.sensitivity.variables_for_irr_sensitivity`: the
   three drivers minus the discount rate.
 
 Output DataFrame columns

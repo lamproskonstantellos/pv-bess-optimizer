@@ -21,7 +21,7 @@ def _econ(**overrides) -> dict:
         "project_lifecycle_years": 10,
         "project_start_year": 2026,
         "capex_pv_eur_per_kw": 0.0,
-        "capex_bess_eur_per_kw": 0.0,
+        "capex_bess_eur_per_kwh": 0.0,
         "devex_pv_eur_per_kw": 0.0,
         "devex_bess_eur_per_kw": 0.0,
         "site_capex_eur": 0.0,
