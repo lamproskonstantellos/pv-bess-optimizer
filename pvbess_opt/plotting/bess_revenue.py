@@ -155,9 +155,13 @@ def plot_bess_revenue_waterfall(
     bm_gross = sum(v for _label, v, _ck in products)
     bal_fee = -bal_fee_frac * max(bm_gross, 0.0)
 
+    # Zero-value steps are noise (a no-balancing run would show five
+    # flat EUR-0 product steps): keep only the steps that carry value,
+    # exactly like the fee steps below.
     steps: list[tuple[str, float, str]] = [
         (_BESS_DAM_LABEL, bess_dam, _BESS_DAM_COLOUR),
-        *((label, v, BM_COLOURS[ck]) for label, v, ck in products),
+        *((label, v, BM_COLOURS[ck])
+          for label, v, ck in products if abs(v) > 1e-9),
     ]
     if energy_fee < -1e-9:
         steps.append((

@@ -365,62 +365,62 @@ PV + BESS dispatching to the day-ahead market with FCR / aFRR / mFRR
 participation stacked on the battery and grid-charging arbitrage
 enabled (the battery may buy cheap hours and resell expensive ones).
 
-![Merchant energy flows](docs/assets/merchant_energy_flow.png)
+![merchant energy flows](docs/assets/merchant_energy_flow.png)
 
-*Year-1 energy flows: PV generation and grid purchases routed through
-the battery to the grid, with curtailment and round-trip losses shown
-explicitly. Ribbon colours match the dispatch plots, so each flow
-reads the same across the whole report.*
+*Year-1 energy flows: PV generation and grid purchases routed through the battery to the grid, with curtailment and round-trip losses shown explicitly. Ribbon colours match the dispatch
+plots, so each flow reads the same across the whole report.*
 
-![Merchant yearly revenue stack](docs/assets/merchant_revenue_stack.png)
+![merchant daily dispatch and SOC](docs/assets/merchant_daily_dispatch_soc.png)
 
-*Yearly revenue stack: PV-DAM and BESS-DAM exports plus the five
-balancing products, net of the energy aggregator fee, grid-charging
-cost, and the optional balancing aggregator (BSP / route-to-market)
-fee (shown here at a representative 10 % of balancing revenue).*
+*A representative summer day: dispatch per 15-minute step with the
+battery state of charge overlaid.*
 
-![BESS revenue waterfall](docs/assets/merchant_bess_revenue_waterfall.png)
+![merchant yearly revenue stack](docs/assets/merchant_revenue_stack.png)
 
-*BESS revenue waterfall: stepping from DAM arbitrage through each
-balancing product, then down by the battery's exact share of the
-energy aggregator fee and by the balancing aggregator (BSP) fee, to
-the total battery revenue net of both route-to-market fees.*
+*Yearly revenue stack per operating year, net of the energy aggregator
+fee and the grid-charging cost, with the five balancing products stacked on the battery and the balancing aggregator fee deducted.*
 
-![Merchant cumulative cashflow](docs/assets/merchant_cumulative_cashflow.png)
+![merchant BESS revenue waterfall](docs/assets/merchant_bess_revenue_waterfall.png)
+
+*BESS revenue waterfall: DAM arbitrage plus each balancing product,
+stepped down by the battery's exact share of each route-to-market fee
+to the total battery revenue.*
+
+![merchant monthly cashflow](docs/assets/merchant_monthly_cashflow.png)
+
+*Year-1 monthly net cashflow: revenue and OPEX bars with the net line.*
+
+![merchant cumulative cashflow](docs/assets/merchant_cumulative_cashflow.png)
 
 *Cumulative undiscounted and discounted cashflow over the project
-life. Each payback marker is drawn only when its curve crosses zero:
-here the undiscounted curve pays back in 2039, while the discounted
-curve stays negative at the 7 % rate, so no discounted-payback marker
-exists.*
+life; each payback marker is drawn only when its curve crosses zero.*
 
-![NPV waterfall](docs/assets/merchant_npv_waterfall.png)
+![merchant NPV waterfall](docs/assets/merchant_npv_waterfall.png)
 
-*Discounted yearly contributions to the total NPV: the Year-0 CAPEX
-block, each operating year's discounted net cashflow, the year-10
-replacement dip, and the cumulative NPV line.*
+*Discounted yearly contributions to the total NPV with the cumulative
+NPV line.*
 
-![NPV sensitivity tornado](docs/assets/merchant_npv_tornado.png)
+![merchant NPV tornado](docs/assets/merchant_npv_tornado.png)
 
 *NPV sensitivity tornado: one-at-a-time CAPEX, revenue, discount-rate
-and OPEX perturbations around the base case, with the absolute driver
-values annotated at the bar ends.*
+and OPEX perturbations around the base case.*
 
-![LCOE benchmark band](docs/assets/merchant_lcoe_band.png)
+![merchant LCOE band](docs/assets/merchant_lcoe_band.png)
 
 *Levelised cost of energy for the PV side against the Lazard 2024
 utility-scale PV band.*
 
-![LCOS benchmark band](docs/assets/merchant_lcos_band.png)
+![merchant LCOS band](docs/assets/merchant_lcos_band.png)
 
 *Levelised cost of storage against the Lazard 2024 LCOS benchmark
 band.*
 
-![Battery state of health](docs/assets/merchant_soh_trajectory.png)
+![merchant battery state of health](docs/assets/merchant_soh_trajectory.png)
 
 *Battery state of health over the project life: calendar plus cycle
 fade, with the scheduled year-10 replacement resetting the pack to
 100 %.*
+
 
 ### Self-consumption (`--mode self_consumption`, `allow_bess_grid_charging = TRUE`)
 
@@ -429,28 +429,61 @@ tariff and exporting only the surplus to the DAM, with no balancing.
 Grid charging is enabled, so the battery may also top up from the
 grid in cheap hours to cover later load.
 
-![Self-consumption energy flows](docs/assets/self_consumption_energy_flow.png)
+![self-consumption energy flows](docs/assets/self_consumption_energy_flow.png)
 
-*Year-1 energy flows behind the meter: PV serving the load directly,
-charging the battery and exporting the surplus, grid imports covering
-the residual load, and the battery's round-trip losses made visible.*
+*Year-1 energy flows: PV serving the load directly, charging the battery and exporting the surplus, grid imports covering the residual load, and the battery's round-trip losses made visible. Ribbon colours match the dispatch
+plots, so each flow reads the same across the whole report.*
 
-![Self-consumption daily dispatch and SOC](docs/assets/self_consumption_daily_dispatch_soc.png)
+![self-consumption daily dispatch and SOC](docs/assets/self_consumption_daily_dispatch_soc.png)
 
-*A representative day: the hard PV→load priority, BESS charge /
-discharge, grid import / export, and the battery state of charge.*
+*A representative summer day: dispatch per 15-minute step with the
+battery state of charge overlaid.*
 
-![Self-consumption yearly revenue stack](docs/assets/self_consumption_revenue_stack.png)
+![self-consumption yearly revenue stack](docs/assets/self_consumption_revenue_stack.png)
 
-*Yearly revenue stack: retail-valued self-consumption (avoided cost)
-plus the DAM surplus-export leg, net of the energy aggregator fee and
-the grid-charging cost.*
+*Yearly revenue stack per operating year, net of the energy aggregator
+fee and the grid-charging cost.*
 
-![Self-consumption monthly cashflow](docs/assets/self_consumption_monthly_cashflow.png)
+![self-consumption BESS revenue waterfall](docs/assets/self_consumption_bess_revenue_waterfall.png)
 
-*Year-1 monthly net cashflow: revenue and OPEX bars with the net
-line, showing the summer-peaking seasonality of the PV-driven
-savings.*
+*BESS revenue waterfall: DAM arbitrage,
+stepped down by the battery's exact share of each route-to-market fee
+to the total battery revenue.*
+
+![self-consumption monthly cashflow](docs/assets/self_consumption_monthly_cashflow.png)
+
+*Year-1 monthly net cashflow: revenue and OPEX bars with the net line.*
+
+![self-consumption cumulative cashflow](docs/assets/self_consumption_cumulative_cashflow.png)
+
+*Cumulative undiscounted and discounted cashflow over the project
+life; each payback marker is drawn only when its curve crosses zero.*
+
+![self-consumption NPV waterfall](docs/assets/self_consumption_npv_waterfall.png)
+
+*Discounted yearly contributions to the total NPV with the cumulative
+NPV line.*
+
+![self-consumption NPV tornado](docs/assets/self_consumption_npv_tornado.png)
+
+*NPV sensitivity tornado: one-at-a-time CAPEX, revenue, discount-rate
+and OPEX perturbations around the base case.*
+
+![self-consumption LCOE band](docs/assets/self_consumption_lcoe_band.png)
+
+*Levelised cost of energy for the PV side against the Lazard 2024
+utility-scale PV band.*
+
+![self-consumption LCOS band](docs/assets/self_consumption_lcos_band.png)
+
+*Levelised cost of storage against the Lazard 2024 LCOS benchmark
+band.*
+
+![self-consumption battery state of health](docs/assets/self_consumption_soh_trajectory.png)
+
+*Battery state of health over the project life: calendar plus cycle
+fade, with the scheduled year-10 replacement resetting the pack to
+100 %.*
 
 ![Foresight-gap distribution](docs/assets/self_consumption_foresight_distribution.png)
 
@@ -459,6 +492,7 @@ window / 24 h commit) against the perfect-foresight benchmark: the
 realistic-forecast dispatch lands within about half a percent of the
 theoretical optimum. Produced by a `--rolling-horizon --monte-carlo 8`
 run rather than the gallery export script.*
+
 
 ## Methodology & conventions
 

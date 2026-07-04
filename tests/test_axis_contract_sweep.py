@@ -220,6 +220,10 @@ def _assert_legend_clear(ax) -> None:
     lbox = legend.get_window_extent(renderer=renderer)
     abox = ax.get_window_extent(renderer=renderer)
     assert lbox.y1 <= abox.y0 + 1e-6, "legend must hang below the axes"
+    # Fixed-canvas saves (no tight crop): the legend must sit fully
+    # inside the declared figure, or the export would clip it.
+    assert lbox.y0 >= -1e-6, "legend clipped off the canvas bottom"
+    assert lbox.x0 >= -1e-6 and lbox.x1 <= fig.bbox.width + 1e-6
     assert legend_overlaps_data(ax, renderer=renderer) == []
 
 

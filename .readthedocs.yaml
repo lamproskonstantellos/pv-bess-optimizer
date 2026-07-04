@@ -1,0 +1,23 @@
+# Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
+# Required
+version: 2
+
+# Set the OS and Python version
+build:
+  os: ubuntu-24.04
+  tools:
+    # Match the tested project floor (README badge: 3.11 | 3.12).
+    python: "3.11"
+
+# Build the Sphinx documentation (the config lives under docs/source/)
+sphinx:
+  configuration: docs/source/conf.py
+
+# The docs build imports the package for autodoc, so it needs the
+# runtime dependencies plus the Sphinx toolchain.
+python:
+  install:
+    - requirements: requirements/base.txt
+    - requirements: requirements/docs.txt
