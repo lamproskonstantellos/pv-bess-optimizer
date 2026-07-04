@@ -21,7 +21,13 @@ from matplotlib.patches import Rectangle
 from matplotlib.ticker import MaxNLocator
 from matplotlib.transforms import offset_copy
 
-from ..theme import BM_COLOURS, IEEE_RCPARAMS, LEGEND_ORDER, assert_unique_colors
+from ..theme import (
+    BM_COLOURS,
+    IEEE_RCPARAMS,
+    LEGEND_ORDER,
+    XTICK_ROT,
+    assert_unique_colors,
+)
 
 # Re-export the balancing colour palette so plot modules can import it
 # from the central style module.
@@ -36,6 +42,7 @@ __all__ = [
     "apply_fine_ticks",
     "apply_ieee_style",
     "apply_legend",
+    "apply_month_axis",
     "apply_universal_margins",
     "attach_legend_clear_of_data",
     "empty_placeholder",
@@ -616,6 +623,29 @@ def attach_legend_clear_of_data(
 # ---------------------------------------------------------------------------
 # Fine tick density helper
 # ---------------------------------------------------------------------------
+
+
+def apply_month_axis(ax, positions, months, year: int | None = None) -> None:
+    """House month axis for the categorical monthly figures.
+
+    The twelve month slots take the same ``MM-YYYY`` labels as the
+    energy plots' month-of-year date axes (rotated ``XTICK_ROT``,
+    right-anchored), so a monthly figure reads identically anywhere in
+    the report, and the window hugs the bars symmetrically like the
+    shared year axis.  Falls back to zero-padded month numbers when
+    the calendar year is not known.  Call AFTER
+    :func:`apply_universal_margins`: the window must not be re-padded.
+    """
+    positions = np.asarray(positions, dtype=float)
+    if positions.size == 0:
+        return
+    labels = [
+        f"{int(m):02d}-{year}" if year is not None else f"{int(m):02d}"
+        for m in months
+    ]
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels, rotation=XTICK_ROT, ha="right")
+    ax.set_xlim(positions.min() - 0.75, positions.max() + 0.75)
 
 
 def apply_fine_ticks(

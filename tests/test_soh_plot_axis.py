@@ -75,6 +75,7 @@ def test_soh_plot_axes_state_before_save(monkeypatch, tmp_path, replacement_year
         captured["yticks"] = list(ax.get_yticks())
         captured["xticks"] = list(ax.get_xticks())
         captured["xminor"] = list(ax.get_xticks(minor=True))
+        captured["xlim"] = ax.get_xlim()
         return real_save(out_path)
 
     monkeypatch.setattr(deg_mod, "save_figure", _spy)
@@ -82,9 +83,12 @@ def test_soh_plot_axes_state_before_save(monkeypatch, tmp_path, replacement_year
     plot_soh_trajectory(_frame(replacement_year), out)
     assert captured["ylim"] == (0.0, 105.0)
     assert captured["yticks"] == [float(v) for v in range(0, 101, 10)]
-    # Shared project-window year axis: ticks every 2 years anchored at
-    # Year 0 (2025 for this frame), none outside the project window,
-    # and no minor ticks (labelled-ticks-only convention).
+    # Shared year-tick GRID anchored at Year 0 (2025 for this frame),
+    # every 2 years, no minor ticks (labelled-ticks-only convention).
     assert captured["xticks"], "no major x ticks captured"
     assert captured["xticks"] == [float(t) for t in range(2025, 2041, 2)]
     assert not captured["xminor"], captured["xminor"]
+    # Operational frame (starts at Year 1): the WINDOW opens at Year 1
+    # with no empty Year-0 slot — the grid's 2025 tick clips off the
+    # left edge — and closes snug after the final year.
+    assert captured["xlim"] == (2026 - 0.75, 2040 + 0.75)

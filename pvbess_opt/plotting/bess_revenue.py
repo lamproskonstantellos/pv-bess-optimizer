@@ -40,10 +40,10 @@ from ._currency import euro_axis_formatter, format_eur, resolve_currency_format
 from .helpers import title_prefix
 from .style import (
     apply_fine_ticks,
+    apply_month_axis,
     apply_universal_margins,
     attach_legend_clear_of_data,
     get_scenario_label,
-    reserve_legend_headroom,
     save_figure,
     show_titles,
 )
@@ -274,11 +274,14 @@ def plot_bess_capacity_vs_activation_split(
             f"Balancing revenue: capacity vs activation"
             f"{title_prefix(get_scenario_label())} (Year 1)"
         )
-    reserve_legend_headroom(ax, loc="best")
-    ax.legend(loc="best")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
+    # Measured grow-until-clear placement (same guarantee as the other
+    # financial plots); ticks stay pruned to the pre-growth ceiling.
+    attach_legend_clear_of_data(
+        ax, loc="best", fontsize=7, tick_ceiling=ax.get_ylim()[1],
+    )
     return save_figure(out_path)
 
 
@@ -390,11 +393,6 @@ def plot_bess_revenue_by_month(
         neg_bottoms = neg_bottoms + arr
 
     ax.axhline(0.0, color="black", linewidth=0.6)
-    # Financial-family month axis: plain month numbers, horizontal
-    # (same as the Year-1 monthly cashflow and the seasonal boxplot);
-    # the calendar year lives in the title / caption.
-    ax.set_xticks(x)
-    ax.set_xticklabels([str(m) for m in range(1, 13)])
     ax.set_xlabel("Month")
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(resolve_currency_format(econ)))
@@ -417,6 +415,7 @@ def plot_bess_revenue_by_month(
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
+    apply_month_axis(ax, x, range(1, 13), year=int(ts.dt.year.iloc[0]))
     if ordered:
         # Measured grow-until-clear placement (same guarantee as the
         # apply_financial_legend plots) with the DAM-first entry order

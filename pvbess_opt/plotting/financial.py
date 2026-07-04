@@ -36,6 +36,7 @@ from ._currency import (
 from .style import (
     annotate_value_safe,
     apply_fine_ticks,
+    apply_month_axis,
     apply_universal_margins,
     empty_placeholder,
     reserve_legend_headroom,
@@ -135,21 +136,24 @@ def _integer_year_axis(
 ) -> None:
     """Common calendar-year axis for every per-year figure.
 
-    Every year plot spans the same window — Year 0 (the CAPEX year)
-    through the final project year — with integer ticks every 2 years
-    anchored at Year 0, so the year axes align across all figures and
-    no tick lands on a year outside the project window.  Frames that
-    start at Year 1 (SOH, revenue stack, cycles: nothing to draw in
-    Year 0) pass ``includes_year_zero=False`` and get the same axis by
-    anchoring one year earlier.  Call AFTER
-    :func:`apply_universal_margins`: the shared window must not be
-    re-padded.
+    One tick GRID for the whole report: integer ticks every 2 years
+    anchored at Year 0 (the CAPEX year), so ticks land on the same
+    calendar years in every figure.  Each plot's WINDOW hugs its own
+    data: the cashflow views span Year 0 through the final project
+    year, while operational frames that start at Year 1 (SOH, revenue
+    stack, cycles: nothing to draw in Year 0) pass
+    ``includes_year_zero=False`` — their window opens at Year 1 with
+    no empty Year-0 slot, and the grid's Year-0 tick simply clips off
+    the left edge (their first visible tick is Year 2, still on the
+    shared grid, and the final year is always ticked).  Call AFTER
+    :func:`apply_universal_margins`: the window must not be re-padded.
     """
     if len(years) == 0:
         return
-    first = int(np.min(years)) - (0 if includes_year_zero else 1)
+    first = int(np.min(years))
+    anchor = first - (0 if includes_year_zero else 1)
     last = int(np.max(years))
-    ax.set_xticks(np.arange(first, last + 1, 2))
+    ax.set_xticks(np.arange(anchor, last + 1, 2))
     ax.set_xlim(first - 0.75, last + 0.75)
 
 
@@ -483,21 +487,22 @@ def plot_monthly_cashflow_year1(
     ax.plot(months, net, color=financial_color("Net cash-flow"),
             linewidth=1.5, marker="o", markersize=4, label="Net cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.6)
-    ax.set_xticks(np.arange(1, 13))
     ax.set_xlabel("Month")
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
 
     if "calendar_year" in monthly_cf.columns and not sub.empty:
-        cy = int(sub["calendar_year"].iloc[0])
-        _maybe_set_title(ax, f"Year-1 Monthly Cash-flow — {cy}")
+        cal_year: int | None = int(sub["calendar_year"].iloc[0])
+        _maybe_set_title(ax, f"Year-1 Monthly Cash-flow — {cal_year}")
     else:
+        cal_year = None
         _maybe_set_title(ax, "Year-1 Monthly Cash-flow")
 
     reserve_legend_headroom(ax, loc="best")
     apply_financial_legend(ax, max_rows=2)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
+    apply_month_axis(ax, months, months, year=cal_year)
     return save_figure(out_path)
 
 
