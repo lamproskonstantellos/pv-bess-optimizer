@@ -28,6 +28,7 @@ import pandas as pd
 from ..theme import COLORS, FINANCIAL_COLORS
 from ._dates import apply_house_date_axis
 from .style import (
+    apply_month_axis,
     apply_universal_margins,
     attach_legend_clear_of_data,
     save_figure,
@@ -173,6 +174,17 @@ def plot_input_seasonal_boxplot(
         axes[0].set_title("Monthly distribution of inputs (Year 1)")
     for ax in axes:
         apply_universal_margins(ax, skip_x=True)
+    # House MM-YYYY month labels on the bottom panel only — the panels
+    # share the month grid, so repeating the rotated labels on every
+    # panel would only add clutter.  The upper panels keep the tick
+    # marks (blank labels) and the exact same window.
+    apply_month_axis(
+        axes[-1], range(1, 13), range(1, 13),
+        year=int(timestamps.dt.year.iloc[0]),
+    )
+    for ax in axes[:-1]:
+        ax.set_xticklabels([])
+        ax.set_xlim(*axes[-1].get_xlim())
     return save_figure(out_path)
 
 
@@ -351,7 +363,7 @@ def plot_uncertainty_coverage_by_horizon(
     ax.set_ylim(0.0, 1.05)
     ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
     if show_titles():
-        ax.set_title("P10–P90 coverage by forecast horizon")
+        ax.set_title("P10-P90 coverage by forecast horizon")
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     ax.legend(loc="lower right", framealpha=LEGEND_KWARGS["framealpha"])

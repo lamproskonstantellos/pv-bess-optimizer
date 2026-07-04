@@ -75,14 +75,16 @@ Production release.
   deductions read unambiguously side by side.
 - Every per-year figure (cumulative cashflow, yearly bars, NPV
   waterfall, payback, revenue stack, lifetime cycles, lifetime
-  summary, SOH) shares one calendar axis: the window spans Year 0
-  through the final project year with ticks every 2 years anchored at
-  Year 0, so no tick lands on a year outside the project and the year
-  axes align across all figures.
+  summary, SOH) shares one calendar tick grid: integer ticks every
+  2 years anchored at Year 0, so ticks land on the same years in
+  every figure and none lands outside the project window.  Each
+  plot's window hugs its own data: the cashflow views open at Year 0
+  (the CAPEX year), the operational views (SOH, revenue stack,
+  cycles, lifetime summary) open at Year 1 with no empty Year-0 slot.
 - The financial monthly figures (Year-1 monthly cashflow, BESS revenue
-  by month, seasonal boxplot) all label months as plain numbers 1-12,
-  horizontal; the by-month view previously used rotated "MM-YYYY"
-  labels borrowed from the energy plots' date axes.
+  by month, seasonal boxplot) all take the house MM-YYYY month labels
+  of the energy plots' month-of-year axes (rotated, right-anchored),
+  through one shared month-axis helper.
 
 ### Added
 
