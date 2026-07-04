@@ -65,3 +65,20 @@ def test_no_inline_colors_in_plotting_modules():
         "Inline hex colours found in plotting modules:\n"
         + "\n".join(offenders)
     )
+
+
+def test_font_size_policy_in_plotting_modules():
+    """One size per text role, everywhere: ticks/labels/titles come from
+    the IEEE rcParams preset (8/9/9 pt), legends render at 7 pt, in-plot
+    annotations and node labels at 7 pt, empty-input placeholders at
+    10 pt.  Any other explicit fontsize literal is a drift."""
+    fontsize_re = re.compile(r"fontsize=(\d+)")
+    plotting_dir = Path(__file__).resolve().parent.parent / "pvbess_opt" / "plotting"
+    offenders: list[str] = []
+    for py_file in plotting_dir.rglob("*.py"):
+        for match in fontsize_re.finditer(py_file.read_text()):
+            if int(match.group(1)) not in (7, 10):
+                offenders.append(f"{py_file.name}: fontsize={match.group(1)}")
+    assert not offenders, (
+        "Non-policy font sizes in plotting modules:\n" + "\n".join(offenders)
+    )

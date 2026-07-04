@@ -666,7 +666,7 @@ def _draw_benchmark_row(
     if not asset_present or np.isnan(base):
         ax.text(
             0.5, 0.5, absent_message, ha="center", va="center",
-            fontsize=9, transform=ax.transAxes,
+            fontsize=10, transform=ax.transAxes,
         )
         ax.set_yticks([])
         ax.set_ylim(-0.5, 0.5)

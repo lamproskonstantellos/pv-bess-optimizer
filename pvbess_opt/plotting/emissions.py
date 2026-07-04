@@ -44,13 +44,13 @@ _SANKEY_NODE_COLUMNS: dict[str, int] = {
     "BESS": 1,
     "Load": 2,
     "Grid export": 2,
-    "Curtailed": 2,
+    "Curtailed PV": 2,
     "Losses": 2,
 }
 _SANKEY_COLUMN_ORDER: tuple[tuple[str, ...], ...] = (
     ("PV generation", "Grid import"),
     ("BESS",),
-    ("Load", "Grid export", "Curtailed", "Losses"),
+    ("Load", "Grid export", "Curtailed PV", "Losses"),
 )
 _SANKEY_NODE_COLOURS: dict[str, str] = {
     "PV generation": COLORS["PV generation"],
@@ -58,7 +58,7 @@ _SANKEY_NODE_COLOURS: dict[str, str] = {
     "BESS": COLORS["BESS to load"],
     "Load": COLORS["Load demand"],
     "Grid export": COLORS["BESS to grid"],
-    "Curtailed": COLORS["Curtailed PV"],
+    "Curtailed PV": COLORS["Curtailed PV"],
     "Losses": COLORS["BESS losses"],
 }
 _SANKEY_LOSSES_COLOUR = COLORS["BESS losses"]
@@ -87,7 +87,7 @@ def plot_energy_sankey(res: pd.DataFrame, out_path: Path) -> Path:
          COLORS["PV to BESS"]),
         ("PV generation", "Grid export", _sum_mwh(res, "pv_to_grid_kwh"),
          COLORS["PV to grid"]),
-        ("PV generation", "Curtailed", _sum_mwh(res, "pv_curtail_kwh"),
+        ("PV generation", "Curtailed PV", _sum_mwh(res, "pv_curtail_kwh"),
          COLORS["Curtailed PV"]),
         ("Grid import", "Load", _sum_mwh(res, "grid_to_load_kwh"),
          COLORS["Grid to load"]),
