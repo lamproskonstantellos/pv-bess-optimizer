@@ -9,7 +9,7 @@ import pandas as pd
 
 from ..theme import FINANCIAL_COLORS
 from .financial import _integer_year_axis
-from .style import apply_universal_margins, save_figure
+from .style import apply_universal_margins, legend_below, save_figure
 
 __all__ = ["plot_soh_trajectory"]
 
@@ -37,8 +37,6 @@ def plot_soh_trajectory(degradation: pd.DataFrame, out_path: Path) -> Path:
                 linewidth=0.8, linestyle="--",
                 label="BESS replacement" if i == 0 else None,
             )
-    if replacement_years:
-        ax.legend(loc="best")
     ax.set_xlabel("Year")
     ax.set_ylabel("State of health (%)")
     # The y-axis is a fixed 0..100 percentage scale (plus headroom),
@@ -46,7 +44,9 @@ def plot_soh_trajectory(degradation: pd.DataFrame, out_path: Path) -> Path:
     # re-scale it; the x-axis takes the shared project-window year
     # ticks (the degradation frame starts at Year 1).
     apply_universal_margins(ax, skip_y=True)
-    _integer_year_axis(ax, years, includes_year_zero=False)
+    _integer_year_axis(ax, years)
     ax.set_ylim(*_SOH_YLIM)
     ax.set_yticks(_SOH_YTICKS)
+    if replacement_years:
+        legend_below(ax)
     return save_figure(out_path)

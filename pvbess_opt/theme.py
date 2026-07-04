@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any
 
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -526,13 +525,18 @@ def _canonical_match_key(label: str) -> str | None:
     return None
 
 
-def apply_financial_legend(ax: Any, *, max_rows: int = 2, loc: str = "best") -> None:
-    """Reorder the legend on ``ax`` to match :data:`FINANCIAL_LEGEND_ORDER`.
+def apply_financial_legend(
+    ax: Any, *, max_rows: int = 2, y_offset: float = -0.18,
+) -> None:
+    """Reorder the legend to :data:`FINANCIAL_LEGEND_ORDER`, hang it below.
 
     Handles whose label is not in the canonical order (and does not
     map to a canonical key via :func:`_canonical_match_key`) are
     appended at the end and a warning is logged — same defensive
-    behaviour as the energy plots' equivalent helper.
+    behaviour as the energy plots' equivalent helper.  Placement is
+    the house rule for every figure: horizontally centered BELOW the
+    axes (``style.legend_below``), so the legend can never intersect
+    the data and the full canvas belongs to the plot.
     """
     handles, labels = ax.get_legend_handles_labels()
     if not labels:
@@ -564,46 +568,12 @@ def apply_financial_legend(ax: Any, *, max_rows: int = 2, loc: str = "best") -> 
         ordered_handles.append(h)
         ordered_labels.append(lab)
 
-    num_entries = len(ordered_labels)
-    ncol = max(1, math.ceil(num_entries / max_rows))
-    legend = ax.legend(
-        ordered_handles, ordered_labels,
-        loc=loc, framealpha=0.9, ncol=ncol, fontsize=7,
+    from .plotting.style import legend_below  # runtime: avoids an import cycle
+
+    legend_below(
+        ax, ordered_handles, ordered_labels,
+        max_rows=max_rows, y_offset=y_offset,
     )
-
-    # Measured fit: with many long entries (e.g. the merchant revenue
-    # stack with both fees and grid charging on) the requested column
-    # count can render the legend wider than the axes, overflowing the
-    # frame.  Narrow it column by column until it fits, then grow the
-    # top y-limit until the drawn legend clears every data artist (the
-    # same closed loop the uncertainty family uses).
-    from .plotting.style import legend_overlaps_data  # runtime: avoids an import cycle
-
-    fig = ax.figure
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
-    ax_width = ax.get_window_extent(renderer=renderer).width
-    while (
-        ncol > 1
-        and legend.get_window_extent(renderer=renderer).width > ax_width
-    ):
-        ncol -= 1
-        legend = ax.legend(
-            ordered_handles, ordered_labels,
-            loc=loc, framealpha=0.9, ncol=ncol, fontsize=7,
-        )
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
-    ymin, ymax = ax.get_ylim()
-    span = ymax - ymin
-    if span > 0:
-        for _ in range(12):
-            if not legend_overlaps_data(ax, renderer=renderer):
-                break
-            ymax += 0.08 * span
-            ax.set_ylim(ymin, ymax)
-            fig.canvas.draw()
-            renderer = fig.canvas.get_renderer()
 
 
 def assert_financial_label_color_coverage() -> None:

@@ -27,10 +27,6 @@ from pvbess_opt.plotting import (
     plot_uncertainty_residual_qq,
 )
 from pvbess_opt.plotting._dates import DATE_FMT, apply_house_date_axis
-from pvbess_opt.plotting.inputs_uncertainty import (
-    LEGEND_KWARGS,
-    LEGEND_LOC,
-)
 
 _DDMMYYYY = re.compile(r"^\d{2}-\d{2}-\d{4}$")
 
@@ -72,9 +68,16 @@ def test_apply_house_date_axis_emits_ddmmyyyy():
     plt.close(fig)
 
 
-def test_legend_loc_constant():
-    assert LEGEND_LOC == "upper right"
-    assert LEGEND_KWARGS["loc"] == "upper right"
+def test_legend_below_loc_constant():
+    # The house rule anchors every legend below the axes from the
+    # "upper center" corner of the legend box.
+    from pvbess_opt.plotting.style import legend_below
+
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1], label="x")
+    leg = legend_below(ax)
+    assert leg is not None
+    plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -82,15 +85,12 @@ def test_legend_loc_constant():
 # ---------------------------------------------------------------------------
 
 
-def _legend_loc_code(loc: str | None = None):
+def _legend_loc_code(loc: str = "upper center"):
     """Resolve the integer loc code matplotlib assigns to a legend loc
-    (defaults to the LEGEND_KWARGS location)."""
+    (the house below-the-axes placement anchors from "upper center")."""
     fig, ax = plt.subplots()
     ax.plot([0, 1], [0, 1], label="x")
-    kwargs = dict(LEGEND_KWARGS)
-    if loc is not None:
-        kwargs["loc"] = loc
-    leg = ax.legend(**kwargs)
+    leg = ax.legend(loc=loc)
     code = leg._loc
     plt.close(fig)
     return code
@@ -115,21 +115,19 @@ def _capture_legend_locs(monkeypatch, plot_call):
     return out, captured
 
 
-# The coverage panel deliberately parks its legend in the lower-right
-# half of the bounded probability axis; every other diagnostic keeps
-# the shared upper-right location.
+# Every diagnostic hangs its legend below the axes (house rule).
 _PLOTS = [
-    ("coverage_by_horizon", plot_uncertainty_coverage_by_horizon, "lower right"),
-    ("pit_histogram", plot_uncertainty_pit_histogram, None),
-    ("crps_timeline", plot_uncertainty_crps_timeline, None),
-    ("residual_qq", plot_uncertainty_residual_qq, None),
+    ("coverage_by_horizon", plot_uncertainty_coverage_by_horizon),
+    ("pit_histogram", plot_uncertainty_pit_histogram),
+    ("crps_timeline", plot_uncertainty_crps_timeline),
+    ("residual_qq", plot_uncertainty_residual_qq),
 ]
 
 
-@pytest.mark.parametrize("name,fn,loc", _PLOTS)
-def test_diagnostic_plot_writes_nonempty(name, fn, loc, tmp_path, monkeypatch):
+@pytest.mark.parametrize("name,fn", _PLOTS)
+def test_diagnostic_plot_writes_nonempty(name, fn, tmp_path, monkeypatch):
     ts = _fixture_ts()
-    expected_loc = _legend_loc_code(loc)
+    expected_loc = _legend_loc_code()
     out, locs = _capture_legend_locs(
         monkeypatch, lambda: fn(ts, tmp_path / f"{name}.pdf"),
     )
@@ -138,7 +136,7 @@ def test_diagnostic_plot_writes_nonempty(name, fn, loc, tmp_path, monkeypatch):
     assert all(code == expected_loc for code in locs), (name, locs)
 
 
-def test_forecast_band_legend_upper_right(tmp_path, monkeypatch):
+def test_forecast_band_legend_below(tmp_path, monkeypatch):
     ts = _fixture_ts()
     expected_loc = _legend_loc_code()
     out, locs = _capture_legend_locs(

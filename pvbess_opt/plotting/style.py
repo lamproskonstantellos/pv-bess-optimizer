@@ -44,13 +44,12 @@ __all__ = [
     "apply_legend",
     "apply_month_axis",
     "apply_universal_margins",
-    "attach_legend_clear_of_data",
     "empty_placeholder",
     "get_figure_format",
     "get_project_mode_label",
     "get_scenario_label",
+    "legend_below",
     "legend_overlaps_data",
-    "reserve_legend_headroom",
     "save_figure",
     "save_figure_daily",
     "save_figure_object",
@@ -400,82 +399,114 @@ def apply_universal_margins(
 # ---------------------------------------------------------------------------
 
 
-def reserve_legend_headroom(
+def legend_below(
     ax,
+    handles=None,
+    labels=None,
     *,
-    loc: str = "best",
-    frac: float = 0.15,
-) -> None:
-    """Reserve y-axis space so a legend sits clear of any bar or marker.
+    max_rows: int = 2,
+    y_offset: float = -0.18,
+    fontsize: int = 7,
+):
+    """House legend: horizontally centered BELOW the axes.
 
-    Call this immediately before the legend is attached (i.e. before
-    ``apply_financial_legend`` / ``ax.legend``).  Idempotent — a second
-    call on the same axis is a no-op (the axis is tagged via the
-    ``_legend_headroom_applied`` attribute).
+    The one placement rule for every figure in the report (the energy
+    plots' ``apply_legend`` hangs its legend from the same anchor): the
+    legend sits under the x-axis, centered, so it can never intersect
+    the data and the full canvas belongs to the plot.  Entries flow
+    into at most ``max_rows`` rows; the drawn legend is then measured
+    and the column count narrowed until it fits inside the figure
+    width.
 
-    Behaviour mirrors the directions a legend can sit in:
-
-    * ``loc`` in ``{"upper left", "upper right", "upper center",
-      "best"}`` — the legend lives near the top, so the helper extends
-      ``ymax`` upward.  When ``ymin >= 0`` the bottom is preserved at
-      the data minimum and the top is padded by ``frac * (ymax -
-      ymin)``.  When ``ymin < 0`` (plot crosses zero) the positive
-      half-span is multiplied by ``1 + frac``.
-    * ``loc`` in ``{"lower left", "lower right", "lower center"}`` —
-      the legend lives near the bottom; the helper extends ``ymin``
-      downward by ``frac * (ymax - ymin)`` when ``ymin < 0``.  When the
-      data is non-negative the lower-corner regions are already in
-      clear space and the helper is a no-op.
-
-    Call before :func:`apply_universal_margins`; pass ``skip_y=True``
-    to the universal helper afterwards to keep its 5 % top-pad from
-    eroding the headroom.  The legend itself can still be requested at
-    ``loc="best"`` — matplotlib will pick the corner with the most
-    clear space, which is the one this helper just produced.
+    ``y_offset`` is the STARTING axes-fraction drop below the axes;
+    the drawn legend is then measured against the x-axis decorations
+    (tick labels and the axis label, which rotated month labels push
+    far down) and lowered until it sits fully clear of them, so no
+    manual per-plot offset tuning is needed.  Explicit ``handles`` /
+    ``labels`` preserve a caller-specific entry order; by default the
+    axes' own handles are used, deduplicated (a mixed-sign stream
+    drawn as two stacks shares one label).
     """
-    if getattr(ax, "_legend_headroom_applied", False):
-        return
-    ymin, ymax = ax.get_ylim()
-    span = ymax - ymin
-    if span <= 0:
-        ax._legend_headroom_applied = True
-        return
+    if handles is None or labels is None:
+        raw_h, raw_l = ax.get_legend_handles_labels()
+        seen: set[str] = set()
+        deduped = []
+        for h, lab in zip(raw_h, raw_l, strict=False):
+            if lab in seen:
+                continue
+            seen.add(lab)
+            deduped.append((h, lab))
+        handles = [h for h, _ in deduped]
+        labels = [lab for _, lab in deduped]
+    if not labels:
+        return None
 
-    upper_locs = {"upper left", "upper right", "upper center", "best"}
-    lower_locs = {"lower left", "lower right", "lower center"}
+    def _attach(n: int):
+        return ax.legend(
+            handles, labels, bbox_to_anchor=(0.5, y_offset),
+            loc="upper center", ncol=n, frameon=True,
+            framealpha=0.9, fontsize=fontsize,
+        )
 
-    if loc in upper_locs:
-        if ymin >= 0:
-            ax.set_ylim(ymin, ymax + frac * span)
-        else:
-            upward = max(ymax, 0.0)
-            ax.set_ylim(ymin, ymax + frac * (upward if upward > 0 else span))
-        # The reserved band exists for the legend; a tick that the
-        # auto-locator drops into it renders half-hidden behind the
-        # legend frame.  Pin the ticks to those at or below the
-        # pre-extension ceiling, and remember the ceiling so a later
-        # locator swap (apply_fine_ticks) can re-apply the prune.
-        ax._legend_headroom_ceiling = ymax
-        ax.set_yticks([t for t in ax.get_yticks() if t <= ymax + 1e-12])
-    elif loc in lower_locs:
-        if ymin < 0:
-            ax.set_ylim(ymin - frac * span, ymax)
-            ax._legend_headroom_floor = ymin
-            ax.set_yticks([t for t in ax.get_yticks() if t >= ymin - 1e-12])
+    # NOTE: _attach reads ``y_offset`` from the enclosing scope, so the
+    # measured-drop loop below can lower it and simply re-attach.
 
-    ax._legend_headroom_applied = True
+    ncol = max(1, int(np.ceil(len(labels) / max_rows)))
+    fig = ax.figure
+    legend = _attach(ncol)
+
+    def _layout_and_measure():
+        """tight_layout + draw, mirroring what save_figure will do.
+
+        tight_layout accounts for the attached legend (it enters the
+        axes' tight bbox), so measuring after it means the measured
+        geometry IS the saved geometry — iterating to a fixpoint here
+        keeps save_figure's own tight_layout call a no-op.
+        """
+        fig.tight_layout()
+        fig.canvas.draw()
+        return fig.canvas.get_renderer()
+
+    renderer = _layout_and_measure()
+    fig_width = fig.bbox.width
+    while (
+        ncol > 1
+        and legend.get_window_extent(renderer=renderer).width > 0.98 * fig_width
+    ):
+        ncol -= 1
+        legend = _attach(ncol)
+        renderer = _layout_and_measure()
+
+    def _decoration_bottom() -> float:
+        """Lowest display-space edge of the x tick labels + axis label."""
+        bottom = ax.get_window_extent(renderer=renderer).y0
+        label = ax.xaxis.get_label()
+        if label.get_text():
+            bottom = min(bottom, label.get_window_extent(renderer=renderer).y0)
+        for tick in ax.get_xticklabels():
+            if tick.get_text():
+                bottom = min(
+                    bottom, tick.get_window_extent(renderer=renderer).y0,
+                )
+        return bottom
+
+    for _ in range(10):
+        lbox = legend.get_window_extent(renderer=renderer)
+        if lbox.y1 <= _decoration_bottom() - 2.0:
+            break
+        y_offset -= 0.05
+        legend = _attach(ncol)
+        renderer = _layout_and_measure()
+    return legend
 
 
 # ---------------------------------------------------------------------------
 # Measured legend placement
 # ---------------------------------------------------------------------------
 #
-# ``reserve_legend_headroom`` above reserves a FIXED fraction and hopes the
-# drawn legend fits.  The two helpers below close the loop: they measure the
-# rendered legend's bounding box against every data artist in display space
-# and grow the axis until the two no longer intersect.  Used by the
-# uncertainty-plot family, whose dense panels (forecast bands, coverage
-# lines, PIT histograms) routinely outgrow any fixed margin.
+# The house legends hang below the axes, so they cannot intersect data by
+# construction.  ``legend_overlaps_data`` remains as the measured invariant
+# the tests assert against every rendered figure.
 
 
 def _is_decorator_line(line) -> bool:
@@ -578,48 +609,6 @@ def legend_overlaps_data(ax, renderer=None) -> list[str]:
     return issues
 
 
-def attach_legend_clear_of_data(
-    ax,
-    *,
-    step_frac: float = 0.08,
-    max_steps: int = 12,
-    tick_ceiling: float | None = None,
-    **legend_kwargs,
-) -> None:
-    """Attach the legend, then grow the top y-limit until the DRAWN
-    legend no longer intersects any data artist.
-
-    The measured replacement for :func:`reserve_legend_headroom` in the
-    uncertainty-plot family: instead of reserving a fixed margin and
-    hoping, the loop renders, measures via :func:`legend_overlaps_data`,
-    and raises ``ymax`` by ``step_frac`` of the entry span per iteration
-    (bounded by ``max_steps``) until the legend sits in clear space.
-
-    ``tick_ceiling`` keeps intentional axis semantics: a probability
-    axis may grow headroom above 1.0, but its ticks are pruned back to
-    end at the ceiling so the scale still reads 0..1.
-
-    Call as the LAST axis-mutating step — after the data, grids, and
-    :func:`apply_universal_margins` — so the measured geometry is final.
-    """
-    _handles, labels = ax.get_legend_handles_labels()
-    if not labels:
-        return
-    ax.legend(**legend_kwargs)
-    ymin, ymax = ax.get_ylim()
-    span = ymax - ymin
-    if span > 0:
-        for _ in range(max_steps):
-            if not legend_overlaps_data(ax):
-                break
-            ymax += step_frac * span
-            ax.set_ylim(ymin, ymax)
-    if tick_ceiling is not None:
-        ax.set_yticks([
-            t for t in ax.get_yticks() if t <= tick_ceiling + 1e-9
-        ])
-
-
 # ---------------------------------------------------------------------------
 # Fine tick density helper
 # ---------------------------------------------------------------------------
@@ -674,15 +663,6 @@ def apply_fine_ticks(
     locator = MaxNLocator(nbins=nbins, steps=[1, 2, 5, 10])
     if axis == "y":
         ax.yaxis.set_major_locator(locator)
-        # Re-apply the legend-headroom prune: the fresh locator would
-        # otherwise drop a tick into the band reserved by
-        # reserve_legend_headroom, rendering it behind the legend.
-        ceiling = getattr(ax, "_legend_headroom_ceiling", None)
-        if ceiling is not None:
-            ax.set_yticks([t for t in ax.get_yticks() if t <= ceiling + 1e-12])
-        floor = getattr(ax, "_legend_headroom_floor", None)
-        if floor is not None:
-            ax.set_yticks([t for t in ax.get_yticks() if t >= floor - 1e-12])
     elif axis == "x":
         ax.xaxis.set_major_locator(locator)
     else:

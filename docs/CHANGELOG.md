@@ -75,16 +75,35 @@ Production release.
   deductions read unambiguously side by side.
 - Every per-year figure (cumulative cashflow, yearly bars, NPV
   waterfall, payback, revenue stack, lifetime cycles, lifetime
-  summary, SOH) shares one calendar tick grid: integer ticks every
-  2 years anchored at Year 0, so ticks land on the same years in
-  every figure and none lands outside the project window.  Each
-  plot's window hugs its own data: the cashflow views open at Year 0
-  (the CAPEX year), the operational views (SOH, revenue stack,
+  summary, SOH) labels EVERY project year, rotated and right-anchored
+  like the month and date axes, so no tick lands outside the project
+  window and the reader never interpolates between sparse ticks.
+  Each plot's window hugs its own data: the cashflow views open at
+  Year 0 (the CAPEX year), the operational views (SOH, revenue stack,
   cycles, lifetime summary) open at Year 1 with no empty Year-0 slot.
+- The cumulative discounted cash-flow curve draws solid like its
+  undiscounted companion, distinguished by colour only (dashes remain
+  reserved for reference lines and markers).
 - The financial monthly figures (Year-1 monthly cashflow, BESS revenue
   by month, seasonal boxplot) all take the house MM-YYYY month labels
   of the energy plots' month-of-year axes (rotated, right-anchored),
   through one shared month-axis helper.
+- One legend placement for the whole report: every legend hangs
+  BELOW its axes, horizontally centered (the energy plots' long-held
+  convention, now universal across the financial, uncertainty and
+  diagnostic figures).  The in-plot legend headroom system is removed,
+  so the full canvas belongs to the data; the below placement is
+  measured — the column count narrows until the legend fits the
+  figure width and the legend drops until it clears the x tick labels
+  and the axis label.
+- The measured legend system pins the y-view across its tick prunes: a
+  locator tick emitted below the visible minimum could re-expand the
+  autoscaled view AFTER the legend was measured clear, shifting the
+  bars under the legend for some project start dates.  A
+  cross-start-date sweep test now renders every per-year and monthly
+  figure over a grid of start years and horizon lengths, asserting the
+  shared tick grid, the data-hugging windows, the MM-YYYY month labels
+  and the measured legend clearance for any project window.
 
 ### Added
 

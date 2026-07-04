@@ -23,7 +23,7 @@ from ..emissions import cfe_score, hourly_cfe_fraction
 from ..theme import COLORS, FINANCIAL_COLORS
 from .style import (
     apply_universal_margins,
-    attach_legend_clear_of_data,
+    legend_below,
     save_figure,
 )
 
@@ -239,9 +239,5 @@ def plot_cfe_duration_curve(res: pd.DataFrame, out_path: Path) -> Path:
     ax.set_ylim(0.0, 100.0)
     apply_universal_margins(ax)
     if has_legend:
-        # Measured placement: headroom may grow above 100, but the
-        # percentage ticks stay pinned at the 0..100 scale.
-        attach_legend_clear_of_data(
-            ax, loc="upper right", tick_ceiling=100.0,
-        )
+        legend_below(ax)
     return save_figure(out_path)

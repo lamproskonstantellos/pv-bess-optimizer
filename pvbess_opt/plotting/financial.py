@@ -26,7 +26,12 @@ import pandas as pd
 
 from ..io import PROJECT_SHEET_DEFAULTS
 from ..sensitivity import DriverSensitivity, build_driver_sensitivities
-from ..theme import FINANCIAL_COLORS, apply_financial_legend, financial_color
+from ..theme import (
+    FINANCIAL_COLORS,
+    XTICK_ROT,
+    apply_financial_legend,
+    financial_color,
+)
 from ._currency import (
     euro_axis_formatter,
 )
@@ -39,7 +44,7 @@ from .style import (
     apply_month_axis,
     apply_universal_margins,
     empty_placeholder,
-    reserve_legend_headroom,
+    legend_below,
     save_figure,
     show_titles,
 )
@@ -131,29 +136,24 @@ def _apply_eur_xaxis(ax, econ: dict[str, Any] | None) -> None:
     ax.xaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
 
 
-def _integer_year_axis(
-    ax, years: np.ndarray, *, includes_year_zero: bool = True,
-) -> None:
+def _integer_year_axis(ax, years: np.ndarray) -> None:
     """Common calendar-year axis for every per-year figure.
 
-    One tick GRID for the whole report: integer ticks every 2 years
-    anchored at Year 0 (the CAPEX year), so ticks land on the same
-    calendar years in every figure.  Each plot's WINDOW hugs its own
-    data: the cashflow views span Year 0 through the final project
-    year, while operational frames that start at Year 1 (SOH, revenue
-    stack, cycles: nothing to draw in Year 0) pass
-    ``includes_year_zero=False`` — their window opens at Year 1 with
-    no empty Year-0 slot, and the grid's Year-0 tick simply clips off
-    the left edge (their first visible tick is Year 2, still on the
-    shared grid, and the final year is always ticked).  Call AFTER
+    EVERY project year is labelled — the reader never interpolates
+    between sparse ticks — and the labels rotate ``XTICK_ROT``
+    right-anchored like every other dense axis in the report (month
+    and date axes), which is how 20+ four-digit years fit the standard
+    7-inch canvas.  The window hugs the data: the cashflow views open
+    at Year 0 (the CAPEX year), the operational frames at Year 1 with
+    no empty Year-0 slot.  Call AFTER
     :func:`apply_universal_margins`: the window must not be re-padded.
     """
     if len(years) == 0:
         return
     first = int(np.min(years))
-    anchor = first - (0 if includes_year_zero else 1)
     last = int(np.max(years))
-    ax.set_xticks(np.arange(anchor, last + 1, 2))
+    ax.set_xticks(np.arange(first, last + 1))
+    plt.setp(ax.get_xticklabels(), rotation=XTICK_ROT, ha="right")
     ax.set_xlim(first - 0.75, last + 0.75)
 
 
@@ -183,7 +183,7 @@ def plot_cumulative_cashflow(
     ax.plot(
         years, cum_disc,
         color=financial_color("Cumulative discounted cash-flow"),
-        linewidth=1.5, linestyle="--", marker="o", markersize=3,
+        linewidth=1.5, marker="o", markersize=3,
         label="Cumulative discounted cash-flow",
     )
     ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
@@ -192,12 +192,11 @@ def plot_cumulative_cashflow(
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Cumulative Cash-flow — {_title_window(yearly_cf)}")
-    reserve_legend_headroom(ax, loc="best")
-    apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     _integer_year_axis(ax, years)
     apply_fine_ticks(ax)
+    apply_financial_legend(ax)
     return save_figure(out_path)
 
 
@@ -252,12 +251,11 @@ def plot_yearly_cashflow_bars(
     # Pin to the lower right — the post-payback region is roughly
     # horizontal there, so the legend stays clear of the bars and the
     # Year-0 CAPEX stack on the left.
-    reserve_legend_headroom(ax, loc="lower right")
-    apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     _integer_year_axis(ax, years)
     apply_fine_ticks(ax)
+    apply_financial_legend(ax)
     return save_figure(out_path)
 
 
@@ -338,12 +336,11 @@ def plot_npv_waterfall(
     ax.set_ylabel("Discounted EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
-    reserve_legend_headroom(ax, loc="lower right")
-    apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     _integer_year_axis(ax, years)
     apply_fine_ticks(ax)
+    apply_financial_legend(ax)
     return save_figure(out_path)
 
 
@@ -372,7 +369,7 @@ def plot_payback(
             linewidth=1.5, marker="o", markersize=3,
             label="Cumulative cash-flow")
     ax.plot(years, cum_disc, color=financial_color("Cumulative discounted cash-flow"),
-            linewidth=1.5, linestyle="--", marker="o", markersize=3,
+            linewidth=1.5, marker="o", markersize=3,
             label="Cumulative discounted cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.6)
 
@@ -414,11 +411,10 @@ def plot_payback(
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Payback Visualisation — {_title_window(yearly_cf)}")
-    reserve_legend_headroom(ax, loc="best")
-    apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     _integer_year_axis(ax, years)
+    apply_financial_legend(ax)
     return save_figure(out_path)
 
 
@@ -498,11 +494,10 @@ def plot_monthly_cashflow_year1(
         cal_year = None
         _maybe_set_title(ax, "Year-1 Monthly Cash-flow")
 
-    reserve_legend_headroom(ax, loc="best")
-    apply_financial_legend(ax, max_rows=2)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     apply_month_axis(ax, months, months, year=cal_year)
+    apply_financial_legend(ax, max_rows=2)
     return save_figure(out_path)
 
 
@@ -719,12 +714,12 @@ def _dumbbell_plot(
     ax.set_xlim(xmin - pad, xmax + pad)
     ax.set_ylim(-0.6, len(labels) - 0.4)
     _maybe_set_title(ax, title)
-    ax.legend(loc="lower right", framealpha=0.9, fontsize=7)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
     # Tornado owns its 18% x-padding (above) and its fixed y-row
     # extent; the universal helper only adds defensive padding to
     # neither axis.
     apply_universal_margins(ax, skip_x=True, skip_y=True)
+    legend_below(ax)
     apply_fine_ticks(ax, axis="x")
 
     return save_figure(out_path)
