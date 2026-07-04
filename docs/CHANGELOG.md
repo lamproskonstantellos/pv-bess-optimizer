@@ -85,6 +85,14 @@ Production release.
   by month, seasonal boxplot) all take the house MM-YYYY month labels
   of the energy plots' month-of-year axes (rotated, right-anchored),
   through one shared month-axis helper.
+- The measured legend system pins the y-view across its tick prunes: a
+  locator tick emitted below the visible minimum could re-expand the
+  autoscaled view AFTER the legend was measured clear, shifting the
+  bars under the legend for some project start dates.  A
+  cross-start-date sweep test now renders every per-year and monthly
+  figure over a grid of start years and horizon lengths, asserting the
+  shared tick grid, the data-hugging windows, the MM-YYYY month labels
+  and the measured legend clearance for any project window.
 
 ### Added
 

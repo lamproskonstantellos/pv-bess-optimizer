@@ -615,9 +615,15 @@ def attach_legend_clear_of_data(
             ymax += step_frac * span
             ax.set_ylim(ymin, ymax)
     if tick_ceiling is not None:
+        # The locator can emit a tick BELOW the visible ymin (locator
+        # overshoot); feeding it back through set_yticks would expand
+        # the autoscaled view and shift the data under the already
+        # measured legend.  Pin the view across the prune.
+        view = ax.get_ylim()
         ax.set_yticks([
             t for t in ax.get_yticks() if t <= tick_ceiling + 1e-9
         ])
+        ax.set_ylim(view)
 
 
 # ---------------------------------------------------------------------------
@@ -677,12 +683,19 @@ def apply_fine_ticks(
         # Re-apply the legend-headroom prune: the fresh locator would
         # otherwise drop a tick into the band reserved by
         # reserve_legend_headroom, rendering it behind the legend.
+        # Pin the view across each prune — the locator can emit a tick
+        # beyond the visible limits (locator overshoot), and feeding it
+        # back through set_yticks would expand the autoscaled view.
         ceiling = getattr(ax, "_legend_headroom_ceiling", None)
         if ceiling is not None:
+            view = ax.get_ylim()
             ax.set_yticks([t for t in ax.get_yticks() if t <= ceiling + 1e-12])
+            ax.set_ylim(view)
         floor = getattr(ax, "_legend_headroom_floor", None)
         if floor is not None:
+            view = ax.get_ylim()
             ax.set_yticks([t for t in ax.get_yticks() if t >= floor - 1e-12])
+            ax.set_ylim(view)
     elif axis == "x":
         ax.xaxis.set_major_locator(locator)
     else:
