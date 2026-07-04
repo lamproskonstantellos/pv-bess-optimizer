@@ -14,7 +14,7 @@ from ..theme import COLORS, FINANCIAL_COLORS, UNCERTAINTY_SOURCE_COLORS
 from ._currency import euro_axis_formatter
 from .style import (
     apply_universal_margins,
-    attach_legend_clear_of_data,
+    legend_below,
     save_figure,
     show_titles,
 )
@@ -121,9 +121,7 @@ def plot_rolling_horizon_distribution(
                 )
             ax.grid(True, axis="y", linestyle="--", alpha=0.5)
             apply_universal_margins(ax, skip_x=True, skip_y=True)
-            attach_legend_clear_of_data(
-                ax, loc="best", framealpha=0.9, fontsize=7,
-            )
+            legend_below(ax)
             return save_figure(out_path)
         fallback_colour = COLORS["BESS to grid"]
         for source_set, group in mc_df.groupby("source_set"):
@@ -152,7 +150,7 @@ def plot_rolling_horizon_distribution(
             ax.set_title("Rolling-horizon MC profit distribution by source set")
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
         apply_universal_margins(ax, skip_y=True)
-        attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
+        legend_below(ax)
         return save_figure(out_path)
 
     profits = mc_df["profit_total_eur"].astype(float).to_numpy()
@@ -177,7 +175,7 @@ def plot_rolling_horizon_distribution(
             ax.set_title("Rolling-horizon Monte Carlo profit distribution")
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
         apply_universal_margins(ax, skip_x=True, skip_y=True)
-        attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
+        legend_below(ax)
         return save_figure(out_path)
 
     ax.hist(profits, bins=max(10, len(profits) // 3),
@@ -207,7 +205,7 @@ def plot_rolling_horizon_distribution(
         ax.set_title("Rolling-horizon Monte Carlo profit distribution")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
-    attach_legend_clear_of_data(ax, loc="best", framealpha=0.9, fontsize=7)
+    legend_below(ax)
     return save_figure(out_path)
 
 

@@ -191,7 +191,12 @@ def _capture(module, render_fn):
 
 
 def _legend_overlap_issues(ax) -> list[str]:
-    """Return human-readable issues when the legend bbox overlaps data."""
+    """Return human-readable issues against the house legend rule.
+
+    Every legend hangs BELOW the axes, horizontally centered — so it
+    can never overlap a data artist.  The helper asserts the placement
+    directly and keeps the overlap probes as a belt-and-braces check.
+    """
     fig = ax.figure
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
@@ -200,6 +205,14 @@ def _legend_overlap_issues(ax) -> list[str]:
         return []
     lbox = legend.get_window_extent(renderer=renderer)
     issues: list[str] = []
+
+    abox = ax.get_window_extent(renderer=renderer)
+    if lbox.y1 > abox.y0 + 1e-6:
+        issues.append("legend is not below the axes frame")
+    ax_cx = 0.5 * (abox.x0 + abox.x1)
+    leg_cx = 0.5 * (lbox.x0 + lbox.x1)
+    if abs(leg_cx - ax_cx) > 0.02 * (abox.x1 - abox.x0) + 1.0:
+        issues.append("legend is not horizontally centered under the axes")
 
     # Bar patches: each container groups its bars; check every patch.
     for cont in ax.containers:
@@ -357,34 +370,28 @@ def test_bess_revenue_by_month_legend_clear(tmp_path: Path):
     assert _legend_overlap_issues(fig.axes[0]) == []
 
 
-def test_reserve_legend_headroom_is_idempotent():
-    """A second call on the same axis must be a no-op."""
-    from pvbess_opt.plotting.style import reserve_legend_headroom
+def test_legend_below_leaves_ylim_untouched():
+    """The below-the-axes legend needs NO in-plot headroom: attaching
+    it must leave the y-limits exactly as the data set them."""
+    from pvbess_opt.plotting.style import legend_below
 
     plt.close("all")
     _fig, ax = plt.subplots()
-    ax.bar([1, 2, 3], [10.0, 20.0, 30.0])
+    ax.bar([1, 2, 3], [10.0, 20.0, 30.0], label="Revenue")
     ax.set_ylim(0.0, 30.0)
-    reserve_legend_headroom(ax, loc="best")
-    ymin_after_first, ymax_after_first = ax.get_ylim()
-    reserve_legend_headroom(ax, loc="best")
-    ymin_after_second, ymax_after_second = ax.get_ylim()
-    assert ymin_after_first == pytest.approx(ymin_after_second)
-    assert ymax_after_first == pytest.approx(ymax_after_second)
-    # And the headroom must actually be larger than the original 30.0.
-    assert ymax_after_first > 30.0
+    legend_below(ax)
+    assert ax.get_ylim() == (0.0, 30.0)
 
 
 # ---------------------------------------------------------------------------
-# Uncertainty-plot family — MEASURED no-overlap guarantee
+# Uncertainty-plot family — house below-the-axes placement
 # ---------------------------------------------------------------------------
 #
-# These figures attach their legends through
-# style.attach_legend_clear_of_data, which measures the drawn legend
-# against the data artists and grows headroom until they no longer
-# intersect.  The assertions below re-measure with the same production
-# helper (style.legend_overlaps_data) on rendered figures, so a
-# regression in any panel of the family fails here.
+# These figures attach their legends through style.legend_below, which
+# hangs the legend under the axes (measured against the x decorations).
+# The assertions below re-measure rendered figures with the production
+# helper (style.legend_overlaps_data), so a regression in any panel of
+# the family fails here.
 
 
 def _uncertainty_ts(n_steps: int = 96 * 28) -> pd.DataFrame:
@@ -614,21 +621,32 @@ def test_waterfall_tick_labels_do_not_overlap(tmp_path):
         assert "\n" not in t.get_text(), t.get_text()
 
 
-def test_no_tick_inside_reserved_legend_band(tmp_path):
-    """apply_fine_ticks must not re-introduce a tick inside the band
-    reserve_legend_headroom cleared for the legend (it renders
-    half-hidden behind the legend frame)."""
+def test_legend_clears_x_axis_decorations(tmp_path):
+    """The measured drop in legend_below must leave the legend fully
+    below the x tick labels AND the axis label — the rotated MM-YYYY
+    month labels of the by-month view reach deepest, so it is the
+    regression case."""
     fig = _capture(
-        lifecycle_mod,
-        lambda: plot_revenue_stack_yearly(
-            _yearly_cf(), _year1_kpis(), tmp_path / "rs.pdf",
-            econ={"retail_inflation_pct": 2.0},
+        bess_revenue_mod,
+        lambda: plot_bess_revenue_by_month(
+            _res_year1(), _year1_kpis(), tmp_path / "bym.pdf",
+            econ={"aggregator_fee_pct_revenue": 10.0},
         ),
     )
     assert fig is not None
     ax = fig.axes[0]
-    ceiling = getattr(ax, "_legend_headroom_ceiling", None)
-    assert ceiling is not None, "revenue stack must reserve legend headroom"
-    assert max(ax.get_yticks()) <= ceiling + 1e-9, (
-        ceiling, list(ax.get_yticks()),
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    legend = ax.get_legend()
+    assert legend is not None
+    lbox = legend.get_window_extent(renderer=renderer)
+    xlabel_box = ax.xaxis.get_label().get_window_extent(renderer=renderer)
+    assert lbox.y1 <= xlabel_box.y0 + 1e-6, (
+        "legend must sit below the x-axis label"
     )
+    for tick in ax.get_xticklabels():
+        if tick.get_text():
+            tbox = tick.get_window_extent(renderer=renderer)
+            assert lbox.y1 <= tbox.y0 + 1e-6, (
+                f"legend must sit below tick label {tick.get_text()!r}"
+            )

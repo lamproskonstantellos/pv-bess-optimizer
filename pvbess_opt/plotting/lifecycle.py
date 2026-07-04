@@ -53,7 +53,7 @@ from .financial import _integer_year_axis
 from .style import (
     apply_fine_ticks,
     apply_universal_margins,
-    reserve_legend_headroom,
+    legend_below,
     save_figure,
     save_figure_object,
     show_titles,
@@ -398,12 +398,11 @@ def plot_revenue_stack_yearly(
     ax.yaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
     if show_titles():
         ax.set_title(f"Revenue stack — {int(years[0])}-{int(years[-1])}")
-    reserve_legend_headroom(ax, loc="best")
-    apply_financial_legend(ax)
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
-    _integer_year_axis(ax, years, includes_year_zero=False)
+    _integer_year_axis(ax, years)
     apply_fine_ticks(ax)
+    apply_financial_legend(ax)
     return save_figure(out_path)
 
 
@@ -447,7 +446,7 @@ def plot_lifetime_cycles(
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
-    _integer_year_axis(ax, years, includes_year_zero=False)
+    _integer_year_axis(ax, years)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -709,15 +708,12 @@ def _draw_benchmark_row(
     )
 
     ax.set_yticks([])
-    # Top space is reserved explicitly: the single row spans y in
-    # [-0.25, 0.25] and the three-entry 7 pt legend needs the band
-    # above it clear (the 15 % pad of reserve_legend_headroom is not
-    # enough on this compact strip).
-    ax.set_ylim(-0.6, 1.1)
+    # The single row spans y in [-0.25, 0.25]; the legend hangs below
+    # the strip (house rule), so the band is framed symmetrically.
+    ax.set_ylim(-0.6, 0.6)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
-    ax.legend(loc="upper right", framealpha=0.9, ncol=1)
 
     # Per-row independent x-axis: span the union of (benchmark, project
     # range) with 12 % padding on each side so legend / labels never
@@ -726,3 +722,4 @@ def _draw_benchmark_row(
     span_hi = max(bench_high, bar_high)
     pad = 0.12 * max(span_hi - span_lo, 1.0)
     ax.set_xlim(max(0.0, span_lo - pad), span_hi + pad)
+    legend_below(ax, max_rows=1, y_offset=-0.25)

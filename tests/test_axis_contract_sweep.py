@@ -5,8 +5,8 @@ a grid of project start years and horizon lengths, asserting the house
 axis contracts hold for ANY project window — not just the shipped
 2026-2045 example:
 
-* one tick grid per project: integer ticks every 2 years anchored at
-  Year 0 (the CAPEX calendar year), identical across all figures;
+* every project year is labelled, rotated ``XTICK_ROT`` and
+  right-anchored like the month and date axes;
 * the window hugs the data: cashflow views open at Year 0, operational
   views (SOH, revenue stack, cycles, lifetime summary) open at Year 1
   with no empty Year-0 slot;
@@ -188,8 +188,11 @@ def _capture(module, fn):
 
 def _assert_year_axis(ax, *, year0: int, last: int, first_data: int) -> None:
     ticks = list(ax.get_xticks())
-    assert ticks == [float(t) for t in range(year0, last + 1, 2)], ticks
+    assert ticks == [float(t) for t in range(first_data, last + 1)], ticks
     assert ax.get_xlim() == (first_data - 0.75, last + 0.75)
+    for t in ax.get_xticklabels():
+        assert t.get_rotation() == pytest.approx(float(XTICK_ROT))
+        assert t.get_horizontalalignment() == "right"
     lo, hi = ax.get_xlim()
     shown = [t for t in ticks if lo <= t <= hi]
     assert shown, "window displays no tick at all"
@@ -206,8 +209,18 @@ def _assert_month_axis(ax, *, year: int, positions: np.ndarray) -> None:
 
 
 def _assert_legend_clear(ax) -> None:
-    if ax.get_legend() is not None:
-        assert legend_overlaps_data(ax) == []
+    """House rule: the legend hangs BELOW the axes (and therefore
+    cannot intersect any data artist)."""
+    legend = ax.get_legend()
+    if legend is None:
+        return
+    fig = ax.figure
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    lbox = legend.get_window_extent(renderer=renderer)
+    abox = ax.get_window_extent(renderer=renderer)
+    assert lbox.y1 <= abox.y0 + 1e-6, "legend must hang below the axes"
+    assert legend_overlaps_data(ax, renderer=renderer) == []
 
 
 # ---------------------------------------------------------------------------

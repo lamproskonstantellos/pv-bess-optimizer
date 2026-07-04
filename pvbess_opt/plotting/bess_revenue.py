@@ -42,8 +42,8 @@ from .style import (
     apply_fine_ticks,
     apply_month_axis,
     apply_universal_margins,
-    attach_legend_clear_of_data,
     get_scenario_label,
+    legend_below,
     save_figure,
     show_titles,
 )
@@ -277,11 +277,7 @@ def plot_bess_capacity_vs_activation_split(
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     apply_fine_ticks(ax)
-    # Measured grow-until-clear placement (same guarantee as the other
-    # financial plots); ticks stay pruned to the pre-growth ceiling.
-    attach_legend_clear_of_data(
-        ax, loc="best", fontsize=7, tick_ceiling=ax.get_ylim()[1],
-    )
+    legend_below(ax)
     return save_figure(out_path)
 
 
@@ -417,15 +413,11 @@ def plot_bess_revenue_by_month(
     apply_fine_ticks(ax)
     apply_month_axis(ax, x, range(1, 13), year=int(ts.dt.year.iloc[0]))
     if ordered:
-        # Measured grow-until-clear placement (same guarantee as the
-        # apply_financial_legend plots) with the DAM-first entry order
-        # preserved; ticks stay pruned to the pre-growth ceiling so
-        # none renders behind the legend.
-        attach_legend_clear_of_data(
+        # House placement (below the axes) with the DAM-first entry
+        # order preserved via explicit handles / labels.
+        legend_below(
             ax,
-            handles=[h for h, _ in ordered],
-            labels=[lbl for _, lbl in ordered],
-            loc="best", fontsize=7,
-            tick_ceiling=ax.get_ylim()[1],
+            [h for h, _ in ordered],
+            [lbl for _, lbl in ordered],
         )
     return save_figure(out_path)

@@ -32,9 +32,9 @@ from .helpers import title_prefix
 from .style import (
     apply_fine_ticks,
     apply_universal_margins,
-    attach_legend_clear_of_data,
     empty_placeholder,
     get_scenario_label,
+    legend_below,
     save_figure,
     show_titles,
 )
@@ -102,9 +102,7 @@ def plot_balancing_reservation_profile(
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
     apply_fine_ticks(ax)
-    attach_legend_clear_of_data(
-        ax, loc="upper right", frameon=True, framealpha=0.9,
-    )
+    legend_below(ax)
     return save_figure(Path(out_path))
 
 
@@ -159,7 +157,5 @@ def plot_balancing_mc_distribution(
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
     apply_fine_ticks(ax, axis="x")
-    attach_legend_clear_of_data(
-        ax, loc="upper right", frameon=True, framealpha=0.9,
-    )
+    legend_below(ax)
     return save_figure(Path(out_path))

@@ -11,7 +11,7 @@ import pandas as pd
 from ..theme import FINANCIAL_COLORS
 from .style import (
     apply_universal_margins,
-    attach_legend_clear_of_data,
+    legend_below,
     save_figure,
 )
 
@@ -61,5 +61,5 @@ def plot_npv_vs_capacity(
     ax.set_ylabel("NPV (EUR)")
     apply_universal_margins(ax)
     if has_legend:
-        attach_legend_clear_of_data(ax, loc="upper right")
+        legend_below(ax)
     return save_figure(out_path)

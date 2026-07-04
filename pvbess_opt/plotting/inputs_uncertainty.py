@@ -30,7 +30,7 @@ from ._dates import apply_house_date_axis
 from .style import (
     apply_month_axis,
     apply_universal_margins,
-    attach_legend_clear_of_data,
+    legend_below,
     save_figure,
     show_titles,
 )
@@ -40,16 +40,7 @@ from .style import (
 
 _Z90 = 1.2816  # Phi^{-1}(0.90)
 
-# House legend placement for the whole 06_uncertainty_plots/ family.
-# Attached via style.attach_legend_clear_of_data as the LAST step of every
-# figure: the drawn legend is measured against the data artists and the
-# panel grows top headroom until the two no longer intersect.
-LEGEND_LOC = "upper right"
-LEGEND_KWARGS = dict(loc=LEGEND_LOC, framealpha=0.85, fontsize=7)
-
 __all__ = [
-    "LEGEND_KWARGS",
-    "LEGEND_LOC",
     "plot_dam_intraday_heatmap",
     "plot_input_forecast_band",
     "plot_input_seasonal_boxplot",
@@ -133,7 +124,7 @@ def plot_input_forecast_band(
         )
     for ax in axes:
         apply_universal_margins(ax)
-        attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
+        legend_below(ax)
     return save_figure(out_path)
 
 
@@ -366,7 +357,7 @@ def plot_uncertainty_coverage_by_horizon(
         ax.set_title("P10-P90 coverage by forecast horizon")
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
-    ax.legend(loc="lower right", framealpha=LEGEND_KWARGS["framealpha"])
+    legend_below(ax)
     return save_figure(out_path)
 
 
@@ -409,7 +400,7 @@ def plot_uncertainty_pit_histogram(
         axes[0].set_title("Probability integral transform (flat ⇒ calibrated)")
     for ax in axes:
         apply_universal_margins(ax, skip_x=True)
-        attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
+        legend_below(ax)
     return save_figure(out_path)
 
 
@@ -455,7 +446,7 @@ def plot_uncertainty_crps_timeline(
         ax.set_ylabel(f"CRPS ({unit})")
         ax.grid(True, linestyle="--", alpha=0.5)
         apply_universal_margins(ax)
-        attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
+        legend_below(ax)
     axes[-1].set_xlabel("Timestamp")
     if show_titles():
         axes[0].set_title("Step-wise CRPS over the forecast band")
@@ -505,5 +496,5 @@ def plot_uncertainty_residual_qq(
         axes[0].set_title("Normalised-residual Q-Q vs standard normal")
     for ax in axes:
         apply_universal_margins(ax)
-        attach_legend_clear_of_data(ax, **LEGEND_KWARGS)
+        legend_below(ax)
     return save_figure(out_path)
