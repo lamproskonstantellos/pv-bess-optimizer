@@ -1,22 +1,20 @@
 Regulatory framework
 ====================
 
-The optimiser respects the Greek regulatory framework for distributed
-generation.
+The optimiser models the regulatory mechanics of distributed
+generation (injection caps, settlement cadence) with every limit
+taken as a plain user input.
 
 Max-injection cap (both modes)
 ------------------------------
 
 The static cap on grid-bound flows is **not** self_consumption-specific.  It
 is a **grid-connection limit** whose allowed-injection percentage is a
-plain user input (any national or contractual curtailment rule is
-modelled by entering its value), expressed as the share of
-``p_grid_export_max_kw`` available for export:
-
-* 73 % allowed on installations connected to the **distribution**
-  network (equivalently 27 % curtailment).
-* 72 % allowed on installations connected to the **transmission**
-  network (equivalently 28 % curtailment).
+plain user input, expressed as the share of
+``p_grid_export_max_kw`` available for export (a value of X means
+X % allowed injection, equivalently 100 - X % curtailment).  Any
+national or contractual curtailment rule is modelled by entering its
+percentage on the ``max_injection`` sheets.
 
 The constraint is encoded as
 
@@ -26,9 +24,10 @@ The constraint is encoded as
    \le p^{\text{export\_max}} \cdot \Delta t \cdot
    \frac{\text{max\_injection\_pct}}{100} \quad \forall t
 
-and is **identically enforced in both self_consumption and merchant modes**.  Any
-suggestion to remove it from merchant mode is wrong; cite the MD and
-reject.
+and is **identically enforced in both self_consumption and merchant
+modes**.  Any suggestion to remove it from merchant mode is wrong;
+the cap is a property of the grid connection, not of the market
+regime.
 
 Optional strict total-injection cap
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
