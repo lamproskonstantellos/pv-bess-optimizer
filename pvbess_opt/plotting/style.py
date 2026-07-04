@@ -148,7 +148,12 @@ def get_figure_format() -> str:
 
 
 def _save_kwargs() -> dict[str, object]:
-    kwargs: dict[str, object] = {"format": FIGURE_FORMAT, "bbox_inches": "tight"}
+    # NO bbox_inches="tight": every figure saves at its EXACT declared
+    # canvas (7 in wide across the report), so two figures side by side
+    # in a document scale identically and their fonts read the same
+    # apparent size.  tight_layout (legend-aware) has already fitted
+    # all decorations inside the canvas by the time the save happens.
+    kwargs: dict[str, object] = {"format": FIGURE_FORMAT}
     if FIGURE_FORMAT == "png":
         kwargs["dpi"] = FIGURE_PNG_DPI
     return kwargs
