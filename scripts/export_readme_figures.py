@@ -59,30 +59,39 @@ _STEPS_PER_DAY = 96
 # Curated figure picks: {glob under the run folder: destination name}.
 # The financial figures come from full-year runs; the daily dispatch trace
 # comes from a one-day run (see ``_build_workbook``).
-_MERCHANT_FIGURES = {
-    "04_financial_plots/revenue_stack_yearly_*.png": "merchant_revenue_stack.png",
-    "04_financial_plots/bess_revenue_waterfall.png": "merchant_bess_revenue_waterfall.png",
-    "04_financial_plots/lcos_summary.png": "merchant_lcos_band.png",
+# One shared per-mode figure set: BOTH gallery sections carry the SAME
+# plot types, so a reader can compare the two business models figure by
+# figure.  {glob under the run folder: gallery basename}.
+_MODE_FIGURES = {
+    "05_energy_plots/energy_sankey.png": "energy_flow.png",
+    "04_financial_plots/revenue_stack_yearly_*.png": "revenue_stack.png",
+    "04_financial_plots/bess_revenue_waterfall.png":
+        "bess_revenue_waterfall.png",
+    "04_financial_plots/monthly_cashflow_*.png": "monthly_cashflow.png",
     "04_financial_plots/cumulative_cashflow_with_payback_*.png":
-        "merchant_cumulative_cashflow.png",
-    "04_financial_plots/soh_trajectory.png": "merchant_soh_trajectory.png",
-    "04_financial_plots/sensitivity_npv_tornado.png": "merchant_npv_tornado.png",
-    "04_financial_plots/lcoe_summary.png": "merchant_lcoe_band.png",
-    "04_financial_plots/npv_waterfall_*.png": "merchant_npv_waterfall.png",
-    "05_energy_plots/energy_sankey.png": "merchant_energy_flow.png",
+        "cumulative_cashflow.png",
+    "04_financial_plots/npv_waterfall_*.png": "npv_waterfall.png",
+    "04_financial_plots/sensitivity_npv_tornado.png": "npv_tornado.png",
+    "04_financial_plots/lcoe_summary.png": "lcoe_band.png",
+    "04_financial_plots/lcos_summary.png": "lcos_band.png",
+    "04_financial_plots/soh_trajectory.png": "soh_trajectory.png",
 }
-_SELF_CONSUMPTION_FINANCIAL_FIGURES = {
-    "04_financial_plots/revenue_stack_yearly_*.png":
-        "self_consumption_revenue_stack.png",
-    "04_financial_plots/monthly_cashflow_*.png":
-        "self_consumption_monthly_cashflow.png",
-    "05_energy_plots/energy_sankey.png":
-        "self_consumption_energy_flow.png",
+_DAILY_FIGURES = {
+    "05_energy_plots/**/daily_combined_*with_soc_*.png":
+        "daily_dispatch_soc.png",
 }
-_SELF_CONSUMPTION_DAILY_FIGURES = {
-    "05_energy_plots/**/daily_combined_with_soc_*.png":
-        "self_consumption_daily_dispatch_soc.png",
-}
+
+
+def _prefixed(mapping: dict[str, str], prefix: str) -> dict[str, str]:
+    return {glob: f"{prefix}_{name}" for glob, name in mapping.items()}
+
+
+_MERCHANT_FIGURES = _prefixed(_MODE_FIGURES, "merchant")
+_SELF_CONSUMPTION_FINANCIAL_FIGURES = _prefixed(
+    _MODE_FIGURES, "self_consumption",
+)
+_SELF_CONSUMPTION_DAILY_FIGURES = _prefixed(_DAILY_FIGURES, "self_consumption")
+_MERCHANT_DAILY_FIGURES = _prefixed(_DAILY_FIGURES, "merchant")
 
 
 def _build_workbook(
@@ -200,6 +209,14 @@ def main(argv: list[str] | None = None) -> int:
                 one_day=True, mip_gap=args.mip_gap, time_limit=args.time_limit,
             )
             written += _curate(sc_day_run, _SELF_CONSUMPTION_DAILY_FIGURES)
+
+            logger.info("merchant — representative-day dispatch ...")
+            merchant_day_run = _run(
+                tmp_dir / "merchant_day", mode="merchant", balancing=False,
+                one_day=True, mip_gap=args.mip_gap,
+                time_limit=args.time_limit,
+            )
+            written += _curate(merchant_day_run, _MERCHANT_DAILY_FIGURES)
     finally:
         set_figure_format("pdf")
 

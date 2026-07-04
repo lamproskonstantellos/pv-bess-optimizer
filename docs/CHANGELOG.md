@@ -108,6 +108,20 @@ Production release.
   test: ticks, axis labels and titles from the IEEE preset, legends at
   7 pt, in-plot annotations and node labels at 7 pt, empty-input
   placeholders at 10 pt.
+- Every figure saves at its exact declared canvas (7 in wide across
+  the report, legend included) instead of a per-figure tight crop, so
+  figures placed side by side scale identically and their fonts read
+  the same apparent size; the sweep asserts the legend sits fully
+  inside the canvas.
+- The BESS revenue waterfall omits zero-value product steps (a
+  no-balancing run previously showed five flat EUR-0 steps), exactly
+  as it omits zero fees.
+- The README gallery carries the SAME figure set for both business
+  models (energy flow, representative-day dispatch, revenue stack,
+  BESS waterfall, monthly and cumulative cashflow, NPV waterfall and
+  tornado, LCOE / LCOS bands, SOH), so the two modes compare figure by
+  figure; a Read the Docs configuration (.readthedocs.yaml) builds the
+  Sphinx docs from docs/source/conf.py.
 - The measured legend system pins the y-view across its tick prunes: a
   locator tick emitted below the visible minimum could re-expand the
   autoscaled view AFTER the legend was measured clear, shifting the
