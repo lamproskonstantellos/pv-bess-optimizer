@@ -12,7 +12,7 @@ exclusively into the day-ahead market, optionally stacking balancing
 services (`docs/balancing_market_design.md`) and a pay-as-produced PPA
 (`docs/ppa_design.md`).  No retail tariff, no load priority, no
 avoided-cost stream.  The regulatory grid-connection injection cap of
-MD YPEN/DAPEEK/53563/1556/2023 applies **unconditionally**; merchant
+the user-configured injection cap applies **unconditionally**; merchant
 mode never skips curtailment.
 
 In the loader, `load_kwh` is optional in this mode: when present it is
@@ -208,7 +208,7 @@ instead of curtailing.
 
 ## References
 
-* MD YPEN/DAPEEK/53563/1556/2023 (injection cap).
+* The user-configured grid-connection injection cap.
 * `docs/self_consumption_design.md` (shared constraint statements),
   `docs/ppa_design.md`, `docs/balancing_market_design.md`,
   `docs/economics_design.md`, `docs/README.md` (notation).

@@ -1,7 +1,10 @@
 Introduction
 ============
 
-**pv-bess-optimizer** is a Mixed-Integer Linear Programming (MILP) model
+**pv-bess-optimizer** is created and developed by
+**Lampros Konstantellos**.
+
+It is a Mixed-Integer Linear Programming (MILP) model
 for sub-hourly dispatch optimization (15-minute canonical cadence,
 auto-detected from the timeseries), with PV + BESS capacity sizing (a
 sweep over the dispatch solve), a multi-year project-finance pipeline
@@ -16,7 +19,7 @@ Two regulatory regimes are supported:
 * ``merchant``: pure utility-scale dispatch with **no co-located load**.
   PV and BESS dispatch entirely to the day-ahead market.
 
-The hard static max-injection cap on grid-bound flows is enforced in
-both modes per **MD YPEN/DAPEEK/53563/1556/2023** (73 % allowed for
-distribution-connected, 72 % for transmission-connected; equivalently
-27 % / 28 % of the cap remains unused as curtailment).
+A hard static (or hourly-profiled) max-injection cap on grid-bound
+flows is enforced in both modes.  The allowed-injection percentage is
+a plain user input (``max_injection`` sheets), so any national or
+contractual curtailment rule can be modelled by entering its value.

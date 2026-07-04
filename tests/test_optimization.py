@@ -125,7 +125,7 @@ def test_merchant_pins_load_flows_to_zero(_solved_merchant):
 
 def test_curtailment_cap_holds_in_both_modes(_solved_self_consumption, _solved_merchant):
     """Curtailment cap is a regulatory grid-connection limit that applies
-    in BOTH self_consumption and merchant modes per MD YPEN/DAPEEK/53563/1556/2023."""
+    in BOTH self_consumption and merchant modes (user-configured cap)."""
     for res in (_solved_self_consumption, _solved_merchant):
         cap = float(res["grid_export_cap_kwh"].iloc[0])
         max_export = float(res["grid_export_total_kwh"].max())

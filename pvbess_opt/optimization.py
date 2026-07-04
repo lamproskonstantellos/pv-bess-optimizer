@@ -11,7 +11,7 @@ Two regulatory regimes are supported via the ``mode`` parameter:
   Load balance NOT enforced; load priority NOT enforced; the
   ``pv_to_load`` / ``bess_dis_load`` / ``grid_to_load`` flows are pinned
   to zero.  The static curtailment cap STILL applies (regulatory
-  grid-connection limit per MD YPEN/DAPEEK/53563/1556/2023).
+  user-configured grid-connection limit).
 
 The single objective is **profit** maximisation.  When the user's
 retail tariff exceeds the DAM price in the majority of hours (the
