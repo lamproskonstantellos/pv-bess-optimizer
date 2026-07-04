@@ -6,9 +6,9 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
-from matplotlib.ticker import MultipleLocator
 
 from ..theme import FINANCIAL_COLORS
+from .financial import _integer_year_axis
 from .style import apply_universal_margins, save_figure
 
 __all__ = ["plot_soh_trajectory"]
@@ -41,16 +41,12 @@ def plot_soh_trajectory(degradation: pd.DataFrame, out_path: Path) -> Path:
         ax.legend(loc="best")
     ax.set_xlabel("Year")
     ax.set_ylabel("State of health (%)")
-    # Publication-style year axis: ticks only at the labelled 5-year
-    # positions (2025/2030/... for calendar years, 0/5/10/... for
-    # project years), matching the labelled-ticks-only convention of
-    # every other year axis in the package.  The annual data points
-    # are already marked on the curve itself.
-    ax.xaxis.set_major_locator(MultipleLocator(5))
-    # Pad the x-axis only: the y-axis is a fixed 0..100 percentage scale
-    # (plus headroom), set explicitly AFTER the margin helper so the
-    # padding cannot re-scale it.
+    # The y-axis is a fixed 0..100 percentage scale (plus headroom),
+    # set explicitly AFTER the margin helper so the padding cannot
+    # re-scale it; the x-axis takes the shared project-window year
+    # ticks (the degradation frame starts at Year 1).
     apply_universal_margins(ax, skip_y=True)
+    _integer_year_axis(ax, years, includes_year_zero=False)
     ax.set_ylim(*_SOH_YLIM)
     ax.set_yticks(_SOH_YTICKS)
     return save_figure(out_path)

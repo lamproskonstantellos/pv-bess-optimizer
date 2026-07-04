@@ -23,7 +23,6 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.ticker import MaxNLocator
 
 from ..io import PROJECT_SHEET_DEFAULTS
 from ..sensitivity import DriverSensitivity, build_driver_sensitivities
@@ -131,9 +130,27 @@ def _apply_eur_xaxis(ax, econ: dict[str, Any] | None) -> None:
     ax.xaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
 
 
-def _integer_year_axis(ax) -> None:
-    """Force integer year ticks; subsample sensibly on long horizons."""
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True, prune=None, nbins=12))
+def _integer_year_axis(
+    ax, years: np.ndarray, *, includes_year_zero: bool = True,
+) -> None:
+    """Common calendar-year axis for every per-year figure.
+
+    Every year plot spans the same window — Year 0 (the CAPEX year)
+    through the final project year — with integer ticks every 2 years
+    anchored at Year 0, so the year axes align across all figures and
+    no tick lands on a year outside the project window.  Frames that
+    start at Year 1 (SOH, revenue stack, cycles: nothing to draw in
+    Year 0) pass ``includes_year_zero=False`` and get the same axis by
+    anchoring one year earlier.  Call AFTER
+    :func:`apply_universal_margins`: the shared window must not be
+    re-padded.
+    """
+    if len(years) == 0:
+        return
+    first = int(np.min(years)) - (0 if includes_year_zero else 1)
+    last = int(np.max(years))
+    ax.set_xticks(np.arange(first, last + 1, 2))
+    ax.set_xlim(first - 0.75, last + 0.75)
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +185,6 @@ def plot_cumulative_cashflow(
     ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
 
     ax.set_xlabel("Year")
-    _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Cumulative Cash-flow — {_title_window(yearly_cf)}")
@@ -176,6 +192,7 @@ def plot_cumulative_cashflow(
     apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
+    _integer_year_axis(ax, years)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -225,7 +242,6 @@ def plot_yearly_cashflow_bars(
     ax.axhline(0.0, color="black", linewidth=0.8)
 
     ax.set_xlabel("Year")
-    _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Yearly Cash-flow Stack — {_title_window(yearly_cf)}")
@@ -236,6 +252,7 @@ def plot_yearly_cashflow_bars(
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
+    _integer_year_axis(ax, years)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -314,7 +331,6 @@ def plot_npv_waterfall(
     ax.axhline(0.0, color="black", linewidth=0.8)
 
     ax.set_xlabel("Year")
-    _integer_year_axis(ax)
     ax.set_ylabel("Discounted EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
@@ -322,6 +338,7 @@ def plot_npv_waterfall(
     apply_financial_legend(ax, loc="lower right")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
+    _integer_year_axis(ax, years)
     apply_fine_ticks(ax)
     return save_figure(out_path)
 
@@ -390,7 +407,6 @@ def plot_payback(
         )
 
     ax.set_xlabel("Year")
-    _integer_year_axis(ax)
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Payback Visualisation — {_title_window(yearly_cf)}")
@@ -398,6 +414,7 @@ def plot_payback(
     apply_financial_legend(ax)
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
+    _integer_year_axis(ax, years)
     return save_figure(out_path)
 
 
