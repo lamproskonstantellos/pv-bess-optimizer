@@ -421,6 +421,13 @@ band.*
 fade, with the scheduled year-10 replacement resetting the pack to
 100 %.*
 
+![Merchant foresight-gap distribution](docs/assets/merchant_foresight_distribution.png)
+
+*Rolling-horizon Monte Carlo profit distribution (8 seeds, 48 h
+window / 24 h commit) against the perfect-foresight benchmark, with
+balancing participation and grid charging active. Produced by a
+`--rolling-horizon --monte-carlo 8` run rather than the gallery export
+script.*
 
 ### Self-consumption (`--mode self_consumption`, `allow_bess_grid_charging = TRUE`)
 
@@ -485,7 +492,7 @@ band.*
 fade, with the scheduled year-10 replacement resetting the pack to
 100 %.*
 
-![Foresight-gap distribution](docs/assets/self_consumption_foresight_distribution.png)
+![Self-consumption foresight-gap distribution](docs/assets/self_consumption_foresight_distribution.png)
 
 *Rolling-horizon Monte Carlo profit distribution (8 seeds, 48 h
 window / 24 h commit) against the perfect-foresight benchmark: the

@@ -14,8 +14,10 @@ Two regulatory regimes are supported:
 * ``self_consumption``: Greek Self-consumption with co-located load.
 * ``merchant``: pure utility-scale dispatch with no co-located load.
 
-The hard static max-injection cap on grid-bound flows is enforced in
-both modes per **MD YPEN/DAPEEK/53563/1556/2023**.
+A hard static (or hourly-profiled) max-injection cap on grid-bound
+flows is enforced in both modes; the allowed-injection percentage is a
+plain user input, so any national or contractual curtailment rule can
+be modelled by entering its value.
 
 The codebase is pure Python and runs on Windows, macOS, and Linux with
 Python ≥ 3.11.

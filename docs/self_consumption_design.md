@@ -22,14 +22,14 @@ drift from the code without breaking CI.
 ## Purpose & scope
 
 Implementation of the Greek "self-consumption" regulatory regime per
-**MD YPEN/DAPEEK/93976/2772/2024**.  The asset stack is a co-located
+the Greek self-consumption regime.  The asset stack is a co-located
 load with a behind-the-meter PV array and an optional BESS:
 
 * The retail tariff values load coverage (avoided cost).
 * Surplus PV / BESS energy may be exported to the day-ahead market
   (DAM) under the combined per-step cap derived from
   `p_grid_export_max_kw` and the `max_injection_profile` sheet
-  (MD YPEN/DAPEEK/53563/1556/2023).
+  (user-configured grid-connection limit).
 * Settlement is 15-minute under the regulation; the optimization
   timestep is auto-detected from the timeseries cadence
   (`pvbess_opt.io.detect_timestep_minutes`), so the canonical workbook
@@ -237,7 +237,7 @@ simultaneity rule from the MD.
 $$g_t \le P^{G} \Delta t\, \mu_t \tag{S15}$$
 
 Active in **both** modes, as the regulatory grid-connection limit from
-MD YPEN/DAPEEK/53563/1556/2023; merchant mode does not skip it.  The
+the user-configured injection cap; merchant mode does not skip it.  The
 cap basis $g_t$ (`grid_injection_total`) is selected by
 `grid_cap_includes_load`:
 
@@ -486,8 +486,8 @@ Invariant (S27) reports 0: the cap is binding in the curtailed step.
 
 ## References
 
-* MD YPEN/DAPEEK/93976/2772/2024 (self-consumption regime).
-* MD YPEN/DAPEEK/53563/1556/2023 (grid-connection injection cap).
+* The Greek self-consumption settlement regime (15-minute netting).
+* The user-configured grid-connection injection cap.
 * `docs/README.md` (shared notation), `docs/merchant_design.md`,
   `docs/balancing_market_design.md`, `docs/ppa_design.md`,
   `docs/economics_design.md`, `docs/uncertainty_design.md`.

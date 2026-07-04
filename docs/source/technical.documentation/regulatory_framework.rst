@@ -7,9 +7,10 @@ generation.
 Max-injection cap (both modes)
 ------------------------------
 
-The static cap on grid-bound flows is **not** self_consumption-specific.  It is
-a **regulatory grid-connection limit** per **MD YPEN/DAPEEK/53563/
-1556/2023** (FEK B' 3328/19-05-2023), expressed as the share of
+The static cap on grid-bound flows is **not** self_consumption-specific.  It
+is a **grid-connection limit** whose allowed-injection percentage is a
+plain user input (any national or contractual curtailment rule is
+modelled by entering its value), expressed as the share of
 ``p_grid_export_max_kw`` available for export:
 
 * 73 % allowed on installations connected to the **distribution**
@@ -78,7 +79,7 @@ strict cap the load-priority floor tightens to
 Settlement period
 -----------------
 
-Greek Self-consumption settles every 15 minutes per **MD YPEN/DAPEEK/93976/2772/2024**.
+Greek Self-consumption settles every 15 minutes.
 The MILP timestep is auto-detected from the ``timeseries`` sheet's
 timestamp cadence (run ``scripts/resample_timeseries.py`` to harmonise
 mixed-resolution input), so the canonical workbook ships a 15-minute
