@@ -23,6 +23,7 @@ from ..emissions import cfe_score, hourly_cfe_fraction
 from ..theme import COLORS, FINANCIAL_COLORS
 from .style import (
     apply_universal_margins,
+    empty_placeholder,
     legend_below,
     save_figure,
 )
@@ -103,12 +104,11 @@ def plot_energy_sankey(res: pd.DataFrame, out_path: Path) -> Path:
     eps = max(total, 1.0) * 1.0e-6
     flows = [f for f in flows if f[2] > eps]
 
+    if not flows:
+        return empty_placeholder(out_path, "No energy flows.")
+
     _fig, ax = plt.subplots(figsize=(7, 4))
     ax.axis("off")
-    if not flows:
-        ax.text(0.5, 0.5, "No energy flows.", ha="center", va="center",
-                transform=ax.transAxes)
-        return save_figure(out_path)
 
     def node_total(name: str) -> float:
         return max(
@@ -217,11 +217,9 @@ def plot_energy_sankey(res: pd.DataFrame, out_path: Path) -> Path:
 def plot_cfe_duration_curve(res: pd.DataFrame, out_path: Path) -> Path:
     """Carbon-free fraction of the load, sorted descending (24/7 CFE curve)."""
     frac = np.sort(hourly_cfe_fraction(res))[::-1] * 100.0
-    _fig, ax = plt.subplots(figsize=(7, 4))
     if frac.size == 0:
-        ax.text(0.5, 0.5, "No load to match.", ha="center", va="center",
-                transform=ax.transAxes)
-        return save_figure(out_path)
+        return empty_placeholder(out_path, "No load to match.")
+    _fig, ax = plt.subplots(figsize=(7, 4))
     x = np.arange(1, frac.size + 1) / frac.size * 100.0
     ax.plot(x, frac, color=FINANCIAL_COLORS["revenue"], linewidth=1.2)
     ax.fill_between(x, 0.0, frac, color=FINANCIAL_COLORS["revenue"], alpha=0.15)

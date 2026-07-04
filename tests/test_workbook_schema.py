@@ -20,8 +20,10 @@ import pandas as pd
 import pytest
 
 from pvbess_opt.io import (
+    BALANCING_SHEET_DEFAULTS,
     BESS_SHEET_DEFAULTS,
     ECONOMICS_SHEET_DEFAULTS,
+    PPA_SHEET_DEFAULTS,
     PROJECT_SHEET_DEFAULTS,
     PV_SHEET_DEFAULTS,
     SIMULATION_SHEET_DEFAULTS,
@@ -97,6 +99,35 @@ def test_economics_sheet_keys():
     assert set(ECONOMICS_SHEET_DEFAULTS) == expected
 
 
+def test_balancing_sheet_keys():
+    products = ("fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+    expected = {
+        "balancing_enabled", "dam_capacity_share_pct",
+        *(f"{p}_capacity_share_pct" for p in products),
+        *(f"{p}_bid_acceptance_pct" for p in products),
+        *(f"{p}_activation_probability_pct" for p in products),
+        *(f"{p}_default_capacity_price_eur_per_mwh" for p in products),
+        *(
+            f"{p}_default_activation_price_eur_per_mwh"
+            for p in products if p != "fcr"
+        ),
+        "fcr_required_duration_hours",
+        "bm_settlement_minutes", "bm_soc_headroom_pct", "bm_inflation_pct",
+        "bm_price_sigma_capacity_pct", "bm_price_sigma_activation_pct",
+        "bm_mc_scenarios", "bm_random_seed",
+    }
+    assert set(BALANCING_SHEET_DEFAULTS) == expected
+
+
+def test_ppa_sheet_keys():
+    expected = {
+        "ppa_enabled", "ppa_structure", "ppa_settlement",
+        "ppa_price_eur_per_mwh", "ppa_volume_share_pct",
+        "ppa_term_years", "ppa_inflation_pct",
+    }
+    assert set(PPA_SHEET_DEFAULTS) == expected
+
+
 def test_simulation_sheet_keys():
     expected = {
         "uncertainty_enabled", "uncertainty_compare_sources",
@@ -125,6 +156,23 @@ def test_all_sheets_present(repo_input_xlsx):
         "max_injection_profile_pv", "max_injection_profile_bess",
         "sizing", "scenarios",
     }
+
+
+def test_repo_workbook_kv_sheets_match_schema(repo_input_xlsx):
+    """Every kv sheet of the shipped workbook carries exactly the schema keys."""
+    defaults = {
+        "project": PROJECT_SHEET_DEFAULTS,
+        "pv": PV_SHEET_DEFAULTS,
+        "bess": BESS_SHEET_DEFAULTS,
+        "economics": ECONOMICS_SHEET_DEFAULTS,
+        "balancing": BALANCING_SHEET_DEFAULTS,
+        "ppa": PPA_SHEET_DEFAULTS,
+        "simulation": SIMULATION_SHEET_DEFAULTS,
+    }
+    for sheet, schema in defaults.items():
+        df = pd.read_excel(repo_input_xlsx, sheet_name=sheet)
+        keys = set(df.iloc[:, 0].dropna().astype(str))
+        assert keys == set(schema), f"sheet={sheet}"
 
 
 def test_repo_workbook_loads_typed_dict(repo_input_xlsx):

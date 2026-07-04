@@ -23,6 +23,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.axes import Axes
 
 from ..io import PROJECT_SHEET_DEFAULTS
 from ..sensitivity import DriverSensitivity, build_driver_sensitivities
@@ -166,7 +167,8 @@ def plot_cumulative_cashflow(
     yearly_cf: pd.DataFrame, out_path: Path,
     *, econ: dict[str, Any] | None = None,
 ) -> Path:
-    """Cumulative undiscounted (solid) + discounted (dashed) cash-flow."""
+    """Cumulative undiscounted + discounted cash-flow (both solid,
+    colour-distinguished data curves)."""
     out_path = Path(out_path)
     years = _calendar_axis(yearly_cf)
     cum = yearly_cf["cumulative_cf_eur"].to_numpy(dtype=float)
@@ -191,7 +193,7 @@ def plot_cumulative_cashflow(
     ax.set_xlabel("Year")
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
-    _maybe_set_title(ax, f"Cumulative Cash-flow — {_title_window(yearly_cf)}")
+    _maybe_set_title(ax, f"Cumulative Cash-flow - {_title_window(yearly_cf)}")
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     _integer_year_axis(ax, years)
@@ -205,14 +207,99 @@ def plot_cumulative_cashflow(
 # ---------------------------------------------------------------------------
 
 
+def _optional_revenue_streams(
+    yearly_cf: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return the (balancing, balancing-fee, ppa) yearly columns.
+
+    Missing or all-zero columns come back as zero arrays so callers can
+    stack them unconditionally; all-zero streams draw nothing.
+    """
+    n = len(yearly_cf)
+    out = []
+    for col in (
+        "balancing_revenue_eur", "balancing_aggregator_fee_eur",
+        "ppa_revenue_eur",
+    ):
+        if col in yearly_cf.columns:
+            out.append(yearly_cf[col].to_numpy(dtype=float))
+        else:
+            out.append(np.zeros(n, dtype=float))
+    return out[0], out[1], out[2]
+
+
+def _stack_cashflow_bars(
+    ax: Axes,
+    years: np.ndarray,
+    width: float,
+    revenue: np.ndarray,
+    balancing: np.ndarray,
+    ppa: np.ndarray,
+    opex: np.ndarray,
+    devex: np.ndarray,
+    capex: np.ndarray,
+    bal_fee: np.ndarray,
+) -> None:
+    """Draw the shared cashflow bar stack (yearly bars / NPV waterfall).
+
+    Positive streams stack upward from the Revenue base (Balancing
+    revenue, then the PPA leg); negative streams stack downward
+    (OPEX, then the balancing aggregator fee, DEVEX, CAPEX).  Every
+    stream is stacked with a cumulative ``bottom`` so no segment
+    paints over another, and all-zero streams are omitted entirely so
+    non-balancing / non-PPA runs keep their four-bar legend.
+    """
+    ax.bar(years, revenue, width=width, color=financial_color("Revenue"),
+           edgecolor="black", linewidth=0.4, label="Revenue")
+    pos_bottom = np.clip(revenue, 0.0, None)
+    if np.any(np.abs(balancing) > 1e-9):
+        ax.bar(years, balancing, width=width, bottom=pos_bottom,
+               color=financial_color("Balancing revenue"),
+               edgecolor="black", linewidth=0.4, label="Balancing revenue")
+        pos_bottom = pos_bottom + np.clip(balancing, 0.0, None)
+    if np.any(np.abs(ppa) > 1e-9):
+        ax.bar(years, ppa, width=width, bottom=pos_bottom,
+               color=financial_color("PPA revenue"),
+               edgecolor="black", linewidth=0.4, label="PPA revenue")
+    ax.bar(years, opex, width=width, color=financial_color("OPEX"),
+           edgecolor="black", linewidth=0.4, label="OPEX")
+    # Stack EVERY negative segment: the balancing fee below OPEX, DEVEX
+    # below both, CAPEX below all.  Without a cumulative ``bottom``
+    # matplotlib overlays same-x bars and the smaller segment disappears
+    # inside the larger block — Year 0 would hide DEVEX inside CAPEX,
+    # and a BESS replacement year (where OPEX and CAPEX are both
+    # non-zero while DEVEX is 0) would hide OPEX entirely and
+    # understate the year's visible outflow.
+    neg_bottom = opex.copy()
+    if np.any(np.abs(bal_fee) > 1e-9):
+        ax.bar(years, bal_fee, width=width, bottom=neg_bottom,
+               color=financial_color("Balancing aggregator fee"),
+               edgecolor="black", linewidth=0.4,
+               label="Balancing aggregator fee")
+        neg_bottom = neg_bottom + bal_fee
+    ax.bar(years, devex, width=width, bottom=neg_bottom,
+           color=financial_color("DEVEX"),
+           edgecolor="black", linewidth=0.4, label="DEVEX")
+    ax.bar(years, capex, width=width, bottom=neg_bottom + devex,
+           color=financial_color("CAPEX"),
+           edgecolor="black", linewidth=0.4, label="CAPEX")
+
+
 def plot_yearly_cashflow_bars(
     yearly_cf: pd.DataFrame, out_path: Path,
     *, econ: dict[str, Any] | None = None,
 ) -> Path:
-    """Stacked yearly bars for revenue (+), opex (-), capex (-), net line."""
+    """Stacked yearly bars for revenue (+), opex (-), capex (-), net line.
+
+    Balancing revenue (gross), the PPA contract leg and the balancing
+    aggregator fee join the stack when their cashflow columns carry
+    value, so the bars always sum to the overlaid net line.  Zero-value
+    streams are omitted (a no-balancing run draws no balancing bar).
+    """
     out_path = Path(out_path)
     years = _calendar_axis(yearly_cf)
     revenue = yearly_cf["revenue_eur"].to_numpy(dtype=float)
+    balancing, bal_fee, ppa = _optional_revenue_streams(yearly_cf)
     opex = yearly_cf["opex_eur"].to_numpy(dtype=float)  # negative
     if "devex_eur" in yearly_cf.columns:
         devex = yearly_cf["devex_eur"].to_numpy(dtype=float)  # negative
@@ -224,22 +311,10 @@ def plot_yearly_cashflow_bars(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     width = 0.8
-    ax.bar(years, revenue, width=width, color=financial_color("Revenue"),
-           edgecolor="black", linewidth=0.4, label="Revenue")
-    ax.bar(years, opex, width=width, color=financial_color("OPEX"),
-           edgecolor="black", linewidth=0.4, label="OPEX")
-    # Stack EVERY negative segment: DEVEX below OPEX, CAPEX below both.
-    # Without a cumulative ``bottom`` matplotlib overlays same-x bars and
-    # the smaller segment disappears inside the larger block — Year 0
-    # would hide DEVEX inside CAPEX, and a BESS replacement year (where
-    # OPEX and CAPEX are both non-zero while DEVEX is 0) would hide OPEX
-    # entirely and understate the year's visible outflow.
-    ax.bar(years, devex, width=width, bottom=opex,
-           color=financial_color("DEVEX"),
-           edgecolor="black", linewidth=0.4, label="DEVEX")
-    ax.bar(years, capex, width=width, bottom=opex + devex,
-           color=financial_color("CAPEX"),
-           edgecolor="black", linewidth=0.4, label="CAPEX")
+    _stack_cashflow_bars(
+        ax, years, width, revenue, balancing, ppa, opex, devex, capex,
+        bal_fee,
+    )
     ax.plot(years, net, color=financial_color("Net cash-flow"), linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.8)
@@ -247,7 +322,7 @@ def plot_yearly_cashflow_bars(
     ax.set_xlabel("Year")
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
-    _maybe_set_title(ax, f"Yearly Cash-flow Stack — {_title_window(yearly_cf)}")
+    _maybe_set_title(ax, f"Yearly Cash-flow Stack - {_title_window(yearly_cf)}")
     # Pin to the lower right — the post-payback region is roughly
     # horizontal there, so the legend stays clear of the bars and the
     # Year-0 CAPEX stack on the left.
@@ -272,15 +347,21 @@ def plot_npv_waterfall(
     ``plot_yearly_cashflow_bars``.
 
     The morphology mirrors :func:`plot_yearly_cashflow_bars` exactly so
-    the two plots can be read side by side: stacked Revenue (+) / OPEX
-    (-) / DEVEX (-) / CAPEX (-) bars per year, a ``Net cash-flow``
-    marker line, and one extra ``Cumulative NPV`` line overlaid.  All
-    values are discounted to Year 0.
+    the two plots can be read side by side: stacked Revenue (+) /
+    Balancing revenue (+) / PPA revenue (+) / OPEX (-) / Balancing
+    aggregator fee (-) / DEVEX (-) / CAPEX (-) bars per year (all-zero
+    streams omitted), a ``Net cash-flow`` marker line, and one extra
+    ``Cumulative NPV`` line overlaid.  All values are discounted to
+    Year 0, so the bars sum to the discounted net line.
     """
     out_path = Path(out_path)
     years = _calendar_axis(yearly_cf)
     disc_factor = yearly_cf["discount_factor"].astype(float).to_numpy()
     revenue_disc = yearly_cf["revenue_eur"].astype(float).to_numpy() * disc_factor
+    balancing, bal_fee, ppa = _optional_revenue_streams(yearly_cf)
+    balancing_disc = balancing * disc_factor
+    bal_fee_disc = bal_fee * disc_factor
+    ppa_disc = ppa * disc_factor
     opex_disc = yearly_cf["opex_eur"].astype(float).to_numpy() * disc_factor
     if "devex_eur" in yearly_cf.columns:
         devex_disc = (
@@ -295,29 +376,9 @@ def plot_npv_waterfall(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     width = 0.8
-    ax.bar(
-        years, revenue_disc, width=width,
-        color=financial_color("Revenue"), edgecolor="black",
-        linewidth=0.4, label="Revenue",
-    )
-    ax.bar(
-        years, opex_disc, width=width,
-        color=financial_color("OPEX"), edgecolor="black",
-        linewidth=0.4, label="OPEX",
-    )
-    # Stack every negative segment (DEVEX below OPEX, CAPEX below both)
-    # — mirrors plot_yearly_cashflow_bars so the smaller segments stay
-    # visible in Year 0 AND in a BESS replacement year, where OPEX and
-    # CAPEX coexist and an un-stacked CAPEX bar would paint over OPEX.
-    ax.bar(
-        years, devex_disc, width=width, bottom=opex_disc,
-        color=financial_color("DEVEX"), edgecolor="black",
-        linewidth=0.4, label="DEVEX",
-    )
-    ax.bar(
-        years, capex_disc, width=width, bottom=opex_disc + devex_disc,
-        color=financial_color("CAPEX"), edgecolor="black",
-        linewidth=0.4, label="CAPEX",
+    _stack_cashflow_bars(
+        ax, years, width, revenue_disc, balancing_disc, ppa_disc,
+        opex_disc, devex_disc, capex_disc, bal_fee_disc,
     )
 
     ax.plot(
@@ -335,7 +396,7 @@ def plot_npv_waterfall(
     ax.set_xlabel("Year")
     ax.set_ylabel("Discounted EUR")
     _apply_eur_yaxis(ax, econ)
-    _maybe_set_title(ax, f"NPV Waterfall — {_title_window(yearly_cf)}")
+    _maybe_set_title(ax, f"NPV Waterfall - {_title_window(yearly_cf)}")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     _integer_year_axis(ax, years)
@@ -410,7 +471,7 @@ def plot_payback(
     ax.set_xlabel("Year")
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
-    _maybe_set_title(ax, f"Payback Visualisation — {_title_window(yearly_cf)}")
+    _maybe_set_title(ax, f"Payback Visualisation - {_title_window(yearly_cf)}")
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     _integer_year_axis(ax, years)
@@ -430,14 +491,16 @@ def plot_monthly_cashflow_year1(
     """Year-1 monthly stacked bars showing the seasonality of cash-flows.
 
     ``revenue_eur`` is the DAM + retail post-fee stream;
-    ``balancing_revenue_eur`` is stacked on top of it when present so
-    the per-month bars reconcile to the net-cash-flow line.  The
-    aggregator fee is already netted out of ``revenue_eur`` upstream
-    (see :func:`derive_monthly_cashflow`) and is therefore not shown
-    as a separate bar here.  Investment events booked in the monthly
-    frame (a Year-1 BESS replacement lands in month 12) are drawn as
-    CAPEX / DEVEX bars stacked below OPEX, mirroring the yearly stack,
-    so the bars still reconcile to the net line.
+    ``balancing_revenue_eur`` (gross), its BSP fee
+    (``balancing_aggregator_fee_eur``, stacked below OPEX) and the PPA
+    leg join the stack when they carry value so the per-month bars
+    reconcile to the net-cash-flow line.  The energy aggregator fee is
+    already netted out of ``revenue_eur`` upstream (see
+    :func:`derive_monthly_cashflow`) and is therefore not shown as a
+    separate bar here.  Investment events booked in the monthly frame
+    (a Year-1 BESS replacement lands in month 12) are drawn as CAPEX /
+    DEVEX bars stacked below OPEX, mirroring the yearly stack, so the
+    bars still reconcile to the net line.
     """
     out_path = Path(out_path)
     yr_col = (
@@ -452,6 +515,16 @@ def plot_monthly_cashflow_year1(
         balancing = sub["balancing_revenue_eur"].astype(float).to_numpy()
     else:
         balancing = np.zeros_like(revenue)
+    if "balancing_aggregator_fee_eur" in sub.columns:
+        bal_fee = (
+            sub["balancing_aggregator_fee_eur"].astype(float).to_numpy()
+        )
+    else:
+        bal_fee = np.zeros_like(revenue)
+    if "ppa_revenue_eur" in sub.columns:
+        ppa = sub["ppa_revenue_eur"].astype(float).to_numpy()
+    else:
+        ppa = np.zeros_like(revenue)
     if "devex_eur" in sub.columns:
         devex = sub["devex_eur"].astype(float).to_numpy()
     else:
@@ -465,23 +538,39 @@ def plot_monthly_cashflow_year1(
     ax = plt.gca()
     ax.bar(months, revenue, color=financial_color("Revenue"),
            edgecolor="black", linewidth=0.4, label="Revenue")
+    pos_bottom = np.clip(revenue, 0.0, None)
     if np.any(np.abs(balancing) > 1e-9):
-        ax.bar(months, balancing, bottom=revenue,
+        ax.bar(months, balancing, bottom=pos_bottom,
                color=financial_color("Balancing revenue"),
                edgecolor="black", linewidth=0.4,
                label="Balancing revenue")
+        pos_bottom = pos_bottom + np.clip(balancing, 0.0, None)
+    if np.any(np.abs(ppa) > 1e-9):
+        ax.bar(months, ppa, bottom=pos_bottom,
+               color=financial_color("PPA revenue"),
+               edgecolor="black", linewidth=0.4, label="PPA revenue")
     ax.bar(months, opex, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
+    neg_bottom = opex.copy()
+    # The BSP fee is GROSS balancing revenue's deduction, so it joins
+    # the negative stack (below OPEX) whenever it carries value — the
+    # bars then reconcile to the net line with the fee on.
+    if np.any(np.abs(bal_fee) > 1e-9):
+        ax.bar(months, bal_fee, bottom=neg_bottom,
+               color=financial_color("Balancing aggregator fee"),
+               edgecolor="black", linewidth=0.4,
+               label="Balancing aggregator fee")
+        neg_bottom = neg_bottom + bal_fee
     if np.any(np.abs(devex) > 1e-9):
-        ax.bar(months, devex, bottom=opex,
+        ax.bar(months, devex, bottom=neg_bottom,
                color=financial_color("DEVEX"),
                edgecolor="black", linewidth=0.4, label="DEVEX")
     if np.any(np.abs(capex) > 1e-9):
-        ax.bar(months, capex, bottom=opex + devex,
+        ax.bar(months, capex, bottom=neg_bottom + devex,
                color=financial_color("CAPEX"),
                edgecolor="black", linewidth=0.4, label="CAPEX")
     ax.plot(months, net, color=financial_color("Net cash-flow"),
-            linewidth=1.5, marker="o", markersize=4, label="Net cash-flow")
+            linewidth=1.5, marker="o", markersize=3, label="Net cash-flow")
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xlabel("Month")
     ax.set_ylabel("EUR")
@@ -489,7 +578,7 @@ def plot_monthly_cashflow_year1(
 
     if "calendar_year" in monthly_cf.columns and not sub.empty:
         cal_year: int | None = int(sub["calendar_year"].iloc[0])
-        _maybe_set_title(ax, f"Year-1 Monthly Cash-flow — {cal_year}")
+        _maybe_set_title(ax, f"Year-1 Monthly Cash-flow - {cal_year}")
     else:
         cal_year = None
         _maybe_set_title(ax, "Year-1 Monthly Cash-flow")
@@ -793,7 +882,7 @@ def plot_npv_tornado(
     """
     base_npv = float(base_kpis.get("npv_eur", 0.0))
     window = _econ_title_window(econ)
-    title = f"NPV Sensitivity — {window}" if window else "NPV Sensitivity"
+    title = f"NPV Sensitivity - {window}" if window else "NPV Sensitivity"
     if sens_df.empty:
         return _dumbbell_plot(
             pd.DataFrame(), base_npv, out_path,
@@ -827,7 +916,7 @@ def plot_irr_tornado(
     """
     base_irr = float(base_kpis.get("irr_pct", 0.0) or 0.0)
     window = _econ_title_window(econ)
-    title = f"IRR Sensitivity — {window}" if window else "IRR Sensitivity"
+    title = f"IRR Sensitivity - {window}" if window else "IRR Sensitivity"
     if sens_df.empty:
         return _dumbbell_plot(
             pd.DataFrame(), base_irr, out_path,

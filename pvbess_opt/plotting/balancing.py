@@ -151,7 +151,7 @@ def plot_balancing_mc_distribution(
     ax.xaxis.set_major_formatter(euro_axis_formatter(fmt_mode))
     if show_titles():
         ax.set_title(
-            f"Balancing revenue — Monte Carlo distribution"
+            f"Balancing revenue - Monte Carlo distribution"
             f"{title_prefix(get_scenario_label())}"
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)

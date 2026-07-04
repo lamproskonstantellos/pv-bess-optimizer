@@ -39,9 +39,9 @@ Three asset configurations are supported in both regimes: `hybrid`
 computes the resulting project finances. It does not search the
 capacity space. Full techno-economic sizing tools (HOMER, Gridcog)
 sweep capacities to find an optimum; here the PV nameplate and the
-BESS power and capacity are inputs. The market model targets the Greek
-regulatory regimes (self-consumption and merchant day-ahead, with
-optional balancing-market participation).
+BESS power and capacity are inputs. The market model covers a
+self-consumption regime and a merchant day-ahead regime, with
+optional balancing-market participation.
 
 ## Installation
 
@@ -141,7 +141,7 @@ the `balancing` sheet.
 
 `pv_source` (`auto` | `file` | `pvgis`), the PVGIS location / geometry
 (`latitude`, `longitude`, `tilt`, `azimuth`, `losses_pct`,
-`weather_year`, `timeseries_path`), `pv_nameplate_kwp`, and the
+`weather_year`, `raddatabase`, `timeseries_path`), `pv_nameplate_kwp`, and the
 degradation coefficients. The `pv_kwh` column is consumed verbatim
 (absolute kWh per step); `pv_nameplate_kwp` is metadata for per-kW
 CAPEX / OPEX and the sizing sweep. `auto` uses the `pv_kwh` column
@@ -270,8 +270,9 @@ Each run writes a self-contained folder
                      tornados, NPV waterfall, LCOE/LCOS, SOH, and the
                      24/7-CFE duration curve when emissions accounting
                      is on (full list below)
-05_energy_plots/     Year-1 energy-flow diagram (every run) plus
-                     daily / monthly / yearly dispatch views per year
+05_energy_plots/     Year-1 energy-flow diagram (every run) and the
+                     lifetime summary chart, plus daily / monthly /
+                     yearly dispatch views per year
 06_uncertainty_plots/ forecast band, seasonal boxplot, DAM heatmap, diagnostics
 ```
 
@@ -332,6 +333,9 @@ Generated under `results/<run>/04_financial_plots/`:
   products per calendar month, with the two fee shares as negative
   bars below zero.
 * Lifetime cycles per operating year.
+* Battery state-of-health trajectory (calendar plus cycle fade, with
+  the replacement reset when one is scheduled).
+* Yearly cashflow bars (revenue / OPEX / CAPEX stacked, net line).
 * Cumulative cashflow + payback marker.
 * Monthly cashflow Year 1 (CAPEX / DEVEX events booked in month 12, so
   the monthly and yearly DCFs agree).
@@ -347,17 +351,21 @@ Generated under `results/<run>/04_financial_plots/`:
 
 Energy plots under `results/<run>/05_energy_plots/`: the Year-1
 energy-flow diagram (PV / BESS / grid / load flows, rendered for every
-run) plus daily / monthly / yearly supply, surplus, combined, dispatch,
-SOC, and revenue views, and the merchant trio when the mode is
-`merchant`.
+run) and the lifetime summary chart
+(`lifetime_summary_<start>-<end>.pdf`), plus daily / monthly / yearly
+supply, surplus, combined, dispatch, SOC, and revenue views, and the
+merchant trio when the mode is `merchant`.
 
 ## Results gallery
 
-Real output from two runs on the shipped `inputs/input.xlsx`
-(PV 15 MWp, BESS 15 MW / 60 MWh, 20-year horizon, 7 % discount,
-retail 120 EUR/MWh, BESS grid charging enabled). Regenerate with
-`python scripts/export_readme_figures.py`, which renders the PDF
-report figures as PNG through the same styler (`set_figure_format`).
+Real output from two scenarios rendered on the shipped `inputs/input.xlsx`
+(PV 15 MWp, BESS 15 MW / 60 MWh, 15 MW grid-export cap, 20-year
+horizon, 7 % discount, retail 120 EUR/MWh); the export script
+additionally enables BESS grid charging (`allow_bess_grid_charging =
+TRUE`, shipped as `FALSE`) so the figures show the complete feature
+set. Regenerate with `python scripts/export_readme_figures.py`, which
+renders the PDF report figures as PNG through the same styler
+(`set_figure_format`).
 
 ### Merchant + balancing (`--mode merchant`, `balancing_enabled = TRUE`, `allow_bess_grid_charging = TRUE`)
 
@@ -367,8 +375,11 @@ enabled (the battery may buy cheap hours and resell expensive ones).
 
 ![merchant energy flows](docs/assets/merchant_energy_flow.png)
 
-*Year-1 energy flows: PV generation and grid purchases routed through the battery to the grid, with curtailment and round-trip losses shown explicitly. Ribbon colours match the dispatch
-plots, so each flow reads the same across the whole report.*
+*Year-1 energy flows: PV generation and grid purchases routed through
+the battery to the grid, with round-trip losses shown explicitly (no
+PV is curtailed in this scenario, so no curtailment sink is drawn).
+Ribbon colours match the dispatch plots, so each flow reads the same
+across the whole report.*
 
 ![merchant daily dispatch and SOC](docs/assets/merchant_daily_dispatch_soc.png)
 
@@ -425,9 +436,9 @@ fade, with the scheduled year-10 replacement resetting the pack to
 
 *Rolling-horizon Monte Carlo profit distribution (8 seeds, 48 h
 window / 24 h commit) against the perfect-foresight benchmark, with
-balancing participation and grid charging active. Produced by a
-`--rolling-horizon --monte-carlo 8` run rather than the gallery export
-script.*
+balancing participation and grid charging active. Produced by the
+gallery export script's rolling-horizon run (equivalent to
+`--rolling-horizon --monte-carlo 8`).*
 
 ### Self-consumption (`--mode self_consumption`, `allow_bess_grid_charging = TRUE`)
 
@@ -496,9 +507,11 @@ fade, with the scheduled year-10 replacement resetting the pack to
 
 *Rolling-horizon Monte Carlo profit distribution (8 seeds, 48 h
 window / 24 h commit) against the perfect-foresight benchmark: the
-realistic-forecast dispatch lands within about half a percent of the
-theoretical optimum. Produced by a `--rolling-horizon --monte-carlo 8`
-run rather than the gallery export script.*
+realistic-forecast dispatch lands within about one and a half percent
+of the theoretical optimum (grid-charging arbitrage widens the gap
+versus the shipped no-grid-charging workbook, whose median gap is
+about half a percent). Produced by the gallery export script's
+rolling-horizon run (equivalent to `--rolling-horizon --monte-carlo 8`).*
 
 
 ## Methodology & conventions
@@ -552,7 +565,7 @@ apply to every sheet, KPI, and plot:
 
 Limitations: dispatch is optimised for a given size (no capacity
 search beyond the optional sweep); years 2..N are scaled, not
-re-solved; the regulatory model targets the Greek self-consumption and
+re-solved; the regulatory model covers the self-consumption and
 merchant regimes; balancing participation is expected-value in the
 MILP with Monte Carlo realisation ex-post.
 

@@ -145,8 +145,8 @@ every consumer:
 ## Default inflation: balancing tracks CPI, DAM is held nominal
 
 The schema defaults set `bm_inflation_pct = 2.0` on the `balancing`
-sheet (Greek balancing market historically tracks inflation as the TSO
-indexes capacity payments) while the `economics` sheet sets
+sheet (balancing capacity payments are commonly indexed to inflation
+by the system operator) while the `economics` sheet sets
 `dam_inflation_pct = 0.0` (wholesale DAM stays at the nominal
 user-supplied price unless explicitly overridden, since DAM price
 forecasts already incorporate an inflation view in their trajectory).

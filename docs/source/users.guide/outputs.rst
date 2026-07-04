@@ -17,13 +17,26 @@ A run produces a single result directory under ``results/``.
   economic assumptions echo.
 * ``04_financial_plots/``: cumulative cashflow, yearly bars, NPV
   waterfall, payback visualisation, monthly cashflow Year-1, NPV /
-  IRR tornados, rolling-horizon distribution (when active).
+  IRR tornados, the yearly revenue stack, the BESS revenue waterfall /
+  capacity-vs-activation split / by-month chart, lifetime cycles,
+  LCOE / LCOS benchmark strips, the battery SOH trajectory (BESS
+  projects), the balancing reservation profile and Monte Carlo
+  distribution (balancing on), the 24/7-CFE duration curve (emissions
+  accounting on) and the rolling-horizon distribution (when active).
 * ``05_energy_plots/``: the Year-1 energy-flow diagram
-  (``energy_sankey.pdf``, every run) plus daily / monthly / yearly
-  PDFs under ``<calendar_year>/``.  Each resolution is gated by its
-  scope flag on the ``simulation`` sheet (``plot_daily_scope`` /
+  (``energy_sankey.pdf``, every run) and the lifetime summary chart
+  (``lifetime_summary_<start>-<end>.pdf``) plus daily / monthly /
+  yearly PDFs under ``<calendar_year>/``.  Each resolution is gated by
+  its scope flag on the ``simulation`` sheet (``plot_daily_scope`` /
   ``plot_monthly_scope`` / ``plot_yearly_scope``); each accepts
   ``none`` | ``year1_only`` | ``all``.
+* ``06_uncertainty_plots/``: the input forecast band
+  (``inputs_forecast_band.pdf``), seasonal boxplot and DAM intraday
+  heatmap on every run, plus the four forecast-calibration
+  diagnostics (coverage-by-horizon, PIT histogram, CRPS timeline,
+  residual Q-Q) while ``uncertainty_diagnostics_enabled`` stays at
+  its default ``TRUE``, and the foresight-gap comparison when
+  ``--compare-uncertainty-sources`` runs.
 
 The monthly and yearly SOC plots draw a stepped mean line (one step
 per day / per month) with a min→max fill envelope.  They carry **no

@@ -63,13 +63,14 @@ A run writes to
     02_dispatch/       dispatch_timeseries.xlsx (one sheet per calendar year)
     03_results.xlsx    KPIs, cashflows, financial KPIs, sensitivity,
                        rolling-horizon MC distribution
-    04_financial_plots/ cumulative, waterfall, payback, tornados,
-                       rolling_horizon_distribution
+    04_financial_plots/ cashflow, waterfall, payback, tornado, revenue,
+                       lifecycle, LCOE / LCOS and balancing figures
     05_energy_plots/   energy_sankey.pdf,
                        <calendar_year>/{daily,monthly,yearly}/...,
                        lifetime_summary_<start>-<end>.pdf
     06_uncertainty_plots/ input forecast band, seasonal boxplot,
-                       DAM heatmap, forecast-gap comparison
+                       DAM heatmap, calibration diagnostics
 
-The folder slug is ``<mode>[_grid_ch]`` (e.g.
-``self_consumption`` or ``merchant_grid_ch``).
+See :doc:`output_layout` for the complete per-file tree.  The folder
+slug is ``<mode>[_grid_ch]`` (e.g. ``self_consumption`` or
+``merchant_grid_ch``).

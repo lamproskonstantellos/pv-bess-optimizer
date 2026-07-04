@@ -7,5 +7,7 @@ __pycache__/
 results/
 scratch/
 docs/build/
+/build/
+dist/
 .venv/
 .DS_Store

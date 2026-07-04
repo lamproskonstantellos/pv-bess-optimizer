@@ -172,3 +172,45 @@ def test_annotate_value_safe_is_the_only_bbox_text_site():
     assert re.search(r"return ax\.text\(", src), (
         "style.py::annotate_value_safe should call ax.text(...) once"
     )
+
+
+# ---------------------------------------------------------------------------
+# Rule 8 — no em / en dashes in figure strings (titles, labels,
+# placeholders).  The report convention uses hyphens or parentheses.
+# ---------------------------------------------------------------------------
+
+
+def test_rule_8_no_em_or_en_dashes_in_figure_strings():
+    import ast
+
+    offenders: dict[str, list[str]] = {}
+    for path in sorted(PLOTTING_DIR.glob("*.py")):
+        src = path.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        doc_lines: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(
+                node,
+                (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                 ast.ClassDef),
+            ):
+                body = getattr(node, "body", [])
+                if (body and isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and isinstance(body[0].value.value, str)):
+                    doc = body[0].value
+                    doc_lines.update(
+                        range(doc.lineno, (doc.end_lineno or doc.lineno) + 1)
+                    )
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and node.lineno not in doc_lines
+                    and ("—" in node.value or "–" in node.value)):
+                offenders.setdefault(path.name, []).append(
+                    f"line {node.lineno}: {node.value!r}"
+                )
+    assert not offenders, (
+        f"Em/en dash found in figure string literal(s): {offenders}.  "
+        "Rendered figure text uses hyphens or parentheses instead."
+    )

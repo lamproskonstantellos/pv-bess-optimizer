@@ -108,9 +108,10 @@ def plot_bess_revenue_waterfall(
     grid-charging expense, labelled ``DAM``); each subsequent bar is
     the per-product capacity + activation revenue.  When the fees are
     on, the battery's exact share of the energy-aggregator fee (a flat
-    percentage of its gross DAM export revenue) and the BSP fee on
-    gross balancing revenue step the total down before the final bar,
-    so ``Total BESS revenue`` is net of both route-to-market fees.
+    percentage of its DAM-stream contribution to the cashflow's fee
+    base, i.e. exports net of grid-charging) and the BSP fee on gross
+    balancing revenue step the total down before the final bar, so
+    ``Total BESS revenue`` is net of both route-to-market fees.
     """
     out_path = Path(out_path)
     bess_dam = float(year1_kpis.get("revenue_bess_dam_eur", 0.0) or 0.0)
@@ -124,10 +125,11 @@ def plot_bess_revenue_waterfall(
         )
 
     # Energy-aggregator fee share attributable to the battery's DAM
-    # exports.  The fee is a flat percentage of energy revenue, so the
-    # per-source attribution is exact: fee_pct x the battery's GROSS
-    # DAM export revenue (the grid-charging expense is a cost, not
-    # revenue, and carries no fee).  Absent when the fee is off.
+    # stream.  The fee is a flat percentage of the cashflow's fee base
+    # (DAM + retail revenue minus the grid-charging expense, see
+    # ``pvbess_opt/conventions.md``), so the per-source attribution is
+    # exact: fee_pct x the battery's DAM-stream contribution to that
+    # base (exports net of grid-charging).  Absent when the fee is off.
     energy_fee_frac = 0.0
     if econ is not None:
         energy_fee_frac = max(0.0, min(
@@ -135,10 +137,10 @@ def plot_bess_revenue_waterfall(
             float(econ.get("aggregator_fee_pct_revenue", 0.0) or 0.0)
             / 100.0,
         ))
-    bess_dam_gross = float(
+    bess_dam_base = float(
         year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0
-    )
-    energy_fee = -energy_fee_frac * max(bess_dam_gross, 0.0)
+    ) - float(year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
+    energy_fee = -energy_fee_frac * max(bess_dam_base, 0.0)
 
     # Optional balancing-aggregator (BSP) fee — a deduction on GROSS
     # balancing revenue (the five products; the DAM-arbitrage segment is
@@ -157,9 +159,12 @@ def plot_bess_revenue_waterfall(
 
     # Zero-value steps are noise (a no-balancing run would show five
     # flat EUR-0 product steps): keep only the steps that carry value,
-    # exactly like the fee steps below.
+    # exactly like the fee steps below.  The DAM step obeys the same
+    # rule (a balancing-only battery renders without a flat EUR-0 DAM
+    # bar); the all-zero guard above ensures at least one step remains.
     steps: list[tuple[str, float, str]] = [
-        (_BESS_DAM_LABEL, bess_dam, _BESS_DAM_COLOUR),
+        *(((_BESS_DAM_LABEL, bess_dam, _BESS_DAM_COLOUR),)
+          if abs(bess_dam) > 1e-9 else ()),
         *((label, v, BM_COLOURS[ck])
           for label, v, ck in products if abs(v) > 1e-9),
     ]

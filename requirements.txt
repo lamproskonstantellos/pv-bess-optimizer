@@ -1,4 +1,4 @@
-# Backwards-compatible shim that pulls in the canonical lists under
-# requirements/.  New code should depend on the split files directly.
+# Convenience alias for the conventional `pip install -r requirements.txt`
+# workflow; the canonical lists live under requirements/.
 -r requirements/base.txt
 -r requirements/solvers.txt

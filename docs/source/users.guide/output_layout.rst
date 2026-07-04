@@ -18,16 +18,31 @@ See :doc:`outputs` for the full reference.  Quick summary::
     │   ├── yearly_cashflow_bars_*.pdf
     │   ├── npv_waterfall_*.pdf
     │   ├── cumulative_cashflow_with_payback_{start}-{end}.pdf
+    │   ├── monthly_cashflow_<start>.pdf
+    │   ├── revenue_stack_yearly_*.pdf
+    │   ├── bess_revenue_waterfall.pdf
+    │   ├── bess_revenue_capacity_vs_activation.pdf
+    │   ├── bess_revenue_by_month.pdf
+    │   ├── lifetime_cycles_*.pdf
+    │   ├── lcoe_summary.pdf
+    │   ├── lcos_summary.pdf
+    │   ├── soh_trajectory.pdf                  # BESS projects
     │   ├── sensitivity_npv_tornado.pdf
     │   ├── sensitivity_irr_tornado.pdf
     │   ├── balancing_reservation_profile.pdf   # balancing on
     │   ├── balancing_mc_distribution.pdf       # balancing on
-    │   └── rolling_horizon_distribution.pdf
+    │   ├── cfe_duration_curve.pdf              # emissions accounting on
+    │   └── rolling_horizon_distribution.pdf    # rolling horizon on
     ├── 05_energy_plots/
     │   ├── energy_sankey.pdf                 # Year-1 energy-flow diagram
+    │   ├── lifetime_summary_<start>-<end>.pdf
     │   └── <calendar_year>/{daily,monthly,yearly}/...
     └── 06_uncertainty_plots/
         ├── inputs_forecast_band.pdf
         ├── inputs_seasonal_boxplot.pdf
         ├── dam_intraday_heatmap.pdf
-        └── rolling_horizon_foresight_gap_comparison.pdf
+        ├── coverage_by_horizon.pdf             # diagnostics on (default)
+        ├── pit_histogram.pdf                   # diagnostics on (default)
+        ├── crps_timeline.pdf                   # diagnostics on (default)
+        ├── residual_qq.pdf                     # diagnostics on (default)
+        └── rolling_horizon_foresight_gap_comparison.pdf  # --compare-uncertainty-sources
