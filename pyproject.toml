@@ -27,8 +27,8 @@ line-length = 100
 [tool.ruff.lint]
 select = ["F", "E", "I", "B", "UP", "ARG", "RUF"]
 # The codebase uses Unicode intentionally and meaningfully: prices use
-# the € sign, the docstrings use the → arrow to describe energy flows,
-# and the docs reference Greek regulatory terms.  The ambiguous-unicode
+# the € sign, and the docstrings use the → arrow to describe energy
+# flows and Greek letters in math notation.  The ambiguous-unicode
 # rules would flag (and tempt auto-rewrites of) these, so they are
 # disabled.
 ignore = ["RUF001", "RUF002", "RUF003"]

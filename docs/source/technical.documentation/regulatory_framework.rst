@@ -78,7 +78,7 @@ strict cap the load-priority floor tightens to
 Settlement period
 -----------------
 
-Greek Self-consumption settles every 15 minutes.
+The settlement cadence is taken from the input data, not configured.
 The MILP timestep is auto-detected from the ``timeseries`` sheet's
 timestamp cadence (run ``scripts/resample_timeseries.py`` to harmonise
 mixed-resolution input), so the canonical workbook ships a 15-minute

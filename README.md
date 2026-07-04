@@ -39,7 +39,7 @@ Three asset configurations are supported in both regimes: `hybrid`
 computes the resulting project finances. It does not search the
 capacity space. Full techno-economic sizing tools (HOMER, Gridcog)
 sweep capacities to find an optimum; here the PV nameplate and the
-BESS power and capacity are inputs. The market model targets the Greek
+BESS power and capacity are inputs. The market model covers two
 regulatory regimes (self-consumption and merchant day-ahead, with
 optional balancing-market participation).
 
@@ -552,7 +552,7 @@ apply to every sheet, KPI, and plot:
 
 Limitations: dispatch is optimised for a given size (no capacity
 search beyond the optional sweep); years 2..N are scaled, not
-re-solved; the regulatory model targets the Greek self-consumption and
+re-solved; the regulatory model covers the self-consumption and
 merchant regimes; balancing participation is expected-value in the
 MILP with Monte Carlo realisation ex-post.
 

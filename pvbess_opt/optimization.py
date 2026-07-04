@@ -2,7 +2,7 @@
 
 Two regulatory regimes are supported via the ``mode`` parameter:
 
-* ``self_consumption`` — Greek Self-consumption.  Strictly enforced rules:
+* ``self_consumption`` — self-consumption.  Strictly enforced rules:
   load balance, hard PV→load priority (Section 2 of the spec), no
   simultaneous grid I/O (tight big-M), retail tariff for self-
   consumption, DAM for export.  A binary-free slack additionally

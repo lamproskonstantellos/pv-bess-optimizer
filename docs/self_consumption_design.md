@@ -21,9 +21,9 @@ drift from the code without breaking CI.
 
 ## Purpose & scope
 
-Implementation of the Greek "self-consumption" regulatory regime per
-the Greek self-consumption regime.  The asset stack is a co-located
-load with a behind-the-meter PV array and an optional BESS:
+Implementation of the "self-consumption" regulatory regime.  The
+asset stack is a co-located load with a behind-the-meter PV array and
+an optional BESS:
 
 * The retail tariff values load coverage (avoided cost).
 * Surplus PV / BESS energy may be exported to the day-ahead market
@@ -486,7 +486,7 @@ Invariant (S27) reports 0: the cap is binding in the curtailed step.
 
 ## References
 
-* The Greek self-consumption settlement regime (15-minute netting).
+* The self-consumption settlement regime (15-minute netting).
 * The user-configured grid-connection injection cap.
 * `docs/README.md` (shared notation), `docs/merchant_design.md`,
   `docs/balancing_market_design.md`, `docs/ppa_design.md`,

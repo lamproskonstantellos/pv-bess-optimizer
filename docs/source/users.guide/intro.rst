@@ -12,7 +12,7 @@ and rolling-horizon Monte Carlo for uncertainty analysis.
 
 Two regulatory regimes are supported:
 
-* ``self_consumption``: Greek Self-consumption with co-located load.  Load
+* ``self_consumption``: self-consumption with co-located load.  Load
   balance, load priority (binary-free slack formulation), no
   simultaneous grid I/O (tight big-M), retail tariff for self-
   consumption, DAM for export.

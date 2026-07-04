@@ -15,8 +15,7 @@ Sheet ``timeseries``
 
 Per-step data (one row per timestep; the timestep is auto-detected).
 The case-study workbook ships at 15-minute cadence (35 040 rows for
-one year), matching the 15-minute settlement of the Greek
-self-consumption regime.
+one year), matching a 15-minute market settlement period.
 
 ==============================  =======================  ====================================
 Column                          Required                 Notes

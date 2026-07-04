@@ -46,7 +46,7 @@ def _normalise_max_injection_profile(
     """Return a (24,) or (24, 12) float array of *percentages*.
 
     Percentages express the share of ``p_grid_export_max_kw``
-    available for export in that hour (e.g. 73 ⇒ 73 % allowed).
+    available for export in that hour (e.g. 80 ⇒ 80 % allowed).
     ``None`` falls back to the constant default.
     """
     if profile is None:
@@ -89,7 +89,7 @@ def build_per_step_max_injection_frac(
         (24, 12) cap profile indexed by ``(hour_of_day, month - 1)``.
         Values are interpreted as percentages of
         ``p_grid_export_max_kw`` available for export
-        (e.g. 73 ⇒ 0.73).  ``None`` falls back to the project default.
+        (e.g. 80 ⇒ 0.80).  ``None`` falls back to the project default.
     """
     arr = _normalise_max_injection_profile(profile)
     ts = pd.to_datetime(pd.Index(timestamps))

@@ -6,7 +6,7 @@ authors:
   - family-names: "Konstantellos"
     given-names: "Lampros"
 version: "1.0.0"
-date-released: "2026-07-03"
+date-released: "2026-07-04"
 repository-code: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
 url: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
 abstract: >-
@@ -14,8 +14,8 @@ abstract: >-
   dispatch at 15-minute resolution, with a multi-year project-finance
   pipeline, stochastic balancing-market participation (FCR/aFRR/mFRR),
   a pay-as-produced PPA contract engine, and rolling-horizon Monte
-  Carlo for uncertainty analysis. Targets the Greek self-consumption
-  and merchant regulatory regimes.
+  Carlo for uncertainty analysis. Covers the self-consumption and
+  merchant regulatory regimes.
 keywords:
   - photovoltaics
   - battery energy storage
