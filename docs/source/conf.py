@@ -23,7 +23,8 @@ sys.path.insert(0, str(ROOT))
 
 project = "pv-bess-optimizer"
 author = "Lampros Konstantellos"
-copyright = f"{datetime.now().year}, {author}"
+# Match the LICENSE range (project start year through today).
+copyright = f"2025-{datetime.now().year}, {author}"
 
 try:
     from pvbess_opt import __version__ as release  # type: ignore
