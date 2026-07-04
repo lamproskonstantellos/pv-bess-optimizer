@@ -200,3 +200,62 @@ def test_emissions_full_run_sheet_and_finance_unchanged(tmp_path):
         assert not (
             r.out_dir / "04_financial_plots" / "energy_sankey.pdf"
         ).exists()
+
+
+def _sankey_frame(**kw) -> pd.DataFrame:
+    cols = [
+        "pv_to_load_kwh", "pv_to_bess_kwh", "pv_to_grid_kwh",
+        "pv_curtail_kwh", "grid_to_load_kwh", "bess_charge_grid_kwh",
+        "bess_dis_load_kwh", "bess_dis_grid_kwh",
+    ]
+    return pd.DataFrame({c: [float(kw.get(c, 0.0)) * 1e6] for c in cols})
+
+
+@pytest.mark.parametrize(("name", "frame_kwargs", "expected", "absent"), [
+    ("pv_only_merchant",
+     dict(pv_to_grid_kwh=21.4, pv_curtail_kwh=1.1),
+     {"PV generation", "Grid export", "Curtailed PV"},
+     {"BESS", "Losses", "Load", "Grid import"}),
+    ("bess_only",
+     dict(bess_charge_grid_kwh=19.8, bess_dis_grid_kwh=18.0),
+     {"Grid import", "BESS", "Grid export", "Losses"},
+     {"PV generation", "Curtailed PV", "Load"}),
+    ("hybrid_with_curtailment",
+     dict(pv_to_load_kwh=12.9, pv_to_bess_kwh=9.2, pv_to_grid_kwh=0.4,
+          pv_curtail_kwh=1.6, grid_to_load_kwh=13.0,
+          bess_charge_grid_kwh=10.6, bess_dis_load_kwh=6.3,
+          bess_dis_grid_kwh=12.1),
+     {"PV generation", "Grid import", "BESS", "Load", "Grid export",
+      "Curtailed PV", "Losses"},
+     set()),
+])
+def test_energy_sankey_single_asset_regimes(
+    tmp_path, monkeypatch, name, frame_kwargs, expected, absent,
+):
+    """The energy-flow diagram collapses to the columns a regime uses:
+    PV-only draws no battery column, BESS-only no PV column, and the
+    curtailment sink carries the canonical "Curtailed PV" label."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from pvbess_opt.plotting import emissions as em_mod
+    from pvbess_opt.plotting.emissions import plot_energy_sankey
+
+    captured: dict = {}
+    real_save = em_mod.save_figure
+
+    def _spy(out_path):
+        captured["texts"] = [
+            t.get_text().split("\n")[0]
+            for t in plt.gcf().axes[0].texts
+        ]
+        return real_save(out_path)
+
+    monkeypatch.setattr(em_mod, "save_figure", _spy)
+    out = tmp_path / f"{name}.pdf"
+    plot_energy_sankey(_sankey_frame(**frame_kwargs), out)
+    assert out.exists() and out.stat().st_size > 0
+    labels = set(captured["texts"])
+    assert expected <= labels, (expected - labels, labels)
+    assert not (absent & labels), (absent & labels)

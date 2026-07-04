@@ -263,7 +263,11 @@ def apply_legend(
     num_entries = len(labels)
     if num_entries == 0:
         return
-    ncol = max(1, int(np.ceil(num_entries / max_rows)))
+    # Same flat-row rule as legend_below: up to four entries on one row.
+    if num_entries <= 4:
+        ncol = num_entries
+    else:
+        ncol = max(1, int(np.ceil(num_entries / max_rows)))
     ax.legend(
         handles,
         labels,
@@ -451,7 +455,13 @@ def legend_below(
     # NOTE: _attach reads ``y_offset`` from the enclosing scope, so the
     # measured-drop loop below can lower it and simply re-attach.
 
-    ncol = max(1, int(np.ceil(len(labels) / max_rows)))
+    # Small legends read best flat: up to four entries sit on ONE row
+    # (matching the LCOE / LCOS strips); larger sets wrap into at most
+    # ``max_rows`` rows and the width fit below narrows them if needed.
+    if len(labels) <= 4:
+        ncol = len(labels)
+    else:
+        ncol = max(1, int(np.ceil(len(labels) / max_rows)))
     fig = ax.figure
     legend = _attach(ncol)
 

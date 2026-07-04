@@ -96,6 +96,18 @@ Production release.
   measured — the column count narrows until the legend fits the
   figure width and the legend drops until it clears the x tick labels
   and the axis label.
+- The energy-flow diagram's curtailment sink takes the canonical
+  "Curtailed PV" label of the energy plots, and its single-asset
+  regimes are locked by tests: a PV-only project draws no battery
+  column or losses sink, a BESS-only project no PV column or
+  curtailment sink.
+- Legends with up to four entries sit on one row (matching the
+  LCOE / LCOS strips) in both legend helpers, so small legends read
+  flat everywhere.
+- One font size per text role across every figure, locked by a static
+  test: ticks, axis labels and titles from the IEEE preset, legends at
+  7 pt, in-plot annotations and node labels at 7 pt, empty-input
+  placeholders at 10 pt.
 - The measured legend system pins the y-view across its tick prunes: a
   locator tick emitted below the visible minimum could re-expand the
   autoscaled view AFTER the legend was measured clear, shifting the
