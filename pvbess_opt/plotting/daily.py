@@ -50,6 +50,7 @@ from .style import (
     apply_legend,
     apply_universal_margins,
     get_scenario_label,
+    legend_below,
     save_figure_daily,
     show_titles,
 )
@@ -108,7 +109,7 @@ def plot_daily_supply(res: pd.DataFrame, date_str: str, out_dir: Path) -> None:
     if show_titles():
         plt.title(
             f"Daily Load Supply{title_prefix(get_scenario_label())} "
-            f"— {pretty_date(date_str)}"
+            f"- {pretty_date(date_str)}"
         )
     plt.xlabel("Time (HH:mm)")
     plt.ylabel("Energy (kWh)")
@@ -151,7 +152,7 @@ def plot_daily_surplus(res: pd.DataFrame, date_str: str, out_dir: Path) -> None:
     if show_titles():
         plt.title(
             f"Daily Surplus Energy Flows{title_prefix(get_scenario_label())} "
-            f"— {pretty_date(date_str)}"
+            f"- {pretty_date(date_str)}"
         )
     plt.xlabel("Time (HH:mm)")
     plt.ylabel("Energy (kWh)")
@@ -210,7 +211,7 @@ def plot_daily_combined(
     if show_titles():
         plt.title(
             f"Daily Energy Flows{title_prefix(get_scenario_label())} "
-            f"— {pretty_date(date_str)}"
+            f"- {pretty_date(date_str)}"
         )
     plt.xlabel("Time (HH:mm)")
     plt.ylabel("Energy (kWh)")
@@ -267,8 +268,8 @@ def plot_daily_dispatch(
 
     if show_titles():
         plt.title(
-            f"Merchant — Daily Dispatch{title_prefix(get_scenario_label())} "
-            f"— {pretty_date(date_str)}"
+            f"Merchant - Daily Dispatch{title_prefix(get_scenario_label())} "
+            f"- {pretty_date(date_str)}"
         )
     plt.xlabel("Time (HH:mm)")
     plt.ylabel("Energy (kWh)")
@@ -326,9 +327,9 @@ def plot_daily_combined_merchant(
 
     if show_titles():
         plt.title(
-            f"Merchant — Daily Combined Flows"
+            f"Merchant - Daily Combined Flows"
             f"{title_prefix(get_scenario_label())} "
-            f"— {pretty_date(date_str)}"
+            f"- {pretty_date(date_str)}"
         )
     plt.xlabel("Time (HH:mm)")
     plt.ylabel("Energy (kWh)")
@@ -388,8 +389,8 @@ def plot_daily_soc(
 
     if show_titles():
         plt.title(
-            f"Merchant — Daily SOC{title_prefix(get_scenario_label())} "
-            f"— {pretty_date(date_str)}"
+            f"Merchant - Daily SOC{title_prefix(get_scenario_label())} "
+            f"- {pretty_date(date_str)}"
         )
     ax.set_xlabel("Time (HH:mm)")
     _setup_day_axes(ax, start, end)
@@ -435,9 +436,10 @@ def _draw_soc_overlay(
 def _apply_combined_with_soc_legend(ax, ax2) -> None:
     """Merge legend handles from the energy axis and the SOC twin axis.
 
-    Mirrors the existing ``apply_legend`` placement (``bbox_to_anchor =
-    (0.5, -0.20)``, ``loc = "upper center"``) so the new plot reads the
-    same as the other daily combined plots.
+    Delegates to :func:`pvbess_opt.plotting.style.legend_below` so the
+    plot follows the one house placement rule (below the axes,
+    centered, up to four entries on one row, wider sets wrapping into
+    at most two measured-fit rows).
     """
     handles_main, labels_main = ax.get_legend_handles_labels()
     if ax2 is not None:
@@ -448,12 +450,7 @@ def _apply_combined_with_soc_legend(ax, ax2) -> None:
     combined_labels = labels_main + labels_soc
     if not combined_labels:
         return
-    ncol = max(1, (len(combined_labels) + 1) // 2)
-    ax.legend(
-        combined_handles, combined_labels,
-        bbox_to_anchor=(0.5, -0.20), loc="upper center",
-        ncol=ncol, frameon=True, framealpha=0.9,
-    )
+    legend_below(ax, combined_handles, combined_labels, y_offset=-0.20)
 
 
 def plot_daily_combined_with_soc(
@@ -518,7 +515,7 @@ def plot_daily_combined_with_soc(
     if show_titles():
         plt.title(
             f"Daily Energy Flows + SOC{title_prefix(get_scenario_label())} "
-            f"— {pretty_date(date_str)}"
+            f"- {pretty_date(date_str)}"
         )
     ax.set_xlabel("Time (HH:mm)")
     ax.set_ylabel("Energy (kWh)")
@@ -580,9 +577,9 @@ def plot_daily_combined_merchant_with_soc(
 
     if show_titles():
         plt.title(
-            f"Merchant — Daily Combined Flows + SOC"
+            f"Merchant - Daily Combined Flows + SOC"
             f"{title_prefix(get_scenario_label())} "
-            f"— {pretty_date(date_str)}"
+            f"- {pretty_date(date_str)}"
         )
     ax.set_xlabel("Time (HH:mm)")
     ax.set_ylabel("Energy (kWh)")
@@ -636,8 +633,8 @@ def plot_daily_revenue(
 
     if show_titles():
         plt.title(
-            f"Merchant — Daily Revenue{title_prefix(get_scenario_label())} "
-            f"— {pretty_date(date_str)}"
+            f"Merchant - Daily Revenue{title_prefix(get_scenario_label())} "
+            f"- {pretty_date(date_str)}"
         )
     ax.set_xlabel("Time (HH:mm)")
     ax.set_ylabel("EUR")

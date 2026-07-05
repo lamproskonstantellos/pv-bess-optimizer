@@ -44,8 +44,8 @@ price (EUR/MWh), and
   contract is active (``docs/ppa_design.md``, equation P4); without a
   contract :math:`p^{\text{eff}}_t = d_t`;
 * :math:`c^{w}` = ``bess_wear_cost_eur_per_mwh`` is the
-  discharge-throughput wear cost (default 0; a dispatch shadow price,
-  never added to the reported cashflow);
+  discharge-throughput wear cost (default 10; set 0 to disable; a
+  dispatch shadow price, never added to the reported cashflow);
 * :math:`R^{\text{bm}}` is the expected balancing revenue, present
   only when ``balancing_enabled``
   (``docs/balancing_market_design.md``, equation B7);

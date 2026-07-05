@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 (2026-07-03)
+## 1.0.0 (2026-07-04)
 
 Production release.
 
@@ -93,7 +93,7 @@ Production release.
   convention, now universal across the financial, uncertainty and
   diagnostic figures).  The in-plot legend headroom system is removed,
   so the full canvas belongs to the data; the below placement is
-  measured — the column count narrows until the legend fits the
+  measured: the column count narrows until the legend fits the
   figure width and the legend drops until it clears the x tick labels
   and the axis label.
 - The energy-flow diagram's curtailment sink takes the canonical
@@ -132,6 +132,48 @@ Production release.
   figure over a grid of start years and horizon lengths, asserting the
   shared tick grid, the data-hugging windows, the MM-YYYY month labels
   and the measured legend clearance for any project window.
+
+### Fixed (final pre-release audit)
+
+- Regulatory framing is fully neutral: remaining country-specific
+  regime references and a leftover country-specific percentage in the
+  max-injection docstrings are removed; the injection cap is
+  documented everywhere as a plain user input (a value of X means X %
+  allowed injection, equivalently 100 - X % curtailment).
+- The two README foresight-distribution figures are produced by the
+  gallery export script itself (8-seed rolling-horizon Monte Carlo
+  runs through the pipeline), so they carry the IEEE preset like every
+  other gallery figure; the script also applies the preset explicitly
+  and defaults to the documented mip-gap 0.002.
+- BESS revenue waterfall: the battery's energy-aggregator-fee share is
+  computed on the cashflow's fee base (exports net of grid-charging
+  expense) instead of gross exports, and an all-zero DAM step is
+  omitted like every other zero step.
+- Yearly cashflow bars, the NPV waterfall and the Year-1 monthly
+  cashflow stack the balancing revenue (gross), the balancing
+  aggregator fee and the PPA leg when those streams carry value, so
+  the bars sum to the overlaid net line in every frame.
+- Figure conventions: rendered figure strings use hyphens instead of
+  em dashes (locked by a static source rule), the IEEE preset pins
+  `figure.titlesize` 9 and marker size 3, the two emissions-plot
+  placeholders route through the canonical 10 pt placeholder helper,
+  and the daily combined + SOC legend follows the house measured-fit
+  placement rule.
+- Docs synchronized with the shipped workbook and pipeline: the wear
+  cost default reads 10 in the objectives page, `raddatabase` and the
+  balancing price columns are documented, the results-folder reference
+  lists every artifact a default run writes, and the cumulative
+  cashflow guide matches the solid colour-distinguished curves.  The
+  workbook-schema parity tests now cover the balancing and ppa sheets
+  and pin every kv sheet of the shipped workbook to the schema.
+- Monthly cashflow allocation falls back to a flat 1/12 split for a
+  year whose Year-1 revenue (or OPEX) base is zero, keeping the
+  monthly-sums-to-yearly reconciliation exact in degenerate regimes;
+  the no-breakdown cashflow fallback carves the fee-free PPA leg out
+  of the fee base.
+- Packaging hygiene: the wheel ships only the `pvbess_opt` packages
+  (no top-level `main` module) and `.gitignore` covers `dist/` and
+  root `build/`.
 
 ### Added
 

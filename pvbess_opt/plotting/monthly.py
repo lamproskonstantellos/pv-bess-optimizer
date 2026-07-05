@@ -102,7 +102,7 @@ def plot_monthly_supply(
     if show_titles():
         ax.set_title(
             f"Monthly Load Supply{title_prefix(get_scenario_label())} "
-            f"— {month_name[month]}"
+            f"- {month_name[month]}"
         )
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
@@ -139,7 +139,7 @@ def plot_monthly_surplus(
     if show_titles():
         ax.set_title(
             f"Monthly Surplus Energy Flows{title_prefix(get_scenario_label())} "
-            f"— {month_name[month]}"
+            f"- {month_name[month]}"
         )
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
@@ -194,7 +194,7 @@ def plot_monthly_combined(
     if show_titles():
         ax.set_title(
             f"Monthly Energy Flows{title_prefix(get_scenario_label())} "
-            f"— {month_name[month]}"
+            f"- {month_name[month]}"
         )
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
@@ -240,8 +240,8 @@ def plot_monthly_dispatch(
     _set_mwh_yaxis(ax, "Energy (MWh/day)")
     if show_titles():
         ax.set_title(
-            f"Merchant — Monthly Dispatch{title_prefix(get_scenario_label())} "
-            f"— {month_name[month]}"
+            f"Merchant - Monthly Dispatch{title_prefix(get_scenario_label())} "
+            f"- {month_name[month]}"
         )
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
@@ -291,9 +291,9 @@ def plot_monthly_combined_merchant(
     _set_mwh_yaxis(ax, "Energy (MWh/day)")
     if show_titles():
         ax.set_title(
-            f"Merchant — Monthly Combined Flows"
+            f"Merchant - Monthly Combined Flows"
             f"{title_prefix(get_scenario_label())} "
-            f"— {month_name[month]}"
+            f"- {month_name[month]}"
         )
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
@@ -392,8 +392,8 @@ def plot_monthly_soc(
 
     if show_titles():
         ax.set_title(
-            f"Merchant — Monthly SOC{title_prefix(get_scenario_label())} "
-            f"— {month_name[month]}"
+            f"Merchant - Monthly SOC{title_prefix(get_scenario_label())} "
+            f"- {month_name[month]}"
         )
     ax.set_xlabel("Day")
     _setup_day_axis(ax, left, width_days)
@@ -465,8 +465,8 @@ def plot_monthly_revenue(
     ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
     if show_titles():
         ax.set_title(
-            f"Merchant — Monthly Revenue{title_prefix(get_scenario_label())} "
-            f"— {month_name[month]}"
+            f"Merchant - Monthly Revenue{title_prefix(get_scenario_label())} "
+            f"- {month_name[month]}"
         )
     ax.set_xlabel("Day")
     ax.set_ylabel("EUR/day")

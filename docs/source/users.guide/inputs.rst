@@ -15,8 +15,8 @@ Sheet ``timeseries``
 
 Per-step data (one row per timestep; the timestep is auto-detected).
 The case-study workbook ships at 15-minute cadence (35 040 rows for
-one year), matching the 15-minute settlement of the Greek
-self-consumption regime.
+one year), matching the 15-minute settlement of the
+``self_consumption`` regime.
 
 ==============================  =======================  ====================================
 Column                          Required                 Notes
@@ -37,6 +37,15 @@ Column                          Required                 Notes
                                                          back to the scalar
                                                          ``retail_tariff_eur_per_mwh`` from
                                                          the ``project`` sheet.
+Balancing price columns         balancing only           Optional per-step balancing-market
+                                                         prices consumed when
+                                                         ``balancing_enabled = TRUE``:
+                                                         ``fcr_capacity_price_eur_per_mwh``,
+                                                         ``{afrr,mfrr}_{up,dn}_capacity_price_eur_per_mwh``
+                                                         and
+                                                         ``{afrr,mfrr}_{up,dn}_activation_price_eur_per_mwh``
+                                                         (see the ``balancing`` sheet
+                                                         reference below).
 ==============================  =======================  ====================================
 
 Sheet ``project``
@@ -111,6 +120,9 @@ Sheet ``pv``
 * ``losses_pct``: PVGIS system losses (percent).
 * ``weather_year``: PVGIS weather year; use a non-leap year for a clean
   8760-hour profile, or ``tmy``.
+* ``raddatabase``: optional PVGIS radiation-database override
+  (e.g. ``PVGIS-SARAH3`` or ``PVGIS-ERA5``); blank lets PVGIS pick the
+  regional default for the location.
 * ``timeseries_path``: file sub-mode: an optional external CSV / Parquet
   whose ``pv_kwh`` column replaces the inline column.
 * ``pv_nameplate_kwp``: PV nameplate.  ``0`` ⇒ no PV in this project.
@@ -432,7 +444,8 @@ Hour-of-day cap profile expressing the share of
 ``p_grid_export_max_kw`` available for export.  Two supported shapes
 (auto-detected by the loader from the column names):
 
-* **24 × 1**: column ``hour_of_day`` (0..23) plus
+* **24 × 1**: column ``hour_of_day`` (an integer ``0..23`` or a
+  24-hour interval label such as ``00:00-01:00``, as shipped) plus
   ``max_injection_pct`` (0..100); applied to every day of the year.
 * **24 × 13**: ``hour_of_day`` plus 12 monthly columns
   ``max_injection_pct_jan`` … ``max_injection_pct_dec``; the cell at
@@ -466,7 +479,9 @@ The canonical defaults live in
 :data:`pvbess_opt.io.PROJECT_SHEET_DEFAULTS`,
 :data:`pvbess_opt.io.PV_SHEET_DEFAULTS`,
 :data:`pvbess_opt.io.BESS_SHEET_DEFAULTS`,
-:data:`pvbess_opt.io.ECONOMICS_SHEET_DEFAULTS`, and
+:data:`pvbess_opt.io.ECONOMICS_SHEET_DEFAULTS`,
+:data:`pvbess_opt.io.BALANCING_SHEET_DEFAULTS`,
+:data:`pvbess_opt.io.PPA_SHEET_DEFAULTS`, and
 :data:`pvbess_opt.io.SIMULATION_SHEET_DEFAULTS`.
 
 The shipped ``inputs/input.xlsx`` is the single source of truth for

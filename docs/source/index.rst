@@ -11,7 +11,7 @@ and rolling-horizon Monte Carlo for uncertainty analysis.
 
 Two regulatory regimes are supported:
 
-* ``self_consumption``: Greek Self-consumption with co-located load.
+* ``self_consumption``: self-consumption with co-located load.
 * ``merchant``: pure utility-scale dispatch with no co-located load.
 
 A hard static (or hourly-profiled) max-injection cap on grid-bound

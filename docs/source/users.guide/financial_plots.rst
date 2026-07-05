@@ -10,7 +10,8 @@ A family of plots is produced when the financial pipeline runs
 / LCOS are active for the run):
 
 1. ``cumulative_cashflow_<start>-<end>.pdf``: cumulative undiscounted
-   (solid) + discounted (dashed) cash-flow over the project horizon.
+   + discounted cash-flow over the project horizon (both solid data
+   curves, distinguished by colour).
 2. ``yearly_cashflow_bars_<start>-<end>.pdf``: stacked yearly bars for
    revenue (+), OPEX (-), CAPEX (-), with the net line overlaid.
 3. ``npv_waterfall_<start>-<end>.pdf``: yearly contribution to total
@@ -44,6 +45,17 @@ A family of plots is produced when the financial pipeline runs
    histogram (``bm_mc_scenarios`` draws, P10 / P50 / P90 markers).
    Written only when ``balancing_enabled`` is on; the distribution
    shares the headline availability-derated scope of the ``bm_*`` KPIs.
+10. The lifecycle set, produced on every default run into the same
+    folder: ``revenue_stack_yearly_<start>-<end>.pdf`` (per-year
+    revenue build-up with fees as negative bars),
+    ``bess_revenue_waterfall.pdf`` /
+    ``bess_revenue_capacity_vs_activation.pdf`` /
+    ``bess_revenue_by_month.pdf`` (BESS-scoped revenue views),
+    ``lifetime_cycles_<start>-<end>.pdf`` (equivalent cycles per
+    year), ``lcoe_summary.pdf`` / ``lcos_summary.pdf`` (Lazard
+    benchmark strips) and ``soh_trajectory.pdf`` (BESS projects).
+    ``cfe_duration_curve.pdf`` joins them when emissions accounting
+    is enabled.
 
 When a PPA contract is enabled, the yearly revenue stack gains a
 ``PPA revenue`` bar drawn straight from the cashflow's

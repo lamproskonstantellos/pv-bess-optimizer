@@ -456,8 +456,15 @@ def build_yearly_cashflow(
         # When year1_kpis carries only profit_total_eur with no
         # per-stream breakdown, index the whole revenue as retail
         # (CPI-linked); this coincides with the per-stream result
-        # whenever retail_inflation_pct == dam_inflation_pct.
-        revenue_1_gross = float(year1_kpis.get("profit_total_eur", 0.0) or 0.0)
+        # whenever retail_inflation_pct == dam_inflation_pct.  The PPA
+        # contract leg (folded into profit_total_eur by compute_kpis)
+        # is carved out: it flows through its own fee-free
+        # ``ppa_revenue_eur`` column, so leaving it in the gross here
+        # would double-count it AND wrongly charge it the aggregator
+        # fee.
+        revenue_1_gross = float(
+            year1_kpis.get("profit_total_eur", 0.0) or 0.0
+        ) - float(year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0)
         revenue_1_retail = revenue_1_gross
         revenue_1_dam = 0.0
         # With no per-stream breakdown the whole revenue base is degraded
@@ -933,16 +940,25 @@ def derive_monthly_cashflow(
 
         if abs(yearly_y1_revenue) > 1e-9:
             rev_scale = rev_y / yearly_y1_revenue
+            rev_flat_m = 0.0
         else:
+            # Degenerate regime: Year-1 net revenue is ~0 (streams can
+            # cancel) while a later year is non-zero.  A proportional
+            # scale is undefined, so allocate that year's revenue flat
+            # across the months — the monthly sum still reconciles to
+            # the yearly column exactly.
             rev_scale = 0.0
+            rev_flat_m = rev_y / 12.0
         if abs(yearly_y1_opex) > 1e-9:
             opex_scale = opex_y / yearly_y1_opex
+            opex_flat_m = 0.0
         else:
             opex_scale = 0.0
+            opex_flat_m = opex_y / 12.0
 
         for m in range(1, 13):
-            rev_m = float(monthly_revenue_y1.loc[m]) * rev_scale
-            opex_m = float(monthly_opex_y1.loc[m]) * opex_scale
+            rev_m = float(monthly_revenue_y1.loc[m]) * rev_scale + rev_flat_m
+            opex_m = float(monthly_opex_y1.loc[m]) * opex_scale + opex_flat_m
             pv_mwh_m = float(monthly_pv_mwh_y1.loc[m]) * pv_factor
             balancing_m = float(balancing_share.loc[m]) * balancing_y
             # The balancing-aggregator fee is proportional to balancing

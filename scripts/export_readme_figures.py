@@ -16,14 +16,18 @@ charging enabled):
   the BESS-revenue waterfall, the LCOS and LCOE bands, the
   cumulative-cashflow / payback chart, the NPV waterfall, the SOH
   trajectory and the NPV tornado.
-
-The foresight-gap distribution figure in the gallery is NOT produced
-here: it comes from a rolling-horizon Monte Carlo run
-(``pvbess inputs/input.xlsx --rolling-horizon --monte-carlo 8``),
-whose ``rolling_horizon_distribution`` figure is exported to
-``docs/assets/self_consumption_foresight_distribution.png``.
 * **Self-consumption** — retail-settled load coverage, no balancing;
   yields the daily dispatch + SOC trace and the revenue stack.
+
+The two foresight-gap distribution figures are produced here too:
+each mode's scenario is re-run through the pipeline with
+rolling-horizon dispatch and an 8-seed Monte Carlo ensemble
+(equivalent to ``--rolling-horizon --monte-carlo 8``; 48 h window /
+24 h commit from the workbook defaults), and the resulting
+``rolling_horizon_distribution`` figure is exported to
+``docs/assets/<mode>_foresight_distribution.png``.  These runs
+dominate the wall-clock; skip them with ``--skip-foresight`` when
+only the deterministic gallery figures need refreshing.
 
 Re-runnable; overwrites the gallery PNGs in place.  Run from anywhere::
 
@@ -45,7 +49,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from pvbess_opt.io import read_workbook, write_workbook  # noqa: E402
 from pvbess_opt.pipeline import RunConfig, run  # noqa: E402
-from pvbess_opt.plotting.style import set_figure_format  # noqa: E402
+from pvbess_opt.plotting.style import (  # noqa: E402
+    apply_ieee_style,
+    set_figure_format,
+)
 
 logger = logging.getLogger("export_readme_figures")
 
@@ -80,6 +87,14 @@ _DAILY_FIGURES = {
     "05_energy_plots/**/daily_combined_*with_soc_*.png":
         "daily_dispatch_soc.png",
 }
+_FORESIGHT_FIGURES = {
+    "04_financial_plots/rolling_horizon_distribution.png":
+        "foresight_distribution.png",
+}
+
+# Seeds for the gallery's rolling-horizon Monte Carlo ensembles; matches
+# the documented ``--rolling-horizon --monte-carlo 8`` recipe.
+_FORESIGHT_N_SEEDS = 8
 
 
 def _prefixed(mapping: dict[str, str], prefix: str) -> dict[str, str]:
@@ -92,6 +107,10 @@ _SELF_CONSUMPTION_FINANCIAL_FIGURES = _prefixed(
 )
 _SELF_CONSUMPTION_DAILY_FIGURES = _prefixed(_DAILY_FIGURES, "self_consumption")
 _MERCHANT_DAILY_FIGURES = _prefixed(_DAILY_FIGURES, "merchant")
+_MERCHANT_FORESIGHT_FIGURES = _prefixed(_FORESIGHT_FIGURES, "merchant")
+_SELF_CONSUMPTION_FORESIGHT_FIGURES = _prefixed(
+    _FORESIGHT_FIGURES, "self_consumption",
+)
 
 
 def _build_workbook(
@@ -144,7 +163,9 @@ def _build_workbook(
 
 def _run(dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
          mip_gap: float, time_limit: int,
-         balancing_aggregator_fee_pct: float = 0.0) -> Path:
+         balancing_aggregator_fee_pct: float = 0.0,
+         rolling_horizon: bool = False,
+         monte_carlo: int | None = None) -> Path:
     wb = _build_workbook(
         dst_dir, mode=mode, balancing=balancing, one_day=one_day,
         balancing_aggregator_fee_pct=balancing_aggregator_fee_pct,
@@ -152,6 +173,7 @@ def _run(dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
     run(RunConfig(
         excel=wb, solver="highs", outdir=dst_dir / "out",
         mip_gap=mip_gap, time_limit=time_limit,
+        rolling_horizon=rolling_horizon, monte_carlo=monte_carlo,
     ))
     runs = sorted((dst_dir / "out").glob(f"{wb.stem}_*"))
     if not runs:
@@ -176,12 +198,22 @@ def _curate(run_dir: Path, mapping: dict[str, str]) -> list[Path]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mip-gap", type=float, default=0.01)
+    parser.add_argument("--mip-gap", type=float, default=0.002)
     parser.add_argument("--time-limit", type=int, default=1800)
+    parser.add_argument(
+        "--skip-foresight", action="store_true", default=False,
+        help="Skip the two rolling-horizon Monte Carlo runs that "
+             "produce the foresight-distribution figures (they dominate "
+             "the wall-clock).",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
     written: list[Path] = []
+    # The pipeline applies the preset itself on every run; the explicit
+    # call keeps this script self-sufficiently conformant (every script
+    # that renders figures applies the IEEE preset before plotting).
+    apply_ieee_style()
     set_figure_format("png")
     try:
         with tempfile.TemporaryDirectory(prefix="readme_figs_") as tmp:
@@ -212,11 +244,42 @@ def main(argv: list[str] | None = None) -> int:
 
             logger.info("merchant — representative-day dispatch ...")
             merchant_day_run = _run(
-                tmp_dir / "merchant_day", mode="merchant", balancing=False,
+                tmp_dir / "merchant_day", mode="merchant", balancing=True,
                 one_day=True, mip_gap=args.mip_gap,
                 time_limit=args.time_limit,
+                balancing_aggregator_fee_pct=10.0,
             )
             written += _curate(merchant_day_run, _MERCHANT_DAILY_FIGURES)
+
+            if not args.skip_foresight:
+                logger.info(
+                    "merchant + balancing — rolling-horizon Monte Carlo "
+                    "(%d seeds) ...", _FORESIGHT_N_SEEDS,
+                )
+                merchant_rh_run = _run(
+                    tmp_dir / "merchant_rh", mode="merchant",
+                    balancing=True, one_day=False,
+                    mip_gap=args.mip_gap, time_limit=args.time_limit,
+                    balancing_aggregator_fee_pct=10.0,
+                    rolling_horizon=True, monte_carlo=_FORESIGHT_N_SEEDS,
+                )
+                written += _curate(
+                    merchant_rh_run, _MERCHANT_FORESIGHT_FIGURES,
+                )
+
+                logger.info(
+                    "self-consumption — rolling-horizon Monte Carlo "
+                    "(%d seeds) ...", _FORESIGHT_N_SEEDS,
+                )
+                sc_rh_run = _run(
+                    tmp_dir / "sc_rh", mode="self_consumption",
+                    balancing=False, one_day=False,
+                    mip_gap=args.mip_gap, time_limit=args.time_limit,
+                    rolling_horizon=True, monte_carlo=_FORESIGHT_N_SEEDS,
+                )
+                written += _curate(
+                    sc_rh_run, _SELF_CONSUMPTION_FORESIGHT_FIGURES,
+                )
     finally:
         set_figure_format("pdf")
 

@@ -363,7 +363,7 @@ def plot_revenue_stack_yearly(
         years, net,
         color=financial_color("Net revenue"),
         linewidth=1.5,
-        marker="o", markersize=4,
+        marker="o", markersize=3,
         markerfacecolor=financial_color("Net revenue"),
         label="Net revenue",
     )
@@ -397,7 +397,7 @@ def plot_revenue_stack_yearly(
     ax.set_ylabel("EUR")
     ax.yaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
     if show_titles():
-        ax.set_title(f"Revenue stack — {int(years[0])}-{int(years[-1])}")
+        ax.set_title(f"Revenue stack - {int(years[0])}-{int(years[-1])}")
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     _integer_year_axis(ax, years)
@@ -441,7 +441,7 @@ def plot_lifetime_cycles(
     ax.set_ylabel("Equivalent cycles per year")
     if show_titles():
         ax.set_title(
-            f"BESS Equivalent Cycles — total {total:.0f} over "
+            f"BESS Equivalent Cycles - total {total:.0f} over "
             f"{int(years[0])}-{int(years[-1])}"
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
@@ -564,12 +564,12 @@ def plot_lcoe_summary(
         bar_colour=FINANCIAL_COLORS["lcoe_bar"],
         benchmark=benchmark,
         label="LCOE", asset_present=pv_present,
-        absent_message="PV not part of this project — LCOE N/A",
+        absent_message="PV not part of this project - LCOE N/A",
     )
     ax.set_xlabel("EUR/MWh")
     apply_fine_ticks(ax, axis="x")
     if show_titles():
-        fig.suptitle("Levelized Cost of Energy — Lazard 2024 benchmark")
+        fig.suptitle("Levelized Cost of Energy - Lazard 2024 benchmark")
     return save_figure_object(fig, out_path)
 
 
@@ -627,12 +627,12 @@ def plot_lcos_summary(
         bar_colour=FINANCIAL_COLORS["lcos_bar"],
         benchmark=benchmark,
         label="LCOS", asset_present=bess_present,
-        absent_message="BESS not part of this project — LCOS N/A",
+        absent_message="BESS not part of this project - LCOS N/A",
     )
     ax.set_xlabel("EUR/MWh")
     apply_fine_ticks(ax, axis="x")
     if show_titles():
-        fig.suptitle("Levelized Cost of Storage — Lazard 2024 benchmark")
+        fig.suptitle("Levelized Cost of Storage - Lazard 2024 benchmark")
     return save_figure_object(fig, out_path)
 
 

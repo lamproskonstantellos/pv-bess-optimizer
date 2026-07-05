@@ -24,7 +24,7 @@ Ordering contract:
     pvbess_opt.plotting.* — figure generation per resolution
 
 Two regulatory modes are supported:
-    * self_consumption       — Greek Self-consumption with co-located load.
+    * self_consumption       — self-consumption with co-located load.
     * merchant  — pure utility-scale DAM dispatch (no co-located load).
 
 Three asset modes are first-class:

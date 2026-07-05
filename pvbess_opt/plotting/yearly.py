@@ -102,7 +102,7 @@ def plot_yearly_supply(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     _set_mwh_yaxis(ax, "Energy (MWh/month)")
     if show_titles():
         ax.set_title(
-            f"Yearly Load Supply{title_prefix(get_scenario_label())} — {year}"
+            f"Yearly Load Supply{title_prefix(get_scenario_label())} - {year}"
         )
     ax.set_xlabel("Month")
     _setup_month_axis(ax, left, width_days)
@@ -137,7 +137,7 @@ def plot_yearly_surplus(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     if show_titles():
         ax.set_title(
             f"Yearly Surplus Energy Flows{title_prefix(get_scenario_label())} "
-            f"— {year}"
+            f"- {year}"
         )
     ax.set_xlabel("Month")
     _setup_month_axis(ax, left, width_days)
@@ -188,7 +188,7 @@ def plot_yearly_combined(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     _set_mwh_yaxis(ax, "Energy (MWh/month)")
     if show_titles():
         ax.set_title(
-            f"Yearly Energy Flows{title_prefix(get_scenario_label())} — {year}"
+            f"Yearly Energy Flows{title_prefix(get_scenario_label())} - {year}"
         )
     ax.set_xlabel("Month")
     _setup_month_axis(ax, left, width_days)
@@ -232,8 +232,8 @@ def plot_yearly_dispatch(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     _set_mwh_yaxis(ax, "Energy (MWh/month)")
     if show_titles():
         ax.set_title(
-            f"Merchant — Yearly Dispatch{title_prefix(get_scenario_label())} "
-            f"— {year}"
+            f"Merchant - Yearly Dispatch{title_prefix(get_scenario_label())} "
+            f"- {year}"
         )
     ax.set_xlabel("Month")
     _setup_month_axis(ax, left, width_days)
@@ -282,8 +282,8 @@ def plot_yearly_combined_merchant(
     _set_mwh_yaxis(ax, "Energy (MWh/month)")
     if show_titles():
         ax.set_title(
-            f"Merchant — Yearly Combined Flows"
-            f"{title_prefix(get_scenario_label())} — {year}"
+            f"Merchant - Yearly Combined Flows"
+            f"{title_prefix(get_scenario_label())} - {year}"
         )
     ax.set_xlabel("Month")
     _setup_month_axis(ax, left, width_days)
@@ -379,8 +379,8 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
 
     if show_titles():
         ax.set_title(
-            f"Merchant — Yearly SOC{title_prefix(get_scenario_label())} "
-            f"— {year}"
+            f"Merchant - Yearly SOC{title_prefix(get_scenario_label())} "
+            f"- {year}"
         )
     ax.set_xlabel("Month")
 
@@ -450,8 +450,8 @@ def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     ax.axhline(0.0, color="black", linewidth=0.6, alpha=0.6)
     if show_titles():
         ax.set_title(
-            f"Merchant — Yearly Revenue{title_prefix(get_scenario_label())} "
-            f"— {year}"
+            f"Merchant - Yearly Revenue{title_prefix(get_scenario_label())} "
+            f"- {year}"
         )
     ax.set_xlabel("Month")
     ax.set_ylabel("EUR/month")
@@ -494,7 +494,7 @@ def plot_lifetime_summary(
     ax.set_ylabel("Energy (MWh/year)")
     if show_titles():
         ax.set_title(
-            f"Lifetime Energy Summary — {int(x[0])}-{int(x[-1])}"
+            f"Lifetime Energy Summary - {int(x[0])}-{int(x[-1])}"
         )
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
