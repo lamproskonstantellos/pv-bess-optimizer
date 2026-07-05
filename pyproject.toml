@@ -8,7 +8,12 @@ description = "PV + BESS dispatch optimizer (MILP) with project-finance pipeline
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
+authors = [{ name = "Lampros Konstantellos" }]
 dynamic = ["version", "dependencies"]
+
+[project.urls]
+Repository = "https://github.com/lamproskonstantellos/pv-bess-optimizer"
+Documentation = "https://pv-bess-optimizer.readthedocs.io/en/latest/"
 
 [project.scripts]
 pvbess = "pvbess_opt.cli:main"
