@@ -190,9 +190,9 @@ Sheet ``bess``
                             x bess_replacement_cost_pct / 100
      wear_cost = replacement_cost_eur / (cycle_life_cycles x usable_energy_mwh)
 
-  For the shipped case study, 250 EUR/kWh x 60,000 kWh x 50 % =
-  7,500,000 EUR; over 6,000 cycles x 45 MWh usable that is roughly
-  28 EUR/MWh as an upper bound, and LFP packs with higher cycle life
+  For the shipped case study, 200 EUR/kWh x 30,000 kWh x 50 % =
+  3,000,000 EUR; over 6,000 cycles x 22.5 MWh usable that is roughly
+  22 EUR/MWh as an upper bound, and LFP packs with higher cycle life
   land near 10 EUR/MWh.
 
 Every run also writes a **degradation** report (a styled ``degradation``

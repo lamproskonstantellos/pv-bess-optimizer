@@ -101,10 +101,15 @@ should be read instead.
 Validation of the observed gap magnitude
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The shipped self-consumption case study shows a median foresight gap of
-roughly half a percent of annual profit.  Two checks establish that
-this is a genuine cost of imperfect information rather than solver
-noise (measured on the shipped workbook, 48 h window / 24 h commit):
+The shipped self-consumption case study shows a median foresight gap
+of roughly half a percent of annual profit: on the 2-hour
+(15 MW / 30 MWh) workbook an 8-seed ensemble at ``mip_gap = 0.002``
+produced gaps of 0.471 to 0.495 % with a median of 0.491 % against a
+2,563,006 EUR perfect-foresight benchmark (48 h window / 24 h
+commit).  Two further checks, measured on the earlier 4-hour
+(15 MW / 60 MWh) configuration of the same workbook, establish that a
+gap of this magnitude is a genuine cost of imperfect information
+rather than solver noise:
 
 * **Tight-gap re-run.**  At ``mip_gap = 1e-5`` (PF benchmark
   2,849,785 EUR) a 5-seed ensemble produced gaps of 0.445 to 0.481 %
@@ -120,8 +125,9 @@ noise (measured on the shipped workbook, 48 h window / 24 h commit):
   single-window fixtures, where truncation cannot bite, the same
   collapse lands at ~0 (see ``tests/test_rolling_horizon_scope.py``).
 
-The decomposition is therefore: about 0.32 pp of the ~0.46 % median
-gap is horizon truncation, and forecast noise adds the remaining
+The decomposition on that configuration is therefore: about 0.32 pp
+of the ~0.46 % median gap is horizon truncation, and forecast noise
+adds the remaining
 ~0.14 pp.  The noise contribution is small because self-consumption
 profit is dominated by retail-priced avoided cost, and the retail
 tariff is never perturbed (load noise is small, sigma 0.05, and

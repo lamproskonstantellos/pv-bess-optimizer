@@ -122,6 +122,12 @@ def _check_section(section_name: str, section: dict, contract: dict) -> None:
     for key, (expected_type, lo, hi) in contract.items():
         assert key in section, f"{section_name}.{key} missing"
         value = section[key]
+        # Three-way replacement semantics: a blank cell / the literal
+        # "auto" resolves to the SOH threshold, so the parsed value is
+        # legitimately the BESS_REPLACEMENT_AUTO sentinel string (the
+        # shipped workbook uses it); a scheduled year stays an int.
+        if key == "bess_replacement_year" and value == "auto":
+            continue
         # bool is a subclass of int — narrow the check.
         if expected_type is bool:
             assert isinstance(value, bool), (

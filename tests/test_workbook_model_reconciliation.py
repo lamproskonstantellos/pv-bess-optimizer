@@ -103,7 +103,8 @@ def test_shipped_workbook_carries_bess_eol_row():
 
     repo_xlsx = Path(__file__).resolve().parent.parent / "inputs" / "input.xlsx"
     df = pd.read_excel(repo_xlsx, sheet_name="bess").set_index("key")
-    assert float(df.loc["bess_eol_soh_pct", "value"]) == 80.0
+    # v1.0.0 case study: SOH-triggered replacement at 70 %.
+    assert float(df.loc["bess_eol_soh_pct", "value"]) == 70.0
 
 
 def test_bess_eol_soh_pct_round_trips_and_validates(tmp_path):
