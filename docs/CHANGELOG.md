@@ -133,6 +133,18 @@ Production release.
   shared tick grid, the data-hugging windows, the MM-YYYY month labels
   and the measured legend clearance for any project window.
 
+### Changed (case-study re-parameterisation)
+
+- The shipped ``inputs/input.xlsx`` case study moves to a 2-hour
+  battery: ``bess_capacity_kwh`` 60,000 to 30,000 (15 MW / 30 MWh),
+  ``capex_bess_eur_per_kwh`` 250 to 200, and the replacement switches
+  from the fixed year 10 to the SOH-triggered ``auto`` semantics with
+  ``bess_eol_soh_pct`` 70 (the pack crosses the threshold in project
+  year 11 under the default calendar + cycle fade).  The schema
+  defaults are unchanged; only the case-study values move.  The
+  gallery figures, the workbook-pinned smoke KPIs and every doc
+  quoting the case study are regenerated/updated accordingly.
+
 ### Fixed (final pre-release audit)
 
 - Regulatory framing is fully neutral: remaining country-specific
@@ -177,10 +189,12 @@ Production release.
 
 ### Added
 
-- Validation of the self-consumption foresight gap: at mip_gap 1e-5 the
-  5-seed median gap is 0.464 % against a 2,849,785 EUR perfect-foresight
-  benchmark; the sigma-zero run isolates a 0.324 % horizon-truncation
-  component, documented in the rolling-horizon guide.
+- Validation of the self-consumption foresight gap (measured on the
+  4-hour, 15 MW / 60 MWh configuration of the case study): at
+  mip_gap 1e-5 the 5-seed median gap is 0.464 % against a
+  2,849,785 EUR perfect-foresight benchmark; the sigma-zero run
+  isolates a 0.324 % horizon-truncation component, documented in the
+  rolling-horizon guide.
 - Cost-accounting invariant tests: the battery wear cost enters the
   optimization objective only, the replacement CAPEX books exactly once
   in the effective replacement year of the cashflow, and no KPI

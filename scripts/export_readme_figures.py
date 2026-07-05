@@ -8,7 +8,7 @@ is forked — and copies a small curated set into ``docs/assets/`` with
 descriptive names.
 
 Scenarios (both on the shipped ``inputs/input.xlsx``: PV 15 MWp,
-BESS 15 MW / 60 MWh, 20-year horizon, 7 % discount, BESS grid
+BESS 15 MW / 30 MWh, 20-year horizon, 7 % discount, BESS grid
 charging enabled):
 
 * **Merchant + balancing** — DAM dispatch with FCR/aFRR/mFRR

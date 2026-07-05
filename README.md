@@ -363,7 +363,7 @@ merchant trio when the mode is `merchant`.
 ## Results gallery
 
 Real output from two scenarios rendered on the shipped `inputs/input.xlsx`
-(PV 15 MWp, BESS 15 MW / 60 MWh, 15 MW grid-export cap, 20-year
+(PV 15 MWp, BESS 15 MW / 30 MWh, 15 MW grid-export cap, 20-year
 horizon, 7 % discount, retail 120 EUR/MWh); the export script
 additionally enables BESS grid charging (`allow_bess_grid_charging =
 TRUE`, shipped as `FALSE`) so the figures show the complete feature
@@ -433,8 +433,8 @@ band.*
 ![merchant battery state of health](docs/assets/merchant_soh_trajectory.png)
 
 *Battery state of health over the project life: calendar plus cycle
-fade, with the scheduled year-10 replacement resetting the pack to
-100 %.*
+fade, with the SOH-triggered replacement (the pack crosses the 70 %
+threshold in year 9 under grid-charging duty) resetting to 100 %.*
 
 ![Merchant foresight-gap distribution](docs/assets/merchant_foresight_distribution.png)
 
@@ -504,18 +504,18 @@ band.*
 ![self-consumption battery state of health](docs/assets/self_consumption_soh_trajectory.png)
 
 *Battery state of health over the project life: calendar plus cycle
-fade, with the scheduled year-10 replacement resetting the pack to
-100 %.*
+fade, with the SOH-triggered replacement (the pack crosses the 70 %
+threshold in year 9 under grid-charging duty) resetting to 100 %.*
 
 ![Self-consumption foresight-gap distribution](docs/assets/self_consumption_foresight_distribution.png)
 
 *Rolling-horizon Monte Carlo profit distribution (8 seeds, 48 h
 window / 24 h commit) against the perfect-foresight benchmark: the
-realistic-forecast dispatch lands within about one and a half percent
-of the theoretical optimum (grid-charging arbitrage widens the gap
-versus the shipped no-grid-charging workbook, whose median gap is
-about half a percent). Produced by the gallery export script's
-rolling-horizon run (equivalent to `--rolling-horizon --monte-carlo 8`).*
+realistic-forecast dispatch lands within about one percent of the
+theoretical optimum (grid-charging arbitrage widens the gap versus
+the shipped no-grid-charging workbook, whose median gap is about half
+a percent). Produced by the gallery export script's rolling-horizon
+run (equivalent to `--rolling-horizon --monte-carlo 8`).*
 
 
 ## Methodology & conventions

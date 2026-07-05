@@ -51,8 +51,8 @@ def test_rolling_horizon_realscale_single_seed_under_budget() -> None:
     profit = float(kpis.get("profit_total_eur", float("nan")))
 
     # Sanity: profit is finite and roughly in the right order of magnitude
-    # for the shipped 15 MW PV + 15 MW / 60 MWh BESS workbook. Audit
-    # measured ~2.86 M EUR for one seed at this config; allow a wide
+    # for the shipped 15 MW PV + 15 MW / 30 MWh BESS workbook (the
+    # deterministic benchmark is ~2.5 M EUR at this config); allow a wide
     # envelope so we catch sign flips or crashes, not algorithmic
     # refinements.
     assert math.isfinite(profit), f"profit not finite: {profit}"

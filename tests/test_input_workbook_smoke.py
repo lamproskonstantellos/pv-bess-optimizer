@@ -147,6 +147,7 @@ def test_repo_input_xlsx_headline_kpis_pinned():
     from pvbess_opt.lifetime import (
         aggregate_lifetime_to_yearly,
         build_lifetime_dispatch,
+        resolve_bess_replacement_year,
     )
     from pvbess_opt.optimization import run_scenario
 
@@ -164,6 +165,20 @@ def test_repo_input_xlsx_headline_kpis_pinned():
     )
     capacities = derive_asset_capacities(econ, params, ts)
     year1_for_cycles = float(kpis.get("bess_total_discharge_mwh", 0.0) or 0.0)
+    # The shipped workbook uses the SOH-triggered (auto) replacement, so
+    # the three-way semantics must be resolved before the finance layer
+    # runs -- exactly as pipeline._run_one does.
+    repl_year, repl_source, _second = resolve_bess_replacement_year(
+        econ,
+        year1_discharge_mwh=year1_for_cycles,
+        capacity_mwh=float(capacities.get("bess_kwh", 0.0) or 0.0) / 1000.0,
+    )
+    econ["bess_replacement_year_effective"] = int(repl_year)
+    econ["bess_replacement_year_source"] = repl_source
+    # The 2-hour pack (2 %/y calendar + cycle fade) crosses the 70 %
+    # SOH threshold in project year 11.
+    assert repl_source == "soh_threshold"
+    assert repl_year == 11
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
     lifetime_df = build_lifetime_dispatch(
         res, econ, capacities, year1_discharge_mwh=year1_for_cycles,
@@ -191,13 +206,14 @@ def test_repo_input_xlsx_headline_kpis_pinned():
     )
 
     # Baseline (perfect-foresight, MIP gap 0.01, HiGHS, no-curtailment
-    # default).  Pins reflect the v1.0.0 defaults: energy-basis BESS
-    # CAPEX (250 EUR/kWh x 60 MWh), 0.95 x 0.95 one-way efficiencies and
-    # the 10 EUR/MWh wear shadow price (which trims marginal cycles).
+    # default).  Pins reflect the v1.0.0 case study: 2-hour energy-basis
+    # BESS CAPEX (200 EUR/kWh x 30 MWh), SOH-triggered replacement at
+    # 70 %, 0.95 x 0.95 one-way efficiencies and the 10 EUR/MWh wear
+    # shadow price (which trims marginal cycles).
     assert abs(float(kpis["pv_generation_mwh"]) - 22_275.0) < 1.0e-2
     assert abs(
-        float(kpis["bess_total_discharge_mwh"]) - 9_184.762_422
+        float(kpis["bess_total_discharge_mwh"]) - 6_064.860_285
     ) < 1.0e-2
-    assert abs(float(kpis["profit_total_eur"]) - 2_774_775.069) < 1.0
-    assert abs(float(fin_kpis["npv_eur"]) - -7_439_827.15) < 1.0
-    assert abs(float(fin_kpis["irr_pct"]) - 2.3908) < 1.0e-2
+    assert abs(float(kpis["profit_total_eur"]) - 2_547_952.318) < 1.0
+    assert abs(float(fin_kpis["npv_eur"]) - 2_027_904.81) < 1.0
+    assert abs(float(fin_kpis["irr_pct"]) - 8.8015) < 1.0e-2
