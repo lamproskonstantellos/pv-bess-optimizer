@@ -4,6 +4,10 @@
 [![version](https://img.shields.io/badge/version-1.0.0-blue)](pvbess_opt/__init__.py)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](pyproject.toml)
 [![ci](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/lamproskonstantellos/pv-bess-optimizer/actions/workflows/ci.yml)
+[![docs](https://readthedocs.org/projects/pv-bess-optimizer/badge/?version=latest)](https://pv-bess-optimizer.readthedocs.io/en/latest/)
+
+Created and developed by **Lampros Konstantellos**. Full manual at
+[pv-bess-optimizer.readthedocs.io](https://pv-bess-optimizer.readthedocs.io/en/latest/).
 
 ## What it does
 
@@ -595,7 +599,9 @@ implementing symbol:
   rolling-horizon MC, the foresight gap, balancing MC, sensitivity
   drivers.
 
-The Sphinx manual (`make -C docs html`) carries the user's guide
+The Sphinx manual is published at
+[pv-bess-optimizer.readthedocs.io](https://pv-bess-optimizer.readthedocs.io/en/latest/)
+(build locally with `make -C docs html`). It carries the user's guide
 (installation, workbook reference, outputs, CLI) and links to the
 design docs for the formulation; cross-module consistency rules live
 in [`pvbess_opt/conventions.md`](pvbess_opt/conventions.md).
