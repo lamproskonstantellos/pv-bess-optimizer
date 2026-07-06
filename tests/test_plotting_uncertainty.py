@@ -131,7 +131,10 @@ def test_diagnostic_plot_writes_nonempty(name, fn, tmp_path, monkeypatch):
     out, locs = _capture_legend_locs(
         monkeypatch, lambda: fn(ts, tmp_path / f"{name}.pdf"),
     )
-    assert out.exists() and out.stat().st_size > 0
+    # Per-source writers return the list of written paths; the
+    # single-figure coverage plot returns one path.
+    outs = out if isinstance(out, list) else [out]
+    assert outs and all(p.exists() and p.stat().st_size > 0 for p in outs)
     assert locs, f"{name}: no legend captured"
     assert all(code == expected_loc for code in locs), (name, locs)
 
@@ -139,13 +142,13 @@ def test_diagnostic_plot_writes_nonempty(name, fn, tmp_path, monkeypatch):
 def test_forecast_band_legend_below(tmp_path, monkeypatch):
     ts = _fixture_ts()
     expected_loc = _legend_loc_code()
-    out, locs = _capture_legend_locs(
+    outs, locs = _capture_legend_locs(
         monkeypatch,
         lambda: plot_input_forecast_band(
             ts, tmp_path / "fb.pdf", week_start_doy=92,
         ),
     )
-    assert out.exists() and out.stat().st_size > 0
+    assert outs and all(p.exists() and p.stat().st_size > 0 for p in outs)
     assert locs, "no legend captured on forecast band"
     assert all(loc == expected_loc for loc in locs), locs
 

@@ -277,7 +277,8 @@ Each run writes a self-contained folder
 05_energy_plots/     Year-1 energy-flow diagram (every run) and the
                      lifetime summary chart, plus daily / monthly /
                      yearly dispatch views per year
-06_uncertainty_plots/ forecast band, seasonal boxplot, DAM heatmap, diagnostics
+06_uncertainty_plots/ per-source forecast bands and seasonal boxplots,
+                     DAM heatmap, calibration diagnostics
 ```
 
 ### KPIs

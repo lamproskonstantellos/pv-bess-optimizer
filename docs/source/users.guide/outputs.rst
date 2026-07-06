@@ -30,13 +30,17 @@ A run produces a single result directory under ``results/``.
   its scope flag on the ``simulation`` sheet (``plot_daily_scope`` /
   ``plot_monthly_scope`` / ``plot_yearly_scope``); each accepts
   ``none`` | ``year1_only`` | ``all``.
-* ``06_uncertainty_plots/``: the input forecast band
-  (``inputs_forecast_band.pdf``), seasonal boxplot and DAM intraday
-  heatmap on every run, plus the four forecast-calibration
-  diagnostics (coverage-by-horizon, PIT histogram, CRPS timeline,
-  residual Q-Q) while ``uncertainty_diagnostics_enabled`` stays at
-  its default ``TRUE``, and the foresight-gap comparison when
-  ``--compare-uncertainty-sources`` runs.
+* ``06_uncertainty_plots/``: one figure per source on the standard
+  canvas: the input forecast bands
+  (``inputs_forecast_band_{dam,pv,load}.pdf``), the seasonal boxplots
+  (``inputs_seasonal_boxplot_{dam,pv,load}.pdf``) and the DAM intraday
+  heatmap on every run, plus the forecast-calibration diagnostics
+  (``coverage_by_horizon.pdf`` and the per-source
+  ``pit_histogram_*`` / ``crps_timeline_*`` / ``residual_qq_*`` files)
+  while ``uncertainty_diagnostics_enabled`` stays at its default
+  ``TRUE``, and the foresight-gap comparison when
+  ``--compare-uncertainty-sources`` runs.  The ``load`` variants exist
+  only when the timeseries carries a ``load_kwh`` column.
 
 The monthly and yearly SOC plots draw a stepped mean line (one step
 per day / per month) with a min→max fill envelope.  They carry **no

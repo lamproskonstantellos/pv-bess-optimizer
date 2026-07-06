@@ -38,11 +38,11 @@ See :doc:`outputs` for the full reference.  Quick summary::
     │   ├── lifetime_summary_<start>-<end>.pdf
     │   └── <calendar_year>/{daily,monthly,yearly}/...
     └── 06_uncertainty_plots/
-        ├── inputs_forecast_band.pdf
-        ├── inputs_seasonal_boxplot.pdf
+        ├── inputs_forecast_band_{dam,pv,load}.pdf
+        ├── inputs_seasonal_boxplot_{dam,pv,load}.pdf
         ├── dam_intraday_heatmap.pdf
         ├── coverage_by_horizon.pdf             # diagnostics on (default)
-        ├── pit_histogram.pdf                   # diagnostics on (default)
-        ├── crps_timeline.pdf                   # diagnostics on (default)
-        ├── residual_qq.pdf                     # diagnostics on (default)
+        ├── pit_histogram_{dam,pv,load}.pdf     # diagnostics on (default)
+        ├── crps_timeline_{dam,pv,load}.pdf     # diagnostics on (default)
+        ├── residual_qq_{dam,pv,load}.pdf       # diagnostics on (default)
         └── rolling_horizon_foresight_gap_comparison.pdf  # --compare-uncertainty-sources

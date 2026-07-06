@@ -432,10 +432,11 @@ Sheet ``simulation``
 * ``plot_daily_scope`` / ``plot_monthly_scope`` /
   ``plot_yearly_scope`` ∈ ``none | year1_only | all``.
 * ``uncertainty_diagnostics_enabled`` (default ``TRUE``): render the
-  forecast-calibration diagnostic plots (coverage-by-horizon, PIT
-  histogram, CRPS timeline, residual Q-Q) into ``06_uncertainty_plots/``
-  alongside the input forecast band.  Set ``FALSE`` to emit only
-  ``inputs_forecast_band.pdf`` and the seasonal / heatmap figures.
+  forecast-calibration diagnostic plots (coverage-by-horizon plus the
+  per-source PIT histogram, CRPS timeline and residual Q-Q figures)
+  into ``06_uncertainty_plots/`` alongside the input forecast bands.
+  Set ``FALSE`` to emit only the per-source
+  ``inputs_forecast_band_*.pdf`` and the seasonal / heatmap figures.
 
 Sheet ``max_injection_profile``
 -------------------------------

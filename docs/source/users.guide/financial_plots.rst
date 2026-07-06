@@ -65,12 +65,15 @@ reversion included), and the tornado gains the ``PPA price`` driver.
 Input-uncertainty plots
 -----------------------
 
-Three additional PDFs land under ``06_uncertainty_plots/``.  They make
-the rolling-horizon forecast model visible without running the Monte
-Carlo:
+Additional PDFs land under ``06_uncertainty_plots/``.  They make the
+rolling-horizon forecast model visible without running the Monte
+Carlo.  Every per-source view renders one figure per source on the
+standard 7x4 canvas (``_dam`` / ``_pv`` / ``_load`` file suffixes; the
+``load`` variant exists only when the timeseries carries a
+``load_kwh`` column):
 
-* ``inputs_forecast_band.pdf``: three-panel weekly slice (DAM, PV,
-  load) with the actual line overlaid on the analytical P10-P90
+* ``inputs_forecast_band_{dam,pv,load}.pdf``: one representative week
+  per source with the actual line overlaid on the analytical P10-P90
   envelope.  The envelope width is derived directly from the
   log-normal noise sigmas used by ``add_forecast_noise``:
 
@@ -81,8 +84,8 @@ Carlo:
 
   with :math:`\Phi^{-1}(0.90) \approx 1.2816`.  DAM uses a sign-aware
   band so negative-price hours preserve their sign.
-* ``inputs_seasonal_boxplot.pdf``: three-panel monthly boxplot of
-  DAM / PV / load (outliers hidden for readability).
+* ``inputs_seasonal_boxplot_{dam,pv,load}.pdf``: monthly boxplot per
+  source (outliers hidden for readability).
 * ``dam_intraday_heatmap.pdf``: DAM by hour-of-day (y) × day-of-year
   (x).  At 15-minute cadence the four sub-hourly samples per cell are
   averaged before plotting, so the heatmap stays clean.

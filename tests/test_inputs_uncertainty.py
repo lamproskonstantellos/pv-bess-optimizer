@@ -25,16 +25,22 @@ def test_lognormal_band_p10_below_p90(short_ts):
     assert (high[nonzero] > actual[nonzero]).all()
 
 
-def test_forecast_band_writes_pdf(short_ts, tmp_path):
-    out = plot_input_forecast_band(
+def test_forecast_band_writes_pdf_per_source(short_ts, tmp_path):
+    outs = plot_input_forecast_band(
         short_ts, tmp_path / "fb.pdf", week_start_doy=152,
     )
-    assert out.exists()
+    assert [p.name for p in outs] == [
+        "fb_dam.pdf", "fb_pv.pdf", "fb_load.pdf",
+    ]
+    assert all(p.exists() for p in outs)
 
 
-def test_seasonal_boxplot_writes_pdf(short_ts, tmp_path):
-    out = plot_input_seasonal_boxplot(short_ts, tmp_path / "sb.pdf")
-    assert out.exists()
+def test_seasonal_boxplot_writes_pdf_per_source(short_ts, tmp_path):
+    outs = plot_input_seasonal_boxplot(short_ts, tmp_path / "sb.pdf")
+    assert [p.name for p in outs] == [
+        "sb_dam.pdf", "sb_pv.pdf", "sb_load.pdf",
+    ]
+    assert all(p.exists() for p in outs)
 
 
 def test_dam_heatmap_writes_pdf(short_ts, tmp_path):

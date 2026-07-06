@@ -406,10 +406,14 @@ def _generate_uncertainty_plots(
 ) -> None:
     """Render the input-uncertainty PDFs into ``out_dir``.
 
-    Always writes the forecast band, seasonal boxplot and DAM heatmap.
-    When ``diagnostics_enabled`` is True (simulation-sheet flag
-    ``uncertainty_diagnostics_enabled``), also writes the four
-    forecast-calibration diagnostic plots.
+    Always writes the per-source forecast bands and seasonal boxplots
+    (``inputs_forecast_band_<src>.pdf`` /
+    ``inputs_seasonal_boxplot_<src>.pdf`` for the present sources) and
+    the DAM heatmap.  When ``diagnostics_enabled`` is True
+    (simulation-sheet flag ``uncertainty_diagnostics_enabled``), also
+    writes the forecast-calibration diagnostics: coverage-by-horizon
+    plus the per-source ``pit_histogram_<src>.pdf`` /
+    ``crps_timeline_<src>.pdf`` / ``residual_qq_<src>.pdf``.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     try:

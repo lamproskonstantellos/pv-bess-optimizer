@@ -1,6 +1,6 @@
 """Input-uncertainty visualization plots.
 
-Three figures help readers reason about the rolling-horizon forecast
+These figures help readers reason about the rolling-horizon forecast
 model:
 
 * :func:`plot_input_forecast_band` — one representative week, mean line
@@ -8,6 +8,12 @@ model:
 * :func:`plot_input_seasonal_boxplot` — monthly distribution of
   DAM / PV / load.
 * :func:`plot_dam_intraday_heatmap` — DAM by hour-of-day vs day-of-year.
+
+Every per-source view renders ONE figure per source (``_dam`` /
+``_pv`` / ``_load`` file suffixes) on the standard 7x4 canvas, so the
+uncertainty figures read exactly like the rest of the report: full
+tick/label styling on every figure and the legend below the axes.
+The per-source writers return the list of written paths.
 
 The forecast envelope is derived analytically from the log-normal
 noise parameters used by ``add_forecast_noise`` (no Monte Carlo
@@ -40,6 +46,21 @@ from .style import (
 
 _Z90 = 1.2816  # Phi^{-1}(0.90)
 
+# File-name slugs for the per-source figure files.
+_SOURCE_SLUGS = {
+    "dam_price_eur_per_mwh": "dam",
+    "pv_kwh": "pv",
+    "load_kwh": "load",
+}
+
+
+def _per_source_path(out_path: Path, col: str) -> Path:
+    """Return ``<stem>_<source><suffix>`` next to the base ``out_path``."""
+    out_path = Path(out_path)
+    return out_path.with_name(
+        f"{out_path.stem}_{_SOURCE_SLUGS[col]}{out_path.suffix}"
+    )
+
 __all__ = [
     "plot_dam_intraday_heatmap",
     "plot_input_forecast_band",
@@ -71,8 +92,10 @@ def plot_input_forecast_band(
     sigma_dam: float = 0.20,
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
-) -> Path:
-    """Three-panel plot for one representative week with P10/P90 envelope.
+) -> list[Path]:
+    """One representative week with the P10/P90 envelope, one figure
+    per source (``_dam`` / ``_pv`` / ``_load`` suffixes on
+    ``out_path``'s stem).
 
     week_start_doy: day-of-year at which the 7-day window starts.
     """
@@ -82,7 +105,7 @@ def plot_input_forecast_band(
     mask = (doy >= week_start_doy) & (doy < week_start_doy + 7)
     sub = ts.loc[mask].reset_index(drop=True)
     if sub.empty:
-        return _placeholder(out_path, "Forecast band: no data.")
+        return [_placeholder(out_path, "Forecast band: no data.")]
 
     panels = [
         ("dam_price_eur_per_mwh", "DAM (EUR/MWh)", sigma_dam,
@@ -95,12 +118,9 @@ def plot_input_forecast_band(
             FINANCIAL_COLORS["revenue"],
         ))
 
-    _fig, axes = plt.subplots(len(panels), 1, figsize=(7, 6.5), sharex=True)
-    if len(panels) == 1:
-        axes = [axes]
-
     t = sub["timestamp"]
-    for ax, (col, ylabel, sigma, color) in zip(axes, panels, strict=False):
+    written: list[Path] = []
+    for col, ylabel, sigma, color in panels:
         actual = sub[col].to_numpy(dtype=float)
         # Sign-aware band on DAM (preserves negative-price sign).
         if col == "dam_price_eur_per_mwh":
@@ -110,73 +130,65 @@ def plot_input_forecast_band(
             low, high = sign * mag_low, sign * mag_high
         else:
             low, high = _lognormal_band(np.maximum(actual, 0.0), sigma)
+        plt.figure(figsize=(7, 4))
+        ax = plt.gca()
         ax.fill_between(t, low, high, color=color, alpha=0.20,
                         label=f"P10-P90 (σ={sigma:.2f})")
         ax.plot(t, actual, color=color, linewidth=1.0, label="Actual")
         ax.set_ylabel(ylabel)
+        ax.set_xlabel("Timestamp")
         ax.grid(True, linestyle="--", alpha=0.5)
         apply_house_date_axis(ax)
-
-    axes[-1].set_xlabel("Timestamp")
-    if show_titles():
-        axes[0].set_title(
-            f"Forecast envelope, week starting DOY {week_start_doy}"
-        )
-    for ax in axes:
+        if show_titles():
+            ax.set_title(
+                f"Forecast envelope, week starting DOY {week_start_doy}"
+            )
         apply_universal_margins(ax)
         legend_below(ax)
-    return save_figure(out_path)
+        written.append(save_figure(_per_source_path(out_path, col)))
+    return written
 
 
 def plot_input_seasonal_boxplot(
     ts: pd.DataFrame, out_path: Path,
-) -> Path:
-    """Three-panel monthly boxplot of DAM, PV, load."""
+) -> list[Path]:
+    """Monthly boxplot of DAM / PV / load, one figure per source
+    (``_dam`` / ``_pv`` / ``_load`` suffixes on ``out_path``'s stem)."""
     out_path = Path(out_path)
     timestamps = pd.to_datetime(ts["timestamp"])
     months = timestamps.dt.month
-    has_load = "load_kwh" in ts.columns
-    n_panels = 3 if has_load else 2
-
-    _fig, axes = plt.subplots(n_panels, 1, figsize=(7, 2.2 * n_panels))
-    if n_panels == 1:
-        axes = [axes]
 
     panels = [
         ("dam_price_eur_per_mwh", "DAM (EUR/MWh)", FINANCIAL_COLORS["net"]),
         ("pv_kwh",                "PV (kWh / step)", COLORS["PV to load"]),
     ]
-    if has_load:
+    if "load_kwh" in ts.columns:
         panels.append((
             "load_kwh", "Load (kWh / step)", FINANCIAL_COLORS["revenue"],
         ))
 
-    for ax, (col, ylabel, color) in zip(axes, panels, strict=False):
+    written: list[Path] = []
+    year = int(timestamps.dt.year.iloc[0])
+    for col, ylabel, color in panels:
         data = [ts.loc[months == m, col].to_numpy(dtype=float)
                 for m in range(1, 13)]
+        plt.figure(figsize=(7, 4))
+        ax = plt.gca()
         ax.boxplot(data, positions=range(1, 13), showfliers=False,
                    patch_artist=True,
                    boxprops=dict(facecolor=color, alpha=0.4))
         ax.set_xticks(range(1, 13))
         ax.set_ylabel(ylabel)
+        ax.set_xlabel("Month")
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    axes[-1].set_xlabel("Month")
-    if show_titles():
-        axes[0].set_title("Monthly distribution of inputs (Year 1)")
-    for ax in axes:
+        if show_titles():
+            ax.set_title("Monthly distribution of inputs (Year 1)")
         apply_universal_margins(ax, skip_x=True)
-    # House MM-YYYY month labels on the bottom panel only — the panels
-    # share the month grid, so repeating the rotated labels on every
-    # panel would only add clutter.  The upper panels keep the tick
-    # marks (blank labels) and the exact same window.
-    apply_month_axis(
-        axes[-1], range(1, 13), range(1, 13),
-        year=int(timestamps.dt.year.iloc[0]),
-    )
-    for ax in axes[:-1]:
-        ax.set_xticklabels([])
-        ax.set_xlim(*axes[-1].get_xlim())
-    return save_figure(out_path)
+        # House MM-YYYY month labels, rotated right-anchored, on the
+        # snug symmetric window shared by every monthly figure.
+        apply_month_axis(ax, range(1, 13), range(1, 13), year=year)
+        written.append(save_figure(_per_source_path(out_path, col)))
+    return written
 
 
 def plot_dam_intraday_heatmap(
@@ -369,39 +381,40 @@ def plot_uncertainty_pit_histogram(
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
     base_seed: int = 42,
-) -> Path:
-    """Probability-integral-transform histogram per source (flat = calibrated)."""
+) -> list[Path]:
+    """Probability-integral-transform histogram (flat = calibrated),
+    one figure per source (``_dam`` / ``_pv`` / ``_load`` suffixes)."""
     out_path = Path(out_path)
     sigmas = {"dam": sigma_dam, "pv": sigma_pv, "load": sigma_load}
     panels = _diagnostic_panels(ts, sigmas)
     if not panels:
-        return _placeholder(out_path, "PIT histogram: no data.")
+        return [_placeholder(out_path, "PIT histogram: no data.")]
 
-    _fig, axes = plt.subplots(len(panels), 1, figsize=(7, 2.2 * len(panels)))
-    if len(panels) == 1:
-        axes = [axes]
     rng = np.random.default_rng(base_seed)
-    for ax, (col, label, sigma, color) in zip(axes, panels, strict=False):
+    written: list[Path] = []
+    for col, label, sigma, color in panels:
         actual = ts[col].to_numpy(dtype=float)
         median, sigma_step, realised, valid = _forecast_vs_realised(actual, sigma, rng)
         z = (realised[valid] - median[valid]) / sigma_step[valid]
         pit = _norm_cdf(z)  # PIT = F_forecast(actual); uniform when calibrated
+        plt.figure(figsize=(7, 4))
+        ax = plt.gca()
         ax.hist(pit, bins=20, range=(0.0, 1.0), color=color, alpha=0.6,
                 edgecolor="black", linewidth=0.4,
                 label=f"{label} (n={pit.size})")
         ideal = pit.size / 20.0 if pit.size else 0.0
         ax.axhline(ideal, color="grey", linestyle="--", linewidth=1.0)
-        # The panel's series identity lives in the legend; the y axis
-        # counts samples per PIT bin.
+        # The series identity lives in the legend; the y axis counts
+        # samples per PIT bin.
         ax.set_ylabel("Count")
+        ax.set_xlabel("PIT value")
         ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    axes[-1].set_xlabel("PIT value")
-    if show_titles():
-        axes[0].set_title("Probability integral transform (flat ⇒ calibrated)")
-    for ax in axes:
+        if show_titles():
+            ax.set_title("Probability integral transform (flat = calibrated)")
         apply_universal_margins(ax, skip_x=True)
         legend_below(ax)
-    return save_figure(out_path)
+        written.append(save_figure(_per_source_path(out_path, col)))
+    return written
 
 
 def plot_uncertainty_crps_timeline(
@@ -412,27 +425,23 @@ def plot_uncertainty_crps_timeline(
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
     base_seed: int = 42,
-) -> Path:
-    """Step-wise CRPS timeline (Gaussian band approximation), one line per source."""
+) -> list[Path]:
+    """Step-wise CRPS timeline (Gaussian band approximation), one
+    figure per source (``_dam`` / ``_pv`` / ``_load`` suffixes).
+
+    The sources carry different units and magnitudes (DAM CRPS in
+    EUR/MWh, PV / load CRPS in kWh), so each renders on its own axis.
+    """
     out_path = Path(out_path)
     sigmas = {"dam": sigma_dam, "pv": sigma_pv, "load": sigma_load}
     panels = _diagnostic_panels(ts, sigmas)
     if not panels:
-        return _placeholder(out_path, "CRPS timeline: no data.")
+        return [_placeholder(out_path, "CRPS timeline: no data.")]
 
     t = pd.to_datetime(ts["timestamp"])
-    # One panel per source: the sources carry different units and
-    # magnitudes (DAM CRPS in EUR/MWh, PV / load CRPS in kWh), so a
-    # shared axis renders the smallest series as an invisible flat line
-    # that the legend still advertises.  Mirrors the stacked-panel
-    # layout of :func:`plot_uncertainty_residual_qq`.
-    fig, axes = plt.subplots(
-        len(panels), 1, figsize=(7, 2.4 * len(panels)), sharex=True,
-    )
-    if len(panels) == 1:
-        axes = [axes]
     rng = np.random.default_rng(base_seed)
-    for ax, (col, label, sigma, color) in zip(axes, panels, strict=True):
+    written: list[Path] = []
+    for col, label, sigma, color in panels:
         actual = ts[col].to_numpy(dtype=float)
         median, sigma_step, realised, valid = _forecast_vs_realised(actual, sigma, rng)
         crps = np.zeros_like(median)
@@ -441,18 +450,20 @@ def plot_uncertainty_crps_timeline(
         crps[valid] = s * (
             z * (2.0 * _norm_cdf(z) - 1.0) + 2.0 * _norm_pdf(z) - _INV_SQRT_PI
         )
+        plt.figure(figsize=(7, 4))
+        ax = plt.gca()
         ax.plot(t, crps, color=color, linewidth=0.9, label=label)
         unit = "EUR/MWh" if "eur_per_mwh" in col else "kWh"
         ax.set_ylabel(f"CRPS ({unit})")
+        ax.set_xlabel("Timestamp")
         ax.grid(True, linestyle="--", alpha=0.5)
+        apply_house_date_axis(ax)
+        if show_titles():
+            ax.set_title("Step-wise CRPS over the forecast band")
         apply_universal_margins(ax)
         legend_below(ax)
-    axes[-1].set_xlabel("Timestamp")
-    if show_titles():
-        axes[0].set_title("Step-wise CRPS over the forecast band")
-    apply_house_date_axis(axes[-1])
-    fig.tight_layout()
-    return save_figure(out_path)
+        written.append(save_figure(_per_source_path(out_path, col)))
+    return written
 
 
 def plot_uncertainty_residual_qq(
@@ -463,23 +474,24 @@ def plot_uncertainty_residual_qq(
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
     base_seed: int = 42,
-) -> Path:
-    """Q-Q plot of normalised residuals vs standard normal, per source."""
+) -> list[Path]:
+    """Q-Q plot of normalised residuals vs standard normal, one figure
+    per source (``_dam`` / ``_pv`` / ``_load`` suffixes)."""
     out_path = Path(out_path)
     sigmas = {"dam": sigma_dam, "pv": sigma_pv, "load": sigma_load}
     panels = _diagnostic_panels(ts, sigmas)
     if not panels:
-        return _placeholder(out_path, "Residual Q-Q: no data.")
+        return [_placeholder(out_path, "Residual Q-Q: no data.")]
 
-    _fig, axes = plt.subplots(len(panels), 1, figsize=(7, 2.4 * len(panels)))
-    if len(panels) == 1:
-        axes = [axes]
     rng = np.random.default_rng(base_seed)
-    for ax, (col, label, sigma, color) in zip(axes, panels, strict=False):
+    written: list[Path] = []
+    for col, label, sigma, color in panels:
         actual = ts[col].to_numpy(dtype=float)
         median, sigma_step, realised, valid = _forecast_vs_realised(actual, sigma, rng)
         resid = np.sort((realised[valid] - median[valid]) / sigma_step[valid])
         n = resid.size
+        plt.figure(figsize=(7, 4))
+        ax = plt.gca()
         if n:
             theoretical = _norm_ppf((np.arange(1, n + 1) - 0.5) / n)
             ax.scatter(theoretical, resid, s=6, color=color, alpha=0.5,
@@ -487,14 +499,14 @@ def plot_uncertainty_residual_qq(
             lim = float(max(abs(theoretical).max(), abs(resid).max(), 1.0))
             ax.plot([-lim, lim], [-lim, lim], color="grey", linestyle="--",
                     linewidth=1.0, label="Standard normal")
-        # The panel's series identity lives in the legend; the y axis
-        # is the empirical quantile of the normalised residuals.
+        # The series identity lives in the legend; the y axis is the
+        # empirical quantile of the normalised residuals.
         ax.set_ylabel("Empirical quantile")
+        ax.set_xlabel("Theoretical normal quantile")
         ax.grid(True, linestyle="--", alpha=0.5)
-    axes[-1].set_xlabel("Theoretical normal quantile")
-    if show_titles():
-        axes[0].set_title("Normalised-residual Q-Q vs standard normal")
-    for ax in axes:
+        if show_titles():
+            ax.set_title("Normalised-residual Q-Q vs standard normal")
         apply_universal_margins(ax)
         legend_below(ax)
-    return save_figure(out_path)
+        written.append(save_figure(_per_source_path(out_path, col)))
+    return written
