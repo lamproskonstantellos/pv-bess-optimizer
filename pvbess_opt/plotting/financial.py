@@ -137,16 +137,18 @@ def _apply_eur_xaxis(ax, econ: dict[str, Any] | None) -> None:
     ax.xaxis.set_major_formatter(euro_axis_formatter(_resolve_currency_format(econ)))
 
 
-def _integer_year_axis(ax, years: np.ndarray) -> None:
+def _integer_year_axis(ax, years: np.ndarray, *, bars: bool = True) -> None:
     """Common calendar-year axis for every per-year figure.
 
     EVERY project year is labelled — the reader never interpolates
     between sparse ticks — and the labels rotate ``XTICK_ROT``
     right-anchored like every other dense axis in the report (month
     and date axes), which is how 20+ four-digit years fit the standard
-    7-inch canvas.  The window hugs the data: the cashflow views open
-    at Year 0 (the CAPEX year), the operational frames at Year 1 with
-    no empty Year-0 slot.  Call AFTER
+    7-inch canvas.  The window hugs the data exactly like the energy
+    plots' time axes: line figures span edge to edge (first to last
+    year, no empty slot), bar figures keep the half-slot each side
+    that the bar geometry needs.  The cashflow views open at Year 0
+    (the CAPEX year), the operational frames at Year 1.  Call AFTER
     :func:`apply_universal_margins`: the window must not be re-padded.
     """
     if len(years) == 0:
@@ -155,7 +157,8 @@ def _integer_year_axis(ax, years: np.ndarray) -> None:
     last = int(np.max(years))
     ax.set_xticks(np.arange(first, last + 1))
     plt.setp(ax.get_xticklabels(), rotation=XTICK_ROT, ha="right")
-    ax.set_xlim(first - 0.75, last + 0.75)
+    pad = 0.5 if bars else 0.0
+    ax.set_xlim(first - pad, last + pad)
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +199,7 @@ def plot_cumulative_cashflow(
     _maybe_set_title(ax, f"Cumulative Cash-flow - {_title_window(yearly_cf)}")
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
-    _integer_year_axis(ax, years)
+    _integer_year_axis(ax, years, bars=False)
     apply_fine_ticks(ax)
     apply_financial_legend(ax)
     return save_figure(out_path)
@@ -351,8 +354,9 @@ def plot_npv_waterfall(
     Balancing revenue (+) / PPA revenue (+) / OPEX (-) / Balancing
     aggregator fee (-) / DEVEX (-) / CAPEX (-) bars per year (all-zero
     streams omitted), a ``Net cash-flow`` marker line, and one extra
-    ``Cumulative NPV`` line overlaid.  All values are discounted to
-    Year 0, so the bars sum to the discounted net line.
+    ``Cumulative discounted cash-flow`` line overlaid — the same series
+    (and name) the cumulative-cashflow figure carries.  All values are
+    discounted to Year 0, so the bars sum to the discounted net line.
     """
     out_path = Path(out_path)
     years = _calendar_axis(yearly_cf)
@@ -371,6 +375,9 @@ def plot_npv_waterfall(
         devex_disc = np.zeros_like(revenue_disc)
     capex_disc = yearly_cf["capex_eur"].astype(float).to_numpy() * disc_factor
     net_disc = yearly_cf["discounted_cf_eur"].astype(float).to_numpy()
+    # Identical to the economics frame's ``cumulative_dcf_eur`` column
+    # (cumsum of the discounted net), recomputed so the plot's input
+    # contract stays minimal.
     cum_disc = np.cumsum(net_disc)
 
     plt.figure(figsize=(7, 4))
@@ -388,8 +395,9 @@ def plot_npv_waterfall(
     )
     ax.plot(
         years, cum_disc,
-        color=financial_color("Cumulative NPV"), linewidth=1.5,
-        marker="o", markersize=3, label="Cumulative NPV",
+        color=financial_color("Cumulative discounted cash-flow"),
+        linewidth=1.5,
+        marker="o", markersize=3, label="Cumulative discounted cash-flow",
     )
     ax.axhline(0.0, color="black", linewidth=0.8)
 
@@ -474,7 +482,7 @@ def plot_payback(
     _maybe_set_title(ax, f"Payback Visualisation - {_title_window(yearly_cf)}")
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
-    _integer_year_axis(ax, years)
+    _integer_year_axis(ax, years, bars=False)
     apply_financial_legend(ax)
     return save_figure(out_path)
 

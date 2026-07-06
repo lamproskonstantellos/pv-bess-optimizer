@@ -44,7 +44,7 @@ def plot_soh_trajectory(degradation: pd.DataFrame, out_path: Path) -> Path:
     # re-scale it; the x-axis takes the shared project-window year
     # ticks (the degradation frame starts at Year 1).
     apply_universal_margins(ax, skip_y=True)
-    _integer_year_axis(ax, years)
+    _integer_year_axis(ax, years, bars=False)
     ax.set_ylim(*_SOH_YLIM)
     ax.set_yticks(_SOH_YTICKS)
     if replacement_years:

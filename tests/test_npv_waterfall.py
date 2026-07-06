@@ -1,8 +1,9 @@
 """plot_npv_waterfall morphology must match yearly_cashflow_bars.
 
-Legend entries: Revenue, OPEX, DEVEX, CAPEX, Net cash-flow, Cumulative
-NPV.  No in-axis DEVEX / CAPEX text annotations.  y-axis padded so the
-topmost bar does not touch the axis spine.
+Legend entries: Revenue, OPEX, DEVEX, CAPEX, Net cash-flow
+(discounted), Cumulative discounted cash-flow.  No in-axis DEVEX /
+CAPEX text annotations.  y-axis padded so the topmost bar does not
+touch the axis spine.
 """
 
 from __future__ import annotations
@@ -92,9 +93,12 @@ def test_npv_waterfall_legend_has_all_components(tmp_path: Path):
     _, labels = ax.get_legend_handles_labels()
     # The waterfall's net line is discounted (it sums to the NPV), so its
     # label is explicitly "(discounted)" to distinguish it from the
-    # undiscounted "Net cash-flow" in plot_yearly_cashflow_bars.
+    # undiscounted "Net cash-flow" in plot_yearly_cashflow_bars.  The
+    # cumulative line carries the same name as the identical series in
+    # the cumulative-cashflow figure.
     expected = {"Revenue", "OPEX", "DEVEX", "CAPEX",
-                "Net cash-flow (discounted)", "Cumulative NPV"}
+                "Net cash-flow (discounted)",
+                "Cumulative discounted cash-flow"}
     assert expected.issubset(set(labels)), (
         f"plot_npv_waterfall missing legend entries: "
         f"{expected - set(labels)}"
