@@ -213,9 +213,17 @@ Production release.
   tighter gaps (down to 1e-6) until it is the best case, recomputes
   the ``foresight_gap_pct`` column and its percentiles against the
   final benchmark, and uses the re-tightened solution for every
-  downstream artifact.  The gap actually used is recorded as the new
-  ``pf_benchmark_mip_gap`` KPI and each re-solve is logged in
-  ``run_log.txt``.
+  downstream artifact.  The gap of the solve that produced the final
+  benchmark is recorded as the new ``pf_benchmark_mip_gap`` KPI and
+  each re-solve is logged in ``run_log.txt``.  A re-solve is accepted
+  only if it improves the incumbent: when the time limit terminates
+  the search, a deterministic solver returns the identical incumbent
+  at any requested gap, so the guard keeps the previous benchmark
+  after one unimproved probe (logging that the time limit binds and
+  advising a higher ``--time-limit`` or a faster solver) instead of
+  burning the limit on every rung of the escalation ladder; a
+  float-rounding artifact that could repeat the floor-gap solve twice
+  is also fixed.
 
 ### Fixed (final pre-release audit)
 

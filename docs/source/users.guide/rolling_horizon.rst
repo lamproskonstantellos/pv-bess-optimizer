@@ -123,11 +123,26 @@ is the best case again.  The foresight-gap column and the percentile
 KPIs are then recomputed against the final benchmark, and every
 downstream artifact — the financial model, ``03_results.xlsx``, and
 all plots — uses the re-tightened solution.  The gap actually used is
-recorded as the ``pf_benchmark_mip_gap`` KPI and each re-solve is
-logged in ``run_log.txt``.  In the unlikely event that a realisation
-still exceeds the benchmark at the floor, the residual difference is
-reported as a warning and the slightly negative gap is left visible
-rather than masked.
+recorded as the ``pf_benchmark_mip_gap`` KPI (the gap of the solve
+that produced the final benchmark) and each re-solve is logged in
+``run_log.txt``.  If a realisation still exceeds the benchmark when
+the escalation ends, the residual difference is reported as a warning
+and the slightly negative gap is left visible rather than masked.
+
+A tighter gap only helps if the solver has time to use it.  Each
+benchmark solve also carries the run's ``--time-limit``; when that
+limit terminates the search, a deterministic solver walks the same
+branch-and-bound tree in the same budget and returns the *identical*
+incumbent no matter how tight the requested gap.  The guard therefore
+accepts a re-solve only when it actually improves the incumbent: after
+one unimproved probe it keeps the previous benchmark, stops
+escalating, and logs that the time limit binds — the remedy is a
+higher ``--time-limit`` or a faster solver (``--solver gurobi``
+typically closes the hard grid-charging MILPs orders of magnitude
+faster than HiGHS).  For publication runs the most economical recipe
+is to avoid the escalation entirely by solving the benchmark tightly
+up front, e.g. ``--solver gurobi --mip-gap 1e-4`` with a generous
+time limit.
 
 Validation of the observed gap magnitude
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

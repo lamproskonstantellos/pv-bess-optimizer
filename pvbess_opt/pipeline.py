@@ -947,6 +947,13 @@ def _project_mode_label(params: dict[str, Any]) -> str:
 #: before the guard gives up and logs the residual negative gap.
 _PF_BENCHMARK_GAP_FLOOR = 1e-6
 
+#: Minimum incumbent improvement (EUR) for the guard to accept a
+#: tighter re-solve and keep escalating.  A re-solve returning the same
+#: profit means the time limit terminated the search, not the gap
+#: criterion -- repeating with an even tighter target would walk the
+#: identical tree and burn the identical wall-clock for nothing.
+_PF_IMPROVEMENT_EPS_EUR = 0.01
+
 _COMPARE_SOURCE_FLAGS: tuple[tuple[str, bool, bool, bool], ...] = (
     ("dam", True, False, False),
     ("pv", False, True, False),
@@ -1252,7 +1259,12 @@ def _run_one(
             # to _PF_BENCHMARK_GAP_FLOOR) until it is the best case, then
             # recompute the gap column and KPIs against the final
             # benchmark.  All downstream artifacts (financials, results
-            # workbook, plots) use the retightened solution.
+            # workbook, plots) use the retightened solution.  A re-solve
+            # is accepted only if it actually improves the incumbent:
+            # when the time limit binds, a deterministic solver walks the
+            # same tree in the same budget and returns the same incumbent
+            # no matter how tight the requested gap, so further
+            # escalation would only burn the time limit again.
             rh_profits = [
                 float(frame["profit_total_eur"].max())
                 for frame in (rolling_mc_df, rolling_compare_df)
@@ -1265,29 +1277,52 @@ def _run_one(
             while (
                 pf_profit_eur > 0.0
                 and best_rh > pf_profit_eur
-                and pf_gap_used > _PF_BENCHMARK_GAP_FLOOR
+                # 1e-9 relative slack so float division dust (1e-3/10/10/10
+                # is slightly above 1e-6) cannot trigger a duplicate solve
+                # at the floor value.
+                and pf_gap_used > _PF_BENCHMARK_GAP_FLOOR * (1.0 + 1e-9)
             ):
-                pf_gap_used = max(pf_gap_used / 10.0, _PF_BENCHMARK_GAP_FLOOR)
+                next_gap = max(pf_gap_used / 10.0, _PF_BENCHMARK_GAP_FLOOR)
                 print(
                     f"[rolling] best rolling-horizon profit {best_rh:,.2f} "
                     f"EUR exceeds the perfect-foresight incumbent "
                     f"{pf_profit_eur:,.2f} EUR (solver tolerance, not a "
                     f"model error) -- re-solving the benchmark at "
-                    f"mip_gap={pf_gap_used:g}"
+                    f"mip_gap={next_gap:g}"
                 )
+                c_res, c_solver, c_kpis, c_monthly, c_bm = (
+                    _solve_perfect_foresight(next_gap)
+                )
+                new_pf = float(c_kpis.get("profit_total_eur", 0.0))
+                if new_pf <= pf_profit_eur + _PF_IMPROVEMENT_EPS_EUR:
+                    print(
+                        f"[rolling] benchmark incumbent did not improve at "
+                        f"mip_gap={next_gap:g} ({new_pf:,.2f} EUR vs "
+                        f"{pf_profit_eur:,.2f} EUR): the time limit "
+                        f"({int(config.time_limit)}s) binds before the "
+                        f"tighter gap can act, so further tightening "
+                        f"cannot help. Keeping the previous benchmark; "
+                        f"raise --time-limit or use a faster solver "
+                        f"(e.g. --solver gurobi) to close the residual "
+                        f"gap."
+                    )
+                    break
                 res, resolved_solver, kpis, kpis_monthly, bm_mc = (
-                    _solve_perfect_foresight(pf_gap_used)
+                    c_res, c_solver, c_kpis, c_monthly, c_bm
                 )
-                pf_profit_eur = float(kpis.get("profit_total_eur", 0.0))
+                pf_profit_eur = new_pf
+                pf_gap_used = next_gap
             if best_rh > pf_profit_eur > 0.0:
                 logger.warning(
                     "rolling-horizon: best realisation %.2f EUR still "
-                    "exceeds the perfect-foresight benchmark %.2f EUR after "
-                    "tightening to mip_gap=%g; the residual negative gap "
-                    "(%.4f%%) is within solver tolerance.",
+                    "exceeds the perfect-foresight benchmark %.2f EUR "
+                    "(benchmark solved at mip_gap=%g); the residual "
+                    "negative gap (%.4f%%) is within solver tolerance.",
                     best_rh, pf_profit_eur, pf_gap_used,
                     100.0 * (1.0 - best_rh / pf_profit_eur),
                 )
+            # The gap of the solve that PRODUCED the final benchmark (the
+            # configured value when no re-solve improved on it).
             kpis["pf_benchmark_mip_gap"] = float(pf_gap_used)
 
             # Gap columns + KPI percentiles against the final benchmark.
