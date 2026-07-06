@@ -317,8 +317,13 @@ the `foresight_gap_pct` against the perfect-foresight benchmark); the
 pipeline reports its P10 / P50 / P90. Seed KPIs share the headline-KPI
 scope (the same unavailability derate and the same year-close SOC
 condition as the benchmark), so `foresight_gap_pct` is non-negative up
-to solver tolerance and the perfect-foresight marker bounds the
-distribution from above (see `pvbess_opt/conventions.md`). Balancing
+to solver tolerance — and the pipeline enforces the bound in practice:
+if any realisation lands above the benchmark incumbent (inside its
+`mip_gap` slack), the benchmark is re-solved at tighter gaps until it
+is the best case, the gap column and percentiles are recomputed, and
+the gap used is reported as the `pf_benchmark_mip_gap` KPI — so the
+perfect-foresight marker bounds the distribution from above (see
+`pvbess_opt/conventions.md`). Balancing
 capacity / activation prices are perturbed separately by
 `pvbess_opt.rolling_horizon.monte_carlo_balancing`.
 
