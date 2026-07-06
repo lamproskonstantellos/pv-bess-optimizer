@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If this software contributes to academic work, please cite it using the metadata below."
 type: software
-title: "PV & BESS Optimizer: MILP dispatch and project-finance pipeline for co-located PV + battery systems"
+title: "PV & BESS Optimizer: MILP dispatch and project-finance pipeline for co-located PV and battery systems"
 authors:
   - family-names: "Konstantellos"
     given-names: "Lampros"
@@ -9,6 +9,7 @@ version: "1.0.0"
 date-released: "2026-07-04"
 repository-code: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
 url: "https://github.com/lamproskonstantellos/pv-bess-optimizer"
+license-url: "https://github.com/lamproskonstantellos/pv-bess-optimizer/blob/main/LICENSE"
 abstract: >-
   Mixed-integer linear programming model for co-located PV + BESS
   dispatch at 15-minute resolution, with a multi-year project-finance

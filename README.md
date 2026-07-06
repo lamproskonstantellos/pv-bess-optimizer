@@ -613,7 +613,7 @@ If this tool contributes to academic work, please cite it as:
 
 ```
 Konstantellos, L. (2026). PV & BESS Optimizer (v1.0.0): MILP dispatch
-and project-finance pipeline for co-located PV + battery systems.
+and project-finance pipeline for co-located PV and battery systems.
 https://github.com/lamproskonstantellos/pv-bess-optimizer
 ```
 
@@ -623,7 +623,7 @@ BibTeX:
 @software{konstantellos_pv_bess_optimizer_2026,
   author  = {Konstantellos, Lampros},
   title   = {{PV} \& {BESS} Optimizer: {MILP} dispatch and
-             project-finance pipeline for co-located {PV} + battery
+             project-finance pipeline for co-located {PV} and battery
              systems},
   version = {1.0.0},
   year    = {2026},
@@ -633,6 +633,15 @@ BibTeX:
 
 A [`CITATION.cff`](CITATION.cff) ships at the repository root, so
 GitHub's "Cite this repository" button serves the same metadata.
+
+## License
+
+© 2025-2026 Lampros Konstantellos. All rights reserved. The source is
+published for reading and for non-commercial academic evaluation only
+(peer review and the verification or reproduction of published
+results); reproduction, redistribution, modification, sublicensing,
+sale, or any other use requires the prior written consent of the
+copyright holder. See [LICENSE](LICENSE) for the exact terms.
 
 ## Development
 

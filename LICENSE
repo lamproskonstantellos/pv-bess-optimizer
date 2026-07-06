@@ -1,11 +1,22 @@
 Copyright © 2025-2026 Lampros Konstantellos. All Rights Reserved.
 
 This software and associated documentation files (the "Software") are
-the proprietary and confidential property of Lampros Konstantellos.
+the proprietary property of Lampros Konstantellos.
 
 No part of the Software may be reproduced, redistributed, modified,
 sublicensed, sold, or used in any form or by any means without the
 prior written consent of the copyright holder.
+
+Limited academic-evaluation permission. Viewing the source code and
+executing unmodified copies of the Software are permitted solely for
+non-commercial academic purposes (peer review and the verification or
+reproduction of published results), provided this copyright notice is
+retained. If the Software contributes to academic work, please cite it
+(see CITATION.cff). This permission grants no other right: any
+reproduction, redistribution, modification, sublicensing, sale, or
+other use of the Software remains reserved and requires the prior
+written consent of the copyright holder, and this permission may be
+revoked at any time.
 
 The Software is provided "AS IS", without warranty of any kind, express
 or implied. In no event shall the copyright holder be liable for any
