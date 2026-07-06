@@ -264,8 +264,6 @@ FINANCIAL_COLORS: dict[str, str] = {
     "capex":          "#C62828",  # Material red 800
     "devex":          "#8E44AD",  # Material purple
     "net":            "#1565C0",  # Material blue 800
-    "discounted":     "#6A1B9A",  # Material purple 800
-    "net_discounted": "#283593",  # Material indigo 800 (discounted net line)
     # Tornado halves (below / above base)
     "tornado_neg":    "#B71C1C",  # Material red 900
     "tornado_pos":    "#1B5E20",  # Material green 900
@@ -382,7 +380,6 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
-    "Cumulative NPV",
     "Net revenue",
     "Real net revenue",
     "Simple payback",
@@ -411,19 +408,22 @@ FINANCIAL_LABELS: tuple[str, ...] = (
 )
 
 
-# Each canonical label binds to a FINANCIAL_COLORS key.  Multiple
-# labels can share a key (e.g. the two cumulative-cashflow series
-# both read off ``net`` vs ``discounted`` consistently).
+# Each canonical label binds to a FINANCIAL_COLORS key.  The line
+# palette is a deliberate two-colour system, identical in every
+# figure: charcoal (``net_revenue_line``) for the undiscounted / net
+# series — including every net line overlaid on a bar stack, where
+# blue reads poorly against the saturated green/teal bars — and the
+# house blue (``net``) for their discounted companions.  Each payback
+# marker inherits the colour of the curve it belongs to.
 FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
-    "Net cash-flow":                    "net",
-    "Net cash-flow (discounted)":       "net_discounted",
-    "Cumulative cash-flow":             "net",
-    "Cumulative discounted cash-flow":  "discounted",
-    "Cumulative NPV":                   "discounted",
+    "Net cash-flow":                    "net_revenue_line",
+    "Net cash-flow (discounted)":       "net_revenue_line",
+    "Cumulative cash-flow":             "net_revenue_line",
+    "Cumulative discounted cash-flow":  "net",
     "Net revenue":                      "net_revenue_line",
     "Real net revenue":                 "net_revenue_line",
-    "Simple payback":                   "net",
-    "Discounted payback":               "discounted",
+    "Simple payback":                   "net_revenue_line",
+    "Discounted payback":               "net",
     "Revenue":                          "revenue",
     "Balancing revenue":                 "balancing_revenue",
     "OPEX":                             "opex",
@@ -454,7 +454,6 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
-    "Cumulative NPV",
     "Net revenue",
     "Real net revenue",
     "Simple payback",

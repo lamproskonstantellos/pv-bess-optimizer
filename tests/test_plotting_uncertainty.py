@@ -58,13 +58,20 @@ def test_apply_house_date_axis_emits_ddmmyyyy():
     ax.plot(t, np.arange(7))
     apply_house_date_axis(ax)
     fig.canvas.draw()
-    labels = [lbl.get_text() for lbl in ax.get_xticklabels() if lbl.get_text()]
+    ticklabels = [lbl for lbl in ax.get_xticklabels() if lbl.get_text()]
+    labels = [lbl.get_text() for lbl in ticklabels]
     assert labels, "no tick labels rendered"
     assert all(_DDMMYYYY.match(lbl) for lbl in labels), labels
     # The formatter must render a known date as DD-MM-YYYY.
     fmt = ax.xaxis.get_major_formatter()
     rendered = fmt(mdates.date2num(pd.Timestamp("2027-04-02")))
     assert rendered == "02-04-2027", rendered
+    # House rotation: rotated right-anchored like every other dense
+    # axis in the report (year, month and energy date axes).
+    from pvbess_opt.theme import XTICK_ROT
+    for lbl in ticklabels:
+        assert lbl.get_rotation() == float(XTICK_ROT)
+        assert lbl.get_horizontalalignment() == "right"
     plt.close(fig)
 
 

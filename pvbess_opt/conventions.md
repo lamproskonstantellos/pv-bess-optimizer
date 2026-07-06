@@ -119,6 +119,16 @@ the perfect-foresight MILP, so `seed profit <= pf profit` up to the
 solver's `mip_gap` slack and the PF marker sits at or above the upper
 tail of the Monte Carlo histogram.
 
+The slack itself is handled by **benchmark re-tightening**: the annual
+incumbent is only `mip_gap`-optimal while the 48 h windows solve
+near-exactly, so a stitched dispatch can land inside the incumbent's
+slack and read as a spurious negative gap.  `pipeline._run_one` then
+re-solves the benchmark at 10x tighter gaps (floor `1e-6`) until it is
+the best case, recomputes `foresight_gap_pct` and its percentiles
+against the final benchmark, and records the gap used as the
+`pf_benchmark_mip_gap` KPI.  Every downstream artifact uses the
+re-tightened solution.
+
 ## PPA stream scope
 
 The pay-as-produced PPA (`docs/ppa_design.md`) keeps one scope across

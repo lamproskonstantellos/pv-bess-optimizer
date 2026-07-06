@@ -233,9 +233,11 @@ def plot_cfe_duration_curve(res: pd.DataFrame, out_path: Path) -> Path:
         )
     ax.set_xlabel("Share of time (%)")
     ax.set_ylabel("Carbon-free share of load (%)")
+    # The share-of-time axis is a bounded 0-100 % scale: keep it edge to
+    # edge (skip_x) and pad only the y headroom above the curve.
     ax.set_xlim(0.0, 100.0)
     ax.set_ylim(0.0, 100.0)
-    apply_universal_margins(ax)
+    apply_universal_margins(ax, skip_x=True)
     if has_legend:
         legend_below(ax)
     return save_figure(out_path)

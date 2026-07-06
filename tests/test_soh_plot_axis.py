@@ -87,6 +87,7 @@ def test_soh_plot_axes_state_before_save(monkeypatch, tmp_path, replacement_year
     assert captured["xticks"], "no major x ticks captured"
     assert captured["xticks"] == [float(t) for t in range(2026, 2041)]
     assert not captured["xminor"], captured["xminor"]
-    # Operational frame (starts at Year 1): the WINDOW opens at Year 1
-    # with no empty Year-0 slot and closes snug after the final year.
-    assert captured["xlim"] == (2026 - 0.75, 2040 + 0.75)
+    # Operational frame (starts at Year 1): a line plot spans the year
+    # axis edge-to-edge — the window opens exactly at the first year and
+    # closes exactly at the final year (no empty half-slots).
+    assert captured["xlim"] == (2026.0, 2040.0)

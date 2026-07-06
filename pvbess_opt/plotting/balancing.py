@@ -100,7 +100,9 @@ def plot_balancing_reservation_profile(
             f"(Year-1 average)"
         )
     ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    apply_universal_margins(ax)
+    # Hour axis spans edge to edge (0..23), like every time axis in the
+    # report; pad only the y side.
+    apply_universal_margins(ax, skip_x=True)
     apply_fine_ticks(ax)
     legend_below(ax)
     return save_figure(Path(out_path))

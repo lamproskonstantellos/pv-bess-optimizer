@@ -93,10 +93,41 @@ zero forecast noise it reduces to the pure horizon-truncation cost
 full-year workbook, see below).  That bound is enforced at
 runtime: a seed whose profit exceeds
 ``pf_profit + 2 * mip_gap * |pf_profit| + 1 EUR`` triggers a prominent
-warning, or a hard error under ``--strict``.  The percentage formula
-assumes a positive benchmark; for a non-positive ``pf_profit`` the sign
-meaning inverts, a warning is emitted, and the absolute profit column
-should be read instead.
+warning, or a hard error under ``--strict``.  Within that slack, the
+pipeline removes the artifact automatically by re-solving the
+benchmark at a tighter gap (see the next section).  The percentage
+formula assumes a positive benchmark; for a non-positive ``pf_profit``
+the sign meaning inverts, a warning is emitted, and the absolute
+profit column should be read instead.
+
+Benchmark re-tightening: the best case stays the best case
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The benchmark incumbent returned by the annual MILP is only
+``mip_gap``-optimal: the solver stops as soon as the incumbent is
+within ``mip_gap`` (relative) of its best bound.  Each 48 h window, by
+contrast, is a small problem the solver closes essentially to
+optimality, so a stitched rolling-horizon dispatch can legitimately
+land *above* a loose year-long incumbent — by up to the solver slack —
+which would read as a spurious **negative** foresight gap even though
+nothing is wrong with the model.  Grid charging makes this visible in
+practice: the extra charge/discharge binaries make the annual MILP
+markedly harder, so its incumbent tends to sit further from the bound
+than the near-exact windows do.
+
+The pipeline therefore enforces the best-case property directly.
+After the Monte Carlo ensemble completes, if any realisation's profit
+exceeds the benchmark, the benchmark MILP is re-solved at a 10x
+tighter ``mip_gap`` (repeating, down to a floor of ``1e-6``) until it
+is the best case again.  The foresight-gap column and the percentile
+KPIs are then recomputed against the final benchmark, and every
+downstream artifact — the financial model, ``03_results.xlsx``, and
+all plots — uses the re-tightened solution.  The gap actually used is
+recorded as the ``pf_benchmark_mip_gap`` KPI and each re-solve is
+logged in ``run_log.txt``.  In the unlikely event that a realisation
+still exceeds the benchmark at the floor, the residual difference is
+reported as a warning and the slightly negative gap is left visible
+rather than masked.
 
 Validation of the observed gap magnitude
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -211,7 +242,9 @@ Output artifacts
 * New KPI keys (only populated when ``--rolling-horizon`` is active):
   ``foresight_gap_pct_p50``, ``foresight_gap_pct_p10``,
   ``foresight_gap_pct_p90``, ``mc_n_seeds``, ``mc_window_hours``,
-  ``mc_commit_hours``.
+  ``mc_commit_hours``, and ``pf_benchmark_mip_gap`` (the ``mip_gap``
+  the perfect-foresight benchmark was finally solved at — tighter than
+  the configured value when the re-tightening guard fired).
 
 Limitations
 -----------

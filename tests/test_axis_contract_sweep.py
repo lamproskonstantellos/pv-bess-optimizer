@@ -186,10 +186,14 @@ def _capture(module, fn):
     return fig
 
 
-def _assert_year_axis(ax, *, year0: int, last: int, first_data: int) -> None:
+def _assert_year_axis(
+    ax, *, year0: int, last: int, first_data: int, pad: float,
+) -> None:
+    """House contract: line plots span edge-to-edge (pad 0.0); bar plots
+    keep half a slot so the first/last bar bodies are not clipped."""
     ticks = list(ax.get_xticks())
     assert ticks == [float(t) for t in range(first_data, last + 1)], ticks
-    assert ax.get_xlim() == (first_data - 0.75, last + 0.75)
+    assert ax.get_xlim() == (first_data - pad, last + pad)
     for t in ax.get_xticklabels():
         assert t.get_rotation() == pytest.approx(float(XTICK_ROT))
         assert t.get_horizontalalignment() == "right"
@@ -205,7 +209,7 @@ def _assert_month_axis(ax, *, year: int, positions: np.ndarray) -> None:
     for t in ax.get_xticklabels():
         assert t.get_rotation() == pytest.approx(float(XTICK_ROT))
         assert t.get_horizontalalignment() == "right"
-    assert ax.get_xlim() == (positions.min() - 0.75, positions.max() + 0.75)
+    assert ax.get_xlim() == (positions.min() - 0.5, positions.max() + 0.5)
 
 
 def _assert_legend_clear(ax) -> None:
@@ -238,43 +242,46 @@ def test_year_axis_contract_all_plots(tmp_path, start_year, n_years):
     year0, last = start_year - 1, start_year - 1 + n_years
     kpis = _year1_kpis()
 
+    # pad 0.0 = line plot (edge-to-edge); pad 0.5 = bar plot (half slot).
     cashflow_cases = [
-        (fin_mod, lambda: fin_mod.plot_cumulative_cashflow(
+        (fin_mod, 0.0, lambda: fin_mod.plot_cumulative_cashflow(
             cf, tmp_path / "cum.pdf")),
-        (fin_mod, lambda: fin_mod.plot_yearly_cashflow_bars(
+        (fin_mod, 0.5, lambda: fin_mod.plot_yearly_cashflow_bars(
             cf, tmp_path / "bars.pdf")),
-        (fin_mod, lambda: fin_mod.plot_npv_waterfall(
+        (fin_mod, 0.5, lambda: fin_mod.plot_npv_waterfall(
             cf, tmp_path / "npv.pdf")),
-        (fin_mod, lambda: fin_mod.plot_payback(
+        (fin_mod, 0.0, lambda: fin_mod.plot_payback(
             cf, tmp_path / "pb.pdf",
             simple_payback_years=min(6.4, n_years - 0.5),
             discounted_payback_years=float("nan"))),
     ]
     operational_cases = [
-        (life_mod, lambda: life_mod.plot_revenue_stack_yearly(
+        (life_mod, 0.5, lambda: life_mod.plot_revenue_stack_yearly(
             cf, kpis, tmp_path / "stack.pdf", econ={})),
-        (life_mod, lambda: life_mod.plot_lifetime_cycles(
+        (life_mod, 0.5, lambda: life_mod.plot_lifetime_cycles(
             _lifetime_yearly(start_year, n_years), 60_000.0,
             tmp_path / "cyc.pdf")),
-        (yearly_mod, lambda: yearly_mod.plot_lifetime_summary(
+        (yearly_mod, 0.0, lambda: yearly_mod.plot_lifetime_summary(
             _lifetime_yearly(start_year, n_years), tmp_path / "sum.pdf")),
-        (deg_mod, lambda: deg_mod.plot_soh_trajectory(
+        (deg_mod, 0.0, lambda: deg_mod.plot_soh_trajectory(
             _soh_frame(start_year, n_years), tmp_path / "soh.pdf")),
     ]
 
-    for module, fn in cashflow_cases:
+    for module, pad, fn in cashflow_cases:
         plt.close("all")
         fig = _capture(module, fn)
         ax = fig.axes[0]
-        _assert_year_axis(ax, year0=year0, last=last, first_data=year0)
+        _assert_year_axis(ax, year0=year0, last=last, first_data=year0, pad=pad)
         _assert_legend_clear(ax)
         plt.close(fig)
 
-    for module, fn in operational_cases:
+    for module, pad, fn in operational_cases:
         plt.close("all")
         fig = _capture(module, fn)
         ax = fig.axes[0]
-        _assert_year_axis(ax, year0=year0, last=last, first_data=year0 + 1)
+        _assert_year_axis(
+            ax, year0=year0, last=last, first_data=year0 + 1, pad=pad,
+        )
         _assert_legend_clear(ax)
         plt.close(fig)
 

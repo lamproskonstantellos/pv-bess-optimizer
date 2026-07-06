@@ -649,7 +649,9 @@ def apply_month_axis(ax, positions, months, year: int | None = None) -> None:
     ]
     ax.set_xticks(positions)
     ax.set_xticklabels(labels, rotation=XTICK_ROT, ha="right")
-    ax.set_xlim(positions.min() - 0.75, positions.max() + 0.75)
+    # Half a slot each side: the tightest categorical window that does
+    # not clip the outer bars, mirroring the shared year axis.
+    ax.set_xlim(positions.min() - 0.5, positions.max() + 0.5)
 
 
 def apply_fine_ticks(

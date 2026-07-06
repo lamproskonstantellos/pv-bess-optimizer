@@ -143,7 +143,9 @@ def plot_input_forecast_band(
             ax.set_title(
                 f"Forecast envelope, week starting DOY {week_start_doy}"
             )
-        apply_universal_margins(ax)
+        # Date axis spans the data edge to edge, like the energy plots.
+        apply_universal_margins(ax, skip_x=True)
+        ax.set_xlim(t.iloc[0], t.iloc[-1])
         legend_below(ax)
         written.append(save_figure(_per_source_path(out_path, col)))
     return written
@@ -329,7 +331,12 @@ def plot_uncertainty_coverage_by_horizon(
     commit_steps: int = 96,
     base_seed: int = 42,
 ) -> Path:
-    """Empirical P10–P90 coverage vs horizon hour, one line per source."""
+    """Empirical P10–P90 coverage vs horizon hour, one line per source.
+
+    margins: delegated — both windows are pinned deliberately: the
+    probability axis keeps its bounded 0..1.05 scale with fixed ticks,
+    and the horizon axis spans the commit window edge to edge.
+    """
     out_path = Path(out_path)
     sigmas = {"dam": sigma_dam, "pv": sigma_pv, "load": sigma_load}
     panels = _diagnostic_panels(ts, sigmas)
@@ -368,7 +375,8 @@ def plot_uncertainty_coverage_by_horizon(
     if show_titles():
         ax.set_title("P10-P90 coverage by forecast horizon")
     ax.grid(True, linestyle="--", alpha=0.5)
-    apply_universal_margins(ax, skip_y=True)
+    # Horizon axis spans the commit window edge to edge.
+    ax.set_xlim(0.0, float(commit_steps - 1) * dt_h)
     legend_below(ax)
     return save_figure(out_path)
 
@@ -412,6 +420,8 @@ def plot_uncertainty_pit_histogram(
         if show_titles():
             ax.set_title("Probability integral transform (flat = calibrated)")
         apply_universal_margins(ax, skip_x=True)
+        # The PIT support is exactly [0, 1]; the bins span it fully.
+        ax.set_xlim(0.0, 1.0)
         legend_below(ax)
         written.append(save_figure(_per_source_path(out_path, col)))
     return written
@@ -460,7 +470,9 @@ def plot_uncertainty_crps_timeline(
         apply_house_date_axis(ax)
         if show_titles():
             ax.set_title("Step-wise CRPS over the forecast band")
-        apply_universal_margins(ax)
+        # Date axis spans the data edge to edge, like the energy plots.
+        apply_universal_margins(ax, skip_x=True)
+        ax.set_xlim(t.iloc[0], t.iloc[-1])
         legend_below(ax)
         written.append(save_figure(_per_source_path(out_path, col)))
     return written

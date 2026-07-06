@@ -171,6 +171,52 @@ Production release.
   `dam_intraday_heatmap` were already single-panel and are unchanged.
   The per-source writers return the list of written paths.
 
+### Changed (overlay-line contrast and naming)
+
+- The line palette is a two-colour system, identical in every figure:
+  charcoal for undiscounted / net series (the net lines overlaid on
+  the monthly / yearly cashflow bars and the NPV waterfall — where
+  blue read poorly against the saturated stacks — plus the cumulative
+  undiscounted curve and the simple-payback marker) and the house
+  blue for their discounted companions (cumulative discounted curve,
+  discounted-payback marker).  The separate purple `discounted` and
+  indigo `net_discounted` palette keys are retired.
+- The NPV waterfall's cumulative line is labelled `Cumulative
+  discounted cash-flow` — it is the identical series (cumsum of the
+  discounted net) the cumulative-cashflow figure plots under that
+  name, so the two figures now share one label; the redundant
+  `Cumulative NPV` label is retired from the palette registry.
+
+### Changed (edge-to-edge axis windows)
+
+- Line and time plots across the financial and uncertainty families
+  span their x axis edge to edge, matching the energy plots: the
+  cumulative cashflow, payback, SOH trajectory and lifetime summary
+  drop the half-slot side gaps of the shared year axis (bar charts
+  keep half a slot so the first/last bar bodies are not clipped, now
+  0.5 instead of 0.75), the month axis tightens to half a slot per
+  side, the balancing reservation profile pins its exact 0-23 hour
+  window, the forecast band and CRPS timelines start and end on their
+  first/last timestamps, the coverage-by-horizon axis spans the commit
+  window exactly, and the PIT histogram pins the probability axis to
+  0-1.  The uncertainty family's date ticks rotate right-anchored like
+  the energy plots' date axes (they were horizontal and could crowd on
+  year-long timelines).
+
+### Fixed (perfect-foresight benchmark re-tightening)
+
+- The rolling-horizon foresight gap can no longer read negative merely
+  because the annual benchmark stopped at its ``mip_gap``: when any
+  Monte Carlo realisation's profit exceeds the perfect-foresight
+  incumbent (the realisation is PF-feasible, so this is solver slack,
+  not model error), the pipeline re-solves the benchmark at 10x
+  tighter gaps (down to 1e-6) until it is the best case, recomputes
+  the ``foresight_gap_pct`` column and its percentiles against the
+  final benchmark, and uses the re-tightened solution for every
+  downstream artifact.  The gap actually used is recorded as the new
+  ``pf_benchmark_mip_gap`` KPI and each re-solve is logged in
+  ``run_log.txt``.
+
 ### Fixed (final pre-release audit)
 
 - Regulatory framing is fully neutral: remaining country-specific

@@ -92,3 +92,8 @@ Rolling-horizon metrics (only when ``--rolling-horizon`` is active)
 * ``foresight_gap_pct_p10`` / ``foresight_gap_pct_p50`` /
   ``foresight_gap_pct_p90``: Monte Carlo distribution percentiles.
 * ``mc_n_seeds`` / ``mc_window_hours`` / ``mc_commit_hours``.
+* ``pf_benchmark_mip_gap``: the ``mip_gap`` the perfect-foresight
+  benchmark was finally solved at.  Tighter than the configured value
+  when a Monte Carlo realisation beat the initial incumbent and the
+  pipeline re-solved the benchmark so it remains the best case (see the
+  rolling-horizon guide).

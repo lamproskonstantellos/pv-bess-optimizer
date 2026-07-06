@@ -498,6 +498,6 @@ def plot_lifetime_summary(
         )
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax)
-    _integer_year_axis(ax, x)
+    _integer_year_axis(ax, x, bars=False)
     legend_below(ax)
     save_figure(out_path)

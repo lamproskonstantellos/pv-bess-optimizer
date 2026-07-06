@@ -122,10 +122,15 @@ Every seed's stitched dispatch is feasible for the PF MILP (same
 constraints incl. the year-close SOC pin), so
 $\Pi^{\mathrm{RH}}_i \le \Pi^{\mathrm{PF}}$ up to `mip_gap` slack:
 the gap is non-negative within solver tolerance and the PF marker
-sits at or above the MC histogram's upper tail.  Output frame: one
-row per seed (`profit_total_eur`, grid import/export MWh, curtailed
-MWh, BESS cycles, `foresight_gap_pct`); the pipeline reports P10/P50/
-P90 (`foresight_gap_pct_p50` etc.) and writes the
+sits at or above the MC histogram's upper tail.  The slack case is
+handled, not tolerated: if any realisation beats the incumbent, the
+pipeline re-solves the PF benchmark at 10x tighter gaps (floor
+`1e-6`) until it is the best case, recomputes the gap column and
+percentiles against the final benchmark, and records the gap used as
+`pf_benchmark_mip_gap` (see `pvbess_opt/conventions.md`).  Output
+frame: one row per seed (`profit_total_eur`, grid import/export MWh,
+curtailed MWh, BESS cycles, `foresight_gap_pct`); the pipeline
+reports P10/P50/P90 (`foresight_gap_pct_p50` etc.) and writes the
 `rolling_horizon_mc` sheet.
 
 ### Four-source comparison
