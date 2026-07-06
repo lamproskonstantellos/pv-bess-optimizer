@@ -145,6 +145,19 @@ Production release.
   gallery figures, the workbook-pinned smoke KPIs and every doc
   quoting the case study are regenerated/updated accordingly.
 
+### Changed (citation and license polish)
+
+- The citation strings (README plain + BibTeX, CITATION.cff title)
+  read "co-located PV and battery systems" instead of "PV + battery";
+  CITATION.cff carries a `license-url` pointing at the shipped
+  LICENSE.
+- The LICENSE adds an explicit limited academic-evaluation permission
+  (viewing and executing unmodified copies solely for non-commercial
+  peer review and the verification or reproduction of published
+  results, citation requested) while every other right stays reserved;
+  the README gains a License section and the docs license page mirrors
+  the summary.
+
 ### Changed (single-panel uncertainty figures)
 
 - The multi-panel uncertainty figures are split into one figure per
