@@ -145,6 +145,19 @@ Production release.
   gallery figures, the workbook-pinned smoke KPIs and every doc
   quoting the case study are regenerated/updated accordingly.
 
+### Changed (single-panel uncertainty figures)
+
+- The multi-panel uncertainty figures are split into one figure per
+  source so the whole report shares a single canvas and styling
+  contract: `inputs_forecast_band`, `inputs_seasonal_boxplot`,
+  `pit_histogram`, `crps_timeline` and `residual_qq` now write
+  `_dam` / `_pv` / `_load` variants (the `load` variant only when the
+  timeseries carries `load_kwh`), each on the standard 7x4 canvas
+  with its own x label, full tick styling and the house
+  below-the-axes legend.  `coverage_by_horizon` and
+  `dam_intraday_heatmap` were already single-panel and are unchanged.
+  The per-source writers return the list of written paths.
+
 ### Fixed (final pre-release audit)
 
 - Regulatory framing is fully neutral: remaining country-specific

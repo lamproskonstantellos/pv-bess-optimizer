@@ -301,10 +301,8 @@ def test_month_axis_contract_all_plots(tmp_path, start_year):
     plt.close("all")
     fig = _capture(unc_mod, lambda: unc_mod.plot_input_seasonal_boxplot(
         _input_ts(start_year), tmp_path / "box.pdf"))
-    bottom = fig.axes[-1]
-    _assert_month_axis(bottom, year=start_year, positions=np.arange(1, 13))
-    # Upper panels: blank labels, identical window (aligned columns).
-    for ax in fig.axes[:-1]:
-        assert all(t.get_text() == "" for t in ax.get_xticklabels())
-        assert ax.get_xlim() == bottom.get_xlim()
+    # One single-panel figure per source; every figure carries the full
+    # house month axis (the captured figure is the last source's).
+    assert len(fig.axes) == 1
+    _assert_month_axis(fig.axes[0], year=start_year, positions=np.arange(1, 13))
     plt.close(fig)
