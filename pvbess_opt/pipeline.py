@@ -941,6 +941,12 @@ def _project_mode_label(params: dict[str, Any]) -> str:
     return ""
 
 
+#: Tightest mip_gap the perfect-foresight benchmark guard will re-solve
+#: at.  Starting from the configured gap and dividing by 10 per pass,
+#: the default 0.001 allows at most three re-solves (1e-4, 1e-5, 1e-6)
+#: before the guard gives up and logs the residual negative gap.
+_PF_BENCHMARK_GAP_FLOOR = 1e-6
+
 _COMPARE_SOURCE_FLAGS: tuple[tuple[str, bool, bool, bool], ...] = (
     ("dam", True, False, False),
     ("pv", False, True, False),
@@ -1079,68 +1085,82 @@ def _run_one(
         print(f"[io] output dir: {out_dir.resolve()}")
 
         # Perfect-foresight base run (also serves as the rolling-horizon
-        # benchmark when --rolling-horizon is on).
-        res, resolved_solver, res_full = run_scenario(
-            params, ts, solver_name=config.solver,
-            mip_gap=config.mip_gap, time_limit_seconds=config.time_limit,
-            tee=config.tee, return_unrounded=True,
-        )
-        # Verify on the full-precision frame so the sum-based invariant_4
-        # is not tripped by round(4) accumulation; KPIs / output use res.
-        residuals = verify_energy_balance(
-            res_full, params, raise_on_failure=False,
-        )
-        print(
-            f"[verify] solver={resolved_solver}  residuals(kWh): "
-            + ", ".join(f"{k}={v:.3g}" for k, v in residuals.items())
-        )
-        if config.strict:
-            _check_strict_energy_balance(residuals)
-
-        invariants = verify_dispatch_invariants(
-            res_full, params, mode=resolve_mode(params),
-        )
-        print(
-            "[invariants] "
-            + ", ".join(f"{k}={v:.3g}" for k, v in invariants.items())
-        )
-        if config.strict:
-            _check_strict_invariants(invariants)
-
-        kpis = compute_kpis(res, params, verify_balance=False)
-        # Post-solve unavailability derate.  Multiplies a
-        # curated set of MWh / EUR keys by (1 - unavailability_pct/100).
-        kpis = apply_unavailability_derate(
-            kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
-        )
-        _emit_bess_utilisation_audit(kpis, params)
-        kpis_monthly = compute_monthly_kpis(res)
-
-        # Balancing-revenue Monte Carlo realisation (P10/P50/P90 + the
-        # per-product breakdowns + the distribution plot input).  The
-        # README's output reference promises this alongside the
-        # reservation profile; both no-op when the balancing block did
-        # not fire.  Sharing kpis['availability_factor'] keeps the
-        # distribution in the same derated scope as the bm_* KPIs.
-        bm_mc: dict[str, Any] = {}
-        if bool(params.get("balancing", {}).get("balancing_enabled", False)):
-            bm_cfg = resolve_balancing_config(params.get("balancing") or {})
-            bm_mc = monte_carlo_balancing(
-                res, params,
-                n_scenarios=int(bm_cfg.bm_mc_scenarios),
-                availability_factor=float(
-                    kpis.get("availability_factor", 1.0)
-                ),
+        # benchmark when --rolling-horizon is on).  Wrapped in a helper
+        # because the rolling-horizon guard further down may repeat it at
+        # a tighter mip_gap: the incumbent returned at the configured gap
+        # can sit below a stitched rolling-horizon dispatch (which is
+        # PF-feasible), and the benchmark must remain the best case.
+        def _solve_perfect_foresight(mip_gap: float) -> tuple[
+            pd.DataFrame, str, dict[str, Any], pd.DataFrame, dict[str, Any],
+        ]:
+            res, resolved_solver, res_full = run_scenario(
+                params, ts, solver_name=config.solver,
+                mip_gap=mip_gap, time_limit_seconds=config.time_limit,
+                tee=config.tee, return_unrounded=True,
             )
-            kpis.update({
-                key: value for key, value in bm_mc.items()
-                if key != "bm_mc_total_realised_eur"
-            })
+            # Verify on the full-precision frame so the sum-based
+            # invariant_4 is not tripped by round(4) accumulation; KPIs /
+            # output use res.
+            residuals = verify_energy_balance(
+                res_full, params, raise_on_failure=False,
+            )
+            print(
+                f"[verify] solver={resolved_solver}  residuals(kWh): "
+                + ", ".join(f"{k}={v:.3g}" for k, v in residuals.items())
+            )
+            if config.strict:
+                _check_strict_energy_balance(residuals)
+
+            invariants = verify_dispatch_invariants(
+                res_full, params, mode=resolve_mode(params),
+            )
+            print(
+                "[invariants] "
+                + ", ".join(f"{k}={v:.3g}" for k, v in invariants.items())
+            )
+            if config.strict:
+                _check_strict_invariants(invariants)
+
+            kpis = compute_kpis(res, params, verify_balance=False)
+            # Post-solve unavailability derate.  Multiplies a
+            # curated set of MWh / EUR keys by (1 - unavailability_pct/100).
+            kpis = apply_unavailability_derate(
+                kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
+            )
+            _emit_bess_utilisation_audit(kpis, params)
+            kpis_monthly = compute_monthly_kpis(res)
+
+            # Balancing-revenue Monte Carlo realisation (P10/P50/P90 + the
+            # per-product breakdowns + the distribution plot input).  The
+            # README's output reference promises this alongside the
+            # reservation profile; both no-op when the balancing block did
+            # not fire.  Sharing kpis['availability_factor'] keeps the
+            # distribution in the same derated scope as the bm_* KPIs.
+            bm_mc: dict[str, Any] = {}
+            if bool(params.get("balancing", {}).get("balancing_enabled", False)):
+                bm_cfg = resolve_balancing_config(params.get("balancing") or {})
+                bm_mc = monte_carlo_balancing(
+                    res, params,
+                    n_scenarios=int(bm_cfg.bm_mc_scenarios),
+                    availability_factor=float(
+                        kpis.get("availability_factor", 1.0)
+                    ),
+                )
+                kpis.update({
+                    key: value for key, value in bm_mc.items()
+                    if key != "bm_mc_total_realised_eur"
+                })
+            return res, resolved_solver, kpis, kpis_monthly, bm_mc
+
+        res, resolved_solver, kpis, kpis_monthly, bm_mc = (
+            _solve_perfect_foresight(config.mip_gap)
+        )
 
         # Optional rolling-horizon run (writes its KPIs alongside the
         # perfect-foresight benchmark for comparison).
         rolling_mc_df: pd.DataFrame | None = None
         rolling_compare_df: pd.DataFrame | None = None
+        rh_det_profit: float | None = None
         if unc_cfg["enabled"]:
             # Headline (unavailability-derated) Year-1 profit.  The
             # rolling-horizon KPIs carry the identical derate (see
@@ -1181,12 +1201,7 @@ def _run_one(
                     )
                     sub.insert(0, "source_set", src)
                     ensembles.append(sub)
-                    p50 = float(sub["foresight_gap_pct"].quantile(0.50))
-                    kpis[f"foresight_gap_pct_p50_{src}"] = float(round(p50, 4))
                 rolling_compare_df = pd.concat(ensembles, ignore_index=True)
-                kpis["mc_n_seeds"] = int(n_seeds)
-                kpis["mc_window_hours"] = int(window_h)
-                kpis["mc_commit_hours"] = int(commit_h)
             elif n_seeds > 0:
                 print(
                     f"[rolling] running {n_seeds} MC seeds "
@@ -1212,13 +1227,6 @@ def _run_one(
                     time_limit_seconds=config.time_limit,
                     tee=config.tee,
                 )
-                gap_p = rolling_mc_df["foresight_gap_pct"].quantile([0.10, 0.50, 0.90])
-                kpis["foresight_gap_pct_p10"] = float(round(gap_p.loc[0.10], 4))
-                kpis["foresight_gap_pct_p50"] = float(round(gap_p.loc[0.50], 4))
-                kpis["foresight_gap_pct_p90"] = float(round(gap_p.loc[0.90], 4))
-                kpis["mc_n_seeds"] = int(n_seeds)
-                kpis["mc_window_hours"] = int(window_h)
-                kpis["mc_commit_hours"] = int(commit_h)
             else:
                 # Single deterministic noiseless rolling horizon.
                 _rh_full, rh_kpis = rolling_horizon_dispatch(
@@ -1232,9 +1240,85 @@ def _run_one(
                     time_limit_seconds=config.time_limit,
                     tee=config.tee,
                 )
-                kpis["rolling_horizon_profit_eur"] = float(
-                    rh_kpis.get("profit_total_eur", 0.0)
+                rh_det_profit = float(rh_kpis.get("profit_total_eur", 0.0))
+
+            # ---- Perfect-foresight benchmark guard ----------------------
+            # A stitched rolling-horizon dispatch is PF-feasible, so no
+            # realisation can legitimately beat the true PF optimum -- but
+            # the benchmark incumbent above is only mip_gap-optimal, and a
+            # realisation landing inside that slack reads as a spurious
+            # NEGATIVE foresight gap.  When that happens, re-solve the
+            # benchmark at progressively tighter gaps (x0.1 per pass, down
+            # to _PF_BENCHMARK_GAP_FLOOR) until it is the best case, then
+            # recompute the gap column and KPIs against the final
+            # benchmark.  All downstream artifacts (financials, results
+            # workbook, plots) use the retightened solution.
+            rh_profits = [
+                float(frame["profit_total_eur"].max())
+                for frame in (rolling_mc_df, rolling_compare_df)
+                if frame is not None and len(frame)
+            ]
+            if rh_det_profit is not None:
+                rh_profits.append(rh_det_profit)
+            best_rh = max(rh_profits) if rh_profits else float("-inf")
+            pf_gap_used = float(config.mip_gap or 0.001)
+            while (
+                pf_profit_eur > 0.0
+                and best_rh > pf_profit_eur
+                and pf_gap_used > _PF_BENCHMARK_GAP_FLOOR
+            ):
+                pf_gap_used = max(pf_gap_used / 10.0, _PF_BENCHMARK_GAP_FLOOR)
+                print(
+                    f"[rolling] best rolling-horizon profit {best_rh:,.2f} "
+                    f"EUR exceeds the perfect-foresight incumbent "
+                    f"{pf_profit_eur:,.2f} EUR (solver tolerance, not a "
+                    f"model error) -- re-solving the benchmark at "
+                    f"mip_gap={pf_gap_used:g}"
                 )
+                res, resolved_solver, kpis, kpis_monthly, bm_mc = (
+                    _solve_perfect_foresight(pf_gap_used)
+                )
+                pf_profit_eur = float(kpis.get("profit_total_eur", 0.0))
+            if best_rh > pf_profit_eur > 0.0:
+                logger.warning(
+                    "rolling-horizon: best realisation %.2f EUR still "
+                    "exceeds the perfect-foresight benchmark %.2f EUR after "
+                    "tightening to mip_gap=%g; the residual negative gap "
+                    "(%.4f%%) is within solver tolerance.",
+                    best_rh, pf_profit_eur, pf_gap_used,
+                    100.0 * (1.0 - best_rh / pf_profit_eur),
+                )
+            kpis["pf_benchmark_mip_gap"] = float(pf_gap_used)
+
+            # Gap columns + KPI percentiles against the final benchmark.
+            for frame in (rolling_mc_df, rolling_compare_df):
+                if frame is not None and len(frame):
+                    if abs(pf_profit_eur) > 1e-9:
+                        frame["foresight_gap_pct"] = 100.0 * (
+                            1.0 - frame["profit_total_eur"] / pf_profit_eur
+                        )
+                    else:
+                        frame["foresight_gap_pct"] = float("nan")
+            if rolling_compare_df is not None:
+                for src, _en_dam, _en_pv, _en_load in _COMPARE_SOURCE_FLAGS:
+                    p50 = float(
+                        rolling_compare_df.loc[
+                            rolling_compare_df["source_set"] == src,
+                            "foresight_gap_pct",
+                        ].quantile(0.50)
+                    )
+                    kpis[f"foresight_gap_pct_p50_{src}"] = float(round(p50, 4))
+            elif rolling_mc_df is not None:
+                gap_p = rolling_mc_df["foresight_gap_pct"].quantile([0.10, 0.50, 0.90])
+                kpis["foresight_gap_pct_p10"] = float(round(gap_p.loc[0.10], 4))
+                kpis["foresight_gap_pct_p50"] = float(round(gap_p.loc[0.50], 4))
+                kpis["foresight_gap_pct_p90"] = float(round(gap_p.loc[0.90], 4))
+            if n_seeds > 0:
+                kpis["mc_n_seeds"] = int(n_seeds)
+                kpis["mc_window_hours"] = int(window_h)
+                kpis["mc_commit_hours"] = int(commit_h)
+            if rh_det_profit is not None:
+                kpis["rolling_horizon_profit_eur"] = rh_det_profit
 
         bundle = _build_financials(
             Path(config.excel), params, ts, kpis, res,

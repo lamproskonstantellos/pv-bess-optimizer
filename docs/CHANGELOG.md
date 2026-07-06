@@ -203,6 +203,20 @@ Production release.
   the energy plots' date axes (they were horizontal and could crowd on
   year-long timelines).
 
+### Fixed (perfect-foresight benchmark re-tightening)
+
+- The rolling-horizon foresight gap can no longer read negative merely
+  because the annual benchmark stopped at its ``mip_gap``: when any
+  Monte Carlo realisation's profit exceeds the perfect-foresight
+  incumbent (the realisation is PF-feasible, so this is solver slack,
+  not model error), the pipeline re-solves the benchmark at 10x
+  tighter gaps (down to 1e-6) until it is the best case, recomputes
+  the ``foresight_gap_pct`` column and its percentiles against the
+  final benchmark, and uses the re-tightened solution for every
+  downstream artifact.  The gap actually used is recorded as the new
+  ``pf_benchmark_mip_gap`` KPI and each re-solve is logged in
+  ``run_log.txt``.
+
 ### Fixed (final pre-release audit)
 
 - Regulatory framing is fully neutral: remaining country-specific
