@@ -125,9 +125,14 @@ near-exactly, so a stitched dispatch can land inside the incumbent's
 slack and read as a spurious negative gap.  `pipeline._run_one` then
 re-solves the benchmark at 10x tighter gaps (floor `1e-6`) until it is
 the best case, recomputes `foresight_gap_pct` and its percentiles
-against the final benchmark, and records the gap used as the
-`pf_benchmark_mip_gap` KPI.  Every downstream artifact uses the
-re-tightened solution.
+against the final benchmark, and records the gap of the solve that
+produced the final benchmark as the `pf_benchmark_mip_gap` KPI.  Every
+downstream artifact uses the re-tightened solution.  A re-solve is
+accepted only if it improves the incumbent: when the `--time-limit`
+terminates the search, a deterministic solver returns the identical
+incumbent at any requested gap, so the guard keeps the previous
+benchmark after one unimproved probe and advises a higher time limit
+or a faster solver instead of burning the limit repeatedly.
 
 ## PPA stream scope
 

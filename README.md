@@ -323,7 +323,10 @@ if any realisation lands above the benchmark incumbent (inside its
 is the best case, the gap column and percentiles are recomputed, and
 the gap used is reported as the `pf_benchmark_mip_gap` KPI — so the
 perfect-foresight marker bounds the distribution from above (see
-`pvbess_opt/conventions.md`). Balancing
+`pvbess_opt/conventions.md`). The escalation stops after one
+unimproved re-solve — an identical incumbent means the `--time-limit`
+terminated the search, and the log then advises a higher limit or a
+faster solver instead of repeating it. Balancing
 capacity / activation prices are perturbed separately by
 `pvbess_opt.rolling_horizon.monte_carlo_balancing`.
 
