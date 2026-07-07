@@ -33,6 +33,16 @@ Production release.
 
 ### Fixed
 
+- Rolling-horizon window solves are decoupled from the benchmark's
+  requested `mip_gap`: they floor their gap at `1e-3` (never tighter,
+  even when the benchmark is solved to `1e-5` for a publication) and
+  cap their per-solve time.  A 48 h window finds its near-optimal
+  incumbent in under a second but can then spend minutes merely
+  *proving* a tight gap that does not change the committed schedule,
+  and an ensemble runs thousands of window solves; since each window is
+  re-priced against the noise-free actuals only the schedule matters,
+  not the proof.  For default runs (benchmark gap `1e-3`) the floor is
+  a no-op and windows are unchanged.
 - The run records the benchmark's PROVEN optimality gap, not just the
   requested one: `--mip-gap` is a target that competes with
   `--time-limit`, and on a hard year-scale grid-charging MILP the time

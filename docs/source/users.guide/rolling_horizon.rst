@@ -163,6 +163,18 @@ value of perfect information, accurate to within that achieved gap; the
 true optimum is bracketed by ``[incumbent, incumbent × (1 + achieved
 gap)]``.
 
+Only the **benchmark** carries the tight ``--mip-gap``.  The 48 h
+rolling-horizon window solves are decoupled: they floor their gap at
+``1e-3`` (never tighter, even when the benchmark is) and cap their
+per-solve time.  A window finds its near-optimal incumbent in well
+under a second but can then spend minutes merely *proving* a 1e-5 gap
+that does not change the committed schedule — and each ensemble runs
+thousands of window solves.  Because every window is re-priced against
+the noise-free actuals, only the schedule matters, not the proof, so
+the floor changes the measured gap negligibly while keeping the run
+tractable.  For default runs (benchmark gap ``1e-3``) the floor is a
+no-op and windows are unchanged.
+
 Validation of the observed gap magnitude
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
