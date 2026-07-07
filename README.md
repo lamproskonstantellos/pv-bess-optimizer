@@ -333,7 +333,11 @@ perfect-foresight marker bounds the distribution from above (see
 `pvbess_opt/conventions.md`). The escalation stops after one
 unimproved re-solve — an identical incumbent means the `--time-limit`
 terminated the search, and the log then advises a higher limit or a
-faster solver instead of repeating it. Balancing
+faster solver instead of repeating it. `--mip-gap` is a requested
+target, not a guarantee (the time limit can bind first), so the run
+records both `pf_benchmark_mip_gap` (requested) and
+`pf_benchmark_gap_achieved` (what the solver actually proved — the
+number to quote in a publication). Balancing
 capacity / activation prices are perturbed separately by
 `pvbess_opt.rolling_horizon.monte_carlo_balancing`.
 

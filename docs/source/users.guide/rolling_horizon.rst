@@ -144,6 +144,37 @@ is to avoid the escalation entirely by solving the benchmark tightly
 up front, e.g. ``--solver gurobi --mip-gap 1e-4`` with a generous
 time limit.
 
+Requested versus proven gap
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``--mip-gap`` is a **target**, not a guarantee: it competes with
+``--time-limit``, and whichever fires first stops the solve.  On a hard
+year-scale grid-charging MILP the time limit usually binds first, so
+the solver returns with a gap looser than requested — e.g. asking for
+``1e-5`` but stopping at ``5e-4`` when the 30-minute limit ends the
+search.  The run records BOTH numbers so the distinction is explicit:
+``pf_benchmark_mip_gap`` is what was requested, and
+``pf_benchmark_gap_achieved`` is what the solver actually proved (the
+same relative gap it prints in its own log).  **A publication should
+quote the achieved gap** as the benchmark's certified optimality.
+Because the incumbent can only understate the true optimum, the
+reported foresight gap is a conservative (lower-bound) estimate of the
+value of perfect information, accurate to within that achieved gap; the
+true optimum is bracketed by ``[incumbent, incumbent × (1 + achieved
+gap)]``.
+
+Only the **benchmark** carries the tight ``--mip-gap``.  The 48 h
+rolling-horizon window solves are decoupled: they floor their gap at
+``1e-3`` (never tighter, even when the benchmark is) and cap their
+per-solve time.  A window finds its near-optimal incumbent in well
+under a second but can then spend minutes merely *proving* a 1e-5 gap
+that does not change the committed schedule — and each ensemble runs
+thousands of window solves.  Because every window is re-priced against
+the noise-free actuals, only the schedule matters, not the proof, so
+the floor changes the measured gap negligibly while keeping the run
+tractable.  For default runs (benchmark gap ``1e-3``) the floor is a
+no-op and windows are unchanged.
+
 Validation of the observed gap magnitude
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -257,9 +288,13 @@ Output artifacts
 * New KPI keys (only populated when ``--rolling-horizon`` is active):
   ``foresight_gap_pct_p50``, ``foresight_gap_pct_p10``,
   ``foresight_gap_pct_p90``, ``mc_n_seeds``, ``mc_window_hours``,
-  ``mc_commit_hours``, and ``pf_benchmark_mip_gap`` (the ``mip_gap``
-  the perfect-foresight benchmark was finally solved at — tighter than
-  the configured value when the re-tightening guard fired).
+  ``mc_commit_hours``, ``pf_benchmark_mip_gap`` (the ``mip_gap``
+  requested for the final perfect-foresight benchmark solve — tighter
+  than the configured value when the re-tightening guard fired) and
+  ``pf_benchmark_gap_achieved`` (the gap the solver actually proved —
+  the number a publication should quote; see "Requested versus proven
+  gap" above).  ``SUMMARY.md`` renders both under a "Rolling-horizon
+  foresight" section.
 
 Limitations
 -----------

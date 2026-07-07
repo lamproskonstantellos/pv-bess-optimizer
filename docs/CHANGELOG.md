@@ -33,6 +33,30 @@ Production release.
 
 ### Fixed
 
+- Rolling-horizon window solves are decoupled from the benchmark's
+  requested `mip_gap`: they floor their gap at `1e-3` (never tighter,
+  even when the benchmark is solved to `1e-5` for a publication) and
+  cap their per-solve time.  A 48 h window finds its near-optimal
+  incumbent in under a second but can then spend minutes merely
+  *proving* a tight gap that does not change the committed schedule,
+  and an ensemble runs thousands of window solves; since each window is
+  re-priced against the noise-free actuals only the schedule matters,
+  not the proof.  For default runs (benchmark gap `1e-3`) the floor is
+  a no-op and windows are unchanged.
+- The run records the benchmark's PROVEN optimality gap, not just the
+  requested one: `--mip-gap` is a target that competes with
+  `--time-limit`, and on a hard year-scale grid-charging MILP the time
+  limit usually binds first, so the solver stops looser than requested
+  (e.g. asking for `1e-5` but proving `5e-4`).  A new
+  `pf_benchmark_gap_achieved` KPI captures the relative gap the solver
+  actually proved (`|bound − incumbent| / |incumbent|`, matching the
+  solver's own printed gap), alongside the existing
+  `pf_benchmark_mip_gap` (requested).  `SUMMARY.md` gains a
+  "Rolling-horizon foresight" section rendering both plus the foresight
+  percentiles.  The achieved gap is the number a publication should
+  quote as the benchmark's certified optimality; it threads off the
+  solved dispatch frame's metadata, so no public return signature
+  changed.  The `[milp-solve] done` log line now also reports it.
 - Gurobi solves carry a memory-safety default (`NodefileStart` 8 GB
   with node files under the system temp dir): a branch-and-bound tree
   that outgrows RAM spills to disk instead of the OS killing the

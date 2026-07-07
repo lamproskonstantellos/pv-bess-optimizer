@@ -954,6 +954,21 @@ _PF_BENCHMARK_GAP_FLOOR = 1e-6
 #: identical tree and burn the identical wall-clock for nothing.
 _PF_IMPROVEMENT_EPS_EUR = 0.01
 
+#: The rolling-horizon WINDOW solves are decoupled from the benchmark's
+#: requested gap.  A benchmark solved to a very tight gap (e.g. 1e-5 for
+#: a publication) certifies ONE year-long MILP; forcing that same target
+#: on every 48 h window is wasteful and can be pathological: a window
+#: finds its (near-optimal) incumbent in well under a second but may then
+#: spend minutes PROVING a 1e-5 gap that does not change the committed
+#: schedule.  Windows are re-evaluated against the noise-free actuals, so
+#: only the schedule matters, not the proof.  The windows therefore floor
+#: their gap at ``_RH_WINDOW_GAP_FLOOR`` (never tighter than this, even
+#: when the benchmark is tighter) and cap their per-solve time at
+#: ``_RH_WINDOW_TIME_CAP`` as a backstop.  For default runs (benchmark
+#: gap 1e-3) the floor is a no-op and windows behave exactly as before.
+_RH_WINDOW_GAP_FLOOR = 1e-3
+_RH_WINDOW_TIME_CAP = 300
+
 _COMPARE_SOURCE_FLAGS: tuple[tuple[str, bool, bool, bool], ...] = (
     ("dam", True, False, False),
     ("pv", False, True, False),
@@ -1179,6 +1194,19 @@ def _run_one(
             window_h = int(unc_cfg["window_hours"])
             commit_h = int(unc_cfg["commit_hours"])
             base_seed = int(unc_cfg["base_seed"])
+            # Decoupled window budget: never tighter than the floor (so a
+            # publication-tight benchmark does not drag every window into
+            # a minutes-long optimality proof), time-capped as a backstop.
+            rh_window_gap = max(float(config.mip_gap), _RH_WINDOW_GAP_FLOOR)
+            rh_window_time = min(int(config.time_limit), _RH_WINDOW_TIME_CAP)
+            if rh_window_gap > float(config.mip_gap):
+                print(
+                    f"[rolling] window solves use mip_gap={rh_window_gap:g} "
+                    f"(floored; benchmark keeps {float(config.mip_gap):g}) "
+                    f"and time_limit={rh_window_time}s -- the committed "
+                    f"schedule is set by the incumbent, not the optimality "
+                    f"proof, so a tighter window target only costs time."
+                )
 
             if unc_cfg["compare_sources"] and n_seeds > 0:
                 print(
@@ -1202,8 +1230,8 @@ def _run_one(
                         commit_hours=commit_h,
                         solver_name=config.solver,
                         strict=bool(config.strict),
-                        mip_gap=config.mip_gap,
-                        time_limit_seconds=config.time_limit,
+                        mip_gap=rh_window_gap,
+                        time_limit_seconds=rh_window_time,
                         tee=config.tee,
                     )
                     sub.insert(0, "source_set", src)
@@ -1230,8 +1258,8 @@ def _run_one(
                     commit_hours=commit_h,
                     solver_name=config.solver,
                     strict=bool(config.strict),
-                    mip_gap=config.mip_gap,
-                    time_limit_seconds=config.time_limit,
+                    mip_gap=rh_window_gap,
+                    time_limit_seconds=rh_window_time,
                     tee=config.tee,
                 )
             else:
@@ -1243,8 +1271,8 @@ def _run_one(
                     forecast_seed=None,
                     evaluate_with_actuals=True,
                     solver_name=config.solver,
-                    mip_gap=config.mip_gap,
-                    time_limit_seconds=config.time_limit,
+                    mip_gap=rh_window_gap,
+                    time_limit_seconds=rh_window_time,
                     tee=config.tee,
                 )
                 rh_det_profit = float(rh_kpis.get("profit_total_eur", 0.0))
@@ -1354,6 +1382,16 @@ def _run_one(
                 kpis["mc_commit_hours"] = int(commit_h)
             if rh_det_profit is not None:
                 kpis["rolling_horizon_profit_eur"] = rh_det_profit
+
+        # Certified optimality gap the solver actually PROVED for the
+        # (final) benchmark solve -- what a publication must quote,
+        # distinct from the requested pf_benchmark_mip_gap.  When the
+        # time limit binds before the requested gap is reached the two
+        # differ (e.g. requesting 1e-5 but proving 5e-4); absent when the
+        # backend does not report bounds or the objective is ~0.
+        _achieved = res.attrs.get("solver_gap_achieved")
+        if _achieved is not None:
+            kpis["pf_benchmark_gap_achieved"] = float(_achieved)
 
         bundle = _build_financials(
             Path(config.excel), params, ts, kpis, res,

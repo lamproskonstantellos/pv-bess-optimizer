@@ -133,7 +133,7 @@ def test_time_limit_with_incumbent_accepted():
         "load_kwh": np.full(24, 1500.0),
         "dam_price_eur_per_mwh": np.full(24, 80.0),
     })
-    model, _ = solve_model(
+    model, _, _gap = solve_model(
         build_model(params, ts), "highs", mip_gap=0.01, time_limit_seconds=60,
     )
     # The model now carries a loaded incumbent; a maxTimeLimit verdict on it
