@@ -55,11 +55,15 @@ cd pv-bess-optimizer
 pip install -r requirements/dev.txt
 ```
 
-HiGHS is the default solver (`pip install highspy`). Gurobi and CBC
-also work; the solver search order is set in
-`pvbess_opt.optimization.choose_solver` (requested solver, then HiGHS,
-then CBC). Solver knobs are CLI flags: `--solver`, `--mip-gap`,
-`--time-limit`, and `--tee` for live solver output.
+HiGHS is the default solver (`pip install highspy`). Gurobi
+(`pip install gurobipy` plus a licence) and CBC also work. The solver
+is part of the results' provenance, so the requested solver is never
+substituted silently: if it is not available the run stops with an
+error listing the installed alternatives
+(`pvbess_opt.optimization.choose_solver`), and the run log's
+`[verify] solver=` line records what actually solved. Solver knobs are
+CLI flags: `--solver`, `--mip-gap`, `--time-limit`, and `--tee` for
+live solver output.
 
 ## Quickstart
 
