@@ -57,6 +57,7 @@ keep the user-facing surface small.
 from __future__ import annotations
 
 import logging
+import tempfile
 import time
 from typing import Any, Literal, overload
 
@@ -155,6 +156,22 @@ _SOLVER_OPTIONS: dict[str, dict[str, str]] = {
     },
 }
 
+#: Memory-safety defaults applied per solver on top of the standard
+#: knobs.  ``NodefileStart`` makes Gurobi spill the branch-and-bound
+#: tree to disk (compressed node files under ``NodefileDir``) once the
+#: in-memory tree exceeds the threshold in GB, instead of letting the
+#: OS kill the process on memory exhaustion.  Node files are
+#: transparent to the search: the branching decisions, incumbents and
+#: bounds are identical with or without them -- below the threshold the
+#: parameter is entirely dormant, above it only node storage moves to
+#: disk (slower, but alive).
+_SOLVER_MEMORY_DEFAULTS: dict[str, dict[str, Any]] = {
+    "gurobi": {
+        "NodefileStart": 8,
+        "NodefileDir": tempfile.gettempdir(),
+    },
+}
+
 
 def _probe_solver(name: str):
     """Return the Pyomo solver object when ``name`` is usable, else None.
@@ -222,6 +239,10 @@ def configure_solver_options(
         solver.options[mapping["mip_focus"]] = mip_focus
     if "threads" in mapping:
         solver.options[mapping["threads"]] = threads
+    for key, value in _SOLVER_MEMORY_DEFAULTS.get(
+        solver_name.lower(), {},
+    ).items():
+        solver.options[key] = value
 
 
 def _has_feasible_incumbent(model: pyo.ConcreteModel | None) -> bool:

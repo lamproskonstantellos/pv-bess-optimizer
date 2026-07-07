@@ -33,6 +33,12 @@ Production release.
 
 ### Fixed
 
+- Gurobi solves carry a memory-safety default (`NodefileStart` 8 GB
+  with node files under the system temp dir): a branch-and-bound tree
+  that outgrows RAM spills to disk instead of the OS killing the
+  process mid-run.  Node files are transparent to the search — below
+  the threshold the parameter is dormant, above it only node storage
+  moves to disk — so results are identical either way.
 - Solver resolution is provenance-safe: requesting a solver that is
   not available (e.g. `--solver gurobi` without `gurobipy` or a
   licence) stops the run with an error listing the installed

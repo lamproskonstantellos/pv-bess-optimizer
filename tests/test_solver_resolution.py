@@ -66,3 +66,27 @@ def test_unavailable_gurobi_raises_instead_of_silently_using_highs():
     msg = str(excinfo.value)
     assert "gurobi" in msg
     assert "gurobipy" in msg  # the install hint
+
+
+def test_gurobi_gets_memory_safety_defaults():
+    """Gurobi solves carry NodefileStart/NodefileDir so a huge
+    branch-and-bound tree spills to disk instead of being OOM-killed.
+    Node files are transparent to the search (identical decisions,
+    incumbents and bounds), so this is a pure survival net."""
+    from pvbess_opt.optimization import configure_solver_options
+
+    class _FakeSolver:
+        def __init__(self):
+            self.options = {}
+
+    solver = _FakeSolver()
+    configure_solver_options(solver, "gurobi", mip_gap=1e-4,
+                             time_limit_seconds=600)
+    assert solver.options["NodefileStart"] == 8
+    assert solver.options["NodefileDir"]
+    assert solver.options["MIPGap"] == 1e-4
+
+    highs = _FakeSolver()
+    configure_solver_options(highs, "highs", mip_gap=1e-4,
+                             time_limit_seconds=600)
+    assert "NodefileStart" not in highs.options
