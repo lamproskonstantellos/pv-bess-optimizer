@@ -63,7 +63,10 @@ error listing the installed alternatives
 (`pvbess_opt.optimization.choose_solver`), and the run log's
 `[verify] solver=` line records what actually solved. Solver knobs are
 CLI flags: `--solver`, `--mip-gap`, `--time-limit`, and `--tee` for
-live solver output.
+live solver output. Gurobi solves carry a memory-safety default
+(`NodefileStart` 8 GB): a branch-and-bound tree that outgrows RAM
+spills to disk instead of the OS killing the run — node files are
+transparent to the search, so results are identical.
 
 ## Quickstart
 
