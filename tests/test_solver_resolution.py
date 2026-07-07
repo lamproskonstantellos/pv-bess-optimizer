@@ -127,6 +127,18 @@ def test_achieved_gap_none_when_bounds_missing():
     assert _achieved_gap_from_result(object()) is None
 
 
+def test_achieved_gap_none_when_incumbent_near_zero():
+    """A ~0 objective has no meaningful relative gap: report None rather
+    than a huge ratio floored by a tiny denominator."""
+    from pvbess_opt.optimization import _achieved_gap_from_result
+
+    assert _achieved_gap_from_result(_FakeResult(0.0, 1e-6)) is None
+    assert _achieved_gap_from_result(_FakeResult(0.5, 0.5000001)) is None
+    # Just above the |incumbent| >= 1 floor: a real (tiny) gap is kept.
+    gap = _achieved_gap_from_result(_FakeResult(1000.0, 1000.5))
+    assert gap == pytest.approx(5e-4, rel=1e-9)
+
+
 def test_achieved_gap_none_on_non_finite():
     from pvbess_opt.optimization import _achieved_gap_from_result
 

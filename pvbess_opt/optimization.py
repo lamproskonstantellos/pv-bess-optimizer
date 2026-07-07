@@ -1196,14 +1196,19 @@ def _achieved_gap_from_result(result: Any) -> float | None:
 
     The dispatch objective is always a MAXIMISE (profit), so Pyomo's
     ``lower_bound`` is the incumbent (best feasible) and ``upper_bound``
-    is the relaxation bound.  The gap is
-    ``|upper - lower| / max(|lower|, tiny)`` -- relative to the
-    incumbent -- which reproduces the solver's own printed relative gap
-    (e.g. Gurobi's ``gap 0.0516%``) to rounding, so the KPI equals what
-    the run log shows.  Returns None when the solver does not report
-    both bounds (e.g. a pure LP, or a backend that omits the relaxation
-    bound) -- callers then simply do not record a certified gap rather
-    than inventing one.
+    is the relaxation bound.  The gap is ``|upper - lower| / |lower|`` --
+    relative to the incumbent -- which reproduces the solver's own
+    printed relative gap (e.g. Gurobi's ``gap 0.0516%``) to rounding, so
+    the KPI equals what the run log shows.
+
+    This is solver-agnostic: it reads the Pyomo results' problem bounds,
+    which Gurobi, HiGHS and CBC all populate.  Returns None -- so callers
+    record no certified gap rather than inventing one -- when a bound is
+    missing or non-finite (a backend that omits the relaxation bound),
+    OR when the incumbent objective is ~0, where a relative gap is not
+    meaningful (a tiny absolute bound difference would otherwise blow up
+    the ratio; a degenerate scenario whose optimum is zero has no
+    meaningful relative certification).
     """
     try:
         problem = result.problem[0]
@@ -1220,7 +1225,9 @@ def _achieved_gap_from_result(result: Any) -> float | None:
         return None
     if not (math.isfinite(incumbent) and math.isfinite(bound)):
         return None
-    return abs(bound - incumbent) / max(abs(incumbent), 1e-10)
+    if abs(incumbent) < 1.0:
+        return None
+    return abs(bound - incumbent) / abs(incumbent)
 
 
 def solve_model(
