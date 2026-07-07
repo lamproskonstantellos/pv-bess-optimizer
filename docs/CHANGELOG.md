@@ -33,6 +33,13 @@ Production release.
 
 ### Fixed
 
+- Solver resolution is provenance-safe: requesting a solver that is
+  not available (e.g. `--solver gurobi` without `gurobipy` or a
+  licence) stops the run with an error listing the installed
+  alternatives, instead of silently falling back to HiGHS/CBC.  The
+  solver identity is part of the results' provenance (run log,
+  SUMMARY.md, any solver statement in a publication), so it is never
+  substituted quietly.
 - Rolling horizon: SOC carry-over across fully committed windows now
   includes the expected balancing-activation drift (shared helper
   mirroring the model's terminal SOC expression) and is clamped into

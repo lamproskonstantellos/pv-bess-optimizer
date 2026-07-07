@@ -156,23 +156,51 @@ _SOLVER_OPTIONS: dict[str, dict[str, str]] = {
 }
 
 
+def _probe_solver(name: str):
+    """Return the Pyomo solver object when ``name`` is usable, else None.
+
+    Any probe failure (unknown plugin, missing binary, licence error --
+    Pyomo raises a mix of ApplicationError / RuntimeError / OSError
+    depending on the path) means the same thing: not available.
+    """
+    try:
+        solver = pyo.SolverFactory(name)
+        if solver is not None and solver.available():
+            return solver
+    except Exception as exc:  # the availability probe must never crash
+        logger.debug("solver %s unavailable: %s", name, exc)
+    return None
+
+
 def choose_solver(name: str | None):
-    """Return the first available Pyomo solver among (`name`, highs, cbc)."""
-    name = (name or "highs").lower()
-    candidates = [name, "highs", "cbc"]
-    seen: set[str] = set()
-    for candidate in candidates:
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        try:
-            solver = pyo.SolverFactory(candidate)
-            if solver is not None and solver.available():
-                return solver, candidate
-        except (RuntimeError, ImportError, OSError) as exc:
-            logger.debug("solver %s unavailable: %s", candidate, exc)
-            continue
-    raise RuntimeError("No LP/MIP solver found (install gurobi, highs, or cbc).")
+    """Return the REQUESTED Pyomo solver, or fail fast.
+
+    The solver is part of the results' provenance (`[verify] solver=`
+    in the run log, the SUMMARY.md header, and any solver statement in
+    a publication), so an unavailable request is a hard error rather
+    than a silent substitution: a run asked to use Gurobi must never
+    quietly produce HiGHS results.  The error lists the solvers that
+    ARE installed so the fix is one flag (or one install) away.
+    """
+    requested = (name or "highs").lower()
+    solver = _probe_solver(requested)
+    if solver is not None:
+        return solver, requested
+    installed = [
+        candidate for candidate in ("gurobi", "highs", "cbc")
+        if candidate != requested and _probe_solver(candidate) is not None
+    ]
+    hint = (
+        f"installed alternatives: {', '.join(installed)}"
+        if installed else "no other LP/MIP solver is installed either"
+    )
+    raise RuntimeError(
+        f"Requested solver {requested!r} is not available ({hint}). "
+        "The solver is part of the results' provenance, so it is never "
+        "substituted silently: install the requested solver (Gurobi "
+        "needs 'pip install gurobipy' plus a licence; HiGHS needs "
+        "'pip install highspy') or pass --solver with an installed one."
+    )
 
 
 def configure_solver_options(
