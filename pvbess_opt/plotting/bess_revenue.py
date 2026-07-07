@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 
 from ..theme import BM_COLOURS, financial_color
-from ._currency import euro_axis_formatter, format_eur, resolve_currency_format
+from ._currency import euro_axis_formatter, resolve_currency_format
 from .helpers import title_prefix
 from .style import (
     apply_fine_ticks,
@@ -198,13 +198,11 @@ def plot_bess_revenue_waterfall(
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     x = np.arange(len(labels))
+    # No per-bar value labels: the amounts read off the EUR axis and live
+    # exactly in SUMMARY.md and 03_results.xlsx, matching the report's
+    # convention that figures carry no computed-value text.
     for i, (label, h, b, c) in enumerate(zip(labels, heights, bottoms, colours, strict=True)):
         ax.bar(x[i], h, bottom=b, color=c, edgecolor="black", linewidth=0.4, label=label)
-        annotation_value = values[i] if i < len(values) - 1 else cumulative
-        ax.text(
-            x[i], b + h, format_eur(float(annotation_value), fmt_mode),
-            ha="center", va="bottom", fontsize=7,
-        )
 
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_xticks(x)
