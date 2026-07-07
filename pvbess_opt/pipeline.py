@@ -1355,6 +1355,16 @@ def _run_one(
             if rh_det_profit is not None:
                 kpis["rolling_horizon_profit_eur"] = rh_det_profit
 
+        # Certified optimality gap the solver actually PROVED for the
+        # (final) benchmark solve -- what a publication must quote,
+        # distinct from the requested pf_benchmark_mip_gap.  When the
+        # time limit binds before the requested gap is reached the two
+        # differ (e.g. requesting 1e-5 but proving 5e-4); None when the
+        # backend does not report bounds (e.g. an LP-only run).
+        _achieved = res.attrs.get("solver_gap_achieved")
+        if _achieved is not None:
+            kpis["pf_benchmark_gap_achieved"] = float(_achieved)
+
         bundle = _build_financials(
             Path(config.excel), params, ts, kpis, res,
         )

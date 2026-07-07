@@ -134,6 +134,15 @@ incumbent at any requested gap, so the guard keeps the previous
 benchmark after one unimproved probe and advises a higher time limit
 or a faster solver instead of burning the limit repeatedly.
 
+The `mip_gap` is a REQUESTED target, not a guarantee: it competes with
+the time limit, and the solver stops at whichever fires first. The run
+therefore records two distinct KPIs — `pf_benchmark_mip_gap` (what was
+requested) and `pf_benchmark_gap_achieved` (what the solver actually
+proved, `|bound − incumbent| / |incumbent|`, matching the solver's own
+printed gap). A publication quotes the ACHIEVED gap; the true optimum
+is bracketed by `[incumbent, incumbent × (1 + achieved gap)]`, so the
+reported foresight gap is a lower bound accurate to within it.
+
 ## PPA stream scope
 
 The pay-as-produced PPA (`docs/ppa_design.md`) keeps one scope across

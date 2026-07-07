@@ -92,10 +92,19 @@ Rolling-horizon metrics (only when ``--rolling-horizon`` is active)
 * ``foresight_gap_pct_p10`` / ``foresight_gap_pct_p50`` /
   ``foresight_gap_pct_p90``: Monte Carlo distribution percentiles.
 * ``mc_n_seeds`` / ``mc_window_hours`` / ``mc_commit_hours``.
-* ``pf_benchmark_mip_gap``: the ``mip_gap`` of the solve that produced
-  the final perfect-foresight benchmark.  Tighter than the configured
-  value when a Monte Carlo realisation beat the initial incumbent and
-  the pipeline re-solved the benchmark so it remains the best case; it
-  stays at the configured value when a tighter re-solve could not
-  improve the incumbent (the time limit binds — see the rolling-horizon
-  guide).
+* ``pf_benchmark_mip_gap``: the ``mip_gap`` **requested** for the solve
+  that produced the final perfect-foresight benchmark.  Tighter than the
+  configured value when a Monte Carlo realisation beat the initial
+  incumbent and the pipeline re-solved the benchmark so it remains the
+  best case; it stays at the configured value when a tighter re-solve
+  could not improve the incumbent (the time limit binds — see the
+  rolling-horizon guide).
+* ``pf_benchmark_gap_achieved``: the relative optimality gap the solver
+  actually **proved** for that benchmark (``|bound − incumbent| /
+  |incumbent|``), i.e. the number the solver prints in its own log.
+  This is DISTINCT from the requested ``pf_benchmark_mip_gap``: when the
+  ``--time-limit`` binds before the target is reached, the solver
+  returns whatever gap it had proven so far (e.g. requesting ``1e-5``
+  but proving ``5e-4``).  **Publications should quote this achieved gap**
+  as the benchmark's certified optimality, not the requested one.
+  Absent when the backend does not report bounds (e.g. a pure LP).

@@ -90,3 +90,77 @@ def test_gurobi_gets_memory_safety_defaults():
     configure_solver_options(highs, "highs", mip_gap=1e-4,
                              time_limit_seconds=600)
     assert "NodefileStart" not in highs.options
+
+
+# ---------------------------------------------------------------------------
+# Achieved optimality gap capture (requested vs proven)
+# ---------------------------------------------------------------------------
+
+
+class _FakeProblem:
+    def __init__(self, lower, upper):
+        self.lower_bound = lower
+        self.upper_bound = upper
+
+
+class _FakeResult:
+    def __init__(self, lower, upper):
+        self.problem = [_FakeProblem(lower, upper)]
+
+
+def test_achieved_gap_matches_solver_definition():
+    from pvbess_opt.optimization import _achieved_gap_from_result
+
+    # Maximise: lower_bound is the incumbent, upper_bound the bound;
+    # gap = |bound - incumbent| / |incumbent| = 500 / 1_000_000 = 5e-4,
+    # exactly the solver's own printed relative gap.
+    gap = _achieved_gap_from_result(_FakeResult(1_000_000.0, 1_000_500.0))
+    assert gap == pytest.approx(5e-4, rel=1e-9)
+
+
+def test_achieved_gap_none_when_bounds_missing():
+    from pvbess_opt.optimization import _achieved_gap_from_result
+
+    assert _achieved_gap_from_result(_FakeResult(None, 1.0)) is None
+    assert _achieved_gap_from_result(_FakeResult(1.0, None)) is None
+    # An object with no ``problem`` at all must not raise.
+    assert _achieved_gap_from_result(object()) is None
+
+
+def test_achieved_gap_none_on_non_finite():
+    from pvbess_opt.optimization import _achieved_gap_from_result
+
+    assert _achieved_gap_from_result(_FakeResult(1.0, float("inf"))) is None
+
+
+@pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_run_scenario_stashes_achieved_gap_on_frame():
+    """The proven gap rides on the returned frame's .attrs so the public
+    tuple signature stays unchanged; a real solve populates it."""
+    import numpy as np
+    import pandas as pd
+
+    from pvbess_opt.optimization import run_scenario
+
+    params = {
+        "mode": "self_consumption", "bess_power_kw": 500.0,
+        "bess_capacity_kwh": 1000.0, "efficiency_charge": 0.95,
+        "efficiency_discharge": 0.95, "soc_min_frac": 0.2,
+        "soc_max_frac": 0.95, "initial_soc_frac": 0.5,
+        "max_cycles_per_day": 1.5, "p_grid_export_max_kw": 500.0,
+        "retail_tariff_eur_per_mwh": 120.0,
+        "allow_bess_grid_charging": True, "unavailability_pct": 0.0,
+        "dt_minutes": 60,
+    }
+    n = 48
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=n, freq="h"),
+        "pv_kwh": np.maximum(np.sin(np.arange(n) * np.pi / 12) * 400, 0),
+        "load_kwh": np.full(n, 200.0),
+        "dam_price_eur_per_mwh": 80 + 30 * np.sin(np.arange(n) * np.pi / 12),
+    })
+    res, _solver = run_scenario(params, ts, "highs", mip_gap=1e-4,
+                                time_limit_seconds=60)
+    gap = res.attrs.get("solver_gap_achieved")
+    assert gap is not None
+    assert 0.0 <= gap < 1e-2  # near the requested 1e-4

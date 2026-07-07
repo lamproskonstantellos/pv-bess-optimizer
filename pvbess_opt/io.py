@@ -2425,6 +2425,19 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("lifetime_bm_revenue_total_eur", "Lifetime balancing revenue [EUR]"),
 )
 
+# Rolling-horizon / benchmark digest: rendered only when the
+# rolling-horizon Monte Carlo ran (``mc_n_seeds`` present).  The
+# benchmark gaps are the two DISTINCT numbers a publication needs --
+# the requested target vs the gap the solver actually proved.
+_SUMMARY_ROLLING_KEYS: tuple[tuple[str, str], ...] = (
+    ("foresight_gap_pct_p50", "Foresight gap P50 [%]"),
+    ("foresight_gap_pct_p10", "Foresight gap P10 [%]"),
+    ("foresight_gap_pct_p90", "Foresight gap P90 [%]"),
+    ("pf_benchmark_mip_gap", "Benchmark MIP gap, requested [-]"),
+    ("pf_benchmark_gap_achieved", "Benchmark MIP gap, proven [-]"),
+    ("mc_n_seeds", "Monte Carlo seeds"),
+)
+
 
 def _summary_fmt(value: Any) -> str:
     """Human format for a SUMMARY.md value cell."""
@@ -2499,6 +2512,18 @@ def write_summary_md(
             value = financial_kpis.get(key)
             if isinstance(value, (int, float)) and abs(float(value)) > 1e-9:
                 lines.append(f"| {label} | {_summary_fmt(value)} |")
+        lines.append("")
+
+    if kpis_year1.get("mc_n_seeds"):
+        lines.append("## Rolling-horizon foresight")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("| --- | ---: |")
+        for key, label in _SUMMARY_ROLLING_KEYS:
+            if key in kpis_year1:
+                lines.append(
+                    f"| {label} | {_summary_fmt(kpis_year1[key])} |"
+                )
         lines.append("")
 
     lines.append("## Where to look next")

@@ -57,6 +57,7 @@ keep the user-facing surface small.
 from __future__ import annotations
 
 import logging
+import math
 import tempfile
 import time
 from typing import Any, Literal, overload
@@ -1183,6 +1184,45 @@ def build_model(
 # ---------------------------------------------------------------------------
 
 
+def _achieved_gap_from_result(result: Any) -> float | None:
+    """Relative optimality gap the solver actually PROVED, or None.
+
+    This is the certified distance between the incumbent and the best
+    bound at termination -- distinct from the REQUESTED ``mip_gap``:
+    when the time limit binds before the target gap is reached, a
+    deterministic solver returns whatever gap it had proven so far
+    (e.g. requesting 1e-5 but stopping at 5e-4).  Publications must
+    report this achieved gap, not the requested one.
+
+    The dispatch objective is always a MAXIMISE (profit), so Pyomo's
+    ``lower_bound`` is the incumbent (best feasible) and ``upper_bound``
+    is the relaxation bound.  The gap is
+    ``|upper - lower| / max(|lower|, tiny)`` -- relative to the
+    incumbent -- which reproduces the solver's own printed relative gap
+    (e.g. Gurobi's ``gap 0.0516%``) to rounding, so the KPI equals what
+    the run log shows.  Returns None when the solver does not report
+    both bounds (e.g. a pure LP, or a backend that omits the relaxation
+    bound) -- callers then simply do not record a certified gap rather
+    than inventing one.
+    """
+    try:
+        problem = result.problem[0]
+        lower = problem.lower_bound
+        upper = problem.upper_bound
+    except (AttributeError, IndexError, TypeError):
+        return None
+    if lower is None or upper is None:
+        return None
+    try:
+        incumbent = float(lower)
+        bound = float(upper)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(incumbent) and math.isfinite(bound)):
+        return None
+    return abs(bound - incumbent) / max(abs(incumbent), 1e-10)
+
+
 def solve_model(
     model: pyo.ConcreteModel,
     solver_name: str,
@@ -1190,8 +1230,14 @@ def solve_model(
     mip_gap: float = 0.001,
     time_limit_seconds: int = 1800,
     tee: bool = False,
-) -> tuple[pyo.ConcreteModel, str]:
-    """Solve ``model``; raise on failure; return ``(model, solver_name)``."""
+) -> tuple[pyo.ConcreteModel, str, float | None]:
+    """Solve ``model``; raise on failure.
+
+    Returns ``(model, solver_name, achieved_gap)`` where ``achieved_gap``
+    is the relative optimality gap the solver PROVED at termination
+    (see :func:`_achieved_gap_from_result`), or None when the backend
+    did not report bounds.
+    """
     solver, resolved = choose_solver(solver_name)
     configure_solver_options(
         solver, resolved,
@@ -1211,14 +1257,17 @@ def solve_model(
     result = solver.solve(model, tee=tee)
     elapsed = time.perf_counter() - t_solve_start
     condition = result.solver.termination_condition
+    achieved_gap = _achieved_gap_from_result(result)
     logger.info(
-        "[milp-solve] done: solver=%s elapsed=%.2fs termination=%s",
+        "[milp-solve] done: solver=%s elapsed=%.2fs termination=%s "
+        "achieved_gap=%s",
         resolved, elapsed, condition,
+        f"{achieved_gap:.3g}" if achieved_gap is not None else "n/a",
     )
     for h in logger.handlers + logging.getLogger().handlers:
         h.flush()
     _check_solver_status(result, resolved, model)
-    return model, resolved
+    return model, resolved, achieved_gap
 
 
 def model_to_dataframe(
@@ -1412,7 +1461,7 @@ def run_scenario(
         terminal_soc_free=terminal_soc_free,
         terminal_soc_target_kwh=terminal_soc_target_kwh,
     )
-    solved, resolved = solve_model(
+    solved, resolved, achieved_gap = solve_model(
         model, solver_name,
         mip_gap=mip_gap, time_limit_seconds=time_limit_seconds, tee=tee,
     )
@@ -1421,8 +1470,14 @@ def run_scenario(
         numeric_cols = [c for c in res_full.columns if c != "timestamp"]
         res = res_full.copy()
         res[numeric_cols] = res[numeric_cols].astype(float).round(4)
+        # The certified optimality gap rides on the frame's metadata so
+        # the public tuple signature is unchanged; the pipeline reads it
+        # off the benchmark frame to report pf_benchmark_gap_achieved.
+        res.attrs["solver_gap_achieved"] = achieved_gap
+        res_full.attrs["solver_gap_achieved"] = achieved_gap
         return res, resolved, res_full
     res = model_to_dataframe(solved, ts, params)
+    res.attrs["solver_gap_achieved"] = achieved_gap
     return res, resolved
 
 
