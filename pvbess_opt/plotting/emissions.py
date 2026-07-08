@@ -28,7 +28,11 @@ from .style import (
     save_figure,
 )
 
-__all__ = ["plot_cfe_duration_curve", "plot_energy_sankey"]
+__all__ = [
+    "energy_sankey_flows",
+    "plot_cfe_duration_curve",
+    "plot_energy_sankey",
+]
 
 def _sum_mwh(res: pd.DataFrame, name: str) -> float:
     if name in res.columns:
@@ -65,8 +69,62 @@ _SANKEY_NODE_COLOURS: dict[str, str] = {
 _SANKEY_LOSSES_COLOUR = COLORS["BESS losses"]
 
 
-def plot_energy_sankey(res: pd.DataFrame, out_path: Path) -> Path:
-    """Year-1 energy-flow diagram (MWh) for the solved dispatch.
+def energy_sankey_flows(
+    res: pd.DataFrame, availability_factor: float = 1.0,
+) -> list[tuple[str, str, float, str]]:
+    """Return the ``(source, target, MWh, colour)`` flows of the Sankey.
+
+    Pulled out of :func:`plot_energy_sankey` so the availability physics is
+    unit-testable.  With ``availability_factor < 1`` every plant-side flow
+    (PV, BESS, export) scales by the factor while ``grid_to_load`` rises by
+    ``(1 - factor) * load`` — the grid covers the load the offline plant
+    cannot serve — so the flows conserve energy against the true (never
+    derated) demand.  ``availability_factor == 1`` returns the raw dispatch.
+    """
+    a = float(availability_factor)
+    # Raw annual energy per flow (MWh) from the dispatch frame.
+    pv_to_load = _sum_mwh(res, "pv_to_load_kwh")
+    pv_to_bess = _sum_mwh(res, "pv_to_bess_kwh")
+    pv_to_grid = _sum_mwh(res, "pv_to_grid_kwh")
+    pv_curtail = _sum_mwh(res, "pv_curtail_kwh")
+    grid_to_load = _sum_mwh(res, "grid_to_load_kwh")
+    grid_to_bess = _sum_mwh(res, "bess_charge_grid_kwh")
+    bess_to_load = _sum_mwh(res, "bess_dis_load_kwh")
+    bess_to_grid = _sum_mwh(res, "bess_dis_grid_kwh")
+    if a < 1.0:
+        load_raw = pv_to_load + bess_to_load + grid_to_load
+        u = 1.0 - a
+        pv_to_load *= a
+        pv_to_bess *= a
+        pv_to_grid *= a
+        pv_curtail *= a
+        grid_to_bess *= a
+        bess_to_load *= a
+        bess_to_grid *= a
+        grid_to_load = grid_to_load * a + u * load_raw
+    charge = pv_to_bess + grid_to_bess
+    discharge = bess_to_load + bess_to_grid
+    losses = max(charge - discharge, 0.0)
+    return [
+        ("PV generation", "Load", pv_to_load, COLORS["PV to load"]),
+        ("PV generation", "BESS", pv_to_bess, COLORS["PV to BESS"]),
+        ("PV generation", "Grid export", pv_to_grid, COLORS["PV to grid"]),
+        ("PV generation", "Curtailed PV", pv_curtail, COLORS["Curtailed PV"]),
+        ("Grid import", "Load", grid_to_load, COLORS["Grid to load"]),
+        ("Grid import", "BESS", grid_to_bess, COLORS["Grid to BESS"]),
+        ("BESS", "Load", bess_to_load, COLORS["BESS to load"]),
+        ("BESS", "Grid export", bess_to_grid, COLORS["BESS to grid"]),
+        ("BESS", "Losses", losses, _SANKEY_LOSSES_COLOUR),
+    ]
+
+
+def plot_energy_sankey(
+    res: pd.DataFrame,
+    out_path: Path,
+    *,
+    availability_factor: float = 1.0,
+) -> Path:
+    """Annual energy-flow diagram (MWh) for the solved dispatch.
 
     Layered ribbon layout: sources on the left (PV generation, grid
     import), the battery in the middle, sinks on the right (load, grid
@@ -75,31 +133,20 @@ def plot_energy_sankey(res: pd.DataFrame, out_path: Path) -> Path:
     BESS`` reads in the same gold here as in the daily dispatch view.
     Node labels carry the annual MWh totals.
 
+    ``availability_factor`` (default ``1.0`` = no derate) makes the
+    diagram consistent with the availability-adjusted annual KPIs /
+    tables: every plant-side flow (PV, BESS, export) scales by the
+    factor, while the load is fixed exogenous demand, so ``grid_to_load``
+    RISES by ``(1 - factor) * load`` to cover the load the offline plant
+    cannot serve.  The load node therefore stays at the true demand and
+    the diagram balances against it — matching the ``system_total_*``
+    KPIs derated by :func:`pvbess_opt.availability.apply_unavailability_derate`.
+    Pass ``kpis['availability_factor']``.
+
     margins: delegated — the diagram turns its axes off and manages its
     own layout, so the universal axis margins do not apply.
     """
-    charge = _sum_mwh(res, "pv_to_bess_kwh") + _sum_mwh(res, "bess_charge_grid_kwh")
-    discharge = _sum_mwh(res, "bess_dis_load_kwh") + _sum_mwh(res, "bess_dis_grid_kwh")
-    losses = max(charge - discharge, 0.0)
-    flows = [
-        ("PV generation", "Load", _sum_mwh(res, "pv_to_load_kwh"),
-         COLORS["PV to load"]),
-        ("PV generation", "BESS", _sum_mwh(res, "pv_to_bess_kwh"),
-         COLORS["PV to BESS"]),
-        ("PV generation", "Grid export", _sum_mwh(res, "pv_to_grid_kwh"),
-         COLORS["PV to grid"]),
-        ("PV generation", "Curtailed PV", _sum_mwh(res, "pv_curtail_kwh"),
-         COLORS["Curtailed PV"]),
-        ("Grid import", "Load", _sum_mwh(res, "grid_to_load_kwh"),
-         COLORS["Grid to load"]),
-        ("Grid import", "BESS", _sum_mwh(res, "bess_charge_grid_kwh"),
-         COLORS["Grid to BESS"]),
-        ("BESS", "Load", _sum_mwh(res, "bess_dis_load_kwh"),
-         COLORS["BESS to load"]),
-        ("BESS", "Grid export", _sum_mwh(res, "bess_dis_grid_kwh"),
-         COLORS["BESS to grid"]),
-        ("BESS", "Losses", losses, _SANKEY_LOSSES_COLOUR),
-    ]
+    flows = energy_sankey_flows(res, availability_factor)
     total = sum(v for _s, _t, v, _c in flows)
     eps = max(total, 1.0) * 1.0e-6
     flows = [f for f in flows if f[2] > eps]

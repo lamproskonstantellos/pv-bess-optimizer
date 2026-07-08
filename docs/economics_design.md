@@ -186,6 +186,24 @@ Both the perfect-foresight KPI path (`pipeline._run_one`) and the
 rolling-horizon path apply the same derate, so foresight-gap
 comparisons are derate-invariant (`docs/uncertainty_design.md`).
 
+**Grid import is the one energy KPI that rises rather than falls.**
+Generation, storage, export and revenue all scale by $A$, but the load
+is fixed exogenous demand that the grid must serve in full while the
+plant is offline.  `system_total_import_mwh` is therefore set to
+
+$$\mathrm{import} = A \cdot \mathrm{import}_{\mathrm{raw}} + a \cdot L \tag{E9}$$
+
+with $L$ the (never-derated) annual load: the uniform $A$ step covers
+the grid-charging leg (which genuinely stops during downtime), and the
+$a \cdot L$ term adds the load the grid imports while the plant is out.
+The derated annual energy balance then closes exactly against $L$, and
+the annual energy Sankey (`plotting.emissions.plot_energy_sankey`,
+passed `kpis['availability_factor']`) applies the same rule so its Load
+node stays at the true demand and its ribbons conserve energy.  Because
+grid import is not a monetised stream — the self-consumption savings,
+which *are* derated, already carry the downtime cost — Eq. E9 leaves
+every financial KPI unchanged.
+
 ### Year-1 revenue bases and the nine canonical aggregates
 
 `kpis.add_economic_columns` writes the per-step EUR columns

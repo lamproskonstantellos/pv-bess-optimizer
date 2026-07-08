@@ -255,6 +255,45 @@ def test_cashflow_balancing_row_scales_with_derate():
     )
 
 
+def test_derate_raises_grid_import_to_cover_downtime_load():
+    """Grid import RISES by ``u * load`` instead of scaling down.
+
+    During plant downtime the grid must serve the full load the offline
+    plant cannot, so ``system_total_import_mwh`` becomes
+    ``factor * import_raw + (1 - factor) * load`` while the load itself is
+    never derated.  The generation-side energy keys still scale down.
+    """
+    import_raw = 12_337.0
+    load = 16_620.5
+    base = {
+        "pv_generation_mwh": 7_078.0,
+        "system_total_export_mwh": 2_356.0,
+        "system_total_import_mwh": import_raw,
+        "load_energy_mwh": load,
+    }
+    factor = 0.99
+    d = apply_unavailability_derate(base, 1.0)  # 1 % unavailability
+
+    assert d["availability_factor"] == pytest.approx(factor)
+    # Import rises: factor * raw + u * load  (> factor * raw, and > raw here).
+    assert d["system_total_import_mwh"] == pytest.approx(
+        factor * import_raw + (1.0 - factor) * load, abs=1e-6,
+    )
+    assert d["system_total_import_mwh"] > import_raw
+    # Load is exogenous demand — untouched.
+    assert d["load_energy_mwh"] == pytest.approx(load)
+    # Generation-side keys still scale DOWN by the factor.
+    assert d["pv_generation_mwh"] == pytest.approx(factor * 7_078.0)
+    assert d["system_total_export_mwh"] == pytest.approx(factor * 2_356.0)
+
+
+def test_derate_without_load_falls_back_to_uniform_import():
+    """No ``load_energy_mwh`` (e.g. merchant) -> import stays uniform-derated."""
+    base = {"system_total_import_mwh": 5_000.0, "pv_generation_mwh": 7_000.0}
+    d = apply_unavailability_derate(base, 10.0)  # factor 0.9
+    assert d["system_total_import_mwh"] == pytest.approx(0.9 * 5_000.0)
+
+
 def test_derate_shifts_financial_kpis_downward():
     """NPV / IRR / ROI / BCR all drop when availability is reduced."""
     base = _year1_kpis_balancing_on()
