@@ -259,3 +259,73 @@ def test_energy_sankey_single_asset_regimes(
     labels = set(captured["texts"])
     assert expected <= labels, (expected - labels, labels)
     assert not (absent & labels), (absent & labels)
+
+
+def _out_of(flows, node):
+    return sum(v for s, _t, v, _c in flows if s == node)
+
+
+def _into(flows, node):
+    return sum(v for _s, t, v, _c in flows if t == node)
+
+
+def _srcs_sinks(flows):
+    srcs = _out_of(flows, "PV generation") + _out_of(flows, "Grid import")
+    sinks = sum(
+        _into(flows, n)
+        for n in ("Load", "Grid export", "Curtailed PV", "Losses")
+    )
+    return srcs, sinks
+
+
+def test_energy_sankey_availability_raises_import_and_conserves():
+    """Availability rule inside the Sankey.
+
+    Plant-side flows (PV, BESS, export) derate by the factor; grid import
+    RISES to cover the load the offline plant cannot serve; the Load node
+    stays at the true (never-derated) demand; and the flows conserve
+    energy (sources == sinks) against that demand.
+    """
+    from pvbess_opt.plotting.emissions import energy_sankey_flows
+
+    res = _sankey_frame(
+        pv_to_load_kwh=12.9, pv_to_bess_kwh=9.2, pv_to_grid_kwh=0.4,
+        pv_curtail_kwh=1.6, grid_to_load_kwh=13.0, bess_charge_grid_kwh=10.6,
+        bess_dis_load_kwh=6.3, bess_dis_grid_kwh=12.1,
+    )
+
+    raw = energy_sankey_flows(res, 1.0)
+    load = _into(raw, "Load")
+    import_raw = _out_of(raw, "Grid import")
+    s_raw, k_raw = _srcs_sinks(raw)
+    assert s_raw == pytest.approx(k_raw)             # raw dispatch conserves
+
+    a = 0.99
+    adj = energy_sankey_flows(res, a)
+    # Load is fixed demand -- unchanged by the derate.
+    assert _into(adj, "Load") == pytest.approx(load)
+    # Import rises to cover the downtime load: factor*import_raw + u*load.
+    assert _out_of(adj, "Grid import") == pytest.approx(
+        a * import_raw + (1.0 - a) * load,
+    )
+    assert _out_of(adj, "Grid import") > import_raw   # strictly up (load > import)
+    # A plant-side sink still scales DOWN by the factor.
+    assert _into(adj, "Grid export") == pytest.approx(a * _into(raw, "Grid export"))
+    # Conserves energy against the true demand.
+    s_adj, k_adj = _srcs_sinks(adj)
+    assert s_adj == pytest.approx(k_adj)
+
+
+def test_energy_sankey_full_availability_is_raw_dispatch():
+    """``availability_factor == 1`` returns the untouched raw dispatch."""
+    from pvbess_opt.plotting.emissions import energy_sankey_flows
+
+    res = _sankey_frame(
+        pv_to_load_kwh=12.9, pv_to_grid_kwh=0.4, grid_to_load_kwh=13.0,
+        pv_curtail_kwh=1.6,
+    )
+    flows = energy_sankey_flows(res, 1.0)
+    # PV→grid flow equals the raw column sum (no scaling): 0.4 GWh = 400 MWh.
+    pv_to_grid = next(v for s, t, v, _c in flows
+                      if s == "PV generation" and t == "Grid export")
+    assert pv_to_grid == pytest.approx(400.0)

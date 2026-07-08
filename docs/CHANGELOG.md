@@ -33,6 +33,21 @@ Production release.
 
 ### Fixed
 
+- The availability derate now raises grid import instead of scaling it
+  down.  Generation, storage, export and revenue all fall with plant
+  availability, but the load is fixed exogenous demand that the grid
+  must serve in full while the plant is offline, so
+  `system_total_import_mwh` becomes `A * import_raw + a * load`
+  (`a` the unavailability fraction, `A = 1 - a`).  This closes the
+  derated annual energy balance against the never-derated load; the
+  previous uniform derate understated import by `a * load` (~1 % of the
+  annual load).  The annual energy Sankey
+  (`plotting.emissions.plot_energy_sankey`) takes an
+  `availability_factor` and applies the identical rule, so its Load node
+  reads the true demand and its ribbons conserve energy — the figure now
+  agrees with the availability-derated energy tables instead of showing
+  the raw dispatch.  Grid import is not a monetised stream, so every
+  financial KPI (NPV, IRR, LCOE, LCOS, payback) is unchanged.
 - Rolling-horizon window solves are decoupled from the benchmark's
   requested `mip_gap`: they floor their gap at `1e-3` (never tighter,
   even when the benchmark is solved to `1e-5` for a publication) and

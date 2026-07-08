@@ -17,6 +17,16 @@ multiplication on a handful of KPIs and cashflow columns, and makes
 the derate trivially auditable downstream.  The case is a one-line
 substitution in :func:`apply_unavailability_derate`.
 
+Generation, storage, export and revenue all scale down by the
+availability factor.  Grid import is the sole exception: it scales *up*,
+because the load is fixed exogenous demand that the grid must cover in
+full while the plant is offline (a PV+BESS site whose plant trips simply
+draws the shortfall from the grid).  Import is therefore set to
+``factor * import_raw + (1 - factor) * load`` so the derated annual
+energy balance closes against the never-derated load -- and so the
+annual energy Sankey (which applies the same rule) balances with the
+real demand rather than a shrunk one.
+
 The canonical default is ``unavailability_pct = 1.0`` (= 99 % yearly
 availability), in line with utility-scale industry benchmarks (NREL
 ATB 2024 reports ~99 % availability for fixed-tilt PV).
@@ -50,6 +60,10 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     "pv_generation_mwh",
     "bess_total_discharge_mwh",
     "system_total_export_mwh",
+    # ``system_total_import_mwh`` is scaled by ``factor`` here like the rest,
+    # then corrected in ``apply_unavailability_derate`` to add the downtime
+    # load the grid must cover (it RISES with unavailability, unlike the
+    # generation-side keys around it).
     "system_total_import_mwh",
     "bess_total_charge_mwh",
     "pv_to_bess_mwh",
@@ -149,6 +163,15 @@ def apply_unavailability_derate(
     derated lifetime numbers.  This asymmetry with the surrounding
     top-level MWh keys is by design.
 
+    ``system_total_import_mwh`` is the one energy key that is NOT scaled
+    linearly: grid import RISES with unavailability because during plant
+    downtime the grid must serve the load the offline plant cannot.  It
+    is set to ``factor * import_raw + (1 - factor) * load`` so the derated
+    energy balance closes against the (never-derated) exogenous load.
+    Grid import is not a monetised stream, so this leaves every financial
+    KPI unchanged.  When no ``load_energy_mwh`` key is present it falls
+    back to the uniform derate.
+
     The factor is also recorded under ``availability_factor`` so the
     downstream cashflow can re-apply it consistently.
     """
@@ -159,6 +182,26 @@ def apply_unavailability_derate(
     for key in derated_keys:
         if key in out and isinstance(out[key], (int, float)):
             out[key] = float(out[key]) * factor
+    # Grid import is the one energy flow that must NOT simply scale down with
+    # availability.  During plant downtime the grid covers the full load the
+    # offline plant would otherwise have served, so annual import RISES rather
+    # than falls.  The uniform ``factor`` step above left it at
+    # ``factor * import_raw`` (the grid-charging leg, which genuinely stops
+    # when the plant is down, is correctly captured by that step); here we add
+    # back the ``(1 - factor) * load`` the grid imports to serve the load while
+    # the plant is out.  Net: ``import = factor * import_raw + u * load``
+    # (u = 1 - factor).  The load is exogenous demand and is never derated, so
+    # the derated energy balance closes exactly against it.  Revenue is
+    # unaffected -- grid import is not a monetised stream; the self-consumption
+    # savings (which ARE derated) already carry the downtime cost.  Absent a
+    # ``load_energy_mwh`` key (a merchant run has no co-located load, and
+    # partial KPI dicts may omit it) the import stays uniformly derated,
+    # matching the previous behaviour.  See ``docs/economics_design.md`` (E9).
+    _load = out.get("load_energy_mwh")
+    if _load is not None and "system_total_import_mwh" in out:
+        out["system_total_import_mwh"] = (
+            float(out["system_total_import_mwh"]) + (1.0 - factor) * float(_load)
+        )
     out["availability_factor"] = float(factor)
     out["unavailability_pct"] = float(unavailability_pct)
     return out

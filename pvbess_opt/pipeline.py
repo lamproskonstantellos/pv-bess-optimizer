@@ -1469,8 +1469,13 @@ def _run_one(
         # so it renders for every run in both modes; the CFE view stays
         # tied to the emissions configuration.
         try:
+            # Apply the same availability rule as the derated KPIs so the
+            # Sankey balances against the real (never-derated) load: plant-side
+            # flows scale by the factor, grid import rises to cover the load
+            # during downtime.  Factor 1.0 (no unavailability) leaves it raw.
             plot_energy_sankey(
                 res, layout["energy_plots"] / "energy_sankey.pdf",
+                availability_factor=float(kpis.get("availability_factor", 1.0)),
             )
         except Exception:
             logger.exception("Energy-flow diagram generation failed")
