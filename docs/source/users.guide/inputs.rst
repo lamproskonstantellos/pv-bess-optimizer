@@ -751,6 +751,12 @@ examples/scenarios.yaml`` lists the same overrides as nested mappings::
         inherits: "Merchant hybrid"
         capex_multiplier: 0.8
 
+A YAML scenarios file may also carry a ``trajectories:`` section per
+scenario (same shape as the top-level block; an overridden stream
+replaces the base workbook's vector wholesale).  The Excel scenarios
+sheet cannot — a single cell cannot carry a per-year vector, and the
+loader says so.
+
 Each scenario runs through the same path as a standalone run, so its
 results match running it alone.  Every override target must name a real
 workbook key: any ``<sheet>.<key>`` from the seven parameter sheets, the

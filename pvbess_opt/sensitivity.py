@@ -201,6 +201,13 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     breakdowns), the aggregator-fee deduction that scales with gross
     revenue, and balancing capacity + activation revenue.
 
+    Decision table vs the per-year trajectory vectors (Eq. E24): the
+    uniform driver scaling perturbs the price LEVEL and commutes with a
+    trajectory's per-year SHAPE, so trajectory-shaped revenue columns
+    and ``optimizer_fee_eur`` scale with the driver, while
+    ``route_to_market_fee_eur`` stays untouched (volume-based, no
+    price component; locked by tests/test_trajectory_application.py).
+
     The perturbed frame is reconstructed so it satisfies the same
     gross/net identity the original cashflow does:
 

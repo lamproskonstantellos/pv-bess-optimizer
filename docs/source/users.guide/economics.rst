@@ -7,6 +7,13 @@ The ``economics`` sheet drives the project-finance pipeline:
   ``project_start_year - 1``); operating Years 1..N cover
   ``project_start_year .. project_start_year + N - 1``.
 * **OPEX** scales by ``(1 + opex_inflation_pct/100)^(y-1)``.
+* Any stream's flat index can be reshaped year-by-year with the
+  optional ``trajectories`` input (equations E24/E24a): a
+  ``replace``-mode vector substitutes the index, ``overlay``
+  multiplies on top of it, and the per-asset ``opex_pv`` /
+  ``opex_bess`` streams shape each OPEX leg (the LCOE / LCOS
+  numerators follow the same series, so metric and cashflow OPEX
+  never diverge).  See the inputs guide for the sheet format.
 * **Revenue** uses the Year-1 per-stream KPI breakdown as the base.
   Revenue is split into a retail-indexed stream (load offset / PPA) and
   a DAM-indexed stream (wholesale exports); within each stream the

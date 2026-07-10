@@ -111,6 +111,31 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
             continue
         if section == "balancing" and not isinstance(value, dict):
             continue  # bare on/off scalar
+        if section == "trajectories":
+            # Per-year stream multipliers (Eq. E24) — YAML scenario
+            # files only: a single scenarios-sheet cell cannot carry a
+            # per-year vector.
+            from .io import _normalise_trajectories_block
+
+            if not isinstance(value, dict):
+                raise ValueError(
+                    f"scenario {name!r}: 'trajectories' must be a "
+                    f"mapping of stream name to a values list or "
+                    f"{{mode, values}} block."
+                )
+            for stream, spec in value.items():
+                if not isinstance(spec, (list, tuple, dict)):
+                    raise ValueError(
+                        f"scenario {name!r}: trajectories.{stream} needs "
+                        "a per-year vector, which a single "
+                        "scenarios-sheet cell cannot carry; declare the "
+                        "override in a YAML scenarios file passed with "
+                        "--scenarios."
+                    )
+            _normalise_trajectories_block(
+                value, source=f"scenario {name!r}",
+            )
+            continue
         if section not in _OVERRIDE_SECTIONS:
             owner = _KEY_TO_SHEET.get(section)
             hint = (
@@ -218,6 +243,25 @@ def _apply_scenario_overrides(
         typed["project"]["site_capex_eur"] = (
             _to_float(typed["project"].get("site_capex_eur", 0.0)) * m
         )
+
+    # Trajectory overrides merge per stream: an overridden stream
+    # replaces the base workbook's vector wholesale, untouched base
+    # streams are kept.  Lifecycle coverage and the Year-1 anchor are
+    # re-validated on the materialize round-trip (read_workbook →
+    # validate_workbook_params), so a scenario that also overrides
+    # project_lifecycle_years is checked against the NEW length.
+    traj_override = scenario.get("trajectories")
+    if traj_override is not None:
+        from .io import _normalise_trajectories_block
+
+        block = _normalise_trajectories_block(
+            traj_override,
+            source=f"scenario {scenario.get('name', '<unnamed>')!r}",
+        )
+        base_block = typed.get("trajectories") or {}
+        typed["trajectories"] = {
+            **copy.deepcopy(base_block), **(block or {}),
+        } or None
 
     # The base PV profile is already resolved; scenarios rescale it by
     # nameplate through the standard read path, so force file mode.

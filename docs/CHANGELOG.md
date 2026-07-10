@@ -34,6 +34,30 @@ Production release.
   warns when the legacy `aggregator_fee_pct_revenue` and the optimizer
   share are combined (double-charging the battery's wholesale stream).
 
+### Added (per-year stream trajectories)
+
+- Optional per-year escalation vectors per revenue/cost stream
+  (Eq. E24/E24a), default-off and bit-identical when unset: a new
+  `trajectories` workbook sheet (tidy: `enabled|stream|mode|year|value`)
+  and equivalent YAML `trajectories:` block reshape `revenue_dam`
+  (PV capture-rate decline; the CfD DAM leg, the post-term PPA
+  reversion and the optimizer-share base ride the same series),
+  `revenue_retail`, `balancing_capacity` / `balancing_activation`
+  (ancillary-services price decay as the fleet saturates) and `opex`
+  or the per-asset `opex_pv` / `opex_bess` split (post-warranty LTSA
+  step, insurance) — `replace` substitutes the stream's flat
+  `(1+i)^(y-1)` index (the loader warns when the matching
+  `*_inflation_pct` is also non-zero), `overlay` multiplies on top.
+  Vectors must cover every operating year and anchor at 1.0 in year 1
+  (the Year-1 cashflow stays equal to the dispatch base).  The LCOE /
+  LCOS discounted-OPEX numerators consume the identical series as the
+  cashflow OPEX row, so metric and cashflow OPEX cannot diverge; the
+  PPA strike and the route-to-market fee deliberately take no
+  trajectory.  YAML scenario files can override trajectories per
+  scenario (the Excel scenarios sheet cannot carry per-year vectors
+  and says so).  The polish script adds the disabled sheet to
+  workbooks that predate it.
+
 ### Changed (aggregator fee template default)
 
 - The `aggregator_fee_pct_revenue` template default drops from 10 % to
