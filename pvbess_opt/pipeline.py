@@ -1018,6 +1018,18 @@ def _resolve_uncertainty_config(
         "sigma_dam": float(econ.get("uncertainty_sigma_dam", 0.20) or 0.20),
         "sigma_pv": float(econ.get("uncertainty_sigma_pv", 0.12) or 0.12),
         "sigma_load": float(econ.get("uncertainty_sigma_load", 0.05) or 0.05),
+        # Ex-post imbalance settlement (Eqs. U6-U9); the loader has
+        # already validated the coupling to the rolling-horizon MC.
+        "imbalance_enabled": bool(econ.get("imbalance_enabled", False)),
+        "imbalance_pricing": str(
+            econ.get("imbalance_pricing", "dual") or "dual"
+        ).lower(),
+        "imbalance_price_mult_short": float(
+            econ.get("imbalance_price_mult_short", 1.25) or 1.25
+        ),
+        "imbalance_price_mult_long": float(
+            econ.get("imbalance_price_mult_long", 0.75) or 0.75
+        ),
         "base_seed": int(config.seed),
     }
 
@@ -1256,6 +1268,14 @@ def _run_one(
                     enable_load=unc_cfg["enable_load"],
                     window_hours=window_h,
                     commit_hours=commit_h,
+                    imbalance_enabled=unc_cfg["imbalance_enabled"],
+                    imbalance_pricing=unc_cfg["imbalance_pricing"],
+                    imbalance_price_mult_short=(
+                        unc_cfg["imbalance_price_mult_short"]
+                    ),
+                    imbalance_price_mult_long=(
+                        unc_cfg["imbalance_price_mult_long"]
+                    ),
                     solver_name=config.solver,
                     strict=bool(config.strict),
                     mip_gap=rh_window_gap,
@@ -1376,6 +1396,35 @@ def _run_one(
                 kpis["foresight_gap_pct_p10"] = float(round(gap_p.loc[0.10], 4))
                 kpis["foresight_gap_pct_p50"] = float(round(gap_p.loc[0.50], 4))
                 kpis["foresight_gap_pct_p90"] = float(round(gap_p.loc[0.90], 4))
+            if (
+                rolling_mc_df is not None
+                and "imbalance_cost_eur" in rolling_mc_df.columns
+            ):
+                # Imbalance settlement aggregates (Eqs. U6-U9): the MEAN
+                # feeds the yearly cashflow as the unbiased expected-value
+                # estimate (Eq. E28); the percentiles carry the
+                # distributional story (right-skewed, spike-driven).
+                _imb = rolling_mc_df["imbalance_cost_eur"].astype(float)
+                _imb_p = _imb.quantile([0.10, 0.50, 0.90])
+                kpis["imbalance_cost_year1_eur"] = float(round(_imb.mean(), 2))
+                kpis["imbalance_cost_p10_eur"] = float(
+                    round(_imb_p.loc[0.10], 2),
+                )
+                kpis["imbalance_cost_p50_eur"] = float(
+                    round(_imb_p.loc[0.50], 2),
+                )
+                kpis["imbalance_cost_p90_eur"] = float(
+                    round(_imb_p.loc[0.90], 2),
+                )
+                _hedge = rolling_mc_df[
+                    "bess_imbalance_hedge_value_eur"
+                ].astype(float)
+                kpis["bess_imbalance_hedge_value_mean_eur"] = float(
+                    round(_hedge.mean(), 2),
+                )
+                kpis["bess_imbalance_hedge_value_p50_eur"] = float(
+                    round(_hedge.quantile(0.50), 2),
+                )
             if n_seeds > 0:
                 kpis["mc_n_seeds"] = int(n_seeds)
                 kpis["mc_window_hours"] = int(window_h)

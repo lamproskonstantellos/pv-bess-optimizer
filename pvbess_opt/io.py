@@ -3093,6 +3093,14 @@ _SUMMARY_ROLLING_KEYS: tuple[tuple[str, str], ...] = (
     ("pf_benchmark_mip_gap", "Benchmark MIP gap, requested [-]"),
     ("pf_benchmark_gap_achieved", "Benchmark MIP gap, proven [-]"),
     ("mc_n_seeds", "Monte Carlo seeds"),
+    # Imbalance settlement (Eqs. U6-U9) — rendered only when the
+    # feature ran (keys absent otherwise).
+    ("imbalance_cost_year1_eur", "Imbalance cost, Year-1 mean [EUR]"),
+    ("imbalance_cost_p50_eur", "Imbalance cost P50 [EUR]"),
+    ("imbalance_cost_p10_eur", "Imbalance cost P10 [EUR]"),
+    ("imbalance_cost_p90_eur", "Imbalance cost P90 [EUR]"),
+    ("bess_imbalance_hedge_value_mean_eur",
+     "BESS imbalance hedge value, mean [EUR]"),
 )
 
 

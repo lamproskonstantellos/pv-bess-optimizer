@@ -738,6 +738,10 @@ def monte_carlo_rolling(
     enable_load: bool = True,
     window_hours: int = 48,
     commit_hours: int = 24,
+    imbalance_enabled: bool = False,
+    imbalance_pricing: str = "dual",
+    imbalance_price_mult_short: float = 1.25,
+    imbalance_price_mult_long: float = 0.75,
     solver_name: str = "highs",
     strict: bool = False,
     **solve_kwargs: Any,
@@ -811,6 +815,10 @@ def monte_carlo_rolling(
             enable_pv=enable_pv,
             enable_load=enable_load,
             evaluate_with_actuals=True,
+            imbalance_enabled=imbalance_enabled,
+            imbalance_pricing=imbalance_pricing,
+            imbalance_price_mult_short=imbalance_price_mult_short,
+            imbalance_price_mult_long=imbalance_price_mult_long,
             solver_name=solver_name,
             **solve_kwargs,
         )
@@ -863,7 +871,7 @@ def monte_carlo_rolling(
             gap = 100.0 * (1.0 - profit / float(pf_profit_eur))
         else:
             gap = float("nan")
-        rows.append({
+        row = {
             "seed": seed,
             "profit_total_eur": profit,
             "grid_export_mwh": float(kpis.get("system_total_export_mwh", 0.0)),
@@ -871,7 +879,18 @@ def monte_carlo_rolling(
             "pv_curtailed_mwh": float(kpis.get("pv_energy_curtailed_mwh", 0.0)),
             "bess_cycles_total": float(kpis.get("bess_equivalent_cycles_total", 0.0)),
             "foresight_gap_pct": gap,
-        })
+        }
+        if imbalance_enabled:
+            # Appended AFTER the stable schema so existing consumers of
+            # the rolling_horizon_mc sheet are untouched; the columns
+            # exist only when the feature ran (bit-identical otherwise).
+            for k in (
+                "imbalance_cost_eur", "imbalance_short_mwh",
+                "imbalance_long_mwh", "imbalance_cost_pv_only_eur",
+                "bess_imbalance_hedge_value_eur",
+            ):
+                row[k] = float(kpis.get(k, 0.0))
+        rows.append(row)
         elapsed = time.perf_counter() - t_start
         done = len(rows)
         eta_s = elapsed / done * (len(seeds) - done) if done else 0.0
