@@ -428,3 +428,18 @@ def test_dispatch_neutrality_lock():
     pd.testing.assert_frame_equal(
         res_on[dispatch_cols], res_off[dispatch_cols],
     )
+    # Suspension x baseload hardening: the masked leg is STILL
+    # variable-free, so the neutrality lock holds through negative-DAM
+    # hours with the clause on.
+    ts_neg = ts.copy()
+    ts_neg.loc[2:5, "dam_price_eur_per_mwh"] = -40.0
+    res_off_neg, _s3, _f3 = run_scenario(
+        dict(params), ts_neg.copy(), return_unrounded=True,
+    )
+    res_susp, _s4, _f4 = run_scenario(
+        dict(params, ppa=_ppa(ppa_negative_price_rule="suspend")),
+        ts_neg.copy(), return_unrounded=True,
+    )
+    pd.testing.assert_frame_equal(
+        res_susp[dispatch_cols], res_off_neg[dispatch_cols],
+    )

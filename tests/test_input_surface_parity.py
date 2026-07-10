@@ -237,6 +237,8 @@ def test_shipped_workbook_scenarios_sheet_validates():
     assert enabled is False, "the shipped example ships disabled"
     names = [s["name"] for s in scenarios]
     assert "Merchant hybrid + PPA" in names
+    assert "Merchant hybrid + baseload PPA" in names
+    assert "Merchant hybrid + sized debt" in names
     for scenario in resolve_inheritance(scenarios):
         validate_scenario_overrides(scenario)
 
@@ -245,5 +247,7 @@ def test_examples_scenarios_yaml_validates():
     scenarios = read_scenarios_file(ROOT / "examples" / "scenarios.yaml")
     names = [s["name"] for s in scenarios]
     assert "Merchant hybrid + PPA" in names
+    assert "Merchant hybrid + baseload PPA" in names
+    assert "Merchant hybrid + sized debt" in names
     for scenario in resolve_inheritance(scenarios):
         validate_scenario_overrides(scenario)

@@ -49,3 +49,28 @@ scenarios:
       ppa_price_eur_per_mwh: 65
       ppa_volume_share_pct: 80
       ppa_term_years: 10
+
+  # Baseload band settled financially against total export (cfd-only;
+  # dispatch is provably unchanged - see docs/ppa_design.md P9-P11).
+  - name: "Merchant hybrid + baseload PPA"
+    inherits: "Merchant hybrid"
+    ppa:
+      ppa_enabled: true
+      ppa_structure: baseload
+      ppa_settlement: cfd
+      ppa_price_eur_per_mwh: 70
+      ppa_baseload_mw: 3
+      ppa_term_years: 10
+
+  # Lender view: debt sized to a covenant instead of a gearing input
+  # (gearing becomes an output), sculpted repayment so coverage is
+  # level across the tenor, and the P90/base lender case table.
+  - name: "Merchant hybrid + sized debt"
+    inherits: "Merchant hybrid"
+    economics:
+      debt_sizing_mode: target_dscr
+      target_dscr: 1.30
+      debt_repayment: sculpted
+      debt_tenor_years: 12
+      production_p90_factor_pct: 92
+      lender_cases_enabled: true
