@@ -751,6 +751,24 @@ examples/scenarios.yaml`` lists the same overrides as nested mappings::
         inherits: "Merchant hybrid"
         capex_multiplier: 0.8
 
+**Price decks** let a scenario swap the price timeseries itself
+(Central / High / Low fundamentals) before its re-solve.  Add variant
+columns to the base ``timeseries`` sheet named ``<column>__<deck>``
+(double underscore reserved; e.g. ``dam_price_eur_per_mwh__high``) for
+any recognised price column — DAM, retail, and the balancing
+capacity / activation price columns — then select the deck with the
+bare ``price_deck`` target (``target=price_deck``, ``value=high``), or
+``price_deck: high`` in a YAML scenario.  Variant columns are inert in
+a normal run; a partial deck keeps base values for columns it does not
+carry; a deck name matching no variant column fails before any solver
+time.  A YAML / JSON config can keep decks in external files with a
+top-level ``price_decks: {high: high.csv}`` mapping (canonical price
+column names, row count matching the grid).  The comparison workbook
+and bars gain a deck column / ``[deck]`` tick-label suffix only when a
+deck is used.  Combine with trajectories: the deck sets the Year-1
+price LEVEL (dispatch re-solves), the trajectory sets the years-2+
+SHAPE.
+
 A YAML scenarios file may also carry a ``trajectories:`` section per
 scenario (same shape as the top-level block; an overridden stream
 replaces the base workbook's vector wholesale).  The Excel scenarios

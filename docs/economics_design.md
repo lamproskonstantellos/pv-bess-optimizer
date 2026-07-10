@@ -363,6 +363,12 @@ LEVEL on top of the trajectory SHAPE), so trajectory-shaped revenue
 columns and `optimizer_fee_eur` scale with the driver while
 `route_to_market_fee_eur` remains volume-based and untouched.
 
+Price decks (`docs/source/users.guide/inputs.rst`) are the structural
+complement: a scenario's deck swaps the Year-1 price inputs and
+re-solves the dispatch, then the multi-year projection applies
+E9-E15 (and any trajectories) unchanged — an input swap, deliberately
+NOT a new equation.
+
 ### Route-to-market and optimizer fees (structural market-access costs)
 
 Two structural fees model how European producers actually pay for

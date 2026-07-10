@@ -1025,6 +1025,9 @@ _SCENARIOS_EXAMPLE_ROWS: tuple[tuple[Any, ...], ...] = (
     (None, "Cheap CAPEX (merchant)", "Merchant hybrid", "capex_multiplier", 0.8),
     (None, "Merchant hybrid + PPA", "Merchant hybrid", "ppa.ppa_enabled", "TRUE"),
     (None, "Merchant hybrid + PPA", "Merchant hybrid", "ppa.ppa_volume_share_pct", 80),
+    # A price deck selects <column>__<deck> variant columns of the base
+    # timeseries (e.g. dam_price_eur_per_mwh__high) for this scenario.
+    (None, "Merchant hybrid (high prices)", "Merchant hybrid", "price_deck", "high"),
 )
 
 
@@ -1867,6 +1870,37 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
                     col, nan_count, first_nan,
                 )
             ts[col] = numeric.ffill().bfill()
+    # Deck variant columns (``<base>__<deck>``): validate the base name
+    # against the recognised price columns and apply the same NaN
+    # ffill/bfill treatment their canonical column receives.
+    for col in list(ts.columns):
+        name = str(col)
+        if "__" not in name:
+            continue
+        base, deck = name.split("__", 1)
+        if base not in PRICE_DECK_BASE_COLUMNS:
+            raise ValueError(
+                f"timeseries column {name!r}: unknown price-deck base "
+                f"{base!r} left of '__' (the double underscore is "
+                f"reserved for deck variant columns); recognised price "
+                f"columns: {', '.join(PRICE_DECK_BASE_COLUMNS)}."
+            )
+        if not deck or not re.fullmatch(r"[a-z0-9_]+", deck):
+            raise ValueError(
+                f"timeseries column {name!r}: deck name {deck!r} must "
+                f"match [a-z0-9_]+."
+            )
+        numeric = ts[name].astype(float)
+        nan_mask = numeric.isna()
+        nan_count = int(nan_mask.sum())
+        if nan_count > 0:
+            first_nan = ts.loc[nan_mask.idxmax(), "timestamp"]
+            logger.warning(
+                "Column '%s' had %d NaN value(s) filled via ffill/bfill; "
+                "first NaN at %s. Check the input timeseries for gaps.",
+                name, nan_count, first_nan,
+            )
+        ts[name] = numeric.ffill().bfill()
     # pv_kwh_override deliberately stays out of the ffill/bfill loop so
     # partial NaN survives for the resolver's deprecated-fallback check
     # (pvbess_opt.io_read._apply_override_fallback) to raise on.
@@ -1969,6 +2003,21 @@ _BALANCING_TS_COLUMN_DEFAULTS: dict[str, str] = {
     "mfrr_dn_activation_price_eur_per_mwh":
         "mfrr_dn_default_activation_price_eur_per_mwh",
 }
+
+
+# Price columns that may carry per-deck variant columns in the base
+# timeseries (``<base>__<deck>``, the double underscore is reserved).
+# A variant column is inert pass-through in a normal run — the MILP
+# reads canonical names only — and becomes active when a scenario
+# selects the deck via the ``price_deck`` special
+# (pvbess_opt.scenarios._apply_price_deck), which copies the named
+# variants onto the canonical columns and strips every ``__`` column
+# before the per-scenario workbook is written.
+PRICE_DECK_BASE_COLUMNS: tuple[str, ...] = (
+    "dam_price_eur_per_mwh",
+    "retail_price_eur_per_mwh",
+    *_BALANCING_TS_COLUMN_DEFAULTS.keys(),
+)
 
 
 def _validate_balancing_config(

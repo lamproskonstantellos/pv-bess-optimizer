@@ -58,6 +58,23 @@ Production release.
   and says so).  The polish script adds the disabled sheet to
   workbooks that predate it.
 
+### Added (multi-scenario price decks)
+
+- Named price decks as first-class scenario inputs: `<column>__<deck>`
+  variant columns on the base `timeseries` sheet (DAM, retail and the
+  balancing price columns; double underscore reserved and validated)
+  stay inert in a normal run and are selected per scenario with the
+  bare `price_deck` target — the deck's columns are copied onto the
+  canonical names before the per-scenario re-solve, so Low/Central/High
+  fundamentals change the DISPATCH, not just the cashflow scaling.
+  Partial decks fall back to base columns (INFO); a deck matching no
+  variant column fails before any solver time; deck-resolved balancing
+  columns win over the scalar fallback.  YAML configs may keep decks in
+  external files via a top-level `price_decks:` mapping.  The
+  comparison table/workbook and the comparison bars carry a deck
+  column / `[deck]` tick suffix only when a deck is used (deck-free
+  batches stay bit-identical).
+
 ### Changed (aggregator fee template default)
 
 - The `aggregator_fee_pct_revenue` template default drops from 10 % to

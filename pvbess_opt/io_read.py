@@ -54,6 +54,7 @@ _TOP_LEVEL_EXTRAS: frozenset[str] = frozenset({
     "max_injection_profile_bess",
     "sizing",  # read separately by pvbess_opt.sizing.read_sizing_block
     "trajectories",  # per-year stream multipliers (Eq. E24)
+    "price_decks",  # named price-deck files merged as __ variant columns
 })
 
 # Reference specific yield (kWh/kWp/yr) and divergence threshold for the PV
@@ -241,6 +242,7 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
         raw.get("trajectories"), source=f"Config {path}",
     )
     typed["ts"] = _resolve_timeseries(raw, path.parent)
+    _resolve_price_decks(raw, path.parent, typed)
     mip = raw.get("max_injection_profile")
     if mip is not None:
         typed["max_injection_profile"] = np.asarray(mip, dtype=float)
@@ -252,6 +254,67 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
             )
     resolve_pv_source(typed, base_dir=path.parent)
     return typed
+
+
+def _resolve_price_decks(
+    raw: dict[str, Any], base_dir: Path, typed: dict[str, Any],
+) -> None:
+    """Merge named price-deck files as ``<col>__<deck>`` variant columns.
+
+    ``price_decks: {name: file.csv}`` keeps 35k-row decks out of the
+    YAML: each file carries canonical price column names (plus an
+    optional ``timestamp``), is row-count-checked against the model
+    grid, and lands as suffix columns on ``typed['ts']`` — exactly the
+    workbook variant-column convention, so the scenario runner's
+    ``price_deck`` special works identically on both surfaces.  The
+    merged columns ride ``typed['ts']`` through ``dump_structured_config``
+    (the ts CSV keeps them), so the round-trip needs no separate block.
+    """
+    decks = raw.get("price_decks")
+    if decks is None:
+        return
+    if not isinstance(decks, dict):
+        raise ValueError(
+            "'price_decks' must be a mapping of deck name to a "
+            "CSV/Parquet path."
+        )
+    from .io import PRICE_DECK_BASE_COLUMNS
+
+    ts = typed["ts"]
+    for deck_name, ref in decks.items():
+        deck = str(deck_name).strip().lower()
+        deck_path = Path(str(ref))
+        if not deck_path.is_absolute():
+            deck_path = base_dir / deck_path
+        if not deck_path.exists():
+            raise FileNotFoundError(
+                f"price deck {deck!r}: file not found: {deck_path}",
+            )
+        if deck_path.suffix.lower() in (".parquet", ".pq"):
+            df = pd.read_parquet(deck_path)
+        else:
+            # timestamp is optional in a deck file (positional alignment
+            # against the model grid; the row count is checked below).
+            df = pd.read_csv(deck_path)
+        price_cols = [c for c in df.columns if c != "timestamp"]
+        if not price_cols:
+            raise ValueError(
+                f"price deck {deck!r} ({deck_path}) carries no price "
+                f"columns."
+            )
+        for col in price_cols:
+            if col not in PRICE_DECK_BASE_COLUMNS:
+                raise ValueError(
+                    f"price deck {deck!r} ({deck_path}): column {col!r} "
+                    f"is not a recognised price column; expected one of "
+                    f"{', '.join(PRICE_DECK_BASE_COLUMNS)}."
+                )
+            if len(df) != len(ts):
+                raise ValueError(
+                    f"price deck {deck!r} ({deck_path}) has {len(df)} "
+                    f"rows but the model grid has {len(ts)}."
+                )
+            ts[f"{col}__{deck}"] = df[col].to_numpy(dtype=float)
 
 
 def _resolve_pvgis(typed: dict[str, Any]) -> None:
@@ -700,6 +763,15 @@ def config_json_schema() -> dict[str, Any]:
     properties["max_injection_profile"] = {"type": "array"}
     properties["max_injection_profile_pv"] = {"type": "array"}
     properties["max_injection_profile_bess"] = {"type": "array"}
+    properties["price_decks"] = {
+        "type": "object",
+        "description": (
+            "Named price decks: mapping of deck name to a CSV/Parquet "
+            "path whose canonical price columns are merged as "
+            "<column>__<deck> variant columns; scenarios select a deck "
+            "with the price_deck special."
+        ),
+    }
     properties["trajectories"] = {
         "type": "object",
         "description": (

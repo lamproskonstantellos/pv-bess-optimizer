@@ -18,6 +18,16 @@ def plot_scenario_comparison_bars(comparison: pd.DataFrame, out_path: Path) -> P
     """NPV bars per scenario with IRR markers on a secondary axis."""
     _fig, ax = plt.subplots(figsize=(7, 4))
     names = [str(n) for n in comparison["name"].tolist()]
+    # Per-deck batches label each bar with its deck ("name [deck]") —
+    # scenario names are tick labels, not registry labels, so the
+    # canonical-label guard is untouched and deck-free batches render
+    # bit-identically.
+    if "price_deck" in comparison.columns:
+        decks = [str(d or "") for d in comparison["price_deck"].tolist()]
+        names = [
+            f"{n} [{d}]" if d else n
+            for n, d in zip(names, decks, strict=True)
+        ]
     x = np.arange(len(names))
     ax.bar(
         x, comparison["npv_eur"].to_numpy(dtype=float),
