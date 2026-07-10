@@ -115,6 +115,7 @@ def test_economics_sheet_keys():
         "gearing_pct", "debt_interest_rate_pct", "debt_tenor_years",
         "debt_repayment",
         "debt_sizing_mode", "target_dscr", "debt_sizing_case",
+        "production_p90_factor_pct", "lender_cases_enabled",
         "grid_co2_intensity_kg_per_mwh", "grid_co2_annual_decline_pct",
     }
     assert set(ECONOMICS_SHEET_DEFAULTS) == expected

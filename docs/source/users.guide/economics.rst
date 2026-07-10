@@ -191,6 +191,15 @@ Headline financial KPIs returned by
   the committed amount, never a per-perturbation re-size.
   ``dscr_target_met`` reports 1/0; an unachievable target completes
   the run all-equity (capacity 0) rather than erroring.
+* With ``lender_cases_enabled`` the run additionally writes the
+  lender case table (Eq. E44) — rows ``base`` / ``p90``, columns
+  min/avg DSCR, equity IRR, NPV and debt capacity per case — to a
+  ``lender_cases`` results sheet and a ``SUMMARY.md`` block.  The
+  P90 row applies the ``production_p90_factor_pct`` haircut to the
+  PV-linked streams and re-evaluates coverage on the same committed
+  debt.  ``debt_sizing_case = p90`` sizes the debt against that
+  haircut CFADS, so the base year then shows a coverage cushion
+  above the target.
 * ``npv_post_tax_eur`` / ``irr_post_tax_pct`` /
   ``equity_irr_post_tax_pct`` / ``simple_payback_post_tax_years`` /
   ``discounted_payback_post_tax_years`` /

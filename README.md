@@ -204,7 +204,9 @@ PPA-price), the debt layer (`gearing_pct`, `debt_interest_rate_pct`,
 `debt_tenor_years`, `debt_repayment` incl. a DSCR-level `sculpted`
 profile, plus target-DSCR debt sizing via `debt_sizing_mode` /
 `target_dscr` — debt sized to a lender covenant with gearing reported
-as an output), and grid-emissions intensity
+as an output — and the P90 production lender case
+`production_p90_factor_pct` / `lender_cases_enabled`), and
+grid-emissions intensity
 for the optional 24/7-CFE accounting. Per-asset CAPEX / DEVEX / OPEX
 live on the `pv` and `bess` sheets; the site-wide lump sums on
 `project`.
@@ -290,8 +292,8 @@ Each run writes a self-contained folder
                      cashflow_yearly | cashflow_quarterly | cashflow_monthly |
                      financial_kpis | sensitivity_analysis |
                      lifetime_dispatch_yearly | economic_assumptions |
-                     degradation (+ debt_schedule / emissions /
-                     rolling-horizon sheets when enabled)
+                     degradation (+ debt_schedule / lender_cases /
+                     emissions / rolling-horizon sheets when enabled)
 04_financial_plots/  revenue stack, BESS waterfall/by-month/split,
                      balancing reservation + MC, lifetime cycles,
                      cumulative + monthly cashflow, payback, NPV/IRR

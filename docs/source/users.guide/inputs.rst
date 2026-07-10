@@ -417,9 +417,11 @@ inert at their defaults:
   coverage ratio the sized debt must hold.
 * ``debt_sizing_case`` ∈ ``base | p90 | low_price`` (default
   ``base``): the cashflow case the debt is sized against.  ``base``
-  is the run's own yearly cashflow; ``p90`` and ``low_price`` are
-  reserved for the production-P90 and Low-price-deck lender cases and
-  are rejected with guidance until those cases are available.
+  is the run's own yearly cashflow; ``p90`` sizes against the
+  production-P90 haircut below (a warning flags the degenerate
+  combination with a factor of 100); ``low_price`` is reserved for
+  the Low-price-deck lender case and is rejected with guidance until
+  it is available.
 
 The sized run reports ``debt_capacity_eur`` (uncapped),
 ``sized_debt_eur``, ``gearing_sized_pct``, ``dscr_target_met`` and
@@ -430,6 +432,32 @@ committed at financial close).  If the target cannot be held (a
 loss-making year inside the tenor under a level-service profile), the
 debt capacity is zero and the run completes all-equity with a neutral
 message — never an error.
+
+Lender cases (P90 production haircut)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two ``economics`` keys add the lender's downside-resource view, both
+inert at their defaults:
+
+* ``production_p90_factor_pct`` (default 100, validated in
+  ``(0, 100]``): the P90-to-P50 annual production ratio in percent
+  (e.g. ``92`` = the P90 year delivers 92 % of the modelled energy).
+  Applied as a deterministic yearly haircut on the PV-linked revenue
+  streams (retail/DAM with the aggregator fee rederived, PPA volume,
+  route-to-market fee, imbalance cost); balancing, contracted BESS
+  payments, OPEX and CAPEX are deliberately untouched.  This is
+  distinct from the forecast-noise Monte Carlo on the ``simulation``
+  sheet, which perturbs intra-year dispatch — see the design docs for
+  the scope split.  No re-dispatch happens (documented cashflow-level
+  approximation).
+* ``lender_cases_enabled`` (default FALSE): evaluate the lender case
+  table — rows ``base`` and ``p90`` with per-case min/avg DSCR,
+  equity IRR, NPV and debt capacity — written to a ``lender_cases``
+  sheet in ``03_results.xlsx`` and a "Lender cases" block in
+  ``SUMMARY.md``.  The per-case leverage KPIs run on the SAME
+  committed debt as the run (frozen under target-DSCR sizing), so the
+  table answers "same debt, worse resource year".  LCOE / LCOS are
+  deliberately excluded from the table.
 
 In a YAML / JSON config the same settings can be supplied as a
 ``financing:`` block whose keys are expressed as fractions / years and

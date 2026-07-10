@@ -311,6 +311,32 @@ Production release.
   every default figure are untouched (financing stays excluded and
   `net_cashflow_eur` does not change).
 
+### Added (P90 production lender case)
+
+- `production_p90_factor_pct` (Eq. E44; default 100 = disabled,
+  bit-identical): the lender convention of a downside resource year
+  as a deterministic INTER-annual haircut on the PV-linked cashflow
+  lines - retail/DAM gross recovered from the base frame and the
+  aggregator fee rederived through its clamp (the sensitivity
+  gross/net identity), PPA volume, route-to-market fee (export
+  volume falls with production) and the E28 imbalance line; the
+  balancing family, contracted BESS payments (toll / floor+share /
+  state support / capacity market), grid-charging fee, levy, OPEX
+  and CAPEX deliberately unscaled, each decision documented in the
+  new `pvbess_opt/lender.py`.  Explicitly distinct from the
+  forecast-noise Monte Carlo (intra-year dispatch realism) - scope
+  split cross-referenced in both design docs; no re-dispatch
+  (documented cashflow-level approximation, scenario-engine re-solve
+  recorded as future work).  `lender_cases_enabled` (default FALSE)
+  writes the case table - base and P90 rows with per-case min/avg
+  DSCR, equity IRR, NPV and E41/E42 debt capacity, all on the run's
+  frozen committed debt - to a `lender_cases` results sheet and a
+  SUMMARY block (LCOE/LCOS deliberately excluded: Lazard cost
+  figures would be misstated by an energy-only scaling).
+  `debt_sizing_case = p90` activates: the target-DSCR debt is sized
+  against the haircut CFADS while the run's own cashflow stays the
+  base case (a warning flags the degenerate factor-100 combination).
+
 ### Fixed (debt-layer follow-ups)
 
 - The corporate-tax layer's debt-interest schedule now threads the

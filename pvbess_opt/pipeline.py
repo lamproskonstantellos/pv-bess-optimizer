@@ -63,6 +63,7 @@ from pvbess_opt.kpis import (
     compute_monthly_kpis,
     verify_energy_balance,
 )
+from pvbess_opt.lender import apply_production_case, build_lender_cases
 from pvbess_opt.lifetime import (
     aggregate_lifetime_to_yearly,
     build_lifetime_dispatch,
@@ -647,11 +648,22 @@ def _build_financials(
         )
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
     # Target-DSCR debt sizing (Eqs. E41-E43) resolves exactly ONCE per
-    # run, on the base cashflow: the sized debt is frozen into econ
-    # (internal underscore keys) so every downstream consumer — KPIs,
-    # debt schedule, tax layer, sensitivity, uncertainty — sees the
-    # amount committed at financial close, never a re-sized one.
-    if resolve_debt_sizing(yearly_cf, econ) is not None:
+    # run, on the configured sizing case: the sized debt is frozen
+    # into econ (internal underscore keys) so every downstream
+    # consumer — KPIs, debt schedule, tax layer, sensitivity,
+    # uncertainty — sees the amount committed at financial close,
+    # never a re-sized one.  debt_sizing_case='p90' sizes against the
+    # production-haircut CFADS (Eq. E44) while the run's own cashflow
+    # stays the base case.
+    sizing_frame = yearly_cf
+    if str(
+        econ.get("debt_sizing_case", "base") or "base"
+    ).strip().lower() == "p90":
+        raw_p90 = econ.get("production_p90_factor_pct")
+        sizing_frame = apply_production_case(
+            yearly_cf, (100.0 if raw_p90 is None else float(raw_p90)) / 100.0,
+        )
+    if resolve_debt_sizing(sizing_frame, econ) is not None:
         # The corporate-tax layer deducts the E20 interest, which now
         # runs on the sized debt; re-applying it (idempotent — every
         # tax column is recomputed from the untouched pre-tax frame)
@@ -693,6 +705,12 @@ def _build_financials(
     else:
         sensitivity_df = None
 
+    # Lender case table (Eq. E44), after sizing so the per-case
+    # leverage KPIs run on the frozen committed debt.
+    lender_cases_df: pd.DataFrame | None = None
+    if bool(econ.get("lender_cases_enabled", False)):
+        lender_cases_df = build_lender_cases(yearly_cf, econ)
+
     return {
         "econ": econ,
         "capacities": capacities,
@@ -704,6 +722,7 @@ def _build_financials(
         "lifetime_yearly": lifetime_yearly,
         "sensitivity": sensitivity_df,
         "debt_schedule": build_debt_schedule(yearly_cf, econ),
+        "lender_cases": lender_cases_df,
     }
 
 
@@ -1498,6 +1517,7 @@ def _run_one(
             degradation=degradation_df,
             debt_schedule=bundle.get("debt_schedule"),
             emissions=emissions_df,
+            lender_cases=bundle.get("lender_cases"),
         )
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
@@ -1506,6 +1526,7 @@ def _run_one(
             params=params,
             solver_name=resolved_solver,
             replacement_note=_format_replacement_note(econ),
+            lender_cases=bundle.get("lender_cases"),
         )
 
         # Balancing plot pair promised by the README's report list; both

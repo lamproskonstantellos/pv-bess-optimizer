@@ -451,10 +451,11 @@ def test_validation_rejects_zero_tenor_in_sizing_mode():
         validate_workbook_params(typed, dt_minutes=60)
 
 
-@pytest.mark.parametrize("case", ["p90", "low_price"])
-def test_validation_rejects_reserved_sizing_cases(case):
+def test_validation_rejects_reserved_sizing_case():
+    # 'p90' is live (tests/test_lender_cases.py); 'low_price' stays a
+    # reserved enum value until the price-deck lender case lands.
     typed = _typed_with_econ(debt_sizing_mode="target_dscr",
-                             debt_sizing_case=case)
+                             debt_sizing_case="low_price")
     with pytest.raises(ValueError, match="not available"):
         validate_workbook_params(typed, dt_minutes=60)
 
@@ -462,7 +463,7 @@ def test_validation_rejects_reserved_sizing_cases(case):
 def test_validation_sizing_keys_inert_in_manual_mode():
     # Out-of-covenant values sit inert while the mode is manual.
     typed = _typed_with_econ(debt_sizing_mode="manual", target_dscr=0.5,
-                             debt_sizing_case="p90")
+                             debt_sizing_case="low_price")
     validate_workbook_params(typed, dt_minutes=60)
 
 

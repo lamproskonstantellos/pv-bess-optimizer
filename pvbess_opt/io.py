@@ -298,6 +298,10 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "debt_sizing_mode": "manual",
     "target_dscr": 1.30,
     "debt_sizing_case": "base",
+    # Lender cases (Eq. E44): production haircut + case table, both
+    # inert at their defaults (factor 100 = no haircut).
+    "production_p90_factor_pct": 100.0,
+    "lender_cases_enabled": False,
     # Grid emissions / 24/7 CFE accounting (off by default: intensity 0).
     "grid_co2_intensity_kg_per_mwh": 0.0,
     "grid_co2_annual_decline_pct": 0.0,
@@ -454,6 +458,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "balancing_enabled",
     "ppa_enabled",
     "optimizer_floor_enabled",
+    "lender_cases_enabled",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -958,9 +963,22 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Used only when debt_sizing_mode = target_dscr; must be >= 1.0."),
     ("debt_sizing_case", "base", "base | p90 | low_price",
      "Cashflow case the debt is sized against. base = the run's own "
-     "yearly cashflow. p90 and low_price are reserved for the "
-     "production-P90 and Low-price-deck lender cases and are rejected "
-     "with guidance until those cases are available."),
+     "yearly cashflow. p90 = the production-P90 case (Eq. E44; set "
+     "production_p90_factor_pct < 100 or the case degenerates to "
+     "base). low_price is reserved for the Low-price-deck lender case "
+     "and is rejected with guidance until it is available."),
+    ("production_p90_factor_pct", 100.0, "%",
+     "P90-to-P50 annual production ratio in percent (e.g. 92 = the "
+     "P90 year delivers 92 % of the modelled energy). 100 = disabled "
+     "(default; results bit-identical). A deterministic yearly "
+     "haircut on the PV-linked revenue streams (Eq. E44) - distinct "
+     "from the forecast-noise Monte Carlo on the simulation sheet, "
+     "which perturbs intra-year dispatch."),
+    ("lender_cases_enabled", False, "bool",
+     "Evaluate the lender case table (base and production-P90 cases): "
+     "per-case min/avg DSCR, equity IRR, NPV and debt capacity, "
+     "written to a lender_cases sheet and a SUMMARY block. Off by "
+     "default."),
     ("grid_co2_intensity_kg_per_mwh", 0.0, "kg/MWh",
      "Grid carbon intensity for emissions / 24/7 CFE accounting "
      "(0 = off, the default; an optional grid_co2_kg_per_mwh time-series "
@@ -2799,17 +2817,34 @@ def validate_workbook_params(
             economics.get("debt_sizing_case", "base") or "base"
         ).strip().lower()
         if sizing_case == "p90":
-            raise ValueError(
-                "debt_sizing_case='p90' is reserved for the "
-                "production-P90 lender case, which is not available "
-                "yet; set debt_sizing_case='base'."
-            )
+            raw_p90 = economics.get("production_p90_factor_pct")
+            p90_factor = 100.0 if raw_p90 is None else float(raw_p90)
+            if p90_factor >= 100.0:
+                logger.warning(
+                    "debt_sizing_case='p90' with "
+                    "production_p90_factor_pct=100: the sizing case "
+                    "degenerates to the base cashflow. Set the factor "
+                    "below 100 for a real P90 haircut."
+                )
         if sizing_case == "low_price":
             raise ValueError(
                 "debt_sizing_case='low_price' is reserved for sizing "
                 "against a named Low price deck, which is not "
                 "available yet; set debt_sizing_case='base'."
             )
+
+    # P90 production factor (Eq. E44): a ratio of annual energies in
+    # percent — 0 is meaningless (no production at all is not a
+    # lender case) and > 100 would be a P90 ABOVE the P50.
+    raw_p90_factor = economics.get("production_p90_factor_pct")
+    p90_factor_pct = (
+        100.0 if raw_p90_factor is None else float(raw_p90_factor)
+    )
+    if not (0.0 < p90_factor_pct <= 100.0):
+        raise ValueError(
+            "'production_p90_factor_pct' must be in (0, 100]; got "
+            f"{p90_factor_pct!r}."
+        )
 
     # Revenue-fee percentages are a fraction of gross revenue, so they live
     # in [0, 100].  An out-of-range value (e.g. 150 meaning a mistyped
@@ -3684,6 +3719,7 @@ def write_summary_md(
     params: dict[str, Any],
     solver_name: str | None = None,
     replacement_note: str | None = None,
+    lender_cases: pd.DataFrame | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -3777,6 +3813,29 @@ def write_summary_md(
                     "all-equity."
                 )
                 lines.append("")
+
+    # Lender case table (Eq. E44): present only when
+    # lender_cases_enabled produced the frame, so default digests are
+    # byte-identical.
+    if lender_cases is not None and not lender_cases.empty:
+        lines.append("## Lender cases")
+        lines.append("")
+        lines.append(
+            "| Case | Production [%] | Min DSCR | Avg DSCR | "
+            "Equity IRR [%] | NPV [EUR] | Debt capacity [EUR] |"
+        )
+        lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
+        for _, row in lender_cases.iterrows():
+            lines.append(
+                f"| {row['case']} "
+                f"| {_summary_fmt(row['production_factor_pct'])} "
+                f"| {_summary_fmt(row['min_dscr'])} "
+                f"| {_summary_fmt(row['avg_dscr'])} "
+                f"| {_summary_fmt(row['equity_irr_pct'])} "
+                f"| {_summary_fmt(row['npv_eur'])} "
+                f"| {_summary_fmt(row['debt_capacity_eur'])} |"
+            )
+        lines.append("")
 
     if kpis_year1.get("mc_n_seeds"):
         lines.append("## Rolling-horizon foresight")
@@ -3897,6 +3956,7 @@ def write_results_workbook(
     degradation: pd.DataFrame | None = None,
     debt_schedule: pd.DataFrame | None = None,
     emissions: pd.DataFrame | None = None,
+    lender_cases: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -3951,6 +4011,10 @@ def write_results_workbook(
             degradation.to_excel(writer, sheet_name="degradation", index=False)
         if debt_schedule is not None and not debt_schedule.empty:
             debt_schedule.to_excel(writer, sheet_name="debt_schedule", index=False)
+        if lender_cases is not None and not lender_cases.empty:
+            lender_cases.to_excel(
+                writer, sheet_name="lender_cases", index=False,
+            )
         if emissions is not None and not emissions.empty:
             emissions.to_excel(writer, sheet_name="emissions", index=False)
         style_workbook(writer.book)

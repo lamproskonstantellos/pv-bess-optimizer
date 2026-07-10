@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E43 (+ suffixed E8a, E13a-E13d, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E44 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -1058,9 +1058,64 @@ follow E20 with debt $= D$.  Conventions, all deliberate:
   line), and `net_cashflow_eur` does not change, so every default
   figure is bit-identical.
 * `debt_sizing_case` fixes the CFADS the debt is sized against;
-  `base` (the run's own cashflow) is implemented, while `p90` and
-  `low_price` are reserved enum values rejected with guidance until
-  the matching lender cases land.
+  `base` (the run's own cashflow) and `p90` (the E44 production
+  haircut; a warning flags the degenerate factor-100 case) are
+  implemented, while `low_price` is a reserved enum value rejected
+  with guidance until the price-deck lender case lands.
+
+### P90 production lender case (Eq. E44; `production_p90_factor_pct`)
+
+Lenders size against a downside resource year: with
+$f = $ `production_p90_factor_pct`$/100$, the P90 case applies a
+deterministic INTER-ANNUAL haircut to the PV-linked streams of the
+yearly cashflow (`lender.apply_production_case`) and re-evaluates
+the leverage metrics on the resulting CFADS:
+
+$$\mathrm{CFADS}^{P90}_y = \mathrm{CFADS}_y\Big|_{\,G_y \to f G_y,\;
+\mathrm{PPA}_y \to f\,\mathrm{PPA}_y,\;
+\mathrm{RtM}_y \to f\,\mathrm{RtM}_y,\;
+\mathrm{IMB}_y \to f\,\mathrm{IMB}_y} \tag{E44}$$
+
+where $G_y$ is the retail/DAM **gross** (recovered from the base
+frame per the `sensitivity._scale_revenue` identity
+`revenue_eur + |aggregator_fee_eur| == gross`, the aggregator fee
+then rederived with the same fraction and non-negative-gross clamp),
+PPA is the pay-as-produced volume leg, RtM the per-MWh
+route-to-market fee (E13c — export VOLUME falls with production,
+unlike under the price-perturbing Revenue tornado driver, where it
+stays fixed) and IMB the E28 imbalance line (PV-curve volume).
+Everything else is deliberately NOT scaled: the balancing family
+(BESS reservation revenue; the partial PV-coupling of activation is
+a flagged approximation), toll / capacity-market / state-support
+payments (contractual EUR/MW), the optimizer floor+share pair
+(BESS-margin structures), the grid-charging fee (grid-import
+volume) and the revenue levy (mixed base, kept at the base value —
+conservative), OPEX / CAPEX / DEVEX.  This factor multiplies
+already-availability-derated revenue (E8/E8a applied upstream), so
+it is NOT an availability derate — adding it to the derate list
+would double-count.
+
+Scope split with the uncertainty machinery (cross-referenced in
+`docs/uncertainty_design.md`): the U1 forecast-noise Monte Carlo
+models intra-year dispatch realism against imperfect foresight; the
+P90 factor is an inter-annual resource case.  No re-dispatch happens
+— the scaling is a documented cashflow-level approximation (a real
+P90 irradiance year moves BESS arbitrage volumes and curtailment
+nonlinearly); re-solving the dispatch with a scaled PV profile
+through the scenario engine is recorded as future work.
+
+`lender_cases_enabled` evaluates the case table
+(`lender.build_lender_cases`): rows `base` and `p90`, columns
+min/avg DSCR, equity IRR (E20 on the case CFADS with the run's
+resolved — frozen — debt), case NPV and E41/E42 debt capacity at the
+configured `target_dscr`; written to a `lender_cases` results sheet
+and a SUMMARY block, both absent by default.  LCOE / LCOS are
+deliberately excluded from the table: they are Lazard cost figures,
+and scaling the energy denominator without the cost numerator would
+misstate them.  `debt_sizing_case = p90` sizes the debt (E41-E43) on
+$\mathrm{CFADS}^{P90}$ while the run's own cashflow stays the base
+case — the sized run then shows the base-case coverage cushion above
+the target.
 
 ### LCOE and LCOS (Lazard-style, revenue-agnostic)
 
@@ -1180,6 +1235,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E40)-(E40a) | `economics._amortization_schedule` sculpted branch + implied-DSCR closed form |
 | (E41)-(E42) | `economics.size_debt` closed-form debt capacity per repayment profile |
 | (E43) | `economics.size_debt` outlay cap + `resolve_debt_sizing` frozen-debt resolution; sizing KPI family in `compute_financial_kpis` |
+| (E44) | `lender.apply_production_case` per-column haircut + `lender.build_lender_cases` case table |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests
