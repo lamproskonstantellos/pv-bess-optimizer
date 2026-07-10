@@ -255,9 +255,9 @@ def main(argv: list[str] | None = None) -> int:
                 tmp_dir / "sc", mode="self_consumption", balancing=False,
                 one_day=False, mip_gap=args.mip_gap, time_limit=args.time_limit,
                 # Route-to-market fee shows on the export volume; the
-                # optimizer share is set too but clamps to zero here (the
-                # grid-charging battery's trading margin is negative), which
-                # is exactly the modelled behaviour.
+                # optimizer share takes its cut of the battery's positive
+                # DAM trading margin (export minus grid charging, E13d),
+                # which is positive in this case study so both bands render.
                 route_to_market_fee_eur_per_mwh=2.0,
                 optimizer_revenue_share_pct=15.0,
             )
