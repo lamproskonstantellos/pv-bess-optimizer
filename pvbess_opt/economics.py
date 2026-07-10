@@ -524,6 +524,27 @@ def build_yearly_cashflow(
     optimizer_share_frac = max(0.0, min(1.0, float(
         econ.get("optimizer_revenue_share_pct", 0.0) or 0.0
     ) / 100.0))
+    # Optimizer floor + share-above-floor (Eqs. E30/E30a): with the
+    # floor enabled the share applies to the margin ABOVE the
+    # guaranteed floor and shortfalls are topped up; disabled (default)
+    # the plain E13d share applies unchanged.  A shared term window
+    # (default whole life) gates BOTH share and floor.  The floor is
+    # gated by the explicit enable switch — a floor VALUE of zero with
+    # the switch on still guarantees a non-negative margin — so a zero
+    # floor value alone never silently converts losses into top-ups.
+    optimizer_floor_enabled = bool(
+        econ.get("optimizer_floor_enabled", False)
+    )
+    optimizer_floor_rate = max(0.0, float(
+        econ.get("optimizer_floor_eur_per_kw_year", 0.0) or 0.0
+    ))
+    _raw_opt_from = econ.get("optimizer_term_year_from", 1)
+    opt_term_year_from = int(1 if _raw_opt_from is None else _raw_opt_from)
+    _raw_opt_to = econ.get("optimizer_term_year_to", 0)
+    opt_term_year_to = int(0 if _raw_opt_to is None else _raw_opt_to)
+    optimizer_margin_basis = str(
+        econ.get("optimizer_margin_basis", "dam") or "dam"
+    ).strip().lower()
     # Year-1 exported MWh by origin (availability-derated upstream, like the
     # EUR bases).  Older KPI dicts without the split charge no RTM fee.
     pv_export_mwh_1 = float(year1_kpis.get("pv_export_mwh", 0.0) or 0.0)
@@ -548,9 +569,16 @@ def build_yearly_cashflow(
     toll_infl = float(
         econ.get("bess_toll_indexation_pct", 0.0) or 0.0
     ) / 100.0
-    toll_avail = availability_factor(
+    # One availability factor for every contracted stream that is NOT
+    # derived from the already-derated Year-1 KPIs (toll, optimizer
+    # floor, ...) — applied once per the E8 single-derate principle.
+    contract_avail = availability_factor(
         float(econ.get("unavailability_pct", 0.0) or 0.0)
     )
+    # Guaranteed floor level (Eq. E30): EUR/kW/yr on the power block,
+    # availability-scaled, flat nominal (no capacity-fade scaling and
+    # no indexation — the floor is a contractual level).
+    optimizer_floor_level = optimizer_floor_rate * bess_kw * contract_avail
 
     # Split the Year-1 revenue base into retail (load-coverage)
     # and DAM (wholesale export) streams.  Retail revenue is indexed by
@@ -786,6 +814,7 @@ def build_yearly_cashflow(
             balancing_aggregator_fee_y = 0.0
             route_to_market_fee_y = 0.0
             optimizer_fee_y = 0.0
+            optimizer_floor_topup_y = 0.0
             grid_charging_fee_y = 0.0
             imbalance_cost_y = 0.0
             ppa_y = 0.0
@@ -805,7 +834,7 @@ def build_yearly_cashflow(
             )
             if toll_in_phase:
                 toll_revenue_y = (
-                    toll_rate * (bess_kw / 1000.0) * toll_avail
+                    toll_rate * (bess_kw / 1000.0) * contract_avail
                     * (1.0 + toll_infl) ** (y - 1)
                 )
             else:
@@ -935,18 +964,51 @@ def build_yearly_cashflow(
                     pv_export_mwh_1 * pv_factor * (1.0 - _ppa_exempt_share)
                     + _bess_export_mwh_1_y * bess_factor
                 )
-            # Optimizer revenue share (Eq. E13d): a percentage of the POSITIVE
-            # BESS wholesale trading margin (export minus grid charging,
-            # already netted in rev1_dam_bess).  Clamped at zero — an
-            # optimizer never invoices a share of a trading loss (the exact
-            # regime of a self-consumption battery that grid-charges more
-            # than it exports).
-            # The trailing +0.0 normalises the -0.0 produced when the
-            # clamp binds (share x 0), keeping the column a clean zero.
-            optimizer_fee_y = -optimizer_share_frac * max(
-                _rev1_dam_bess_y * bess_factor * g_dam[y - 1],
-                0.0,
-            ) + 0.0
+            # Optimizer revenue share (Eq. E13d) / floor+share
+            # (Eqs. E30/E30a), gated by the shared term window (default
+            # whole life, preserving the historical all-years share).
+            # Plain share: a percentage of the POSITIVE BESS wholesale
+            # trading margin (export minus grid charging, already
+            # netted in rev1_dam_bess), clamped at zero — an optimizer
+            # never invoices a share of a trading loss.  Floor+share:
+            # the share applies to the margin ABOVE the guaranteed
+            # floor, and any shortfall below the floor is topped up by
+            # the optimizer (a separate >= 0 column so the fee column
+            # keeps its <= 0 sign contract).  The trailing +0.0
+            # normalises the -0.0 produced when a clamp binds.
+            _opt_in_term = _contract_phase(
+                y, opt_term_year_from, opt_term_year_to, n_years,
+            )
+            if not _opt_in_term:
+                optimizer_fee_y = 0.0
+                optimizer_floor_topup_y = 0.0
+            elif optimizer_floor_enabled:
+                # Margin basis (Eq. E30a): the E13d DAM margin, or the
+                # full E25a base when the optimizer also manages the
+                # ancillary revenue (share after the BSP fee — fees
+                # never compound).
+                if optimizer_margin_basis == "dam_plus_balancing":
+                    _opt_margin = (
+                        _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                        + balancing_capacity_y + balancing_activation_y
+                        + balancing_aggregator_fee_y
+                    )
+                else:
+                    _opt_margin = (
+                        _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                    )
+                optimizer_fee_y = -optimizer_share_frac * max(
+                    _opt_margin - optimizer_floor_level, 0.0,
+                ) + 0.0
+                optimizer_floor_topup_y = max(
+                    optimizer_floor_level - _opt_margin, 0.0,
+                ) + 0.0
+            else:
+                optimizer_fee_y = -optimizer_share_frac * max(
+                    _rev1_dam_bess_y * bess_factor * g_dam[y - 1],
+                    0.0,
+                ) + 0.0
+                optimizer_floor_topup_y = 0.0
             # Charging-side grid fee (Eq. E27): flat regulated rate on a
             # charged volume that fades on the BESS capacity curve.
             grid_charging_fee_y = -_grid_charging_fee_1_y * bess_factor
@@ -993,6 +1055,7 @@ def build_yearly_cashflow(
         net_cf = (
             revenue_net_y + balancing_revenue_y + balancing_aggregator_fee_y
             + route_to_market_fee_y + optimizer_fee_y
+            + optimizer_floor_topup_y
             + grid_charging_fee_y + imbalance_cost_y
             + toll_revenue_y
             + ppa_y + opex_y + capex_y + devex_y
@@ -1010,6 +1073,7 @@ def build_yearly_cashflow(
                 "aggregator_fee_eur": float(aggregator_fee_y),
                 "route_to_market_fee_eur": float(route_to_market_fee_y),
                 "optimizer_fee_eur": float(optimizer_fee_y),
+                "optimizer_floor_topup_eur": float(optimizer_floor_topup_y),
                 "grid_charging_fee_eur": float(grid_charging_fee_y),
                 "imbalance_cost_eur": float(imbalance_cost_y),
                 "balancing_capacity_revenue_eur": float(balancing_capacity_y),
@@ -1281,6 +1345,7 @@ def derive_monthly_cashflow(
     has_gcf_col = "grid_charging_fee_eur" in yearly_cf.columns
     has_imb_col = "imbalance_cost_eur" in yearly_cf.columns
     has_toll_col = "toll_revenue_eur" in yearly_cf.columns
+    has_topup_col = "optimizer_floor_topup_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
@@ -1325,6 +1390,10 @@ def derive_monthly_cashflow(
         toll_y = (
             float(yearly_indexed.loc[y, "toll_revenue_eur"])
             if has_toll_col else 0.0
+        )
+        topup_y = (
+            float(yearly_indexed.loc[y, "optimizer_floor_topup_eur"])
+            if has_topup_col else 0.0
         )
         ppa_y = (
             float(yearly_indexed.loc[y, "ppa_revenue_eur"])
@@ -1390,6 +1459,11 @@ def derive_monthly_cashflow(
             # a flat 1/12 allocation is exact (shares sum to one and
             # the monthly sum reconciles the yearly column).
             toll_m = toll_y / 12.0
+            # The optimizer floor top-up (Eq. E30) settles ex post
+            # against the year's realised margin, so it books in
+            # month 12 — the replacement-CAPEX convention, keeping the
+            # monthly and yearly DCFs in exact agreement on the event.
+            topup_m = topup_y if m == 12 else 0.0
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
@@ -1400,6 +1474,7 @@ def derive_monthly_cashflow(
             # aggregator fee (fee_m is informational on the monthly frame).
             net_m = (
                 rev_m + balancing_m + bal_fee_m + rtm_fee_m + opt_fee_m
+                + topup_m
                 + gcf_fee_m + imb_m
                 + toll_m
                 + ppa_m + opex_m + capex_m + devex_m
@@ -1422,6 +1497,7 @@ def derive_monthly_cashflow(
                     "balancing_aggregator_fee_eur": float(bal_fee_m),
                     "route_to_market_fee_eur": float(rtm_fee_m),
                     "optimizer_fee_eur": float(opt_fee_m),
+                    "optimizer_floor_topup_eur": float(topup_m),
                     "grid_charging_fee_eur": float(gcf_fee_m),
                     "imbalance_cost_eur": float(imb_m),
                     "toll_revenue_eur": float(toll_m),
@@ -1442,6 +1518,7 @@ def derive_monthly_cashflow(
         "period_type", "pv_production_mwh", "revenue_eur",
         "balancing_revenue_eur", "balancing_aggregator_fee_eur",
         "route_to_market_fee_eur", "optimizer_fee_eur",
+        "optimizer_floor_topup_eur",
         "grid_charging_fee_eur", "imbalance_cost_eur",
         "toll_revenue_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
@@ -1462,6 +1539,7 @@ def derive_monthly_cashflow(
                     "pv_production_mwh", "revenue_eur",
                     "balancing_revenue_eur", "balancing_aggregator_fee_eur",
                     "route_to_market_fee_eur", "optimizer_fee_eur",
+                    "optimizer_floor_topup_eur",
                     "grid_charging_fee_eur", "imbalance_cost_eur",
                     "toll_revenue_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
@@ -1634,6 +1712,10 @@ def compute_financial_kpis(
     total_toll_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "toll_revenue_eur"].sum())
         if "toll_revenue_eur" in df.columns else 0.0
+    )
+    total_optimizer_floor_topup_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "optimizer_floor_topup_eur"].sum())
+        if "optimizer_floor_topup_eur" in df.columns else 0.0
     )
     total_balancing_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
@@ -1963,6 +2045,10 @@ def compute_financial_kpis(
         # the SUMMARY renders it only when non-zero.
         "total_toll_revenue_eur_lifecycle": float(round(
             total_toll_revenue_eur_lifecycle, 2,
+        )),
+        # Optimizer floor guarantee (Eq. E30); >= 0, SUMMARY-optional.
+        "total_optimizer_floor_topup_eur_lifecycle": float(round(
+            total_optimizer_floor_topup_eur_lifecycle, 2,
         )),
         "lifetime_bm_revenue_total_eur": float(round(
             total_balancing_revenue_eur_lifecycle, 2,

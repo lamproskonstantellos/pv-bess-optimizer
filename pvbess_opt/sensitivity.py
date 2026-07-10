@@ -30,11 +30,16 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .availability import availability_factor
 from .constants import (
     DEFAULT_SENSITIVITY_DELTA_PCT,
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
 )
-from .economics import build_yearly_cashflow, compute_financial_kpis
+from .economics import (
+    _contract_phase,
+    build_yearly_cashflow,
+    compute_financial_kpis,
+)
 
 __all__ = [
     "DriverSensitivity",
@@ -165,6 +170,8 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("imbalance_cost_eur")
     if "toll_revenue_eur" in df.columns:
         components.append("toll_revenue_eur")
+    if "optimizer_floor_topup_eur" in df.columns:
+        components.append("optimizer_floor_topup_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -204,7 +211,10 @@ def _scale_opex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     return _recompute_net(df)
 
 
-def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
+def _scale_revenue(
+    yearly_cf: pd.DataFrame, factor: float,
+    econ: dict[str, Any] | None = None,
+) -> pd.DataFrame:
     """Scale every revenue stream by the same factor, then rederive the fee.
 
     The Revenue driver sweeps the project's Year-1+ income holistically:
@@ -303,6 +313,67 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     # market prices, which a toll is by construction insulated from
     # (the same no-scale rationale as route_to_market_fee_eur and
     # grid_charging_fee_eur above).
+
+    # Optimizer floor+share (Eq. E30): the fee/top-up pair is PIECEWISE
+    # in the margin, so a constant scale is wrong once the floor is
+    # enabled — the tornado would miss the kink at M_y = Floor.  With
+    # ``econ`` threaded, both columns are recomputed from the SCALED
+    # margin base against the UN-scaled floor level (the floor is
+    # contractual, not price-linked).  The legacy ``econ=None`` path is
+    # exact for the plain share (max(f*M, 0) == f*max(M, 0) for f > 0),
+    # which is why the constant scale above remains the default.
+    if (
+        econ is not None
+        and bool(econ.get("optimizer_floor_enabled", False))
+        and "optimizer_fee_eur" in df.columns
+        and "bess_market_revenue_eur" in df.columns
+    ):
+        share = max(0.0, min(1.0, float(
+            econ.get("optimizer_revenue_share_pct", 0.0) or 0.0
+        ) / 100.0))
+        floor_rate = max(0.0, float(
+            econ.get("optimizer_floor_eur_per_kw_year", 0.0) or 0.0
+        ))
+        bess_kw = max(0.0, float(econ.get("bess_power_kw", 0.0) or 0.0))
+        floor_level = floor_rate * bess_kw * availability_factor(
+            float(econ.get("unavailability_pct", 0.0) or 0.0)
+        )
+        raw_from = econ.get("optimizer_term_year_from", 1)
+        term_from = int(1 if raw_from is None else raw_from)
+        raw_to = econ.get("optimizer_term_year_to", 0)
+        term_to = int(0 if raw_to is None else raw_to)
+        basis = str(
+            econ.get("optimizer_margin_basis", "dam") or "dam"
+        ).strip().lower()
+        # The scaled margin base: bess_market_revenue_eur (E25a) was
+        # scaled by the driver above.  Under the 'dam' basis the
+        # balancing components are subtracted back out (cent-level;
+        # the E25a column is the only stored decomposition).
+        margin = df["bess_market_revenue_eur"].astype(float).copy()
+        if basis != "dam_plus_balancing":
+            for bal_col in (
+                "balancing_capacity_revenue_eur",
+                "balancing_activation_revenue_eur",
+                "balancing_aggregator_fee_eur",
+            ):
+                if bal_col in df.columns:
+                    margin = margin - df[bal_col].astype(float)
+        years = df["project_year"].astype(int)
+        n_years = int(years.max())
+        in_term = years.map(
+            lambda y: y >= 1 and _contract_phase(
+                y, term_from, term_to, n_years,
+            )
+        )
+        fee = (
+            -share * (margin - floor_level).clip(lower=0.0) + 0.0
+        ).where(in_term, 0.0)
+        topup = (
+            (floor_level - margin).clip(lower=0.0) + 0.0
+        ).where(in_term, 0.0)
+        df["optimizer_fee_eur"] = fee
+        if "optimizer_floor_topup_eur" in df.columns:
+            df["optimizer_floor_topup_eur"] = topup
 
     # Step 2 — scale the gross and rederive the fee with the SAME frac and the
     # SAME non-negative-gross clamp the base build applies (economics.py:
@@ -537,10 +608,10 @@ def run_sensitivity_analysis(
             low_value = base_revenue_year1 * (1.0 - delta)
             high_value = base_revenue_year1 * (1.0 + delta)
             low_kpis = compute_financial_kpis(
-                _scale_revenue(base_yearly_cf, 1.0 - delta), econ,
+                _scale_revenue(base_yearly_cf, 1.0 - delta, econ), econ,
             )
             high_kpis = compute_financial_kpis(
-                _scale_revenue(base_yearly_cf, 1.0 + delta), econ,
+                _scale_revenue(base_yearly_cf, 1.0 + delta, econ), econ,
             )
             _record(name, label, "base", 0.0, base_value, base_kpis)
             _record(name, label, "low", -delta, low_value, low_kpis)

@@ -224,6 +224,15 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     # share (merchant / floor+share structures).
     "route_to_market_fee_eur_per_mwh": 0.0,
     "optimizer_revenue_share_pct": 0.0,
+    # Optimizer floor + share-above-floor structure (Eqs. E30/E30a):
+    # with the floor enabled, the share applies to the margin ABOVE the
+    # guaranteed floor and shortfalls are topped up.  Default-off so the
+    # plain E13d share (and existing results) stay bit-identical.
+    "optimizer_floor_enabled": False,
+    "optimizer_floor_eur_per_kw_year": 0.0,
+    "optimizer_term_year_from": 1,
+    "optimizer_term_year_to": 0,
+    "optimizer_margin_basis": "dam",
     # Optional, separate route-to-market (BSP / balancing-aggregator) fee on
     # GROSS balancing revenue.  Default 0.0 so existing results are
     # bit-identical; balancing carries no energy-aggregator fee but may carry
@@ -408,6 +417,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "imbalance_enabled",
     "balancing_enabled",
     "ppa_enabled",
+    "optimizer_floor_enabled",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -423,6 +433,8 @@ _INT_KEYS: frozenset[str] = frozenset({
     "ppa_term_years",
     "bess_toll_year_from",
     "bess_toll_year_to",
+    "optimizer_term_year_from",
+    "optimizer_term_year_to",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -437,6 +449,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "ppa_negative_price_rule",
     "imbalance_pricing",
     "bess_toll_merchant_treatment",
+    "optimizer_margin_basis",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -453,6 +466,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "ppa_negative_price_rule": frozenset({"none", "suspend"}),
     "imbalance_pricing": frozenset({"single", "dual"}),
     "bess_toll_merchant_treatment": frozenset({"zeroed", "retained"}),
+    "optimizer_margin_basis": frozenset({"dam", "dam_plus_balancing"}),
 }
 
 
@@ -688,6 +702,35 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "revenue (the BSP fee below covers balancing). 0 = off (default). "
      "Surfaces as a signed optimizer_fee_eur cashflow column. Excluded "
      "from LCOE/LCOS."),
+    ("optimizer_floor_enabled", False, "bool",
+     "Enable the floor+share optimizer structure (Eq. E30): the "
+     "optimizer guarantees optimizer_floor_eur_per_kw_year and "
+     "optimizer_revenue_share_pct applies to the margin ABOVE the "
+     "floor (not the whole positive margin). FALSE (default) = plain "
+     "share, exactly the E13d behaviour. Note a floor of 0 with this "
+     "enabled still guarantees a non-negative margin (losses are "
+     "topped up)."),
+    ("optimizer_floor_eur_per_kw_year", 0.0, "EUR/kW/yr",
+     "Guaranteed annual floor per kW of BESS power under the "
+     "floor+share structure (a standard BESS-optimizer contract form). "
+     "Availability-scaled (x A); flat nominal, no capacity-fade "
+     "scaling. Ignored unless optimizer_floor_enabled. Surfaces as an "
+     "optimizer_floor_topup_eur column (>= 0). Excluded from "
+     "LCOE/LCOS."),
+    ("optimizer_term_year_from", 1, "year",
+     "First project year of the optimizer contract (share and floor), "
+     "inclusive. Default 1 preserves the whole-life share behaviour."),
+    ("optimizer_term_year_to", 0, "year",
+     "Last project year of the optimizer contract (inclusive); 0 = end "
+     "of life (default, preserving the whole-life behaviour). After "
+     "the term neither share nor floor applies."),
+    ("optimizer_margin_basis", "dam", "dam | dam_plus_balancing",
+     "Margin base for share and floor: 'dam' (default; the BESS DAM "
+     "trading margin, the E13d base) or 'dam_plus_balancing' (adds "
+     "balancing net of the BSP fee, i.e. the full E25a base - "
+     "optimizers routinely manage ancillary revenue too). The share "
+     "applies AFTER the BSP fee; fees never compound. Default keeps "
+     "results bit-identical."),
     ("balancing_aggregator_fee_pct_revenue", 0.0, "%",
      "Optional, separate route-to-market (BSP / balancing-aggregator) fee on "
      "GROSS balancing revenue (capacity + activation). Default 0 = fee-free, "
@@ -2522,7 +2565,7 @@ def validate_workbook_params(
     # warn (never block) so deliberate contract overlays stay possible.
     _require_non_negative(economics, "bess_toll_eur_per_mw_year")
     _require_non_negative(economics, "bess_toll_indexation_pct")
-    _validate_phase_window("bess_toll")
+    _toll_window = _validate_phase_window("bess_toll")
     _toll_treatment = str(
         economics.get("bess_toll_merchant_treatment", "zeroed") or "zeroed"
     ).strip().lower()
@@ -2556,6 +2599,43 @@ def validate_workbook_params(
                 "in toll years; the two structures double-charge the "
                 "same wholesale stream otherwise.",
                 _opt_pct,
+            )
+
+    # Optimizer floor + share-above-floor (Eqs. E30/E30a): non-negative
+    # floor over a valid term window; the margin basis is enum-checked.
+    _require_non_negative(economics, "optimizer_floor_eur_per_kw_year")
+    _opt_term_window = _validate_phase_window("optimizer_term")
+    _margin_basis = str(
+        economics.get("optimizer_margin_basis", "dam") or "dam"
+    ).strip().lower()
+    if _margin_basis not in ("dam", "dam_plus_balancing"):
+        raise ValueError(
+            "'optimizer_margin_basis' must be 'dam' or "
+            f"'dam_plus_balancing'; got {_margin_basis!r}."
+        )
+    _floor_enabled = bool(economics.get("optimizer_floor_enabled", False))
+    if _floor_enabled and _toll_rate > 0.0 and _toll_treatment == "zeroed":
+        # Resolve the two windows' end-of-life sentinels and warn on
+        # overlap: the toll zeroes the margin, so every overlap year
+        # forces a full floor top-up — double-charging the
+        # counterparties.
+        _n_years_pw = int(
+            project.get("project_lifecycle_years", 20) or 20
+        )
+        _toll_to = _n_years_pw if _toll_window[1] == 0 else _toll_window[1]
+        _term_to = (
+            _n_years_pw if _opt_term_window[1] == 0 else _opt_term_window[1]
+        )
+        if (
+            _toll_window[0] <= _term_to
+            and _opt_term_window[0] <= _toll_to
+        ):
+            logger.warning(
+                "optimizer_floor_enabled while a 'zeroed' BESS toll "
+                "window overlaps the optimizer term: the toll zeroes "
+                "the margin in overlap years, forcing a full floor "
+                "top-up every year — double-charging the "
+                "counterparties.",
             )
 
     # Grid-emissions accounting (24/7-CFE): a non-negative intensity and a
@@ -3179,6 +3259,8 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_imbalance_cost_eur_lifecycle",
      "Lifetime imbalance cost [EUR]"),
     ("total_toll_revenue_eur_lifecycle", "Lifetime tolling revenue [EUR]"),
+    ("total_optimizer_floor_topup_eur_lifecycle",
+     "Lifetime optimizer floor top-up [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the

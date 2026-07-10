@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E29a (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E30a (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -62,6 +62,10 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `bess_toll_year_from`, `bess_toll_year_to` | 1, 0 | toll phase window (E25; 0 = end of life) |
 | economics | `bess_toll_merchant_treatment` | zeroed | E29a merchant gating (`zeroed` \| `retained`) |
 | economics | `bess_toll_indexation_pct` | 0.0 | $i_\tau$ (contractual toll escalation) |
+| economics | `optimizer_floor_enabled` | FALSE | E30 floor+share switch (FALSE = plain E13d share) |
+| economics | `optimizer_floor_eur_per_kw_year` | 0.0 | $F$ (guaranteed floor per kW of BESS power) |
+| economics | `optimizer_term_year_from`, `optimizer_term_year_to` | 1, 0 | optimizer term window (E25; default whole life) |
+| economics | `optimizer_margin_basis` | dam | E30a margin base (`dam` \| `dam_plus_balancing`) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
 | economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
 | economics | `gearing_pct`, `debt_interest_rate_pct`, `debt_tenor_years`, `debt_repayment` | 0, 5.0, 15, annuity | debt layer |
@@ -596,6 +600,61 @@ with `bess_power_kw = 0` (no-op), treatment `retained`
 both active (under `zeroed` the share is gated in toll years; the two
 double-charge the same wholesale stream otherwise).
 
+### Optimizer floor + share above floor (Eqs. E30/E30a)
+
+The plain optimizer revenue share (E13d) is the $\varphi$-share special
+case of the floor+share structure BESS optimizers commonly offer: the
+optimizer guarantees an annual floor and takes its share of the margin
+**above** the floor; shortfalls are topped up.  Gated by the explicit
+`optimizer_floor_enabled` switch (default FALSE ⇒ E13d bit-identically)
+so a floor *value* of zero never silently converts trading losses into
+top-ups — note that a floor of 0 with the switch ON still guarantees a
+non-negative margin.  A shared term window
+(`optimizer_term_year_from/to`, default whole life) gates both share
+and floor; outside the term the year is merchant.
+
+$$\mathrm{Floor}_y = F \cdot P^{B} \cdot A, \qquad
+F^{\mathrm{opt}}_y = -\varphi_{\mathrm{opt}}
+\max\!\left(M_y - \mathrm{Floor}_y,\, 0\right), \qquad
+T^{\mathrm{opt}}_y = +\max\!\left(\mathrm{Floor}_y - M_y,\, 0\right)
+\tag{E30}$$
+
+within the term window $\chi_y$ (both zero outside); $F$ in EUR/kW/yr
+on the power block, availability-scaled ($\times A$, the E29
+convention — a new stream, derated once), flat nominal (no fade, no
+indexation).  The owner's realised optimizer-managed margin is
+$M_y + F^{\mathrm{opt}}_y + T^{\mathrm{opt}}_y =
+\max\!\left(\mathrm{Floor}_y,\, \mathrm{Floor}_y +
+(1-\varphi_{\mathrm{opt}})(M_y - \mathrm{Floor}_y)\right)$ — never
+below the floor.  The top-up is a separate `optimizer_floor_topup_eur`
+column ($\ge 0$) so `optimizer_fee_eur` keeps its $\le 0$ sign
+contract (plot stacking and fee-inference helpers rely on it).
+
+Margin basis (Eq. E30a):
+
+$$M_y = \begin{cases}
+R^{\mathrm{DAM,B}}_1\, f^{B}_y\, g^{\mathrm{dam}}_y &
+\texttt{dam} \text{ (default; the E13d base)}\\[2pt]
+\text{E25a base (DAM margin + balancing net of the BSP fee)} &
+\texttt{dam\_plus\_balancing}
+\end{cases} \tag{E30a}$$
+
+Under `dam_plus_balancing` the share applies **after** the BSP fee —
+fees never compound on other fees (house rule).  Monthly: the top-up
+books in **month 12** (annual ex-post settlement, the
+replacement-CAPEX convention, so monthly and yearly DCFs agree on the
+event); the fee keeps its revenue-share weights.  Sensitivity: the
+fee/top-up pair is piecewise in the margin, so the Revenue driver
+recomputes both from the scaled E25a base against the **un-scaled**
+contractual floor (`_scale_revenue` gains an optional `econ`
+parameter; the `None`-default legacy path is exact for the plain share
+because $\max(fM,0) = f\max(M,0)$ for $f>0$).  The tornado is
+therefore exact at the $M_y = \mathrm{Floor}_y$ kink, and contracted
+floors visibly damp the Revenue bars.  Excluded from LCOE/LCOS.
+Stacking: a `zeroed` toll window overlapping the optimizer term warns
+— the toll zeroes the margin, forcing a full floor top-up every
+overlap year.
+
 ### Financial KPIs
 
 $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$
@@ -743,6 +802,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E27) | `build_yearly_cashflow` grid_charging_fee_eur column + monthly allocation |
 | (E28)-(E28a) | `build_yearly_cashflow` imbalance_cost_eur column + PV-shape monthly allocation |
 | (E29)-(E29a) | `build_yearly_cashflow` toll_revenue_eur column + per-year merchant gating |
+| (E30)-(E30a) | `build_yearly_cashflow` optimizer fee/top-up pair; `sensitivity._scale_revenue` econ-threaded kink recompute |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

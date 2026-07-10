@@ -272,6 +272,14 @@ def plot_revenue_stack_yearly(
         toll_arr = op["toll_revenue_eur"].astype(float).to_numpy()
     else:
         toll_arr = np.zeros_like(load_pv)
+    # Optimizer floor top-up (Eq. E30) — a >= 0 contract payment read
+    # straight from its cashflow column, exactly like the fees.
+    if "optimizer_floor_topup_eur" in op.columns:
+        floor_topup_arr = (
+            op["optimizer_floor_topup_eur"].astype(float).to_numpy()
+        )
+    else:
+        floor_topup_arr = np.zeros_like(load_pv)
     _toll_treatment = str(
         (econ or {}).get("bess_toll_merchant_treatment", "zeroed")
         or "zeroed"
@@ -441,6 +449,14 @@ def plot_revenue_stack_yearly(
             label="Tolling revenue",
         )
         bottoms = bottoms + np.clip(toll_arr, 0.0, None)
+    if np.any(np.abs(floor_topup_arr) > 1e-9):
+        ax.bar(
+            years, floor_topup_arr, bottom=bottoms,
+            color=financial_color("Optimizer floor top-up"),
+            edgecolor="black", linewidth=0.4,
+            label="Optimizer floor top-up",
+        )
+        bottoms = bottoms + floor_topup_arr
 
     net = (op["revenue_eur"].astype(float)).to_numpy()
     if "balancing_revenue_eur" in op.columns:
@@ -450,7 +466,7 @@ def plot_revenue_stack_yearly(
     # structural fees enter the yearly net the same way (their columns are
     # not folded into revenue_eur), so the line steps down by them too.
     net = net + bal_agg_fee + rtm_fee + opt_fee + gcf_fee + imb_cost
-    net = net + toll_arr
+    net = net + toll_arr + floor_topup_arr
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The

@@ -297,6 +297,10 @@ FINANCIAL_COLORS: dict[str, str] = {
     # teal one shade darker than the balancing roll-up so the two
     # BESS-side revenue bands stay distinguishable when stacked.
     "toll_revenue":        "#00695C",  # Material teal 800
+    # Optimizer floor guarantee payment (Eq. E30) — the darkest teal of
+    # the contracted family, adjacent to the optimizer fee it settles
+    # against.
+    "optimizer_floor_topup": "#004D40",  # Material teal 900
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -415,6 +419,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Energy aggregator fee",
     "Balancing aggregator fee",
     "Route-to-market fee",
+    "Optimizer floor top-up",
     "Optimizer fee",
     "Grid-charging fee",
     "Imbalance cost",
@@ -458,6 +463,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Energy aggregator fee":            "aggregator_fee",
     "Balancing aggregator fee":         "balancing_aggregator_fee",
     "Route-to-market fee":              "route_to_market_fee",
+    "Optimizer floor top-up":           "optimizer_floor_topup",
     "Optimizer fee":                    "optimizer_fee",
     "Grid-charging fee":                "grid_charging_fee",
     "Imbalance cost":                   "imbalance_cost",
@@ -507,6 +513,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Energy aggregator fee",
     "Balancing aggregator fee",
     "Route-to-market fee",
+    "Optimizer floor top-up",
     "Optimizer fee",
     "Grid-charging fee",
     "Imbalance cost",

@@ -145,6 +145,27 @@ Production release.
   contractual payment).  Stacking warnings: no-op toll (no BESS),
   `retained` double-monetisation, toll + optimizer-share overlap.
 
+### Added (optimizer floor + share above floor)
+
+- `optimizer_floor_enabled` + floor level / term window / margin-basis
+  keys on the economics sheet (default off, bit-identical — the plain
+  `optimizer_revenue_share_pct` becomes the E13d special case): the
+  floor+share BESS-optimizer contract (Eqs. E30/E30a).  The optimizer
+  guarantees an availability-scaled EUR/kW/yr floor and takes the
+  share of the margin ABOVE it; shortfalls surface as a separate
+  `optimizer_floor_topup_eur` column (>= 0, month-12 ex-post booking)
+  so the fee column keeps its <= 0 sign contract.  The margin base is
+  the E13d DAM margin or, under `dam_plus_balancing`, the full E25a
+  base (share applies after the BSP fee — fees never compound).
+  `sensitivity._scale_revenue` gains an optional econ parameter that
+  recomputes the piecewise fee/top-up pair from the scaled margin base
+  against the un-scaled floor, making the Revenue tornado exact at the
+  floor kink (the None-default legacy path is unchanged and remains
+  exact for the plain share).  Lifetime KPI + conditional SUMMARY row,
+  'Optimizer floor top-up' band (teal 900), LCOE/LCOS invariant; a
+  'zeroed' toll window overlapping the optimizer term warns (full
+  floor top-up every overlap year).
+
 ### Added (imbalance settlement exposure)
 
 - `imbalance_enabled` on the simulation sheet (default FALSE,

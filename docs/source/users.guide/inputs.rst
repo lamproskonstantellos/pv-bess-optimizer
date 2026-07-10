@@ -282,6 +282,19 @@ Sheet ``economics``
   cashflow column (flat 1/12 monthly); excluded from LCOE/LCOS; not
   scaled by the Revenue tornado driver.  See Eqs. E29/E29a in
   ``docs/economics_design.md``.
+* ``optimizer_floor_enabled`` (default FALSE) /
+  ``optimizer_floor_eur_per_kw_year`` (default 0) /
+  ``optimizer_term_year_from`` / ``optimizer_term_year_to`` (defaults
+  1 / 0 = whole life) / ``optimizer_margin_basis`` (default ``dam``):
+  the floor+share optimizer structure (Eqs. E30/E30a).  With the
+  switch on, ``optimizer_revenue_share_pct`` applies to the margin
+  ABOVE the guaranteed floor (availability-scaled EUR/kW/yr on the
+  power block) and shortfalls are topped up through the
+  ``optimizer_floor_topup_eur`` column (booked in month 12 — annual
+  ex-post settlement).  ``dam_plus_balancing`` widens the margin base
+  to include balancing net of the BSP fee.  FALSE keeps the plain
+  share bit-identical.  Excluded from LCOE/LCOS; the Revenue tornado
+  recomputes the fee/top-up pair exactly at the floor kink.
 * ``sensitivity_enabled`` / ``sensitivity_capex_delta_pct`` /
   ``sensitivity_opex_delta_pct`` /
   ``sensitivity_revenue_delta_pct`` /
