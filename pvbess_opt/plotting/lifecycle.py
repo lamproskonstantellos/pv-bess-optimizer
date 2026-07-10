@@ -251,6 +251,14 @@ def plot_revenue_stack_yearly(
         opt_fee = op["optimizer_fee_eur"].astype(float).to_numpy()
     else:
         opt_fee = np.zeros_like(load_pv)
+    if "grid_charging_fee_eur" in op.columns:
+        gcf_fee = op["grid_charging_fee_eur"].astype(float).to_numpy()
+    else:
+        gcf_fee = np.zeros_like(load_pv)
+    if "imbalance_cost_eur" in op.columns:
+        imb_cost = op["imbalance_cost_eur"].astype(float).to_numpy()
+    else:
+        imb_cost = np.zeros_like(load_pv)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -304,6 +312,26 @@ def plot_revenue_stack_yearly(
             edgecolor="black", linewidth=0.4,
             label="Optimizer fee",
         )
+    if np.any(gcf_fee < -1e-9):
+        # Charging-side grid fee (Eq. E27) — the regulated wedge next to
+        # the energy cost of the same grid-charged volume.
+        ax.bar(
+            years, gcf_fee,
+            bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee,
+            color=financial_color("Grid-charging fee"),
+            edgecolor="black", linewidth=0.4,
+            label="Grid-charging fee",
+        )
+    if np.any(imb_cost < -1e-9):
+        # Imbalance settlement (Eq. E28) — its own deduction slot.
+        ax.bar(
+            years, imb_cost,
+            bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
+            + gcf_fee,
+            color=financial_color("Imbalance cost"),
+            edgecolor="black", linewidth=0.4,
+            label="Imbalance cost",
+        )
 
     # PPA contract leg — drawn straight from the cashflow column so the
     # bar carries the exact stream NPV/IRR saw (term cutoff, its own
@@ -327,7 +355,8 @@ def plot_revenue_stack_yearly(
         if np.any(ppa_neg < -1e-9):
             ax.bar(
                 years, ppa_neg,
-                bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee,
+                bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
+                + gcf_fee + imb_cost,
                 color=financial_color("PPA revenue"),
                 edgecolor="black", linewidth=0.4,
                 label=None if drew_ppa_label else "PPA revenue",
@@ -385,7 +414,7 @@ def plot_revenue_stack_yearly(
     # fee (bal_agg_fee <= 0) to keep it on top of the drawn stack.  The two
     # structural fees enter the yearly net the same way (their columns are
     # not folded into revenue_eur), so the line steps down by them too.
-    net = net + bal_agg_fee + rtm_fee + opt_fee
+    net = net + bal_agg_fee + rtm_fee + opt_fee + gcf_fee + imb_cost
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The

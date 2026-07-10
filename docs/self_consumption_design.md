@@ -111,7 +111,12 @@ $$\Pi^{\mathrm{ret}} = \sum_t \pi^{\mathrm{ret}}_t \left(x^{pl}_t + x^{bl}_t\rig
 
 $$\Pi^{\mathrm{exp}} = \sum_t \left(p^{\mathrm{eff}}_t\, x^{pg}_t + \pi^{\mathrm{DAM}}_t\, x^{bg}_t\right) / 1000 \tag{S3}$$
 
-$$C^{\mathrm{chg}} = \sum_t \pi^{\mathrm{DAM}}_t\, x^{gb}_t / 1000, \qquad C^{\mathrm{wear}} = c^{w} \sum_t \left(x^{bl}_t + x^{bg}_t\right)/1000 \tag{S4}$$
+$$C^{\mathrm{chg}} = \sum_t \left(\pi^{\mathrm{DAM}}_t + w^{\mathrm{eff}}\right) x^{gb}_t / 1000, \qquad C^{\mathrm{wear}} = c^{w} \sum_t \left(x^{bl}_t + x^{bg}_t\right)/1000 \tag{S4}$$
+
+where $w^{\mathrm{eff}}$ is the regulated charging-side wedge of
+Eq. E26 (`docs/economics_design.md`; 0 by default and under the
+exemption switch), so grid-charging decisions internalise network
+charges and levies, not just the energy price.
 
 where $p^{\mathrm{eff}}_t = (1-s)\,\pi^{\mathrm{DAM}}_t + s\,\pi^{\mathrm{PPA}}$
 is the PPA-adjusted PV export price (equal to $\pi^{\mathrm{DAM}}_t$

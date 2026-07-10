@@ -16,8 +16,8 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E25a (+ suffixed E8a, E13a-E13d) |
-| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U5 |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E28a (+ suffixed E8a, E13a-E13d) |
+| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
 | B | (reserved) | balancing product structure | — |
@@ -433,12 +433,72 @@ OPEX, replacement CAPEX, and the net cashflow:
 $$O_y = -\left(o^{PV}\,\mathrm{kWp} + o^{B} P^{B}\right)(1+i_{\mathrm{opex}})^{y-1}, \qquad
 C_y = \begin{cases} c^{B} E^{\mathrm{cap}} \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
 
-$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
+$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + F^{\mathrm{chg}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
 
 with $V_y$ the DEVEX column (Year 0 only) and Year 0 carrying
 $\mathrm{CF}_0 = \mathrm{CAPEX}_0 + \mathrm{DEVEX}_0$.  Discounted:
 $\mathrm{DCF}_y = \mathrm{CF}_y \cdot D_y$; cumulative columns
 accumulate both.
+
+### Charging-side grid fee (Eq. E26)
+
+Grid-charged BESS energy pays regulated network charges and levies on
+top of the DAM price where storage is not exempt.  The effective wedge
+
+$$w^{\mathrm{eff}} = \phi_{\mathrm{chg}} \cdot \left(1 - \mathbf{1}[\mathrm{exempt}]\right),
+\qquad C^{\mathrm{chg}} = \sum_t \left(\pi^{\mathrm{DAM}}_t + w^{\mathrm{eff}}\right) x^{gb}_t / 1000 \tag{E26}$$
+
+($\phi_{\mathrm{chg}}$ = `grid_charging_fee_eur_per_mwh` >= 0 on the
+project sheet; `grid_charging_fee_exempt` = TRUE zeroes it) enters the
+**MILP objective**, not just the cashflow: charging-side fees of
+10-30 EUR/MWh erase a large share of arbitrage margin, and thin
+spreads flip sign with the wedge — dispatch decided on the energy-only
+price would grid-charge at a real-world loss.  The wedge actually paid
+surfaces per step as `expense_grid_charging_fee_eur` (written only
+when non-zero), is subtracted from `profit_total_eur` (keeping the KPI
+algebraically consistent with the objective), is availability-derated
+with the charging throughput it is proportional to, and is **not**
+bundled into the BESS-DAM stream (`pvbess_opt/conventions.md`) so the
+E13d/E25a bases stay market-only.
+
+Over the lifecycle the fee projects as its own signed column
+(Eq. E27): the Year-1 wedge actually paid (the KPI above) at the flat
+regulated rate, with the charged grid-to-BESS volume fading on the
+BESS capacity curve — the E13c flat-rate convention:
+
+$$F^{\mathrm{chg}}_y = -\,e^{\mathrm{chg}}_1\, f^{B}_y \tag{E27}$$
+
+It joins the net (E15), allocates monthly on the Year-1 per-step
+charging shape (1/12 fallback, exact reconciliation), rolls up to
+`total_grid_charging_fee_eur_lifecycle` (a SUMMARY row when non-zero),
+joins every cashflow figure as its own deduction band ("Grid-charging
+fee", drawn only when non-zero), is folded by the sensitivity net
+recompute but NOT scaled by the Revenue driver (a regulated rate on
+volume, no price component), and is **excluded from LCOE/LCOS** like
+every market/venue fee.  The no-breakdown cashflow fallback adds the
+fee back to the gross it derives from `profit_total_eur` (which
+already nets it), so the column carries the deduction exactly once.
+
+### Imbalance settlement line (Eqs. E28/E28a)
+
+The rolling-horizon Monte Carlo's Year-1 settlement MEAN (unbiased,
+additive expected value; a P50 would understate a right-skewed,
+spike-driven cost — the percentiles carry the distribution) projects
+as its own signed column:
+
+$$I_y = -\,\bar{I}_1\; f^{PV}_y\; g^{\mathrm{dam}}_y \tag{E28}$$
+
+— the deviation volume is PV-forecast-error-driven (fades on the PV
+curve) and the settlement prices ride the DAM escalation series.
+Monthly allocation follows the Year-1 PV production shape with exact
+reconciliation (Eq. E28a).  Included in the net and NPV/IRR/payback;
+**excluded from LCOE/LCOS** (market settlement cost, the market-fees
+convention); folded by the sensitivity net recompute and SCALED by the
+Revenue driver (price-spread times volume — price-proportional, like
+the balancing columns).  Lifetime total
+`total_imbalance_cost_eur_lifecycle` renders in SUMMARY.md when
+non-zero and the "Imbalance cost" band joins every cashflow figure,
+drawn only when non-zero.
 
 ### Contracted BESS revenue layer (foundations)
 
@@ -616,6 +676,9 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E24a) | `economics._opex_escalation_series` (cashflow OPEX row + LCOE/LCOS OPEX numerators) |
 | (E25) | `economics._contract_phase` |
 | (E25a) | `build_yearly_cashflow` bess_market_revenue_eur column |
+| (E26) | `build_model` grid-charge wedge; `kpis.add_economic_columns` fee column |
+| (E27) | `build_yearly_cashflow` grid_charging_fee_eur column + monthly allocation |
+| (E28)-(E28a) | `build_yearly_cashflow` imbalance_cost_eur column + PV-shape monthly allocation |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

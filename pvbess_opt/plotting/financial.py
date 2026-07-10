@@ -212,9 +212,10 @@ def plot_cumulative_cashflow(
 
 def _optional_revenue_streams(
     yearly_cf: pd.DataFrame,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return the (balancing, balancing-fee, ppa, rtm-fee, optimizer-fee)
-    yearly columns.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+           np.ndarray, np.ndarray]:
+    """Return the (balancing, balancing-fee, ppa, rtm-fee, optimizer-fee,
+    grid-charging-fee, imbalance-cost) yearly columns.
 
     Missing or all-zero columns come back as zero arrays so callers can
     stack them unconditionally; all-zero streams draw nothing.
@@ -224,12 +225,13 @@ def _optional_revenue_streams(
     for col in (
         "balancing_revenue_eur", "balancing_aggregator_fee_eur",
         "ppa_revenue_eur", "route_to_market_fee_eur", "optimizer_fee_eur",
+        "grid_charging_fee_eur", "imbalance_cost_eur",
     ):
         if col in yearly_cf.columns:
             out.append(yearly_cf[col].to_numpy(dtype=float))
         else:
             out.append(np.zeros(n, dtype=float))
-    return out[0], out[1], out[2], out[3], out[4]
+    return out[0], out[1], out[2], out[3], out[4], out[5], out[6]
 
 
 def _stack_cashflow_bars(
@@ -245,6 +247,8 @@ def _stack_cashflow_bars(
     bal_fee: np.ndarray,
     rtm_fee: np.ndarray | None = None,
     opt_fee: np.ndarray | None = None,
+    gcf_fee: np.ndarray | None = None,
+    imb_cost: np.ndarray | None = None,
 ) -> None:
     """Draw the shared cashflow bar stack (yearly bars / NPV waterfall).
 
@@ -298,6 +302,18 @@ def _stack_cashflow_bars(
                edgecolor="black", linewidth=0.4,
                label="Optimizer fee")
         neg_bottom = neg_bottom + opt_fee
+    if gcf_fee is not None and np.any(np.abs(gcf_fee) > 1e-9):
+        ax.bar(years, gcf_fee, width=width, bottom=neg_bottom,
+               color=financial_color("Grid-charging fee"),
+               edgecolor="black", linewidth=0.4,
+               label="Grid-charging fee")
+        neg_bottom = neg_bottom + gcf_fee
+    if imb_cost is not None and np.any(np.abs(imb_cost) > 1e-9):
+        ax.bar(years, imb_cost, width=width, bottom=neg_bottom,
+               color=financial_color("Imbalance cost"),
+               edgecolor="black", linewidth=0.4,
+               label="Imbalance cost")
+        neg_bottom = neg_bottom + imb_cost
     ax.bar(years, devex, width=width, bottom=neg_bottom,
            color=financial_color("DEVEX"),
            edgecolor="black", linewidth=0.4, label="DEVEX")
@@ -320,7 +336,7 @@ def plot_yearly_cashflow_bars(
     out_path = Path(out_path)
     years = _calendar_axis(yearly_cf)
     revenue = yearly_cf["revenue_eur"].to_numpy(dtype=float)
-    balancing, bal_fee, ppa, rtm_fee, opt_fee = (
+    balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost = (
         _optional_revenue_streams(yearly_cf)
     )
     opex = yearly_cf["opex_eur"].to_numpy(dtype=float)  # negative
@@ -336,7 +352,7 @@ def plot_yearly_cashflow_bars(
     width = 0.8
     _stack_cashflow_bars(
         ax, years, width, revenue, balancing, ppa, opex, devex, capex,
-        bal_fee, rtm_fee, opt_fee,
+        bal_fee, rtm_fee, opt_fee, gcf_fee, imb_cost,
     )
     ax.plot(years, net, color=financial_color("Net cash-flow"), linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
@@ -382,7 +398,7 @@ def plot_npv_waterfall(
     years = _calendar_axis(yearly_cf)
     disc_factor = yearly_cf["discount_factor"].astype(float).to_numpy()
     revenue_disc = yearly_cf["revenue_eur"].astype(float).to_numpy() * disc_factor
-    balancing, bal_fee, ppa, rtm_fee, opt_fee = (
+    balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost = (
         _optional_revenue_streams(yearly_cf)
     )
     balancing_disc = balancing * disc_factor
@@ -390,6 +406,8 @@ def plot_npv_waterfall(
     ppa_disc = ppa * disc_factor
     rtm_fee_disc = rtm_fee * disc_factor
     opt_fee_disc = opt_fee * disc_factor
+    gcf_fee_disc = gcf_fee * disc_factor
+    imb_cost_disc = imb_cost * disc_factor
     opex_disc = yearly_cf["opex_eur"].astype(float).to_numpy() * disc_factor
     if "devex_eur" in yearly_cf.columns:
         devex_disc = (
@@ -410,7 +428,7 @@ def plot_npv_waterfall(
     _stack_cashflow_bars(
         ax, years, width, revenue_disc, balancing_disc, ppa_disc,
         opex_disc, devex_disc, capex_disc, bal_fee_disc,
-        rtm_fee_disc, opt_fee_disc,
+        rtm_fee_disc, opt_fee_disc, gcf_fee_disc, imb_cost_disc,
     )
 
     ax.plot(
@@ -566,6 +584,14 @@ def plot_monthly_cashflow_year1(
         opt_fee = sub["optimizer_fee_eur"].astype(float).to_numpy()
     else:
         opt_fee = np.zeros_like(revenue)
+    if "grid_charging_fee_eur" in sub.columns:
+        gcf_fee = sub["grid_charging_fee_eur"].astype(float).to_numpy()
+    else:
+        gcf_fee = np.zeros_like(revenue)
+    if "imbalance_cost_eur" in sub.columns:
+        imb_cost = sub["imbalance_cost_eur"].astype(float).to_numpy()
+    else:
+        imb_cost = np.zeros_like(revenue)
     if "devex_eur" in sub.columns:
         devex = sub["devex_eur"].astype(float).to_numpy()
     else:
@@ -616,6 +642,18 @@ def plot_monthly_cashflow_year1(
                edgecolor="black", linewidth=0.4,
                label="Optimizer fee")
         neg_bottom = neg_bottom + opt_fee
+    if np.any(np.abs(gcf_fee) > 1e-9):
+        ax.bar(months, gcf_fee, bottom=neg_bottom,
+               color=financial_color("Grid-charging fee"),
+               edgecolor="black", linewidth=0.4,
+               label="Grid-charging fee")
+        neg_bottom = neg_bottom + gcf_fee
+    if np.any(np.abs(imb_cost) > 1e-9):
+        ax.bar(months, imb_cost, bottom=neg_bottom,
+               color=financial_color("Imbalance cost"),
+               edgecolor="black", linewidth=0.4,
+               label="Imbalance cost")
+        neg_bottom = neg_bottom + imb_cost
     if np.any(np.abs(devex) > 1e-9):
         ax.bar(months, devex, bottom=neg_bottom,
                color=financial_color("DEVEX"),

@@ -111,6 +111,24 @@ _WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH: float = 1.0e-5
 # warning would repeat hundreds of times per Monte Carlo seed.
 _MERCHANT_CAP_FLAG_WARNED = False
 
+# Same latch pattern for a grid-charging fee that can never bind because
+# grid charging itself is disallowed (Eq. E26 wedge set, but
+# allow_bess_grid_charging is FALSE).
+_GRID_FEE_INERT_WARNED = False
+
+
+def _warn_inert_grid_fee() -> None:
+    global _GRID_FEE_INERT_WARNED
+    if _GRID_FEE_INERT_WARNED:
+        return
+    logger.warning(
+        "grid_charging_fee_eur_per_mwh is set but "
+        "allow_bess_grid_charging is FALSE: the BESS never grid-charges, "
+        "so the charging-side wedge (Eq. E26) cannot bind. Set "
+        "allow_bess_grid_charging to TRUE or remove the fee."
+    )
+    _GRID_FEE_INERT_WARNED = True
+
 # Battery wear cost (cycle degradation) is a per-MWh-throughput penalty
 # read from params['bess_wear_cost_eur_per_mwh'] (default 0 = off) and
 # subtracted in the objective; see pvbess_opt.degradation for the
@@ -1135,8 +1153,25 @@ def build_model(
         for t in time_index
     )
 
+    # Charging-side grid fee (Eq. E26): a regulated EUR/MWh wedge on the
+    # buy price of grid-charged energy (network charges + levies on
+    # storage charging where not exempt).  It MUST enter the objective —
+    # not just the cashflow — because thin arbitrage spreads flip sign
+    # with the wedge: dispatch decided on the energy-only price would
+    # grid-charge at a real-world loss.
+    if bool(params.get("grid_charging_fee_exempt", False)):
+        grid_fee_wedge = 0.0
+    else:
+        grid_fee_wedge = float(
+            params.get("grid_charging_fee_eur_per_mwh", 0.0) or 0.0
+        )
+    if grid_fee_wedge > 0.0 and not bool(
+        params.get("allow_bess_grid_charging", False)
+    ):
+        _warn_inert_grid_fee()
     grid_charge_cost = sum(
-        dam_price[t] * m.grid_to_bess[t] / 1000.0 for t in time_index
+        (dam_price[t] + grid_fee_wedge) * m.grid_to_bess[t] / 1000.0
+        for t in time_index
     )
     # Battery wear cost: penalise discharge throughput so the optimizer only
     # cycles when the spread beats the per-MWh degradation cost.  Default 0

@@ -70,6 +70,21 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     # refines.  Absent unless the clause is on (missing keys are
     # skipped).
     "ppa_fee_exempt_export_mwh",
+    # Charging-side grid fee (Eq. E26): DERATE — proportional to the
+    # grid-charged throughput (bess_charge_grid_mwh), which scales with
+    # availability like every dispatch-energy key; during downtime the
+    # BESS neither charges nor pays the wedge.
+    "expense_grid_charging_fee_eur",
+    # Imbalance settlement (Eqs. U6-U9): DERATE — deviation volume
+    # scales with operating throughput exactly like the revenues it
+    # corrects.  Known limitation (documented): real forced outages
+    # INCREASE imbalance; the uniform factor keeps the hedge value
+    # derate-invariant since it cancels in the paired difference.
+    "imbalance_cost_eur",
+    "imbalance_cost_pv_only_eur",
+    "bess_imbalance_hedge_value_eur",
+    "imbalance_short_mwh",
+    "imbalance_long_mwh",
     # ``system_total_import_mwh`` is scaled by ``factor`` here like the rest,
     # then corrected in ``apply_unavailability_derate`` to add the downtime
     # load the grid must cover (it RISES with unavailability, unlike the

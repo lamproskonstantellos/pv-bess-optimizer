@@ -141,6 +141,11 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "p_grid_export_max_kw": 5000.0,
     "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
+    # Regulated charging-side wedge (EUR/MWh) on grid-charged BESS
+    # energy, entering the MILP objective AND the cashflow (Eq. E26).
+    "grid_charging_fee_eur_per_mwh": 0.0,
+    # Storage network-charge exemption regime: TRUE zeroes the wedge.
+    "grid_charging_fee_exempt": False,
     "grid_cap_includes_load": False,
     "unavailability_pct": 1.0,
     "site_capex_eur": 0.0,
@@ -347,6 +352,12 @@ SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_sigma_pv": 0.12,
     "uncertainty_sigma_load": 0.05,
     "uncertainty_diagnostics_enabled": True,
+    # Ex-post imbalance settlement of forecast-error deviations
+    # (Eqs. U6-U9); requires the rolling-horizon Monte Carlo.
+    "imbalance_enabled": False,
+    "imbalance_pricing": "dual",
+    "imbalance_price_mult_short": 1.25,
+    "imbalance_price_mult_long": 0.75,
     "plot_daily_scope": "year1_only",
     "plot_monthly_scope": "all",
     "plot_yearly_scope": "all",
@@ -376,6 +387,7 @@ for _sheet_name, _sheet_defaults in _SHEET_DEFAULTS.items():
 _BOOL_KEYS: frozenset[str] = frozenset({
     "show_titles",
     "allow_bess_grid_charging",
+    "grid_charging_fee_exempt",
     "grid_cap_includes_load",
     "terminal_soc_equal",
     "sensitivity_enabled",
@@ -385,6 +397,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "uncertainty_pv_enabled",
     "uncertainty_load_enabled",
     "uncertainty_diagnostics_enabled",
+    "imbalance_enabled",
     "balancing_enabled",
     "ppa_enabled",
 })
@@ -412,6 +425,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "ppa_structure",
     "ppa_settlement",
     "ppa_negative_price_rule",
+    "imbalance_pricing",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -426,6 +440,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "ppa_structure": frozenset({"pay_as_produced", "baseload"}),
     "ppa_settlement": frozenset({"physical", "cfd"}),
     "ppa_negative_price_rule": frozenset({"none", "suspend"}),
+    "imbalance_pricing": frozenset({"single", "dual"}),
 }
 
 
@@ -455,6 +470,20 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Retail tariff used in self_consumption mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",
      "If TRUE the BESS may charge from the grid in periods with pv_kwh ~ 0."),
+    ("grid_charging_fee_eur_per_mwh", 0.0, "EUR/MWh",
+     "Regulated charging-side wedge on grid-charged BESS energy: "
+     "network use-of-system charges plus levies applied to storage "
+     "charging where not exempt. Enters the MILP objective as a buy-"
+     "price adder on grid-to-BESS energy (thin arbitrage spreads flip "
+     "correctly) AND the cashflow as its own expense line (Eq. E26). "
+     "Typical European range 10-30 EUR/MWh; 0 = no wedge. Inert unless "
+     "the dispatch actually grid-charges (allow_bess_grid_charging)."),
+    ("grid_charging_fee_exempt", False, "bool",
+     "Storage network-charge exemption regime switch. TRUE = the "
+     "project qualifies for a storage charging exemption and the wedge "
+     "above is ignored (effective fee 0 in the objective AND the "
+     "cashflow); FALSE = the wedge applies. Keeps the exempt / "
+     "non-exempt scenario pair a one-cell switch."),
     ("grid_cap_includes_load", False, "bool",
      "Sets what the per-step grid-injection cap limits (self_consumption mode "
      "only). FALSE (default) = PHYSICAL / co-located self-consumption: the load "
@@ -728,6 +757,28 @@ _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("uncertainty_diagnostics_enabled", True, "bool",
      "Render the forecast-calibration diagnostic plots (coverage, PIT, "
      "CRPS, residual Q-Q) into 06_uncertainty_plots/. Default TRUE."),
+    ("imbalance_enabled", False, "bool",
+     "Master switch for the ex-post imbalance settlement of "
+     "forecast-error deviations (BRP deviation settlement). Requires "
+     "uncertainty_enabled = TRUE and uncertainty_window_hours >= 2 x "
+     "uncertainty_commit_hours (the day-ahead nomination is the noisy "
+     "lookahead slice of each window, Eq. U6). Default FALSE - "
+     "bit-identical when off."),
+    ("imbalance_pricing", "dual", "enum",
+     "single | dual. dual: short deviations pay the short price, long "
+     "deviations are paid the long price (cost non-negative when long "
+     "<= DAM <= short, Eq. U7). single: both sides settle at one "
+     "imbalance price (sign-indefinite, Eq. U8); requires the "
+     "imbalance_price_eur_per_mwh timeseries column."),
+    ("imbalance_price_mult_short", 1.25, "-",
+     "DAM-proxy multiplier for the SHORT imbalance price when the "
+     "imbalance_price_short_eur_per_mwh column is absent (dual "
+     "regime). Applied sign-aware to |DAM| (Eq. U8a) so negative-price "
+     "hours keep long <= DAM <= short."),
+    ("imbalance_price_mult_long", 0.75, "-",
+     "DAM-proxy multiplier for the LONG imbalance price when the "
+     "imbalance_price_long_eur_per_mwh column is absent (dual regime). "
+     "Sign-aware like the short-side proxy."),
     ("plot_daily_scope", "year1_only", "scope",
      "none | year1_only | all. 'all' produces ~365 * N_years * 3 daily PDFs."),
     ("plot_monthly_scope", "all", "scope",
@@ -1872,7 +1923,11 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
     if mode == "merchant" and "load_kwh" in ts.columns:
         logger.info("merchant mode: load_kwh column ignored")
 
-    for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh", "retail_price_eur_per_mwh"):
+    for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh",
+                "retail_price_eur_per_mwh",
+                "imbalance_price_eur_per_mwh",
+                "imbalance_price_short_eur_per_mwh",
+                "imbalance_price_long_eur_per_mwh"):
         if col in ts.columns:
             numeric = ts[col].astype(float)
             nan_mask = numeric.isna()
@@ -2032,6 +2087,11 @@ PRICE_DECK_BASE_COLUMNS: tuple[str, ...] = (
     "dam_price_eur_per_mwh",
     "retail_price_eur_per_mwh",
     *_BALANCING_TS_COLUMN_DEFAULTS.keys(),
+    # Optional imbalance settlement price columns (Eqs. U7/U8) — deck
+    # variants allowed like every other price column.
+    "imbalance_price_eur_per_mwh",
+    "imbalance_price_short_eur_per_mwh",
+    "imbalance_price_long_eur_per_mwh",
 )
 
 
@@ -2348,7 +2408,13 @@ def validate_workbook_params(
         "bess_replacement_year",
     ):
         _require_non_negative(bess, key)
-    for key in ("site_capex_eur", "site_devex_eur"):
+    for key in (
+        "site_capex_eur",
+        "site_devex_eur",
+        # A negative wedge would be a charging subsidy paid by the
+        # network — not a fee; reject it like every other cost key.
+        "grid_charging_fee_eur_per_mwh",
+    ):
         _require_non_negative(project, key)
 
     gearing = float(economics.get("gearing_pct", 0.0) or 0.0)
@@ -2464,6 +2530,52 @@ def validate_workbook_params(
         # truth.
         if dt_minutes is not None:
             _validate_balancing_config(balancing, dt_minutes)
+
+    # Imbalance settlement (Eqs. U6-U9): the nomination is the noisy
+    # lookahead slice of each rolling-horizon window, so the feature is
+    # meaningless without the rolling-horizon Monte Carlo and needs a
+    # lookahead at least one commit block long.
+    simulation_cfg = typed.get("simulation") or {}
+    if bool(simulation_cfg.get("imbalance_enabled", False)):
+        if not bool(simulation_cfg.get("uncertainty_enabled", False)):
+            raise ValueError(
+                "imbalance_enabled requires uncertainty_enabled = TRUE: "
+                "the day-ahead nomination is each rolling-horizon "
+                "window's noisy lookahead slice (Eq. U6)."
+            )
+        window_h = int(
+            simulation_cfg.get("uncertainty_window_hours", 48) or 48
+        )
+        commit_h = int(
+            simulation_cfg.get("uncertainty_commit_hours", 24) or 24
+        )
+        if window_h < 2 * commit_h:
+            raise ValueError(
+                f"imbalance_enabled requires uncertainty_window_hours "
+                f"(= {window_h}) >= 2 x uncertainty_commit_hours "
+                f"(= {commit_h}): the nomination for the next commit "
+                f"block is the lookahead slice [commit, 2 x commit) of "
+                f"each window."
+            )
+        m_short = float(
+            simulation_cfg.get("imbalance_price_mult_short", 1.25) or 0.0
+        )
+        m_long = float(
+            simulation_cfg.get("imbalance_price_mult_long", 0.75) or 0.0
+        )
+        if m_short < 0.0 or m_long < 0.0:
+            raise ValueError(
+                "imbalance price multipliers must be non-negative; got "
+                f"short={m_short!r}, long={m_long!r}."
+            )
+        if m_short < 1.0 or m_long > 1.0:
+            logger.warning(
+                "imbalance DAM-proxy multipliers short=%.3g / long=%.3g "
+                "are not incentive-compatible (expected short >= 1 and "
+                "long <= 1, so that long <= DAM <= short); a deviation "
+                "could be PAID more than the DAM. Set them knowingly.",
+                m_short, m_long,
+            )
 
     # Per-year trajectory vectors (Eq. E24): structural checks live in the
     # parser / normaliser; here the lifecycle-aware invariants are
@@ -2706,6 +2818,21 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     dt_minutes = detect_timestep_minutes(ts)
     validate_workbook_params(typed, dt_minutes=dt_minutes)
     ts = _apply_balancing_timeseries_fallback(ts, typed["balancing"])
+    # Single-price imbalance settlement has no canonical DAM
+    # relationship to proxy, so the column is mandatory (the dual
+    # regime falls back per side to the U8a DAM proxy instead).
+    _sim = typed.get("simulation") or {}
+    if (
+        bool(_sim.get("imbalance_enabled", False))
+        and str(_sim.get("imbalance_pricing", "dual")).lower() == "single"
+        and "imbalance_price_eur_per_mwh" not in ts.columns
+    ):
+        raise ValueError(
+            "imbalance_pricing = 'single' requires the "
+            "imbalance_price_eur_per_mwh timeseries column (a lone "
+            "imbalance price cannot be proxied from the DAM); add the "
+            "column or use imbalance_pricing = 'dual'."
+        )
     out: dict[str, Any] = {
         "ts": ts,
         "max_injection_profile": profile,
@@ -2775,6 +2902,14 @@ def _typed_to_flat(
         "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
         "mode": str(project["mode"]),
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
+        # Charging-side wedge (Eq. E26): consumed by the MILP objective
+        # (build_model) and the per-step fee column (add_economic_columns).
+        "grid_charging_fee_eur_per_mwh": float(
+            project.get("grid_charging_fee_eur_per_mwh", 0.0) or 0.0
+        ),
+        "grid_charging_fee_exempt": bool(
+            project.get("grid_charging_fee_exempt", False)
+        ),
         "grid_cap_includes_load": bool(project["grid_cap_includes_load"]),
         "unavailability_pct": float(project["unavailability_pct"]),
         "site_capex_eur": float(project.get("site_capex_eur", 0.0) or 0.0),
@@ -2943,6 +3078,10 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_route_to_market_fee_eur_lifecycle",
      "Lifetime route-to-market fee [EUR]"),
     ("total_optimizer_fee_eur_lifecycle", "Lifetime optimizer fee [EUR]"),
+    ("total_grid_charging_fee_eur_lifecycle",
+     "Lifetime grid-charging fee [EUR]"),
+    ("total_imbalance_cost_eur_lifecycle",
+     "Lifetime imbalance cost [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the
@@ -2956,6 +3095,14 @@ _SUMMARY_ROLLING_KEYS: tuple[tuple[str, str], ...] = (
     ("pf_benchmark_mip_gap", "Benchmark MIP gap, requested [-]"),
     ("pf_benchmark_gap_achieved", "Benchmark MIP gap, proven [-]"),
     ("mc_n_seeds", "Monte Carlo seeds"),
+    # Imbalance settlement (Eqs. U6-U9) — rendered only when the
+    # feature ran (keys absent otherwise).
+    ("imbalance_cost_year1_eur", "Imbalance cost, Year-1 mean [EUR]"),
+    ("imbalance_cost_p50_eur", "Imbalance cost P50 [EUR]"),
+    ("imbalance_cost_p10_eur", "Imbalance cost P10 [EUR]"),
+    ("imbalance_cost_p90_eur", "Imbalance cost P90 [EUR]"),
+    ("bess_imbalance_hedge_value_mean_eur",
+     "BESS imbalance hedge value, mean [EUR]"),
 )
 
 

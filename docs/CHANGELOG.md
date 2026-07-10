@@ -105,6 +105,51 @@ Production release.
   uses it instead of the share-based approximation; without it every
   path is bit-identical to before.
 
+### Added (charging-side grid fee)
+
+- `grid_charging_fee_eur_per_mwh` / `grid_charging_fee_exempt` on the
+  project sheet (default 0 / FALSE, bit-identical when unset): a
+  regulated wedge on grid-charged BESS energy (network charges +
+  levies; typical European range 10-30 EUR/MWh) that enters the MILP
+  objective as a buy-price adder (Eq. E26) — thin arbitrage spreads
+  flip sign with the wedge, so it must shape the dispatch, not just
+  the cashflow — and projects over the lifecycle as its own signed
+  `grid_charging_fee_eur` column (Eq. E27; flat rate, charged volume
+  fading on the BESS curve).  The wedge actually paid surfaces per
+  step and as an availability-derated KPI, is subtracted from
+  `profit_total_eur` (KPI == objective, mip-gap-0 locked), allocates
+  monthly on the Year-1 charging shape, rolls up to a lifetime total
+  with a conditional SUMMARY row, joins every cashflow figure as its
+  own "Grid-charging fee" deduction band, is excluded from LCOE/LCOS,
+  and is not scaled by the Revenue tornado driver (regulated rate x
+  volume).  The exemption switch keeps the exempt / non-exempt regime
+  pair a one-cell scenario change; a latched warning flags a wedge
+  that can never bind because grid charging is disallowed.
+
+### Added (imbalance settlement exposure)
+
+- `imbalance_enabled` on the simulation sheet (default FALSE,
+  bit-identical when off — the nomination capture consumes no rng
+  draws, so existing Monte Carlo seeds reproduce exactly): ex-post
+  settlement of forecast-error deviations on the rolling-horizon
+  machinery (Eqs. U6-U9).  Each window's noisy lookahead slice is the
+  day-ahead nomination for the next commit block; the realised net
+  grid position settles against it at actual prices under a dual-
+  (incentive-compatible, non-negative cost) or single-price
+  (sign-indefinite) regime, with sign-aware DAM proxies when the
+  optional imbalance price columns are absent.  A paired analytic
+  PV-only counterfactual yields `bess_imbalance_hedge_value_eur` — the
+  quantified co-location benefit of the BESS against deviation
+  exposure.  Per-seed columns join the rolling_horizon_mc output; the
+  pipeline aggregates mean and P10/P50/P90 into the KPI dict and
+  SUMMARY digest; the availability derate applies uniformly (cancels
+  in the paired hedge).  The MC mean projects into the yearly cashflow
+  as its own `imbalance_cost_eur` column (Eq. E28: PV-curve volume,
+  DAM-series prices; PV-shape monthly allocation E28a), excluded from
+  LCOE/LCOS, scaled by the Revenue tornado driver, with a lifetime
+  total, conditional SUMMARY row and its own "Imbalance cost" figure
+  band.
+
 ### Changed (aggregator fee template default)
 
 - The `aggregator_fee_pct_revenue` template default drops from 10 % to

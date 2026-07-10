@@ -31,6 +31,28 @@ Availability (unplanned outage) is handled separately as a
 deterministic post-solve derate (Eq. E8, `docs/economics_design.md`),
 applied identically to the PF benchmark and every MC seed.
 
+### Imbalance settlement exposure (Eqs. U6-U9)
+
+`imbalance_enabled` settles each committed block's realised net grid
+position against its day-ahead nomination — the noisy lookahead slice
+[commit, 2 x commit) of the PREVIOUS window's solve, the only
+forecast-based schedule the machinery produces (committed rows are
+byte-identical to actuals by design).  Eq. U6 defines the deviation
+Delta_t = (realised - nominated)/1000 MWh (block 0 settles at zero);
+Eq. U7 the dual-price settlement cost (non-negative under
+incentive-compatible long <= DAM <= short); Eq. U8 the sign-indefinite
+single-price regime; Eq. U8a the sign-aware DAM proxy used per side
+when a price column is absent (short = DAM + (m_s - 1)|DAM|,
+long = DAM - (1 - m_l)|DAM|).  A PV-only counterfactual (Eq. U9) is
+computed analytically inside the same seed — nominate min(forecast PV,
+cap), deliver min(actual PV, cap) — yielding the paired
+`bess_imbalance_hedge_value_eur`.  Capture consumes no rng draws, so
+seeds reproduce bit-identically with the feature off.  All EUR/MWh
+keys carry the standard availability derate (uniform factor; it
+cancels in the paired hedge difference — real forced outages
+increasing imbalance is a documented limitation).  The MC mean feeds
+the yearly cashflow (Eq. E28); P10/P50/P90 carry the distribution.
+
 ## Inputs
 
 | Sheet | Key | Default | Role |
@@ -45,7 +67,8 @@ applied identically to the PF benchmark and every MC seed.
 | simulation | `uncertainty_diagnostics_enabled` | TRUE | input-uncertainty diagnostic PDFs |
 | balancing | `bm_price_sigma_capacity_pct` / `bm_price_sigma_activation_pct` | 25 / 35 | $\sigma^{\mathrm{cap}}, \sigma^{\mathrm{act}}$ (percent → fraction) |
 | balancing | `bm_mc_scenarios` / `bm_random_seed` | 200 / 1729 | balancing MC size / seed |
-| economics | `sensitivity_enabled` + 5 `sensitivity_*` deltas | TRUE; 10/10/10/2 pp/10 | tornado drivers |
+| economics | `sensitivity_enabled` + 5 `sensitivity_*` deltas | TRUE; 10/10/10/2 pp/10 | U6-U9 imbalance settlement | `rolling_horizon.settle_imbalance`, `resolve_imbalance_prices`, nomination capture in `rolling_horizon_dispatch`, MC columns in `monte_carlo_rolling`, pipeline aggregation |
+| tornado drivers |
 | project | `unavailability_pct` | 1.0 | $a$ |
 
 CLI overrides (merged in `pipeline._resolve_uncertainty_config`; a

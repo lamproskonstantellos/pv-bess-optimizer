@@ -70,6 +70,14 @@ High-level run configuration:
 * ``retail_tariff_eur_per_mwh``: retail tariff used in self_consumption mode.
 * ``allow_bess_grid_charging``: TRUE → BESS may charge from grid in
   PV-zero periods.
+* ``grid_charging_fee_eur_per_mwh`` / ``grid_charging_fee_exempt``:
+  regulated charging-side wedge on grid-charged BESS energy (network
+  charges + levies; typical European range 10–30 EUR/MWh).  Enters the
+  MILP objective as a buy-price adder — thin arbitrage spreads flip
+  correctly — and the cashflow as its own expense line (equation E26).
+  The exemption switch zeroes it (exempt regimes), keeping the
+  exempt / non-exempt scenario pair a one-cell change.  Inert unless
+  the dispatch actually grid-charges.
 * ``grid_cap_includes_load`` (default FALSE): sets what the per-step
   grid-injection cap limits.  **FALSE** (default) models *physical /
   co-located* self-consumption: the load sits behind the plant meter and
@@ -343,6 +351,19 @@ mapped onto the ``economics`` keys above::
     grid:
       co2_intensity: 350       # → grid_co2_intensity_kg_per_mwh
       co2_annual_decline: 0.02  # → grid_co2_annual_decline_pct = 2
+
+The four ``imbalance_*`` keys switch on the ex-post imbalance
+settlement of forecast-error deviations (requires the rolling-horizon
+Monte Carlo and ``uncertainty_window_hours >= 2 x
+uncertainty_commit_hours``): ``imbalance_enabled``,
+``imbalance_pricing`` (``dual`` settles short/long deviations at their
+own prices, cost non-negative under incentive-compatible prices;
+``single`` settles both at one price and requires the
+``imbalance_price_eur_per_mwh`` timeseries column), and the two
+DAM-proxy multipliers used per side when the optional
+``imbalance_price_short_eur_per_mwh`` /
+``imbalance_price_long_eur_per_mwh`` columns are absent (sign-aware,
+so negative-price hours keep the spread ordering).
 
 Sheet ``balancing``
 -------------------

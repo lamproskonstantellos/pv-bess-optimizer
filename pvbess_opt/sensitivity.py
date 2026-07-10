@@ -159,6 +159,10 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("route_to_market_fee_eur")
     if "optimizer_fee_eur" in df.columns:
         components.append("optimizer_fee_eur")
+    if "grid_charging_fee_eur" in df.columns:
+        components.append("grid_charging_fee_eur")
+    if "imbalance_cost_eur" in df.columns:
+        components.append("imbalance_cost_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -210,8 +214,10 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     uniform driver scaling perturbs the price LEVEL and commutes with a
     trajectory's per-year SHAPE, so trajectory-shaped revenue columns
     and ``optimizer_fee_eur`` scale with the driver, while
-    ``route_to_market_fee_eur`` stays untouched (volume-based, no
-    price component; locked by tests/test_trajectory_application.py).
+    ``route_to_market_fee_eur`` and ``grid_charging_fee_eur`` stay
+    untouched (volume-based regulated charges, no price component;
+    locked by tests/test_trajectory_application.py and
+    tests/test_grid_charging_fee.py).
 
     The perturbed frame is reconstructed so it satisfies the same
     gross/net identity the original cashflow does:
@@ -283,6 +289,10 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
         # (Eq. E25a): price-proportional, so it scales with the driver;
         # it is NOT part of net_cashflow_eur (see _recompute_net).
         "bess_market_revenue_eur",
+        # Imbalance settlement (Eq. E28): a price-spread times volume —
+        # price-proportional, so it scales with the Revenue driver
+        # (same rationale as the balancing columns).
+        "imbalance_cost_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)
