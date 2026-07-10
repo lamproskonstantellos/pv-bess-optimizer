@@ -1051,6 +1051,275 @@ def _build_scenarios_sheet(
     )
 
 
+# ---------------------------------------------------------------------------
+# Optional escalation sheet: trajectories (per-year stream multipliers)
+# ---------------------------------------------------------------------------
+
+# Trajectories sheet: tidy / long — one row per (stream, year) multiplier,
+# gated by an ``enabled`` TRUE/FALSE toggle read from the first data row
+# (sizing / scenarios sheet pattern; shipped disabled so a normal run is
+# bit-identical).  Each stream carries a ``mode``:
+#
+# * ``replace`` — the per-year multiplier m_y substitutes the stream's
+#   flat (1 + i)^(y-1) inflation index (Eq. E24).  The loader warns when
+#   the matching ``*_inflation_pct`` is also non-zero (double
+#   specification).
+# * ``overlay`` — m_y multiplies ON TOP of the inflation index.
+#
+# Year-indexed rows are deliberately used instead of comma-separated
+# values in a single cell: locales that write decimal commas make
+# CSV-in-a-cell a silent-corruption footgun, while Excel drag-fill makes
+# one-row-per-year cheap.  The engine consumes the parsed block through
+# ``economics`` (Eq. E24/E24a); this module owns the format and its
+# structural validation only.
+TRAJECTORY_STREAMS: tuple[str, ...] = (
+    "revenue_dam",
+    "revenue_retail",
+    "balancing_capacity",
+    "balancing_activation",
+    "opex",
+    "opex_pv",
+    "opex_bess",
+)
+
+# Streams that deliberately take NO trajectory: the PPA strike escalates
+# contractually (``ppa_inflation_pct``) and the route-to-market fee
+# (Eq. E13c) is a flat per-MWh volume charge by design.
+
+_TRAJECTORY_MODES: tuple[str, ...] = ("replace", "overlay")
+
+# The scalar inflation key each stream's replace-mode trajectory
+# substitutes, as ``(sheet, key)`` — used for the double-specification
+# warning in ``validate_workbook_params``.
+_TRAJECTORY_INFLATION_KEYS: dict[str, tuple[str, str]] = {
+    "revenue_dam": ("economics", "dam_inflation_pct"),
+    "revenue_retail": ("economics", "retail_inflation_pct"),
+    "balancing_capacity": ("balancing", "bm_inflation_pct"),
+    "balancing_activation": ("balancing", "bm_inflation_pct"),
+    "opex": ("economics", "opex_inflation_pct"),
+    "opex_pv": ("economics", "opex_inflation_pct"),
+    "opex_bess": ("economics", "opex_inflation_pct"),
+}
+
+TRAJECTORIES_SHEET_COLUMNS: tuple[str, ...] = (
+    "enabled",
+    "stream",
+    "mode",
+    "year",
+    "value",
+)
+
+# Disabled worked example shipped in the workbook so the tidy/long format
+# is self-documenting (a mild DAM capture-rate decline).  Blank ``stream``
+# / ``mode`` cells inherit the row above; enabling it requires filling
+# every operating year 1..project_lifecycle_years.
+_TRAJECTORIES_EXAMPLE_ROWS: tuple[tuple[Any, ...], ...] = (
+    ("FALSE", "revenue_dam", "overlay", 1, 1.0),
+    (None, None, None, 2, 0.99),
+    (None, None, None, 3, 0.98),
+)
+
+
+def _build_trajectories_sheet(
+    trajectories: dict[str, dict[str, Any]] | None = None,
+) -> pd.DataFrame:
+    """Render the optional ``trajectories`` sheet.
+
+    ``trajectories`` is the parsed block (``{stream: {"mode": ...,
+    "values": [...]}}``); ``None`` writes the shipped disabled example so
+    the tidy format is self-documenting.
+    """
+    if trajectories:
+        rows: list[dict[str, Any]] = []
+        first = True
+        for stream, spec in trajectories.items():
+            for idx, value in enumerate(spec["values"], start=1):
+                rows.append({
+                    "enabled": "TRUE" if first else None,
+                    "stream": stream if idx == 1 else None,
+                    "mode": str(spec["mode"]) if idx == 1 else None,
+                    "year": idx,
+                    "value": float(value),
+                })
+                first = False
+        return pd.DataFrame(rows, columns=list(TRAJECTORIES_SHEET_COLUMNS))
+    return pd.DataFrame(
+        [
+            dict(zip(TRAJECTORIES_SHEET_COLUMNS, r, strict=True))
+            for r in _TRAJECTORIES_EXAMPLE_ROWS
+        ],
+        columns=list(TRAJECTORIES_SHEET_COLUMNS),
+    )
+
+
+def _normalise_trajectories_block(
+    raw: Any, *, source: str,
+) -> dict[str, dict[str, Any]] | None:
+    """Validate and normalise a trajectories mapping (shared by surfaces).
+
+    Accepts ``{stream: {"mode": "replace"|"overlay", "values": [...]}}``
+    or the list shorthand ``{stream: [...]}`` (replace mode).  Structural
+    checks only: length-vs-lifecycle coverage and the m_1 == 1 anchor are
+    enforced by :func:`validate_workbook_params`, which knows
+    ``project_lifecycle_years``.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"{source}: 'trajectories' must be a mapping of stream name "
+            f"to a values list or {{mode, values}} block; got "
+            f"{type(raw).__name__}."
+        )
+    if not raw:
+        return None
+    out: dict[str, dict[str, Any]] = {}
+    for stream, spec in raw.items():
+        stream = str(stream).strip().lower()
+        if stream not in TRAJECTORY_STREAMS:
+            raise ValueError(
+                f"{source}: unknown trajectory stream {stream!r}; known "
+                f"streams: {', '.join(TRAJECTORY_STREAMS)}."
+            )
+        if isinstance(spec, dict):
+            mode = str(spec.get("mode", "replace")).strip().lower()
+            values = spec.get("values")
+        else:
+            mode = "replace"
+            values = spec
+        if mode not in _TRAJECTORY_MODES:
+            raise ValueError(
+                f"{source}: trajectory stream {stream!r} has unknown mode "
+                f"{mode!r}; expected one of {', '.join(_TRAJECTORY_MODES)}."
+            )
+        if not isinstance(values, (list, tuple)) or not values:
+            raise ValueError(
+                f"{source}: trajectory stream {stream!r} needs a non-empty "
+                f"'values' list of per-year multipliers."
+            )
+        floats: list[float] = []
+        for idx, v in enumerate(values, start=1):
+            if isinstance(v, (bool, np.bool_)):
+                raise ValueError(
+                    f"{source}: trajectory stream {stream!r} year {idx} "
+                    f"expects a number, got boolean {bool(v)!r}."
+                )
+            try:
+                fv = float(v)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"{source}: trajectory stream {stream!r} year {idx} "
+                    f"value {v!r} is not a number."
+                ) from exc
+            if not np.isfinite(fv) or fv < 0.0:
+                raise ValueError(
+                    f"{source}: trajectory stream {stream!r} year {idx} "
+                    f"multiplier must be finite and >= 0; got {fv!r}."
+                )
+            floats.append(fv)
+        out[stream] = {"mode": mode, "values": floats}
+    return out
+
+
+def _parse_trajectories_sheet(
+    df: pd.DataFrame,
+) -> dict[str, dict[str, Any]] | None:
+    """Parse the columnar ``trajectories`` sheet.
+
+    Returns the normalised block (``{stream: {"mode": ..., "values":
+    [...]}}``) or ``None`` when the sheet is disabled or empty.  Blank
+    ``stream`` / ``mode`` cells inherit the row above (tidy/long, the
+    scenarios-sheet convention); years must be contiguous from 1 per
+    stream.
+    """
+    cols = {str(c).strip().lower(): c for c in df.columns}
+    for required in TRAJECTORIES_SHEET_COLUMNS:
+        if required not in cols:
+            raise ValueError(
+                f"trajectories sheet is missing the {required!r} column; "
+                f"expected columns: {', '.join(TRAJECTORIES_SHEET_COLUMNS)}."
+            )
+
+    def cell(row: Any, name: str) -> Any:
+        value = row[cols[name]]
+        if value is None:
+            return None
+        if isinstance(value, float) and np.isnan(value):
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    enabled = False
+    nonnull = df[cols["enabled"]].dropna()
+    if not nonnull.empty:
+        enabled = _parse_bool(nonnull.iloc[0], False)
+    if not enabled:
+        return None
+
+    per_stream: dict[str, dict[str, Any]] = {}
+    current: str | None = None
+    for _, row in df.iterrows():
+        stream_val = cell(row, "stream")
+        if stream_val is not None:
+            current = str(stream_val).strip().lower()
+        year_val = cell(row, "year")
+        value_val = cell(row, "value")
+        if current is None:
+            if year_val is None and value_val is None:
+                continue
+            raise ValueError(
+                "trajectories sheet has a value row before any 'stream' "
+                "cell; name the stream on the first row of each block."
+            )
+        if year_val is None and value_val is None:
+            continue
+        bucket = per_stream.setdefault(
+            current, {"mode": None, "years": {}},
+        )
+        mode_val = cell(row, "mode")
+        if mode_val is not None and bucket["mode"] is None:
+            bucket["mode"] = str(mode_val).strip().lower()
+        try:
+            year = int(float(year_val))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"trajectories stream {current!r}: year {year_val!r} is "
+                f"not an integer."
+            ) from exc
+        if year < 1:
+            raise ValueError(
+                f"trajectories stream {current!r}: operating years start "
+                f"at 1; got {year}."
+            )
+        if year in bucket["years"]:
+            raise ValueError(
+                f"trajectories stream {current!r}: duplicate year {year}."
+            )
+        bucket["years"][year] = value_val
+
+    if not per_stream:
+        return None
+
+    raw_block: dict[str, Any] = {}
+    for stream, bucket in per_stream.items():
+        years = bucket["years"]
+        expected = set(range(1, max(years) + 1))
+        missing = sorted(expected - set(years))
+        if missing:
+            raise ValueError(
+                f"trajectories stream {stream!r}: years must be "
+                f"contiguous from 1; missing {missing}."
+            )
+        raw_block[stream] = {
+            "mode": bucket["mode"] or "replace",
+            "values": [years[y] for y in sorted(years)],
+        }
+    return _normalise_trajectories_block(
+        raw_block, source="trajectories sheet",
+    )
+
+
 # Output-styling contract: every workbook written below passes through
 # pvbess_opt.io_style.style_workbook before save, so all outputs share the
 # input workbook's navy frozen-header house style.  Never save an output
@@ -1076,6 +1345,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     max_injection_df = _build_max_injection_sheet(profile)
     sizing_df = _build_sizing_sheet(typed.get("sizing"))
     scenarios_df = _build_scenarios_sheet(typed.get("scenarios"))
+    trajectories_df = _build_trajectories_sheet(typed.get("trajectories"))
 
     with pd.ExcelWriter(dst, engine="openpyxl") as writer:
         typed["ts"].to_excel(writer, sheet_name="timeseries", index=False)
@@ -1099,6 +1369,9 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
                 )
         sizing_df.to_excel(writer, sheet_name="sizing", index=False)
         scenarios_df.to_excel(writer, sheet_name="scenarios", index=False)
+        trajectories_df.to_excel(
+            writer, sheet_name="trajectories", index=False,
+        )
         style_workbook(writer.book)
     return dst
 
@@ -2115,6 +2388,54 @@ def validate_workbook_params(
         if dt_minutes is not None:
             _validate_balancing_config(balancing, dt_minutes)
 
+    # Per-year trajectory vectors (Eq. E24): structural checks live in the
+    # parser / normaliser; here the lifecycle-aware invariants are
+    # enforced — full coverage of the project life, the Year-1 anchor
+    # (m_1 == 1 keeps the Year-1 cashflow equal to the dispatch-KPI base),
+    # the shared-vs-split OPEX conflict, and the replace-mode
+    # double-specification warning.
+    trajectories = typed.get("trajectories")
+    if trajectories:
+        n_years = int(project.get("project_lifecycle_years", 0) or 0)
+        for stream, spec in trajectories.items():
+            values = spec["values"]
+            if n_years and len(values) != n_years:
+                raise ValueError(
+                    f"trajectories stream {stream!r} covers "
+                    f"{len(values)} year(s) but project_lifecycle_years "
+                    f"is {n_years}; provide one multiplier per operating "
+                    f"year 1..{n_years}."
+                )
+            if abs(float(values[0]) - 1.0) > 1e-9:
+                raise ValueError(
+                    f"trajectories stream {stream!r} must anchor at "
+                    f"value 1.0 in year 1 (multipliers are relative to "
+                    f"the Year-1 base); got {values[0]!r}."
+                )
+        if "opex" in trajectories and (
+            {"opex_pv", "opex_bess"} & set(trajectories)
+        ):
+            raise ValueError(
+                "trajectories: the shared 'opex' stream cannot be "
+                "combined with the per-asset 'opex_pv' / 'opex_bess' "
+                "streams; use one or the other."
+            )
+        for stream, spec in trajectories.items():
+            if spec["mode"] != "replace":
+                continue
+            sheet_name, infl_key = _TRAJECTORY_INFLATION_KEYS[stream]
+            section = typed.get(sheet_name) or {}
+            infl = float(section.get(infl_key, 0.0) or 0.0)
+            if infl != 0.0:
+                logger.warning(
+                    "trajectories stream %r uses mode 'replace', which "
+                    "substitutes the flat %s (%.4g %%): the scalar index "
+                    "is IGNORED for this stream. Set %s to 0, or use "
+                    "mode 'overlay' to stack the trajectory on top of "
+                    "it.",
+                    stream, infl_key, infl, infl_key,
+                )
+
 
 def _apply_balancing_timeseries_fallback(
     ts: pd.DataFrame, balancing: dict[str, Any],
@@ -2244,6 +2565,19 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         typed["ppa"] = _parse_kv_sheet("ppa", ppa_flat)
     else:
         typed["ppa"] = dict(PPA_SHEET_DEFAULTS)
+
+    # Optional ``trajectories`` sheet — per-year stream multipliers
+    # (Eq. E24).  Absent sheet, ``enabled`` = FALSE, or no data rows all
+    # resolve to None and the run is bit-identical to before.
+    if "trajectories" in sheets:
+        try:
+            typed["trajectories"] = _parse_trajectories_sheet(
+                pd.read_excel(xlsx_path, sheet_name="trajectories"),
+            )
+        except ValueError as exc:
+            raise ValueError(f"trajectories: {exc}") from exc
+    else:
+        typed["trajectories"] = None
 
     # A finite grid-export cap must be strictly positive.  An empty cell
     # or an 'unlimited' token resolves to float('inf') (cap disabled).

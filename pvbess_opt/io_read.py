@@ -32,6 +32,7 @@ import pandas as pd
 from .io import (
     _KEY_TO_SHEET,
     _SHEET_DEFAULTS,
+    _normalise_trajectories_block,
     _parse_grid_export_max,
     _parse_value,
     reject_legacy_bess_capex_key,
@@ -52,6 +53,7 @@ _TOP_LEVEL_EXTRAS: frozenset[str] = frozenset({
     "max_injection_profile_pv",
     "max_injection_profile_bess",
     "sizing",  # read separately by pvbess_opt.sizing.read_sizing_block
+    "trajectories",  # per-year stream multipliers (Eq. E24)
 })
 
 # Reference specific yield (kWh/kWp/yr) and divergence threshold for the PV
@@ -230,6 +232,14 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
             )
     _apply_financing_block(raw, typed)
     _apply_grid_block(raw, typed)
+    # Optional per-year trajectory block, normalised through the SAME
+    # helper the workbook parser uses (three-surface parity: one
+    # parse/validate path).  Lifecycle-aware invariants (coverage, the
+    # m_1 == 1 anchor) are enforced by validate_workbook_params on the
+    # materialize_to_xlsx round-trip.
+    typed["trajectories"] = _normalise_trajectories_block(
+        raw.get("trajectories"), source=f"Config {path}",
+    )
     typed["ts"] = _resolve_timeseries(raw, path.parent)
     mip = raw.get("max_injection_profile")
     if mip is not None:
@@ -604,6 +614,17 @@ def dump_structured_config(
             out[f"max_injection_profile_{_src}"] = np.asarray(
                 _mip_src, dtype=float,
             ).tolist()
+    trajectories = typed.get("trajectories")
+    if trajectories:
+        # Emitted only when set so an untouched config round-trips with
+        # zero diff.
+        out["trajectories"] = {
+            stream: {
+                "mode": str(spec["mode"]),
+                "values": [float(v) for v in spec["values"]],
+            }
+            for stream, spec in trajectories.items()
+        }
 
     if config_path.suffix.lower() == ".json":
         config_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
@@ -679,6 +700,16 @@ def config_json_schema() -> dict[str, Any]:
     properties["max_injection_profile"] = {"type": "array"}
     properties["max_injection_profile_pv"] = {"type": "array"}
     properties["max_injection_profile_bess"] = {"type": "array"}
+    properties["trajectories"] = {
+        "type": "object",
+        "description": (
+            "Per-year stream multipliers (Eq. E24): mapping of stream "
+            "name (revenue_dam, revenue_retail, balancing_capacity, "
+            "balancing_activation, opex, opex_pv, opex_bess) to a "
+            "values list or a {mode: replace|overlay, values: [...]} "
+            "block; year-1 value must be 1.0."
+        ),
+    }
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "pvbess-optimizer configuration",

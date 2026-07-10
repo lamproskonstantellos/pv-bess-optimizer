@@ -6,9 +6,9 @@ The optimiser consumes a single Excel workbook.  Nine core data sheets
 ``balancing``, ``ppa``, ``simulation``, ``max_injection_profile``)
 carry the run, plus the optional per-source sub-cap sheets
 (``max_injection_profile_pv`` / ``max_injection_profile_bess``) and two
-optional sweep sheets, ``sizing`` and ``scenarios`` (each gated by an
-``enabled`` toggle and shipped disabled).  All keys use lowercase
-snake_case.
+optional opt-in sheets ``sizing``, ``scenarios`` and ``trajectories``
+(each gated by an ``enabled`` toggle and shipped disabled).  All keys
+use lowercase snake_case.
 
 Sheet ``timeseries``
 --------------------
@@ -764,3 +764,72 @@ revenue bridge between the first two scenarios.  Scenarios vary on a
 shared base PV profile; use separate inputs for different sites.  The
 ``scenarios`` and ``sizing`` sheets are mutually exclusive; enabling both
 raises a clear error.
+
+Per-year stream trajectories (``trajectories`` sheet / ``trajectories:`` block)
+--------------------------------------------------------------------------------
+
+Shape a revenue or cost stream year by year instead of the flat
+``(1 + inflation)^(y-1)`` index — a declining DAM capture rate as PV
+build-out compresses solar-hour prices, an ancillary-services price
+decay as the balancing fleet saturates, or a stepped OPEX profile
+(post-warranty LTSA step-up, an insurance line).  The Excel workbook
+carries a ``trajectories`` sheet for this; a YAML / JSON config uses an
+equivalent ``trajectories:`` block.
+
+In the **Excel workbook** the sheet is tidy / long (one row per
+``(stream, year)`` multiplier; blank ``stream`` / ``mode`` cells inherit
+the row above), gated by an ``enabled`` TRUE / FALSE toggle in the first
+data row and shipped **disabled** with a worked example.  Streams:
+``revenue_dam``, ``revenue_retail``, ``balancing_capacity``,
+``balancing_activation``, ``opex``, or the per-asset split ``opex_pv`` /
+``opex_bess`` (the shared ``opex`` stream and the split streams are
+mutually exclusive).  ``mode`` is ``replace`` (the vector substitutes the
+stream's inflation index; the loader warns when the matching
+``*_inflation_pct`` is also non-zero) or ``overlay`` (the vector
+multiplies on top of it):
+
+.. list-table::
+   :header-rows: 1
+
+   * - ``enabled``
+     - ``stream``
+     - ``mode``
+     - ``year``
+     - ``value``
+   * - ``TRUE``
+     - revenue_dam
+     - overlay
+     - 1
+     - 1.0
+   * -
+     -
+     -
+     - 2
+     - 0.99
+   * -
+     -
+     -
+     - 3
+     - 0.98
+
+Every enabled stream must cover **all** operating years
+``1..project_lifecycle_years`` contiguously and anchor at ``1.0`` in
+year 1 (multipliers are relative to the Year-1 base, which stays equal
+to the dispatch result).  The PPA strike deliberately takes no
+trajectory (it escalates contractually via ``ppa_inflation_pct``), and
+so does the per-MWh route-to-market fee (a flat volume charge).
+
+In a **YAML / JSON config** the same block is a mapping of stream name
+to either a ``{mode, values}`` block or a plain list (``replace``
+mode)::
+
+    trajectories:
+      revenue_dam:
+        mode: overlay
+        values: [1.0, 0.99, 0.98, 0.97, 0.96]
+      opex: [1.0, 1.0, 1.02, 1.02, 1.10]
+
+With the sheet disabled (or no ``trajectories:`` block) every stream
+keeps its flat scalar index and the run is bit-identical to before.  The
+multi-year application itself (equations E24 / E24a) is described in the
+economics guide.

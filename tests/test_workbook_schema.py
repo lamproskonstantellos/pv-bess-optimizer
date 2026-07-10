@@ -5,7 +5,7 @@ Covers:
 * The core sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
   ``economics`` / ``simulation`` / ``balancing`` /
   ``max_injection_profile``) plus the optional ``sizing`` / ``scenarios``
-  sweep sheets.
+  / ``trajectories`` sheets.
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
@@ -156,7 +156,7 @@ def test_all_sheets_present(repo_input_xlsx):
         "timeseries", "project", "pv", "bess", "economics",
         "simulation", "balancing", "ppa", "max_injection_profile",
         "max_injection_profile_pv", "max_injection_profile_bess",
-        "sizing", "scenarios",
+        "sizing", "scenarios", "trajectories",
     }
 
 

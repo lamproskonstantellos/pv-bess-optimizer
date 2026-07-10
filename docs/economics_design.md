@@ -6,6 +6,26 @@ aggregates, the aggregator fee, degradation scaling, replacement,
 debt, the headline financial KPIs, and LCOE/LCOS.  Notation follows
 the shared table in `docs/README.md`.
 
+## Equation tag registry
+
+Every numbered equation across the design documents draws its tag from
+one global registry so tags never collide (the availability import
+correction had to be renumbered E8a after a duplicate-E9 incident —
+allocate here first, then write the equation).  One counter per
+namespace; a tag, once merged, is never reused or renumbered.
+
+| Namespace | Owner document | Scope | Highest allocated |
+|---|---|---|---|
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E23 (+ suffixed E8a, E13a-E13d) |
+| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U5 |
+| P | `ppa_design.md` | PPA settlement and dispatch coupling | P5 |
+| S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
+| B | (reserved) | balancing product structure | — |
+| I | (reserved) | intraday venue | — |
+
+New equations take the next free tag in their namespace at merge time
+and add a row to the owning document's implementation map.
+
 ## Purpose & scope
 
 The MILP (see `docs/self_consumption_design.md` /
