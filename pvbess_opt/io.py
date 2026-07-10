@@ -2977,6 +2977,8 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_route_to_market_fee_eur_lifecycle",
      "Lifetime route-to-market fee [EUR]"),
     ("total_optimizer_fee_eur_lifecycle", "Lifetime optimizer fee [EUR]"),
+    ("total_grid_charging_fee_eur_lifecycle",
+     "Lifetime grid-charging fee [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the

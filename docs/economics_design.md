@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E26 (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E27 (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U5 |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -433,7 +433,7 @@ OPEX, replacement CAPEX, and the net cashflow:
 $$O_y = -\left(o^{PV}\,\mathrm{kWp} + o^{B} P^{B}\right)(1+i_{\mathrm{opex}})^{y-1}, \qquad
 C_y = \begin{cases} c^{B} E^{\mathrm{cap}} \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
 
-$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
+$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + F^{\mathrm{chg}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
 
 with $V_y$ the DEVEX column (Year 0 only) and Year 0 carrying
 $\mathrm{CF}_0 = \mathrm{CAPEX}_0 + \mathrm{DEVEX}_0$.  Discounted:
@@ -460,6 +460,24 @@ algebraically consistent with the objective), is availability-derated
 with the charging throughput it is proportional to, and is **not**
 bundled into the BESS-DAM stream (`pvbess_opt/conventions.md`) so the
 E13d/E25a bases stay market-only.
+
+Over the lifecycle the fee projects as its own signed column
+(Eq. E27): the Year-1 wedge actually paid (the KPI above) at the flat
+regulated rate, with the charged grid-to-BESS volume fading on the
+BESS capacity curve — the E13c flat-rate convention:
+
+$$F^{\mathrm{chg}}_y = -\,e^{\mathrm{chg}}_1\, f^{B}_y \tag{E27}$$
+
+It joins the net (E15), allocates monthly on the Year-1 per-step
+charging shape (1/12 fallback, exact reconciliation), rolls up to
+`total_grid_charging_fee_eur_lifecycle` (a SUMMARY row when non-zero),
+joins every cashflow figure as its own deduction band ("Grid-charging
+fee", drawn only when non-zero), is folded by the sensitivity net
+recompute but NOT scaled by the Revenue driver (a regulated rate on
+volume, no price component), and is **excluded from LCOE/LCOS** like
+every market/venue fee.  The no-breakdown cashflow fallback adds the
+fee back to the gross it derives from `profit_total_eur` (which
+already nets it), so the column carries the deduction exactly once.
 
 ### Contracted BESS revenue layer (foundations)
 
@@ -638,6 +656,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E25) | `economics._contract_phase` |
 | (E25a) | `build_yearly_cashflow` bess_market_revenue_eur column |
 | (E26) | `build_model` grid-charge wedge; `kpis.add_economic_columns` fee column |
+| (E27) | `build_yearly_cashflow` grid_charging_fee_eur column + monthly allocation |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests
