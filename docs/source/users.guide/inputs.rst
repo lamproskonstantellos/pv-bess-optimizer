@@ -229,6 +229,27 @@ Sheet ``economics``
   PPA revenue.  Real-world route-to-market charges are typically a few
   EUR/MWh of *sold* energy or a share of *market* revenue only, so the
   template no longer pre-fills a flat percentage of all revenue.
+* ``route_to_market_fee_eur_per_mwh`` (default 0, off): route-to-market /
+  representation fee per MWh of grid-**exported** energy (PV + BESS) —
+  the charge a cumulative-representation aggregator (Greek FoSE, or the
+  last-resort FoSETeK under regulated charges; German Direktvermarkter)
+  levies for scheduling, forecasting, balancing responsibility and market
+  access.  Charged on *sold* energy only: never on self-consumption
+  savings, balancing or PPA revenue, and the PPA-covered PV export share
+  is exempt while a physical (sleeved) contract is in term.  Typical
+  0.5–5 EUR/MWh (Greek examples ~1–3.5).  Flat over the project life.
+  Surfaces as a signed ``route_to_market_fee_eur`` cashflow column;
+  excluded from LCOE/LCOS.  See Eq. E13c in ``docs/economics_design.md``.
+* ``optimizer_revenue_share_pct`` (default 0 %, off): battery optimizer /
+  trading-services revenue share on the **positive** annual BESS
+  wholesale trading margin (DAM export revenue minus grid-charging
+  cost); nothing is charged in years where the margin is negative.
+  Mirrors the merchant revenue-share / floor+share structures of BESS
+  optimizers; typical 10–25 %.  Applies only to the battery's wholesale
+  stream.  Surfaces as a signed ``optimizer_fee_eur`` cashflow column;
+  excluded from LCOE/LCOS.  A warning fires when combined with
+  ``aggregator_fee_pct_revenue`` (double-charging the battery's
+  wholesale stream).  See Eq. E13d in ``docs/economics_design.md``.
 * ``balancing_aggregator_fee_pct_revenue`` (default 0 %): optional,
   separate route-to-market (BSP / balancing-aggregator) fee on **gross**
   balancing revenue (capacity + activation), for assets that participate

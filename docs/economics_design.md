@@ -34,7 +34,9 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `opex_inflation_pct` | 1.0 | $i_{\mathrm{opex}}$ |
 | economics | `retail_inflation_pct` | 0.0 | $i_{\mathrm{ret}}$ |
 | economics | `dam_inflation_pct` | 0.0 | $i_{\mathrm{DAM}}$ (held nominal by default; DAM forecasts already embed a price view) |
-| economics | `aggregator_fee_pct_revenue` | 10.0 | $\varphi$ (energy-aggregator fee on DAM + retail only) |
+| economics | `aggregator_fee_pct_revenue` | 0.0 | $\varphi$ (energy-aggregator fee on DAM + retail only; opt-in) |
+| economics | `route_to_market_fee_eur_per_mwh` | 0.0 | $\phi_{\mathrm{rtm}}$ (representation fee per exported MWh; opt-in) |
+| economics | `optimizer_revenue_share_pct` | 0.0 | $\varphi_{\mathrm{opt}}$ (BESS optimizer share of the positive trading margin; opt-in) |
 | economics | `balancing_aggregator_fee_pct_revenue` | 0.0 | $\varphi_{\mathrm{bm}}$ (optional BSP / route-to-market fee on gross balancing revenue; default off) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
 | economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
@@ -191,7 +193,7 @@ Generation, storage, export and revenue all scale by $A$, but the load
 is fixed exogenous demand that the grid must serve in full while the
 plant is offline.  `system_total_import_mwh` is therefore set to
 
-$$\mathrm{import} = A \cdot \mathrm{import}_{\mathrm{raw}} + a \cdot L \tag{E9}$$
+$$\mathrm{import} = A \cdot \mathrm{import}_{\mathrm{raw}} + a \cdot L \tag{E8a}$$
 
 with $L$ the (never-derated) annual load: the uniform $A$ step covers
 the grid-charging leg (which genuinely stops during downtime), and the
@@ -201,7 +203,7 @@ the annual energy Sankey (`plotting.emissions.plot_energy_sankey`,
 passed `kpis['availability_factor']`) applies the same rule so its Load
 node stays at the true demand and its ribbons conserve energy.  Because
 grid import is not a monetised stream — the self-consumption savings,
-which *are* derated, already carry the downtime cost — Eq. E9 leaves
+which *are* derated, already carry the downtime cost — Eq. E8a leaves
 every financial KPI unchanged.
 
 ### Year-1 revenue bases and the nine canonical aggregates
@@ -295,12 +297,71 @@ its own signed `balancing_aggregator_fee_eur` cashflow column, and is
 balancing revenue. A realistic range is ~5-20 % for behind-the-meter /
 smaller assets; 0 for utility-scale BSPs that self-dispatch.
 
+### Route-to-market and optimizer fees (structural market-access costs)
+
+Two structural fees model how European producers actually pay for
+market access, both **default-off** (results bit-identical when unset)
+and both **excluded from LCOE/LCOS**:
+
+**Route-to-market fee** — the per-MWh representation charge of a
+cumulative-representation aggregator: in Greece a FoSE (or the
+last-resort FoSETeK operated by DAPEEP under regulated charges, per
+YPEN/DAPEEK/25512/883/2019), in Germany a Direktvermarkter.  The
+aggregator handles scheduling, injection declarations, balancing
+responsibility and exchange access, and charges per MWh of **sold**
+energy — typically 0.5-5 EUR/MWh (Greek examples ~1-3.5; German
+Direktvermarktung 0.5-5).  The fee level is flat over the project life
+(representation charges are quoted per MWh, not indexed); the charged
+MWh fade on the per-origin degradation curves.  While a PHYSICAL
+(sleeved) PPA is in term, its covered PV-export share $s$ is routed by
+the offtaker and is exempt; a CfD (financial settlement) sells the full
+volume at DAM through the aggregator and is not exempt.  Self-consumed
+energy never crosses the market interface and carries no fee:
+
+$$F^{\mathrm{rtm}}_y = -\phi_{\mathrm{rtm}} \left( E^{\mathrm{exp,PV}}_1 f^{PV}_y (1 - s \cdot \mathbb{1}[\mathrm{sleeved,\ in\ term}]) + E^{\mathrm{exp,B}}_1 f^{B}_y \right) \tag{E13c}$$
+
+with $E^{\mathrm{exp,PV}}_1$ / $E^{\mathrm{exp,B}}_1$ the Year-1
+exported MWh by origin (`pv_export_mwh` / `bess_export_mwh`,
+availability-derated like the EUR bases).
+
+**Optimizer revenue share** — the trading-services fee of a battery
+optimizer, structured as a share of the **positive** annual BESS
+wholesale trading margin (the merchant revenue-share / floor+share
+structures documented for BESS optimizers; typical 10-25 %).  The base
+is the battery's DAM stream net of grid-charging cost (exactly
+$R^{\mathrm{DAM,B}}_1$, the `rev1_dam_bess` base), clamped at zero —
+an optimizer never invoices a share of a trading loss:
+
+$$F^{\mathrm{opt}}_y = -\varphi_{\mathrm{opt}} \cdot \max\!\left(R^{\mathrm{DAM,B}}_1 f^{B}_y (1+i_{\mathrm{DAM}})^{y-1},\; 0\right) \tag{E13d}$$
+
+Neither fee touches self-consumption savings, PPA revenue, or
+balancing revenue (the BSP fee (E13b) covers balancing).  Fees never
+compound on other fees.  Stacking $\varphi$ (E13) with
+$\varphi_{\mathrm{opt}}$ (E13d) double-charges the battery's
+wholesale stream, so the loader warns when both are set.  Both surface
+as their own signed cashflow columns (`route_to_market_fee_eur`,
+`optimizer_fee_eur`) folded into `net_cashflow_eur`, allocated to
+months by the same revenue-share weights as the energy-aggregator fee,
+and roll up to `total_route_to_market_fee_eur_lifecycle` /
+`total_optimizer_fee_eur_lifecycle` (rendered in `SUMMARY.md` only
+when non-zero).  In the sensitivity tornado the optimizer share scales
+with the revenue driver (price-proportional) while the
+route-to-market fee does not (volume-based; the revenue delta perturbs
+prices, not energy).
+
+Who charges what, for reference: FoSE / FoSETeK (DAPEEP) and
+Direktvermarkter charge (E13c)-style per-MWh representation fees;
+battery optimizers (merchant revenue-share, floor+share or tolling
+structures) charge (E13d)-style shares; retail/net-billing
+self-consumption carries no aggregator fee (the netting is a supplier
+service).
+
 OPEX, replacement CAPEX, and the net cashflow:
 
 $$O_y = -\left(o^{PV}\,\mathrm{kWp} + o^{B} P^{B}\right)(1+i_{\mathrm{opex}})^{y-1}, \qquad
 C_y = \begin{cases} c^{B} E^{\mathrm{cap}} \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
 
-$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
+$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
 
 with $V_y$ the DEVEX column (Year 0 only) and Year 0 carrying
 $\mathrm{CF}_0 = \mathrm{CAPEX}_0 + \mathrm{DEVEX}_0$.  Discounted:

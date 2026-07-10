@@ -2,11 +2,41 @@
 
 ## 1.1.0 (unreleased)
 
+### Added
+
+- Two structural market-access fees, both default-off (results
+  bit-identical when unset), modelled on European practice and
+  controlled from the workbook `economics` sheet (YAML and scenario
+  surfaces inherit automatically):
+  - `route_to_market_fee_eur_per_mwh` — representation fee per MWh of
+    grid-exported energy (Greek FoSE / last-resort FoSETeK under
+    regulated charges, German Direktvermarktung; typical 0.5-5
+    EUR/MWh).  Charged on sold energy only; the PPA-covered PV export
+    share is exempt while a physical (sleeved) contract is in term;
+    flat over the project life while the charged MWh fade on the
+    per-origin degradation curves (Eq. E13c).
+  - `optimizer_revenue_share_pct` — battery optimizer revenue share on
+    the POSITIVE annual BESS wholesale trading margin (export minus
+    grid charging), the merchant / floor+share structure of BESS
+    optimizers (typical 10-25 %); never invoices a share of a loss
+    (Eq. E13d).
+  Both surface as signed cashflow columns
+  (`route_to_market_fee_eur`, `optimizer_fee_eur`) folded into
+  `net_cashflow_eur`, roll up to lifetime totals rendered in
+  `SUMMARY.md` when non-zero, join every cashflow figure (revenue
+  stack, yearly/monthly bars, NPV waterfall, BESS revenue waterfall
+  and monthly view) as their own deduction bands drawn only when
+  non-zero, and are excluded from LCOE/LCOS.  New Year-1 KPIs
+  `pv_export_mwh` / `bess_export_mwh` carry the fee's export base
+  (availability-derated with the totals they compose).  The loader
+  warns when the legacy `aggregator_fee_pct_revenue` and the optimizer
+  share are combined (double-charging the battery's wholesale stream).
+
 ### Changed
 
 - The `aggregator_fee_pct_revenue` template default drops from 10 % to
   0 % (fee-free; opt-in).  Real-world route-to-market charges are
-  typically a few EUR/MWh of sold energy (Greek ΦοΣΕ representation,
+  typically a few EUR/MWh of sold energy (Greek FoSE representation,
   German Direktvermarktung) or a share of market revenue only — a flat
   10 % of ALL revenue (including self-consumption savings) sits far
   above European market practice, so the template no longer pre-fills

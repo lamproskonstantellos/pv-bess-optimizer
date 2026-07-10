@@ -212,8 +212,9 @@ def plot_cumulative_cashflow(
 
 def _optional_revenue_streams(
     yearly_cf: pd.DataFrame,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return the (balancing, balancing-fee, ppa) yearly columns.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return the (balancing, balancing-fee, ppa, rtm-fee, optimizer-fee)
+    yearly columns.
 
     Missing or all-zero columns come back as zero arrays so callers can
     stack them unconditionally; all-zero streams draw nothing.
@@ -222,13 +223,13 @@ def _optional_revenue_streams(
     out = []
     for col in (
         "balancing_revenue_eur", "balancing_aggregator_fee_eur",
-        "ppa_revenue_eur",
+        "ppa_revenue_eur", "route_to_market_fee_eur", "optimizer_fee_eur",
     ):
         if col in yearly_cf.columns:
             out.append(yearly_cf[col].to_numpy(dtype=float))
         else:
             out.append(np.zeros(n, dtype=float))
-    return out[0], out[1], out[2]
+    return out[0], out[1], out[2], out[3], out[4]
 
 
 def _stack_cashflow_bars(
@@ -242,6 +243,8 @@ def _stack_cashflow_bars(
     devex: np.ndarray,
     capex: np.ndarray,
     bal_fee: np.ndarray,
+    rtm_fee: np.ndarray | None = None,
+    opt_fee: np.ndarray | None = None,
 ) -> None:
     """Draw the shared cashflow bar stack (yearly bars / NPV waterfall).
 
@@ -280,6 +283,21 @@ def _stack_cashflow_bars(
                edgecolor="black", linewidth=0.4,
                label="Balancing aggregator fee")
         neg_bottom = neg_bottom + bal_fee
+    # Structural market-access fees keep their own negative slots, exactly
+    # like the BSP fee: all-zero streams draw nothing so a fee-free run's
+    # figure is unchanged.
+    if rtm_fee is not None and np.any(np.abs(rtm_fee) > 1e-9):
+        ax.bar(years, rtm_fee, width=width, bottom=neg_bottom,
+               color=financial_color("Route-to-market fee"),
+               edgecolor="black", linewidth=0.4,
+               label="Route-to-market fee")
+        neg_bottom = neg_bottom + rtm_fee
+    if opt_fee is not None and np.any(np.abs(opt_fee) > 1e-9):
+        ax.bar(years, opt_fee, width=width, bottom=neg_bottom,
+               color=financial_color("Optimizer fee"),
+               edgecolor="black", linewidth=0.4,
+               label="Optimizer fee")
+        neg_bottom = neg_bottom + opt_fee
     ax.bar(years, devex, width=width, bottom=neg_bottom,
            color=financial_color("DEVEX"),
            edgecolor="black", linewidth=0.4, label="DEVEX")
@@ -302,7 +320,9 @@ def plot_yearly_cashflow_bars(
     out_path = Path(out_path)
     years = _calendar_axis(yearly_cf)
     revenue = yearly_cf["revenue_eur"].to_numpy(dtype=float)
-    balancing, bal_fee, ppa = _optional_revenue_streams(yearly_cf)
+    balancing, bal_fee, ppa, rtm_fee, opt_fee = (
+        _optional_revenue_streams(yearly_cf)
+    )
     opex = yearly_cf["opex_eur"].to_numpy(dtype=float)  # negative
     if "devex_eur" in yearly_cf.columns:
         devex = yearly_cf["devex_eur"].to_numpy(dtype=float)  # negative
@@ -316,7 +336,7 @@ def plot_yearly_cashflow_bars(
     width = 0.8
     _stack_cashflow_bars(
         ax, years, width, revenue, balancing, ppa, opex, devex, capex,
-        bal_fee,
+        bal_fee, rtm_fee, opt_fee,
     )
     ax.plot(years, net, color=financial_color("Net cash-flow"), linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
@@ -362,10 +382,14 @@ def plot_npv_waterfall(
     years = _calendar_axis(yearly_cf)
     disc_factor = yearly_cf["discount_factor"].astype(float).to_numpy()
     revenue_disc = yearly_cf["revenue_eur"].astype(float).to_numpy() * disc_factor
-    balancing, bal_fee, ppa = _optional_revenue_streams(yearly_cf)
+    balancing, bal_fee, ppa, rtm_fee, opt_fee = (
+        _optional_revenue_streams(yearly_cf)
+    )
     balancing_disc = balancing * disc_factor
     bal_fee_disc = bal_fee * disc_factor
     ppa_disc = ppa * disc_factor
+    rtm_fee_disc = rtm_fee * disc_factor
+    opt_fee_disc = opt_fee * disc_factor
     opex_disc = yearly_cf["opex_eur"].astype(float).to_numpy() * disc_factor
     if "devex_eur" in yearly_cf.columns:
         devex_disc = (
@@ -386,6 +410,7 @@ def plot_npv_waterfall(
     _stack_cashflow_bars(
         ax, years, width, revenue_disc, balancing_disc, ppa_disc,
         opex_disc, devex_disc, capex_disc, bal_fee_disc,
+        rtm_fee_disc, opt_fee_disc,
     )
 
     ax.plot(
@@ -533,6 +558,14 @@ def plot_monthly_cashflow_year1(
         ppa = sub["ppa_revenue_eur"].astype(float).to_numpy()
     else:
         ppa = np.zeros_like(revenue)
+    if "route_to_market_fee_eur" in sub.columns:
+        rtm_fee = sub["route_to_market_fee_eur"].astype(float).to_numpy()
+    else:
+        rtm_fee = np.zeros_like(revenue)
+    if "optimizer_fee_eur" in sub.columns:
+        opt_fee = sub["optimizer_fee_eur"].astype(float).to_numpy()
+    else:
+        opt_fee = np.zeros_like(revenue)
     if "devex_eur" in sub.columns:
         devex = sub["devex_eur"].astype(float).to_numpy()
     else:
@@ -569,6 +602,20 @@ def plot_monthly_cashflow_year1(
                edgecolor="black", linewidth=0.4,
                label="Balancing aggregator fee")
         neg_bottom = neg_bottom + bal_fee
+    # Structural market-access fees join the same negative stack (they are
+    # part of net_cashflow_eur on the monthly frame), each in its own slot.
+    if np.any(np.abs(rtm_fee) > 1e-9):
+        ax.bar(months, rtm_fee, bottom=neg_bottom,
+               color=financial_color("Route-to-market fee"),
+               edgecolor="black", linewidth=0.4,
+               label="Route-to-market fee")
+        neg_bottom = neg_bottom + rtm_fee
+    if np.any(np.abs(opt_fee) > 1e-9):
+        ax.bar(months, opt_fee, bottom=neg_bottom,
+               color=financial_color("Optimizer fee"),
+               edgecolor="black", linewidth=0.4,
+               label="Optimizer fee")
+        neg_bottom = neg_bottom + opt_fee
     if np.any(np.abs(devex) > 1e-9):
         ax.bar(months, devex, bottom=neg_bottom,
                color=financial_color("DEVEX"),

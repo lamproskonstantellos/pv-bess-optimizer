@@ -15,7 +15,7 @@ Dispatch metrics
   import scales *up*: the grid covers the full load during plant
   downtime, so ``import = A * import_raw + a * load`` (``a`` the
   unavailability fraction, ``A = 1 - a``).  See the "Availability derate"
-  note below and ``docs/economics_design.md`` (Eq. E9).
+  note below and ``docs/economics_design.md`` (Eq. E8a).
 * ``bess_total_charge_mwh`` / ``bess_total_discharge_mwh``.
 * ``pv_to_bess_mwh`` / ``bess_charge_grid_mwh``.
 * ``pv_generation_mwh`` / ``load_energy_mwh`` (load is 0 in merchant).
@@ -98,7 +98,7 @@ The post-solve availability derate scales every generation-, storage-,
 export- and revenue-bearing KPI *down* by the availability factor.
 ``system_total_import_mwh`` is the sole exception and scales *up*: the
 load is fixed exogenous demand that the grid must serve in full while
-the plant is offline, so ``import = A * import_raw + a * load`` (Eq. E9
+the plant is offline, so ``import = A * import_raw + a * load`` (Eq. E8a
 in ``docs/economics_design.md``).  This keeps the derated annual energy
 balance closed against the never-derated load and leaves every financial
 KPI unchanged (grid import is not a monetised stream).  The annual
