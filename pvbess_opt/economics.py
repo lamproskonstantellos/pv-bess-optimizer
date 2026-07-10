@@ -529,6 +529,29 @@ def build_yearly_cashflow(
     pv_export_mwh_1 = float(year1_kpis.get("pv_export_mwh", 0.0) or 0.0)
     bess_export_mwh_1 = float(year1_kpis.get("bess_export_mwh", 0.0) or 0.0)
 
+    # BESS tolling agreement (Eqs. E29/E29a): a fixed EUR/MW/yr payment
+    # for dispatch rights over a phase window (Eq. E25).  The toll is a
+    # NEW stream (not derived from the derated Year-1 KPIs), so the
+    # availability factor applies here — once, per the E8 single-derate
+    # principle — and there is deliberately no bess_factor fade (the
+    # payment is on the contracted power block, not delivered energy).
+    toll_rate = max(0.0, float(
+        econ.get("bess_toll_eur_per_mw_year", 0.0) or 0.0
+    ))
+    _raw_toll_from = econ.get("bess_toll_year_from", 1)
+    toll_year_from = int(1 if _raw_toll_from is None else _raw_toll_from)
+    _raw_toll_to = econ.get("bess_toll_year_to", 0)
+    toll_year_to = int(0 if _raw_toll_to is None else _raw_toll_to)
+    toll_treatment = str(
+        econ.get("bess_toll_merchant_treatment", "zeroed") or "zeroed"
+    ).strip().lower()
+    toll_infl = float(
+        econ.get("bess_toll_indexation_pct", 0.0) or 0.0
+    ) / 100.0
+    toll_avail = availability_factor(
+        float(econ.get("unavailability_pct", 0.0) or 0.0)
+    )
+
     # Split the Year-1 revenue base into retail (load-coverage)
     # and DAM (wholesale export) streams.  Retail revenue is indexed by
     # retail_inflation_pct (CPI-linked PPAs / Self-consumption tariffs).  DAM revenue
@@ -613,6 +636,20 @@ def build_yearly_cashflow(
         rev1_retail_bess = 0.0
         rev1_dam_pv = 0.0
         rev1_dam_bess = 0.0
+
+    # A tolled grid-scale battery has no retail leg, so the self-
+    # consumption BESS stream (profit_load_from_bess_eur) is
+    # deliberately NOT zeroed by the toll (Eq. E29a) — flag the
+    # combination instead of silently mis-modelling it.
+    if toll_rate > 0.0 and abs(rev1_retail_bess) > 1e-9:
+        logger.warning(
+            "A BESS toll is active while the battery also serves retail "
+            "load (profit_load_from_bess_eur = %.2f EUR): the retail "
+            "stream is NOT zeroed in toll years (Eq. E29a). A tolled "
+            "grid-scale battery normally has no retail leg — check the "
+            "configuration.",
+            rev1_retail_bess,
+        )
 
     opex_pv_1 = float(econ["opex_pv_eur_per_kwp"]) * pv_kwp
     opex_bess_1 = float(econ["opex_bess_eur_per_kw"]) * bess_kw
@@ -753,12 +790,51 @@ def build_yearly_cashflow(
             imbalance_cost_y = 0.0
             ppa_y = 0.0
             bess_market_rev_y = 0.0
+            toll_revenue_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
             else:
                 pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
             bess_factor = bess_factors[y - 1]
+            # Toll revenue (Eq. E29): availability-conditioned payment
+            # on the contracted power block, indexed contractually,
+            # gated by the phase window (Eq. E25).  No bess_factor fade.
+            toll_in_phase = toll_rate > 0.0 and _contract_phase(
+                y, toll_year_from, toll_year_to, n_years,
+            )
+            if toll_in_phase:
+                toll_revenue_y = (
+                    toll_rate * (bess_kw / 1000.0) * toll_avail
+                    * (1.0 + toll_infl) ** (y - 1)
+                )
+            else:
+                toll_revenue_y = 0.0
+            # Merchant zeroing (Eq. E29a): in toll years under 'zeroed'
+            # treatment the toller holds dispatch rights, so every
+            # BESS-origin merchant base is substituted with zero FOR
+            # THE YEAR — the Year-1 bases themselves are never mutated,
+            # so the Year-1 revenue-split reconciliation stays intact
+            # and non-toll years reuse the exact original floats
+            # (bit-identity when the toll is off).  The charging-side
+            # grid fee follows the grid-charging cost it accompanies
+            # (both are dispatch costs the toller bears); PV-origin
+            # streams, the retail/self-consumption stream (warned
+            # above) and the PV-forecast-error-driven imbalance cost
+            # are untouched.
+            _toll_zeroed = toll_in_phase and toll_treatment == "zeroed"
+            if _toll_zeroed:
+                _rev1_dam_bess_y = 0.0
+                _bm_cap_y1_y = 0.0
+                _bm_act_y1_y = 0.0
+                _bess_export_mwh_1_y = 0.0
+                _grid_charging_fee_1_y = 0.0
+            else:
+                _rev1_dam_bess_y = rev1_dam_bess
+                _bm_cap_y1_y = bm_cap_y1
+                _bm_act_y1_y = bm_act_y1
+                _bess_export_mwh_1_y = bess_export_mwh_1
+                _grid_charging_fee_1_y = grid_charging_fee_1
             # Degrade PV-origin revenue on pv_factor and BESS-origin
             # revenue on bess_factor, mirroring build_lifetime_dispatch's
             # per-year factor loop so the
@@ -768,7 +844,7 @@ def build_yearly_cashflow(
                 rev1_retail_pv * pv_factor + rev1_retail_bess * bess_factor
             ) * g_retail[y - 1]
             revenue_dam_y = (
-                rev1_dam_pv * pv_factor + rev1_dam_bess * bess_factor
+                rev1_dam_pv * pv_factor + _rev1_dam_bess_y * bess_factor
             ) * g_dam[y - 1]
             # PPA stream: in-term contract leg, or the post-term
             # physical reversion of the covered volume to the DAM
@@ -811,10 +887,10 @@ def build_yearly_cashflow(
                 capex_y = 0.0
             devex_y = 0.0
             balancing_capacity_y = (
-                bm_cap_y1 * bess_factor * g_bm_cap[y - 1]
+                _bm_cap_y1_y * bess_factor * g_bm_cap[y - 1]
             )
             balancing_activation_y = (
-                bm_act_y1 * bess_factor * g_bm_act[y - 1]
+                _bm_act_y1_y * bess_factor * g_bm_act[y - 1]
             )
             # Optional route-to-market (BSP) fee on GROSS balancing revenue.
             # A non-negative deduction, clamped at a zero-gross floor exactly
@@ -849,7 +925,7 @@ def build_yearly_cashflow(
                         * pv_factor,
                         0.0,
                     )
-                    + bess_export_mwh_1 * bess_factor
+                    + _bess_export_mwh_1_y * bess_factor
                 )
             else:
                 _ppa_exempt_share = (
@@ -857,7 +933,7 @@ def build_yearly_cashflow(
                 )
                 route_to_market_fee_y = -route_to_market_fee_rate * (
                     pv_export_mwh_1 * pv_factor * (1.0 - _ppa_exempt_share)
-                    + bess_export_mwh_1 * bess_factor
+                    + _bess_export_mwh_1_y * bess_factor
                 )
             # Optimizer revenue share (Eq. E13d): a percentage of the POSITIVE
             # BESS wholesale trading margin (export minus grid charging,
@@ -868,12 +944,12 @@ def build_yearly_cashflow(
             # The trailing +0.0 normalises the -0.0 produced when the
             # clamp binds (share x 0), keeping the column a clean zero.
             optimizer_fee_y = -optimizer_share_frac * max(
-                rev1_dam_bess * bess_factor * g_dam[y - 1],
+                _rev1_dam_bess_y * bess_factor * g_dam[y - 1],
                 0.0,
             ) + 0.0
             # Charging-side grid fee (Eq. E27): flat regulated rate on a
             # charged volume that fades on the BESS capacity curve.
-            grid_charging_fee_y = -grid_charging_fee_1 * bess_factor
+            grid_charging_fee_y = -_grid_charging_fee_1_y * bess_factor
             # Imbalance settlement (Eq. E28): PV-error-driven volume on
             # the PV curve, prices on the DAM escalation series.
             imbalance_cost_y = (
@@ -887,7 +963,7 @@ def build_yearly_cashflow(
             # is NOT summed into net_cashflow_eur.  Availability-derated
             # by construction (every input already carries A per E8).
             bess_market_rev_y = (
-                rev1_dam_bess * bess_factor * g_dam[y - 1]
+                _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
                 + balancing_capacity_y + balancing_activation_y
                 + balancing_aggregator_fee_y
             )
@@ -918,6 +994,7 @@ def build_yearly_cashflow(
             revenue_net_y + balancing_revenue_y + balancing_aggregator_fee_y
             + route_to_market_fee_y + optimizer_fee_y
             + grid_charging_fee_y + imbalance_cost_y
+            + toll_revenue_y
             + ppa_y + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -940,6 +1017,7 @@ def build_yearly_cashflow(
                 "balancing_revenue_eur": float(balancing_revenue_y),
                 "balancing_aggregator_fee_eur": float(balancing_aggregator_fee_y),
                 "bess_market_revenue_eur": float(bess_market_rev_y),
+                "toll_revenue_eur": float(toll_revenue_y),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -1013,6 +1091,9 @@ def derive_monthly_cashflow(
       ``revenue_eur`` share so each month carries its proportional
       slice of the fee that has already been deducted from
       ``revenue_eur`` (informational; NOT re-added to the net).
+    * ``toll_revenue_eur`` — flat ``1/12`` allocation of the yearly
+      toll payment (Eq. E29; a level contractual stream, so the flat
+      split is exact).  Part of ``net_cashflow_eur`` here.
     * ``opex_eur`` — Year-1 ``opex`` split evenly across months, scaled
       by the year's opex inflation factor.
     * ``capex_eur`` / ``devex_eur`` — the year's investment events
@@ -1199,6 +1280,7 @@ def derive_monthly_cashflow(
     has_opt_col = "optimizer_fee_eur" in yearly_cf.columns
     has_gcf_col = "grid_charging_fee_eur" in yearly_cf.columns
     has_imb_col = "imbalance_cost_eur" in yearly_cf.columns
+    has_toll_col = "toll_revenue_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
@@ -1239,6 +1321,10 @@ def derive_monthly_cashflow(
         imb_y = (
             float(yearly_indexed.loc[y, "imbalance_cost_eur"])
             if has_imb_col else 0.0
+        )
+        toll_y = (
+            float(yearly_indexed.loc[y, "toll_revenue_eur"])
+            if has_toll_col else 0.0
         )
         ppa_y = (
             float(yearly_indexed.loc[y, "ppa_revenue_eur"])
@@ -1300,6 +1386,10 @@ def derive_monthly_cashflow(
                 imb_m = float(monthly_pv_mwh_y1.loc[m]) / pv_y1_total * imb_y
             else:
                 imb_m = imb_y / 12.0
+            # Toll revenue (Eq. E29) is a level contractual payment, so
+            # a flat 1/12 allocation is exact (shares sum to one and
+            # the monthly sum reconciles the yearly column).
+            toll_m = toll_y / 12.0
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
@@ -1311,6 +1401,7 @@ def derive_monthly_cashflow(
             net_m = (
                 rev_m + balancing_m + bal_fee_m + rtm_fee_m + opt_fee_m
                 + gcf_fee_m + imb_m
+                + toll_m
                 + ppa_m + opex_m + capex_m + devex_m
             )
             # End-of-month discounting: month m of year y lands at
@@ -1333,6 +1424,7 @@ def derive_monthly_cashflow(
                     "optimizer_fee_eur": float(opt_fee_m),
                     "grid_charging_fee_eur": float(gcf_fee_m),
                     "imbalance_cost_eur": float(imb_m),
+                    "toll_revenue_eur": float(toll_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -1351,6 +1443,7 @@ def derive_monthly_cashflow(
         "balancing_revenue_eur", "balancing_aggregator_fee_eur",
         "route_to_market_fee_eur", "optimizer_fee_eur",
         "grid_charging_fee_eur", "imbalance_cost_eur",
+        "toll_revenue_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
@@ -1370,6 +1463,7 @@ def derive_monthly_cashflow(
                     "balancing_revenue_eur", "balancing_aggregator_fee_eur",
                     "route_to_market_fee_eur", "optimizer_fee_eur",
                     "grid_charging_fee_eur", "imbalance_cost_eur",
+                    "toll_revenue_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
@@ -1536,6 +1630,10 @@ def compute_financial_kpis(
     total_imbalance_cost_eur_lifecycle = (
         float(df.loc[after_y0_mask, "imbalance_cost_eur"].sum())
         if "imbalance_cost_eur" in df.columns else 0.0
+    )
+    total_toll_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "toll_revenue_eur"].sum())
+        if "toll_revenue_eur" in df.columns else 0.0
     )
     total_balancing_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
@@ -1860,6 +1958,11 @@ def compute_financial_kpis(
         )),
         "total_optimizer_fee_eur_lifecycle": float(round(
             total_optimizer_fee_eur_lifecycle, 2,
+        )),
+        # Contracted BESS revenue (Eq. E29); 0 when no toll is set and
+        # the SUMMARY renders it only when non-zero.
+        "total_toll_revenue_eur_lifecycle": float(round(
+            total_toll_revenue_eur_lifecycle, 2,
         )),
         "lifetime_bm_revenue_total_eur": float(round(
             total_balancing_revenue_eur_lifecycle, 2,

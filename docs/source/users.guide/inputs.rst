@@ -266,6 +266,22 @@ Sheet ``economics``
   ``balancing_aggregator_fee_eur`` column; the default 0 keeps results
   bit-identical and the column all-zero.  Range-validated ``[0, 100]``,
   like ``aggregator_fee_pct_revenue``.  Excluded from LCOE/LCOS.
+* ``bess_toll_eur_per_mw_year`` (default 0, off): BESS tolling
+  agreement — a fixed annual payment per MW of BESS power for dispatch
+  rights over a phase window (``bess_toll_year_from`` /
+  ``bess_toll_year_to``, inclusive; ``year_to = 0`` = end of life).
+  Availability-scaled, contractually indexed
+  (``bess_toll_indexation_pct``), with **no** capacity-fade scaling
+  (the payment is on the power block).  Under the default
+  ``bess_toll_merchant_treatment = zeroed`` every BESS-origin merchant
+  stream (BESS DAM margin, balancing legs and their BSP fee, the BESS
+  route-to-market fee share, the optimizer share, the charging-side
+  grid fee) is zeroed in toll years — the toller keeps them;
+  ``retained`` stacks the toll on top instead (warns:
+  double-monetises the same MW).  Surfaces as a ``toll_revenue_eur``
+  cashflow column (flat 1/12 monthly); excluded from LCOE/LCOS; not
+  scaled by the Revenue tornado driver.  See Eqs. E29/E29a in
+  ``docs/economics_design.md``.
 * ``sensitivity_enabled`` / ``sensitivity_capex_delta_pct`` /
   ``sensitivity_opex_delta_pct`` /
   ``sensitivity_revenue_delta_pct`` /

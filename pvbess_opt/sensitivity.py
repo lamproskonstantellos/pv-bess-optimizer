@@ -163,6 +163,8 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("grid_charging_fee_eur")
     if "imbalance_cost_eur" in df.columns:
         components.append("imbalance_cost_eur")
+    if "toll_revenue_eur" in df.columns:
+        components.append("toll_revenue_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -296,6 +298,11 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)
+    # toll_revenue_eur (Eq. E29) does NOT scale with the Revenue driver:
+    # it is a fixed contractual EUR/MW payment — the driver perturbs
+    # market prices, which a toll is by construction insulated from
+    # (the same no-scale rationale as route_to_market_fee_eur and
+    # grid_charging_fee_eur above).
 
     # Step 2 — scale the gross and rederive the fee with the SAME frac and the
     # SAME non-negative-gross clamp the base build applies (economics.py:

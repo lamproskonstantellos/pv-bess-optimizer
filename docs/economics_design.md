@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E28a (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E29a (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -58,6 +58,10 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `route_to_market_fee_eur_per_mwh` | 0.0 | $\phi_{\mathrm{rtm}}$ (representation fee per exported MWh; opt-in) |
 | economics | `optimizer_revenue_share_pct` | 0.0 | $\varphi_{\mathrm{opt}}$ (BESS optimizer share of the positive trading margin; opt-in) |
 | economics | `balancing_aggregator_fee_pct_revenue` | 0.0 | $\varphi_{\mathrm{bm}}$ (optional BSP / route-to-market fee on gross balancing revenue; default off) |
+| economics | `bess_toll_eur_per_mw_year` | 0.0 | $\tau$ (tolling rate per MW of BESS power; default off) |
+| economics | `bess_toll_year_from`, `bess_toll_year_to` | 1, 0 | toll phase window (E25; 0 = end of life) |
+| economics | `bess_toll_merchant_treatment` | zeroed | E29a merchant gating (`zeroed` \| `retained`) |
+| economics | `bess_toll_indexation_pct` | 0.0 | $i_\tau$ (contractual toll escalation) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
 | economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
 | economics | `gearing_pct`, `debt_interest_rate_pct`, `debt_tenor_years`, `debt_repayment` | 0, 5.0, 15, annuity | debt layer |
@@ -533,6 +537,65 @@ base the contracted structures will read, and the Revenue tornado
 driver scales it (price-proportional) so piecewise contract terms can
 be recomputed exactly from a scaled base.
 
+### BESS tolling agreement (Eqs. E29/E29a)
+
+A tolling agreement pays the owner a fixed annual rate per MW of BESS
+power for the right to dispatch the battery — the fixed-payment end of
+the contracted-revenue spectrum.  Five `economics` keys, all
+default-off (`bess_toll_eur_per_mw_year = 0` ⇒ bit-identical):
+`bess_toll_eur_per_mw_year` ($\tau$), `bess_toll_year_from` /
+`bess_toll_year_to` (the E25 window), `bess_toll_merchant_treatment`
+(`zeroed` | `retained`) and `bess_toll_indexation_pct` ($i_\tau$).
+
+$$R^{\mathrm{toll}}_y = \tau \cdot \frac{P^{B}}{1000} \cdot A \cdot
+(1+i_\tau)^{\,y-1} \cdot \chi_y\!\left(y_f^{\mathrm{toll}},
+y_t^{\mathrm{toll}}\right) \tag{E29}$$
+
+The availability factor $A$ (E8) applies **here, once** — the toll is
+a new stream, not derived from the already-derated Year-1 KPIs
+(availability-conditioned capacity payments are the market norm) — and
+there is deliberately **no** $f^{B}$ fade: the payment is on the
+contracted power block, not on delivered energy.  Surfaces as the
+`toll_revenue_eur` column (monthly: exact flat $1/12$ — a level
+contractual payment), folds into `net_cashflow_eur`, is **excluded
+from LCOE/LCOS** (revenue-agnostic convention) and does **not** scale
+with the Revenue tornado driver (fixed contractual EUR/MW; the driver
+perturbs market prices the toll is insulated from).
+
+Merchant zeroing (default treatment `zeroed`):
+
+$$\chi_y = 1:\quad R^{\mathrm{DAM,B}} \to 0,\;
+R^{\mathrm{bm,cap}}_y, R^{\mathrm{bm,act}}_y, F^{\mathrm{bm}}_y \to 0,\;
+E^{\mathrm{exp,B}} \to 0 \text{ in } F^{\mathrm{rtm}},\;
+F^{\mathrm{opt}}_y \to 0,\;
+F^{\mathrm{gcf}}_y \to 0 \tag{E29a}$$
+
+— in toll years the toller holds dispatch rights, so every BESS-origin
+merchant stream is gated to zero for that year: the $R^{\mathrm{DAM,B}}$
+contribution to E10 (which nets the grid-charging energy cost), both
+E11 balancing legs and their BSP fee (E13b), the BESS-export term of
+the route-to-market fee (E13c), the optimizer share (E13d) **and the
+charging-side grid fee (E27)** — the wedge follows the grid-charging
+cost it accompanies, both being dispatch costs the toller bears (an
+extension of the workstream design, which predates E26/E27).  The
+gating substitutes the Year-1 bases per year inside the projection
+loop and never mutates them, so the Year-1 revenue-split
+reconciliation guard is untouched and `bess_market_revenue_eur` (E25a)
+reflects the zeroing (it reports *realised* market revenue: zero in
+toll years).  Deliberately **not** zeroed: PV-origin streams, the PPA
+leg, self-consumption savings (a warning fires when
+`profit_load_from_bess_eur` is non-zero alongside a toll — a tolled
+grid-scale battery has no retail leg) and the PV-forecast-error-driven
+imbalance cost (E28).  Under `retained` no gating occurs — the toll
+stacks on top of the full merchant streams (a capacity-overlay
+contract; a warning flags the double-monetisation).
+
+Stacking warnings (validation-time, never blocking): toll rate set
+with `bess_power_kw = 0` (no-op), treatment `retained`
+(double-monetises the MW), and toll + `optimizer_revenue_share_pct`
+both active (under `zeroed` the share is gated in toll years; the two
+double-charge the same wholesale stream otherwise).
+
 ### Financial KPIs
 
 $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$
@@ -679,6 +742,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E26) | `build_model` grid-charge wedge; `kpis.add_economic_columns` fee column |
 | (E27) | `build_yearly_cashflow` grid_charging_fee_eur column + monthly allocation |
 | (E28)-(E28a) | `build_yearly_cashflow` imbalance_cost_eur column + PV-shape monthly allocation |
+| (E29)-(E29a) | `build_yearly_cashflow` toll_revenue_eur column + per-year merchant gating |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

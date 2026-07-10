@@ -293,6 +293,10 @@ FINANCIAL_COLORS: dict[str, str] = {
     "grid_charging_fee":   "#F06292",  # Material pink 300
     # Imbalance settlement cost (Eqs. U6-U9 / E28).
     "imbalance_cost":      "#4E342E",  # Material brown 800
+    # Contracted BESS revenue: tolling agreement (Eqs. E29/E29a) — a
+    # teal one shade darker than the balancing roll-up so the two
+    # BESS-side revenue bands stay distinguishable when stacked.
+    "toll_revenue":        "#00695C",  # Material teal 800
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -406,6 +410,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Export from PV",
     "Export from BESS",
     "PPA revenue",
+    "Tolling revenue",
     "Grid-charging cost",
     "Energy aggregator fee",
     "Balancing aggregator fee",
@@ -448,6 +453,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Export from PV":                   "export_from_pv",
     "Export from BESS":                 "export_from_bess",
     "PPA revenue":                      "ppa_revenue",
+    "Tolling revenue":                  "toll_revenue",
     "Grid-charging cost":               "grid_charge_cost",
     "Energy aggregator fee":            "aggregator_fee",
     "Balancing aggregator fee":         "balancing_aggregator_fee",
@@ -484,6 +490,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Export from PV",
     "Export from BESS",
     "PPA revenue",
+    "Tolling revenue",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.

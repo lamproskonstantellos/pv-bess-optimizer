@@ -229,6 +229,14 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     # bit-identical; balancing carries no energy-aggregator fee but may carry
     # this one (Gridcog-style per-stream route-to-market cost).
     "balancing_aggregator_fee_pct_revenue": 0.0,
+    # BESS tolling agreement (Eqs. E29/E29a): fixed EUR/MW/yr for dispatch
+    # rights over a phase window (Eq. E25).  Default-off (rate 0) so
+    # existing results stay bit-identical.
+    "bess_toll_eur_per_mw_year": 0.0,
+    "bess_toll_year_from": 1,
+    "bess_toll_year_to": 0,
+    "bess_toll_merchant_treatment": "zeroed",
+    "bess_toll_indexation_pct": 0.0,
     "benchmark_lcoe_low_eur_per_mwh": BENCHMARK_LCOE_LOW_EUR_PER_MWH,
     "benchmark_lcoe_high_eur_per_mwh": BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     "benchmark_lcos_low_eur_per_mwh": BENCHMARK_LCOS_LOW_EUR_PER_MWH,
@@ -413,6 +421,8 @@ _INT_KEYS: frozenset[str] = frozenset({
     "bm_mc_scenarios",
     "bm_random_seed",
     "ppa_term_years",
+    "bess_toll_year_from",
+    "bess_toll_year_to",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -426,6 +436,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "ppa_settlement",
     "ppa_negative_price_rule",
     "imbalance_pricing",
+    "bess_toll_merchant_treatment",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -441,6 +452,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "ppa_settlement": frozenset({"physical", "cfd"}),
     "ppa_negative_price_rule": frozenset({"none", "suspend"}),
     "imbalance_pricing": frozenset({"single", "dual"}),
+    "bess_toll_merchant_treatment": frozenset({"zeroed", "retained"}),
 }
 
 
@@ -684,6 +696,29 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "assets, ~5-20 %); per-stream route-to-market cost, Gridcog convention. "
      "Surfaces as a signed balancing_aggregator_fee_eur cashflow column. "
      "Never applies to DAM / retail / PPA revenue."),
+    ("bess_toll_eur_per_mw_year", 0.0, "EUR/MW/yr",
+     "Tolling agreement: fixed annual payment per MW of BESS power for "
+     "dispatch rights. 0 = off (default, bit-identical). Applied x "
+     "availability factor; no capacity-fade scaling (payment is on the "
+     "power block, not delivered energy). Surfaces as a toll_revenue_eur "
+     "cashflow column. Excluded from LCOE/LCOS."),
+    ("bess_toll_year_from", 1, "year",
+     "First project year of the toll window (inclusive). Must be >= 1."),
+    ("bess_toll_year_to", 0, "year",
+     "Last project year of the toll window (inclusive). 0 = through end "
+     "of project life. Must be 0 or >= bess_toll_year_from. E.g. toll "
+     "years 1-5 then merchant: from=1, to=5."),
+    ("bess_toll_merchant_treatment", "zeroed", "zeroed | retained",
+     "'zeroed' (default): in toll years the BESS-origin merchant streams "
+     "(BESS DAM margin incl. grid-charging cost and the charging-side "
+     "grid fee, balancing capacity+activation, BSP fee, BESS "
+     "route-to-market fee share, optimizer fee) are zeroed - the toller "
+     "keeps them. 'retained': the toll stacks on top of retained "
+     "merchant streams (warns: double-monetises the same MW; use only "
+     "for capacity-overlay contracts)."),
+    ("bess_toll_indexation_pct", 0.0, "%/yr",
+     "Annual escalation of the toll rate ((1+i)^(y-1) convention, "
+     "Eq. E2). Default 0 = flat nominal."),
     ("benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
@@ -2462,6 +2497,67 @@ def validate_workbook_params(
             _agg_pct, _opt_pct,
         )
 
+    # Contract phase windows (Eq. E25): year_from >= 1 (integer);
+    # year_to == 0 means end-of-life, otherwise year_to >= year_from.
+    def _validate_phase_window(prefix: str) -> tuple[int, int]:
+        # A blank cell (None) falls back to the default; an explicit 0
+        # must NOT be swallowed by a falsy-`or`, it is rejected below.
+        raw_from = economics.get(f"{prefix}_year_from", 1)
+        y_from = int(1 if raw_from is None else raw_from)
+        raw_to = economics.get(f"{prefix}_year_to", 0)
+        y_to = int(0 if raw_to is None else raw_to)
+        if y_from < 1:
+            raise ValueError(
+                f"'{prefix}_year_from' must be >= 1; got {y_from!r}."
+            )
+        if y_to != 0 and y_to < y_from:
+            raise ValueError(
+                f"'{prefix}_year_to' must be 0 (end of life) or >= "
+                f"'{prefix}_year_from' ({y_from!r}); got {y_to!r}."
+            )
+        return y_from, y_to
+
+    # BESS tolling agreement (Eqs. E29/E29a): non-negative rate and
+    # indexation over a valid phase window; stacking configurations
+    # warn (never block) so deliberate contract overlays stay possible.
+    _require_non_negative(economics, "bess_toll_eur_per_mw_year")
+    _require_non_negative(economics, "bess_toll_indexation_pct")
+    _validate_phase_window("bess_toll")
+    _toll_treatment = str(
+        economics.get("bess_toll_merchant_treatment", "zeroed") or "zeroed"
+    ).strip().lower()
+    if _toll_treatment not in ("zeroed", "retained"):
+        raise ValueError(
+            "'bess_toll_merchant_treatment' must be 'zeroed' or "
+            f"'retained'; got {_toll_treatment!r}."
+        )
+    _toll_rate = float(
+        economics.get("bess_toll_eur_per_mw_year", 0.0) or 0.0
+    )
+    if _toll_rate > 0.0:
+        if float(bess.get("bess_power_kw", 0.0) or 0.0) <= 0.0:
+            logger.warning(
+                "bess_toll_eur_per_mw_year is set (%.4g EUR/MW/yr) but "
+                "bess_power_kw is 0: the toll stream is a no-op.",
+                _toll_rate,
+            )
+        if _toll_treatment == "retained":
+            logger.warning(
+                "bess_toll_merchant_treatment = 'retained': the toll "
+                "stacks on top of retained merchant streams, "
+                "double-monetising the same MW. Use only for "
+                "capacity-overlay contracts.",
+            )
+        if _opt_pct > 0.0:
+            logger.warning(
+                "The toll window overlaps an active optimizer revenue "
+                "share (optimizer_revenue_share_pct = %.4g %%): under "
+                "'zeroed' treatment the optimizer share is gated to zero "
+                "in toll years; the two structures double-charge the "
+                "same wholesale stream otherwise.",
+                _opt_pct,
+            )
+
     # Grid-emissions accounting (24/7-CFE): a non-negative intensity and a
     # decline in [0, 100] %/yr.  A decline above 100 % makes the
     # ``(1 - decline)^y`` projection factor negative, flipping the grid
@@ -3082,6 +3178,7 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
      "Lifetime grid-charging fee [EUR]"),
     ("total_imbalance_cost_eur_lifecycle",
      "Lifetime imbalance cost [EUR]"),
+    ("total_toll_revenue_eur_lifecycle", "Lifetime tolling revenue [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the

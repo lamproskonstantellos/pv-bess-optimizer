@@ -213,9 +213,9 @@ def plot_cumulative_cashflow(
 def _optional_revenue_streams(
     yearly_cf: pd.DataFrame,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-           np.ndarray, np.ndarray]:
+           np.ndarray, np.ndarray, np.ndarray]:
     """Return the (balancing, balancing-fee, ppa, rtm-fee, optimizer-fee,
-    grid-charging-fee, imbalance-cost) yearly columns.
+    grid-charging-fee, imbalance-cost, toll-revenue) yearly columns.
 
     Missing or all-zero columns come back as zero arrays so callers can
     stack them unconditionally; all-zero streams draw nothing.
@@ -226,12 +226,15 @@ def _optional_revenue_streams(
         "balancing_revenue_eur", "balancing_aggregator_fee_eur",
         "ppa_revenue_eur", "route_to_market_fee_eur", "optimizer_fee_eur",
         "grid_charging_fee_eur", "imbalance_cost_eur",
+        "toll_revenue_eur",
     ):
         if col in yearly_cf.columns:
             out.append(yearly_cf[col].to_numpy(dtype=float))
         else:
             out.append(np.zeros(n, dtype=float))
-    return out[0], out[1], out[2], out[3], out[4], out[5], out[6]
+    return (
+        out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
+    )
 
 
 def _stack_cashflow_bars(
@@ -249,15 +252,16 @@ def _stack_cashflow_bars(
     opt_fee: np.ndarray | None = None,
     gcf_fee: np.ndarray | None = None,
     imb_cost: np.ndarray | None = None,
+    toll: np.ndarray | None = None,
 ) -> None:
     """Draw the shared cashflow bar stack (yearly bars / NPV waterfall).
 
     Positive streams stack upward from the Revenue base (Balancing
-    revenue, then the PPA leg); negative streams stack downward
-    (OPEX, then the balancing aggregator fee, DEVEX, CAPEX).  Every
-    stream is stacked with a cumulative ``bottom`` so no segment
-    paints over another, and all-zero streams are omitted entirely so
-    non-balancing / non-PPA runs keep their four-bar legend.
+    revenue, the PPA leg, then the tolling payment); negative streams
+    stack downward (OPEX, then the balancing aggregator fee, DEVEX,
+    CAPEX).  Every stream is stacked with a cumulative ``bottom`` so no
+    segment paints over another, and all-zero streams are omitted
+    entirely so non-balancing / non-PPA runs keep their four-bar legend.
     """
     ax.bar(years, revenue, width=width, color=financial_color("Revenue"),
            edgecolor="black", linewidth=0.4, label="Revenue")
@@ -271,6 +275,12 @@ def _stack_cashflow_bars(
         ax.bar(years, ppa, width=width, bottom=pos_bottom,
                color=financial_color("PPA revenue"),
                edgecolor="black", linewidth=0.4, label="PPA revenue")
+        pos_bottom = pos_bottom + np.clip(ppa, 0.0, None)
+    if toll is not None and np.any(np.abs(toll) > 1e-9):
+        ax.bar(years, toll, width=width, bottom=pos_bottom,
+               color=financial_color("Tolling revenue"),
+               edgecolor="black", linewidth=0.4, label="Tolling revenue")
+        pos_bottom = pos_bottom + np.clip(toll, 0.0, None)
     ax.bar(years, opex, width=width, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
     # Stack EVERY negative segment: the balancing fee below OPEX, DEVEX
@@ -336,9 +346,8 @@ def plot_yearly_cashflow_bars(
     out_path = Path(out_path)
     years = _calendar_axis(yearly_cf)
     revenue = yearly_cf["revenue_eur"].to_numpy(dtype=float)
-    balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost = (
-        _optional_revenue_streams(yearly_cf)
-    )
+    (balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost,
+     toll) = _optional_revenue_streams(yearly_cf)
     opex = yearly_cf["opex_eur"].to_numpy(dtype=float)  # negative
     if "devex_eur" in yearly_cf.columns:
         devex = yearly_cf["devex_eur"].to_numpy(dtype=float)  # negative
@@ -352,7 +361,7 @@ def plot_yearly_cashflow_bars(
     width = 0.8
     _stack_cashflow_bars(
         ax, years, width, revenue, balancing, ppa, opex, devex, capex,
-        bal_fee, rtm_fee, opt_fee, gcf_fee, imb_cost,
+        bal_fee, rtm_fee, opt_fee, gcf_fee, imb_cost, toll,
     )
     ax.plot(years, net, color=financial_color("Net cash-flow"), linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
@@ -398,9 +407,8 @@ def plot_npv_waterfall(
     years = _calendar_axis(yearly_cf)
     disc_factor = yearly_cf["discount_factor"].astype(float).to_numpy()
     revenue_disc = yearly_cf["revenue_eur"].astype(float).to_numpy() * disc_factor
-    balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost = (
-        _optional_revenue_streams(yearly_cf)
-    )
+    (balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost,
+     toll) = _optional_revenue_streams(yearly_cf)
     balancing_disc = balancing * disc_factor
     bal_fee_disc = bal_fee * disc_factor
     ppa_disc = ppa * disc_factor
@@ -408,6 +416,7 @@ def plot_npv_waterfall(
     opt_fee_disc = opt_fee * disc_factor
     gcf_fee_disc = gcf_fee * disc_factor
     imb_cost_disc = imb_cost * disc_factor
+    toll_disc = toll * disc_factor
     opex_disc = yearly_cf["opex_eur"].astype(float).to_numpy() * disc_factor
     if "devex_eur" in yearly_cf.columns:
         devex_disc = (
@@ -429,6 +438,7 @@ def plot_npv_waterfall(
         ax, years, width, revenue_disc, balancing_disc, ppa_disc,
         opex_disc, devex_disc, capex_disc, bal_fee_disc,
         rtm_fee_disc, opt_fee_disc, gcf_fee_disc, imb_cost_disc,
+        toll_disc,
     )
 
     ax.plot(
@@ -592,6 +602,10 @@ def plot_monthly_cashflow_year1(
         imb_cost = sub["imbalance_cost_eur"].astype(float).to_numpy()
     else:
         imb_cost = np.zeros_like(revenue)
+    if "toll_revenue_eur" in sub.columns:
+        toll = sub["toll_revenue_eur"].astype(float).to_numpy()
+    else:
+        toll = np.zeros_like(revenue)
     if "devex_eur" in sub.columns:
         devex = sub["devex_eur"].astype(float).to_numpy()
     else:
@@ -616,6 +630,12 @@ def plot_monthly_cashflow_year1(
         ax.bar(months, ppa, bottom=pos_bottom,
                color=financial_color("PPA revenue"),
                edgecolor="black", linewidth=0.4, label="PPA revenue")
+        pos_bottom = pos_bottom + np.clip(ppa, 0.0, None)
+    if np.any(np.abs(toll) > 1e-9):
+        ax.bar(months, toll, bottom=pos_bottom,
+               color=financial_color("Tolling revenue"),
+               edgecolor="black", linewidth=0.4, label="Tolling revenue")
+        pos_bottom = pos_bottom + np.clip(toll, 0.0, None)
     ax.bar(months, opex, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
     neg_bottom = opex.copy()

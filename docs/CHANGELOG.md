@@ -126,6 +126,25 @@ Production release.
   pair a one-cell scenario change; a latched warning flags a wedge
   that can never bind because grid charging is disallowed.
 
+### Added (BESS tolling agreement)
+
+- `bess_toll_eur_per_mw_year` + window / treatment / indexation keys
+  on the economics sheet (default 0, bit-identical when off): a fixed
+  EUR/MW/yr payment for BESS dispatch rights over a phase window
+  (Eqs. E29/E29a).  Availability-conditioned, contractually indexed,
+  no capacity-fade scaling (power-block basis).  Under the default
+  `zeroed` merchant treatment every BESS-origin merchant stream (BESS
+  DAM margin, both balancing legs and their BSP fee, the BESS
+  route-to-market fee share, the optimizer share and the charging-side
+  grid fee) is gated to zero in toll years — the toller keeps them;
+  `retained` stacks the toll on top (warned).  Surfaces as a
+  `toll_revenue_eur` cashflow column with exact flat-1/12 monthly
+  allocation, a lifetime KPI + conditional SUMMARY row, a "Tolling
+  revenue" figure band (teal, drawn only when non-zero), and is
+  excluded from LCOE/LCOS and from Revenue-driver scaling (fixed
+  contractual payment).  Stacking warnings: no-op toll (no BESS),
+  `retained` double-monetisation, toll + optimizer-share overlap.
+
 ### Added (imbalance settlement exposure)
 
 - `imbalance_enabled` on the simulation sheet (default FALSE,

@@ -259,6 +259,27 @@ def plot_revenue_stack_yearly(
         imb_cost = op["imbalance_cost_eur"].astype(float).to_numpy()
     else:
         imb_cost = np.zeros_like(load_pv)
+    # Tolling revenue (Eq. E29) — read straight from the cashflow
+    # column.  Under 'zeroed' treatment (Eq. E29a) the BESS-origin
+    # merchant streams are zero in toll years: the column-derived
+    # ratios above absorb that for the DAM/retail stack sums (the
+    # per-component attribution inside a blended ratio is approximate,
+    # as it already is for the pv/bess split), but the per-product
+    # balancing segments are reconstructed analytically below, so they
+    # carry an explicit merchant gate — zero exactly in the years the
+    # toll column is non-zero.
+    if "toll_revenue_eur" in op.columns:
+        toll_arr = op["toll_revenue_eur"].astype(float).to_numpy()
+    else:
+        toll_arr = np.zeros_like(load_pv)
+    _toll_treatment = str(
+        (econ or {}).get("bess_toll_merchant_treatment", "zeroed")
+        or "zeroed"
+    ).strip().lower()
+    if _toll_treatment == "zeroed":
+        merchant_gate = np.where(np.abs(toll_arr) > 1e-9, 0.0, 1.0)
+    else:
+        merchant_gate = np.ones_like(toll_arr)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -381,7 +402,9 @@ def plot_revenue_stack_yearly(
     else:
         bess_factor_arr = np.ones_like(project_years_arr, dtype=float)
     balancing_ratio = pd.Series(
-        bess_factor_arr * np.power(1.0 + bm_infl, project_years_arr - 1),
+        bess_factor_arr
+        * np.power(1.0 + bm_infl, project_years_arr - 1)
+        * merchant_gate,
         index=op.index, dtype=float,
     )
 
@@ -407,6 +430,18 @@ def plot_revenue_stack_yearly(
         )
         bottoms = bottoms + seg
 
+    # Tolling revenue band (Eq. E29) — the contracted stream that
+    # replaces the gated merchant segments in toll years; drawn only
+    # when the column carries value so default figures are unchanged.
+    if np.any(np.abs(toll_arr) > 1e-9):
+        ax.bar(
+            years, np.clip(toll_arr, 0.0, None), bottom=bottoms,
+            color=financial_color("Tolling revenue"),
+            edgecolor="black", linewidth=0.4,
+            label="Tolling revenue",
+        )
+        bottoms = bottoms + np.clip(toll_arr, 0.0, None)
+
     net = (op["revenue_eur"].astype(float)).to_numpy()
     if "balancing_revenue_eur" in op.columns:
         net = net + op["balancing_revenue_eur"].astype(float).to_numpy()
@@ -415,6 +450,7 @@ def plot_revenue_stack_yearly(
     # structural fees enter the yearly net the same way (their columns are
     # not folded into revenue_eur), so the line steps down by them too.
     net = net + bal_agg_fee + rtm_fee + opt_fee + gcf_fee + imb_cost
+    net = net + toll_arr
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The
