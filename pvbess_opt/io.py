@@ -212,6 +212,13 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     # (the old template default) sits far above European market practice, so
     # the template no longer pre-fills it.
     "aggregator_fee_pct_revenue": 0.0,
+    # Structural market-access fees (European practice), both default-off so
+    # existing results stay bit-identical.  The route-to-market fee is the
+    # per-MWh representation charge (Greek FoSE / FoSETeK, German
+    # Direktvermarktung); the optimizer share is the BESS trading revenue
+    # share (merchant / floor+share structures).
+    "route_to_market_fee_eur_per_mwh": 0.0,
+    "optimizer_revenue_share_pct": 0.0,
     # Optional, separate route-to-market (BSP / balancing-aggregator) fee on
     # GROSS balancing revenue.  Default 0.0 so existing results are
     # bit-identical; balancing carries no energy-aggregator fee but may carry
@@ -607,7 +614,34 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "to balancing or PPA revenue. Default 0 = fee-free (opt-in): real "
      "route-to-market charges are typically EUR/MWh of sold energy or a "
      "share of market revenue only, well below a flat percentage of ALL "
-     "revenue."),
+     "revenue. Prefer the two structural fees below "
+     "(route_to_market_fee_eur_per_mwh, optimizer_revenue_share_pct) for "
+     "market-faithful modelling; a warning fires if this and the optimizer "
+     "share are both set (they would double-charge the battery's wholesale "
+     "stream)."),
+    ("route_to_market_fee_eur_per_mwh", 0.0, "EUR/MWh",
+     "Route-to-market / representation fee per MWh of grid-EXPORTED energy "
+     "(PV + BESS) — the charge a cumulative-representation aggregator "
+     "(Greek FoSE, or the last-resort FoSETeK under regulated charges; "
+     "German Direktvermarkter) levies for scheduling, forecasting, "
+     "balancing responsibility and market access. Charged on SOLD energy "
+     "only: never on self-consumption savings, balancing or PPA revenue, "
+     "and the PPA-covered PV export share is exempt while a physical "
+     "(sleeved) contract is in term (the offtaker routes that volume). "
+     "Typical 0.5-5 EUR/MWh (Greek examples ~1-3.5). Flat over the project "
+     "life (no indexation). 0 = off (default). Surfaces as a signed "
+     "route_to_market_fee_eur cashflow column. Excluded from LCOE/LCOS."),
+    ("optimizer_revenue_share_pct", 0.0, "%",
+     "Battery optimizer / trading-services revenue share, charged on the "
+     "POSITIVE annual BESS wholesale trading margin (DAM export revenue "
+     "minus grid-charging cost); nothing is charged in years where the "
+     "margin is negative (an optimizer never invoices a share of a loss). "
+     "Mirrors the merchant revenue-share / floor+share structures used by "
+     "BESS optimizers; typical 10-25 %. Applies ONLY to the battery's "
+     "wholesale stream: never to self-consumption, PPA, or balancing "
+     "revenue (the BSP fee below covers balancing). 0 = off (default). "
+     "Surfaces as a signed optimizer_fee_eur cashflow column. Excluded "
+     "from LCOE/LCOS."),
     ("balancing_aggregator_fee_pct_revenue", 0.0, "%",
      "Optional, separate route-to-market (BSP / balancing-aggregator) fee on "
      "GROSS balancing revenue (capacity + activation). Default 0 = fee-free, "
@@ -1992,10 +2026,12 @@ def validate_workbook_params(
     # Revenue-fee percentages are a fraction of gross revenue, so they live
     # in [0, 100].  An out-of-range value (e.g. 150 meaning a mistyped
     # "1.50 %") is rejected rather than silently clamped — the same loud
-    # contract as gearing_pct.  Both the energy-aggregator fee and the
-    # optional balancing-aggregator (BSP) fee share this range.
+    # contract as gearing_pct.  The energy-aggregator fee, the optional
+    # balancing-aggregator (BSP) fee, and the optimizer revenue share all
+    # share this range.
     for fee_key in ("aggregator_fee_pct_revenue",
-                    "balancing_aggregator_fee_pct_revenue"):
+                    "balancing_aggregator_fee_pct_revenue",
+                    "optimizer_revenue_share_pct"):
         if fee_key not in economics:
             continue
         fee_val = float(economics.get(fee_key, 0.0) or 0.0)
@@ -2003,6 +2039,28 @@ def validate_workbook_params(
             raise ValueError(
                 f"{fee_key!r} must be in [0, 100]; got {fee_val!r}."
             )
+
+    # The per-MWh route-to-market fee is a non-negative charge on exported
+    # energy (a negative value would be a rebate, never a fee).
+    _require_non_negative(economics, "route_to_market_fee_eur_per_mwh")
+
+    # The legacy percentage-of-gross fee and the optimizer share both charge
+    # the battery's wholesale stream: stacking them double-charges it.  Warn
+    # (not raise) — a user may deliberately combine a small residual
+    # representation percentage with a trading share, but should do so
+    # knowingly.
+    _agg_pct = float(economics.get("aggregator_fee_pct_revenue", 0.0) or 0.0)
+    _opt_pct = float(
+        economics.get("optimizer_revenue_share_pct", 0.0) or 0.0
+    )
+    if _agg_pct > 0.0 and _opt_pct > 0.0:
+        logger.warning(
+            "Both aggregator_fee_pct_revenue (%.4g %%) and "
+            "optimizer_revenue_share_pct (%.4g %%) are set: the battery's "
+            "wholesale (DAM) stream is charged by BOTH fees. Prefer one "
+            "structure, or set the percentages knowingly.",
+            _agg_pct, _opt_pct,
+        )
 
     # Grid-emissions accounting (24/7-CFE): a non-negative intensity and a
     # decline in [0, 100] %/yr.  A decline above 100 % makes the
@@ -2488,6 +2546,9 @@ _SUMMARY_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
 _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("lifetime_ppa_revenue_total_eur", "Lifetime PPA revenue [EUR]"),
     ("lifetime_bm_revenue_total_eur", "Lifetime balancing revenue [EUR]"),
+    ("total_route_to_market_fee_eur_lifecycle",
+     "Lifetime route-to-market fee [EUR]"),
+    ("total_optimizer_fee_eur_lifecycle", "Lifetime optimizer fee [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the

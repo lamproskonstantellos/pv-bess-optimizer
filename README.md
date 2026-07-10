@@ -184,7 +184,11 @@ Discount rate, OPEX inflation, per-stream revenue indexation
 (`aggregator_fee_pct_revenue`, on DAM + retail) and the optional,
 separate balancing-aggregator / BSP fee
 (`balancing_aggregator_fee_pct_revenue`, on gross balancing revenue;
-default 0), LCOE / LCOS benchmark-band overrides, the five
+default 0), the structural market-access fees
+(`route_to_market_fee_eur_per_mwh`, a per-MWh representation charge on
+exported energy, and `optimizer_revenue_share_pct`, a share of the
+positive BESS trading margin; both default 0),
+LCOE / LCOS benchmark-band overrides, the five
 sensitivity-tornado deltas (CAPEX / OPEX / revenue / discount-rate /
 PPA-price), the debt layer (`gearing_pct`, `debt_interest_rate_pct`,
 `debt_tenor_years`, `debt_repayment`), and grid-emissions intensity

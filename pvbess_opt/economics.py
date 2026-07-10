@@ -410,6 +410,25 @@ def build_yearly_cashflow(
     balancing_aggregator_fee_frac = max(
         0.0, min(1.0, balancing_aggregator_fee_pct / 100.0)
     )
+    # Structural market-access fees (Eq. E13c / E13d in
+    # docs/economics_design.md), both default-off:
+    # * route-to-market fee — EUR/MWh of grid-EXPORTED energy (the FoSE /
+    #   Direktvermarktung representation charge).  Flat over the project
+    #   life; the exported MWh themselves fade on the per-origin
+    #   degradation curves.  Clamped non-negative (a fee, never a rebate).
+    # * optimizer revenue share — a percentage of the POSITIVE annual BESS
+    #   wholesale trading margin (export minus grid charging), the
+    #   merchant / floor+share structure of BESS optimizers.
+    route_to_market_fee_rate = max(0.0, float(
+        econ.get("route_to_market_fee_eur_per_mwh", 0.0) or 0.0
+    ))
+    optimizer_share_frac = max(0.0, min(1.0, float(
+        econ.get("optimizer_revenue_share_pct", 0.0) or 0.0
+    ) / 100.0))
+    # Year-1 exported MWh by origin (availability-derated upstream, like the
+    # EUR bases).  Older KPI dicts without the split charge no RTM fee.
+    pv_export_mwh_1 = float(year1_kpis.get("pv_export_mwh", 0.0) or 0.0)
+    bess_export_mwh_1 = float(year1_kpis.get("bess_export_mwh", 0.0) or 0.0)
 
     # Split the Year-1 revenue base into retail (load-coverage)
     # and DAM (wholesale export) streams.  Retail revenue is indexed by
@@ -527,6 +546,11 @@ def build_yearly_cashflow(
     )
     ppa_term = int(econ.get("ppa_term_years", 0) or 0)
     ppa_infl = float(econ.get("ppa_inflation_pct", 0.0) or 0.0) / 100.0
+    # Covered share of the PV export — the route-to-market fee exempts it
+    # while a physical (sleeved) contract is in term (Eq. E13c).
+    ppa_share_frac = max(0.0, min(1.0, float(
+        econ.get("ppa_volume_share_pct", 0.0) or 0.0
+    ) / 100.0))
     rev1_ppa = float(year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0)
     ppa_covered_dam_1 = float(
         year1_kpis.get("ppa_covered_dam_value_eur", 0.0) or 0.0
@@ -573,6 +597,8 @@ def build_yearly_cashflow(
             balancing_capacity_y = 0.0
             balancing_activation_y = 0.0
             balancing_aggregator_fee_y = 0.0
+            route_to_market_fee_y = 0.0
+            optimizer_fee_y = 0.0
             ppa_y = 0.0
         else:
             if y == 1:
@@ -641,6 +667,36 @@ def build_yearly_cashflow(
                 balancing_capacity_y + balancing_activation_y, 0.0,
             ) * balancing_aggregator_fee_frac
 
+            # Route-to-market fee (Eq. E13c): EUR/MWh on the year's exported
+            # energy, each origin fading on its own curve.  The fee level is
+            # flat (representation charges are quoted per MWh, not indexed);
+            # the charged MWh shrink with degradation.  While a PHYSICAL
+            # (sleeved) PPA is in term its covered PV-export share is routed
+            # by the offtaker, not the aggregator, so that share is exempt;
+            # a CfD sells the full volume at DAM through the aggregator and
+            # is not exempt.  Post-term the full export pays the fee.
+            _ppa_exempt_share = (
+                ppa_share_frac
+                if (ppa_enabled and ppa_settlement != "cfd" and y <= ppa_term)
+                else 0.0
+            )
+            route_to_market_fee_y = -route_to_market_fee_rate * (
+                pv_export_mwh_1 * pv_factor * (1.0 - _ppa_exempt_share)
+                + bess_export_mwh_1 * bess_factor
+            )
+            # Optimizer revenue share (Eq. E13d): a percentage of the POSITIVE
+            # BESS wholesale trading margin (export minus grid charging,
+            # already netted in rev1_dam_bess).  Clamped at zero — an
+            # optimizer never invoices a share of a trading loss (the exact
+            # regime of a self-consumption battery that grid-charges more
+            # than it exports).
+            # The trailing +0.0 normalises the -0.0 produced when the
+            # clamp binds (share x 0), keeping the column a clean zero.
+            optimizer_fee_y = -optimizer_share_frac * max(
+                rev1_dam_bess * bess_factor * (1.0 + dam_infl) ** (y - 1),
+                0.0,
+            ) + 0.0
+
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
         # to their gross contribution so the per-stream net columns add
@@ -665,6 +721,7 @@ def build_yearly_cashflow(
         # own negative column, mirroring ``aggregator_fee_eur``.
         net_cf = (
             revenue_net_y + balancing_revenue_y + balancing_aggregator_fee_y
+            + route_to_market_fee_y + optimizer_fee_y
             + ppa_y + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -678,6 +735,8 @@ def build_yearly_cashflow(
                 "revenue_retail_eur": float(revenue_retail_net_y),
                 "revenue_dam_eur": float(revenue_dam_net_y),
                 "aggregator_fee_eur": float(aggregator_fee_y),
+                "route_to_market_fee_eur": float(route_to_market_fee_y),
+                "optimizer_fee_eur": float(optimizer_fee_y),
                 "balancing_capacity_revenue_eur": float(balancing_capacity_y),
                 "balancing_activation_revenue_eur": float(balancing_activation_y),
                 "balancing_revenue_eur": float(balancing_revenue_y),
@@ -910,6 +969,8 @@ def derive_monthly_cashflow(
     has_balancing_col = "balancing_revenue_eur" in yearly_cf.columns
     has_bal_fee_col = "balancing_aggregator_fee_eur" in yearly_cf.columns
     has_fee_col = "aggregator_fee_eur" in yearly_cf.columns
+    has_rtm_col = "route_to_market_fee_eur" in yearly_cf.columns
+    has_opt_col = "optimizer_fee_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
@@ -934,6 +995,14 @@ def derive_monthly_cashflow(
         fee_y = (
             float(yearly_indexed.loc[y, "aggregator_fee_eur"])
             if has_fee_col else 0.0
+        )
+        rtm_fee_y = (
+            float(yearly_indexed.loc[y, "route_to_market_fee_eur"])
+            if has_rtm_col else 0.0
+        )
+        opt_fee_y = (
+            float(yearly_indexed.loc[y, "optimizer_fee_eur"])
+            if has_opt_col else 0.0
         )
         ppa_y = (
             float(yearly_indexed.loc[y, "ppa_revenue_eur"])
@@ -976,6 +1045,14 @@ def derive_monthly_cashflow(
             bal_fee_m = float(balancing_share.loc[m]) * bal_fee_y
             ppa_m = float(ppa_share.loc[m]) * ppa_y
             fee_m = float(fee_share.loc[m]) * fee_y
+            # The structural fees ride the same monthly revenue-share
+            # weights as the energy-aggregator fee (an approximation of the
+            # export/trading shape; the shares sum to one, so each month's
+            # slice reconciles the yearly column exactly).  Unlike fee_m
+            # they are part of the net here — the yearly net_cashflow_eur
+            # carries them as their own columns.
+            rtm_fee_m = float(fee_share.loc[m]) * rtm_fee_y
+            opt_fee_m = float(fee_share.loc[m]) * opt_fee_y
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
@@ -985,8 +1062,8 @@ def derive_monthly_cashflow(
             # the net here — unlike rev_m, which is already net of the energy
             # aggregator fee (fee_m is informational on the monthly frame).
             net_m = (
-                rev_m + balancing_m + bal_fee_m + ppa_m
-                + opex_m + capex_m + devex_m
+                rev_m + balancing_m + bal_fee_m + rtm_fee_m + opt_fee_m
+                + ppa_m + opex_m + capex_m + devex_m
             )
             # End-of-month discounting: month m of year y lands at
             # (y - 1) + m/12, so December of year y discounts exactly like
@@ -1004,6 +1081,8 @@ def derive_monthly_cashflow(
                     "revenue_eur": float(rev_m),
                     "balancing_revenue_eur": float(balancing_m),
                     "balancing_aggregator_fee_eur": float(bal_fee_m),
+                    "route_to_market_fee_eur": float(rtm_fee_m),
+                    "optimizer_fee_eur": float(opt_fee_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -1020,6 +1099,7 @@ def derive_monthly_cashflow(
         "project_year", "calendar_year", "period",
         "period_type", "pv_production_mwh", "revenue_eur",
         "balancing_revenue_eur", "balancing_aggregator_fee_eur",
+        "route_to_market_fee_eur", "optimizer_fee_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
@@ -1037,6 +1117,7 @@ def derive_monthly_cashflow(
                 [
                     "pv_production_mwh", "revenue_eur",
                     "balancing_revenue_eur", "balancing_aggregator_fee_eur",
+                    "route_to_market_fee_eur", "optimizer_fee_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
@@ -1187,6 +1268,14 @@ def compute_financial_kpis(
     total_aggregator_fee_eur_lifecycle = (
         float(df.loc[after_y0_mask, "aggregator_fee_eur"].sum())
         if "aggregator_fee_eur" in df.columns else 0.0
+    )
+    total_route_to_market_fee_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "route_to_market_fee_eur"].sum())
+        if "route_to_market_fee_eur" in df.columns else 0.0
+    )
+    total_optimizer_fee_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "optimizer_fee_eur"].sum())
+        if "optimizer_fee_eur" in df.columns else 0.0
     )
     total_balancing_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
@@ -1484,6 +1573,14 @@ def compute_financial_kpis(
         "total_revenue_eur_lifecycle": float(round(total_revenue_eur_lifecycle, 2)),
         "total_aggregator_fee_eur_lifecycle": float(round(
             total_aggregator_fee_eur_lifecycle, 2,
+        )),
+        # Structural market-access fee totals (Eq. E13c / E13d); both 0 when
+        # the knobs are off, and the SUMMARY renders them only when set.
+        "total_route_to_market_fee_eur_lifecycle": float(round(
+            total_route_to_market_fee_eur_lifecycle, 2,
+        )),
+        "total_optimizer_fee_eur_lifecycle": float(round(
+            total_optimizer_fee_eur_lifecycle, 2,
         )),
         "lifetime_bm_revenue_total_eur": float(round(
             total_balancing_revenue_eur_lifecycle, 2,

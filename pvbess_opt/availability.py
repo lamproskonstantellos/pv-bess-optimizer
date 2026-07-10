@@ -60,6 +60,10 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     "pv_generation_mwh",
     "bess_total_discharge_mwh",
     "system_total_export_mwh",
+    # Export split by origin (route-to-market fee bases) — derate with the
+    # total they compose.
+    "pv_export_mwh",
+    "bess_export_mwh",
     # ``system_total_import_mwh`` is scaled by ``factor`` here like the rest,
     # then corrected in ``apply_unavailability_derate`` to add the downtime
     # load the grid must cover (it RISES with unavailability, unlike the
@@ -196,7 +200,7 @@ def apply_unavailability_derate(
     # savings (which ARE derated) already carry the downtime cost.  Absent a
     # ``load_energy_mwh`` key (a merchant run has no co-located load, and
     # partial KPI dicts may omit it) the import stays uniformly derated,
-    # matching the previous behaviour.  See ``docs/economics_design.md`` (E9).
+    # matching the previous behaviour.  See ``docs/economics_design.md`` (E8a).
     _load = out.get("load_energy_mwh")
     if _load is not None and "system_total_import_mwh" in out:
         out["system_total_import_mwh"] = (
