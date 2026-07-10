@@ -125,7 +125,9 @@ Sheet ``pv``
   (PVGIS picks the optimal inclination).
 * ``azimuth``: array azimuth in degrees: ``0`` = south, ``90`` = west,
   ``-90`` = east.
-* ``losses_pct``: PVGIS system losses (percent).
+* ``losses_pct``: PVGIS system losses (percent).  A blank cell means
+  the PVGIS default (14); an explicit ``0`` is honoured (loss-free
+  array).
 * ``weather_year``: PVGIS weather year; use a non-leap year for a clean
   8760-hour profile, or ``tmy``.
 * ``raddatabase``: optional PVGIS radiation-database override
@@ -677,8 +679,9 @@ decides the source from ``pv_source``, whether the ``pv_kwh`` column (or a
    * - ``pvgis``
      - (any)
      - present
-     - **pvgis**: the column is ignored (a warning is logged if it has
-       data)
+     - **pvgis**: any workbook PV data — a filled ``pv_kwh`` column
+       and/or a ``timeseries_path`` file — is ignored (a warning is
+       logged); price columns are consumed as usual
    * - ``pvgis``
      - (any)
      - missing

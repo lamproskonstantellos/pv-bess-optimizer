@@ -359,6 +359,29 @@ Production release.
   itself is unchanged — it scales every year of the stream by the same
   factor — only the EUR endpoint annotations move.
 
+### Fixed (PVGIS input-path audit)
+
+- Explicit zeros in the PVGIS geometry fields now survive to the
+  fetch: `losses_pct = 0` (a loss-free array) was silently replaced
+  by the 14 % default through a falsy-`or` fallback, and `azimuth = 0`
+  (due south) only worked because it coincided with the default.
+  Geometry parsing is now None-explicit — a blank cell / YAML null in
+  `tilt`, `azimuth`, `losses_pct` or `weather_year` falls back to the
+  documented default, while every explicit value (0 included) passes
+  through verbatim; a null no longer risks a `float(None)` crash on
+  hand-built configs.
+- The "PV data ignored" warning now also fires when a pv-sheet
+  `timeseries_path` file carries the PV column while `pv_source`
+  resolves to PVGIS (previously only a filled inline `pv_kwh` column
+  warned), with one unified message: the location wins and the
+  workbook/file PV data is ignored; the price columns of the
+  timeseries are consumed as usual.  A field-wiring audit locks the
+  full path: every pv-sheet geometry field reaches the PVGIS request
+  verbatim from both the Excel and the YAML surface, the fetched
+  per-kWp profile is scaled by the nameplate and OVERWRITES any
+  workbook PV, and `pv_source = file` never contacts PVGIS even when
+  a location is present.
+
 ### Changed (breaking)
 
 - BESS CAPEX is priced per kWh of nameplate energy capacity:
