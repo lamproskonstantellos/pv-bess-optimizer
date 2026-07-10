@@ -329,6 +329,9 @@ PPA_SHEET_DEFAULTS: dict[str, Any] = {
     "ppa_term_years": 10,
     # Yearly indexation of the contract strike ((1+i)^(y-1)).
     "ppa_inflation_pct": 0.0,
+    # Negative-DAM-hour clause: 'none' (pay through negative hours) or
+    # 'suspend' (contract pauses in DAM < 0 steps — Eqs. P6-P8).
+    "ppa_negative_price_rule": "none",
 }
 
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
@@ -408,6 +411,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "debt_repayment",
     "ppa_structure",
     "ppa_settlement",
+    "ppa_negative_price_rule",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -421,6 +425,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     # it with guidance while only pay_as_produced is implemented.
     "ppa_structure": frozenset({"pay_as_produced", "baseload"}),
     "ppa_settlement": frozenset({"physical", "cfd"}),
+    "ppa_negative_price_rule": frozenset({"none", "suspend"}),
 }
 
 
@@ -852,6 +857,16 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Yearly indexation of the contract strike ((1+i)^(y-1)). "
      "Independent of retail_inflation_pct (CPI-linked tariffs) and "
      "dam_inflation_pct (wholesale view)."),
+    ("ppa_negative_price_rule", "none", "enum",
+     "none | suspend. Negative-DAM-hour clause on the contract. "
+     "'none' (default): the covered volume settles through negative "
+     "hours unchanged (as-produced behaviour). 'suspend': in every "
+     "step with DAM < 0 the contract pauses - physical: the covered "
+     "volume is not paid the strike and faces spot; cfd: the "
+     "difference leg is suspended while the market leg keeps selling. "
+     "The dispatch then curtails or charges the BESS instead of "
+     "exporting covered PV at a loss. Common in European "
+     "pay-as-produced offtake terms and premium schemes."),
 )
 
 
@@ -2148,6 +2163,19 @@ def _validate_ppa_config(ppa: dict[str, Any]) -> None:
     if settlement not in ("physical", "cfd"):
         raise ValueError(
             f"ppa_settlement must be 'physical' or 'cfd'; got {settlement!r}."
+        )
+
+    # The negative-price clause gates dispatch (optimization.py Eq. P8)
+    # AND settlement (kpis.py Eq. P7); an unknown value would silently
+    # behave as 'none' in a hand-built dict, so reject it loudly here
+    # exactly like the settlement enum above.
+    negative_rule = str(
+        ppa.get("ppa_negative_price_rule", "none") or "none"
+    ).lower()
+    if negative_rule not in ("none", "suspend"):
+        raise ValueError(
+            f"ppa_negative_price_rule must be 'none' or 'suspend'; got "
+            f"{negative_rule!r}."
         )
 
     share = float(ppa.get("ppa_volume_share_pct", 0.0) or 0.0)

@@ -126,6 +126,7 @@ def test_ppa_sheet_keys():
         "ppa_enabled", "ppa_structure", "ppa_settlement",
         "ppa_price_eur_per_mwh", "ppa_volume_share_pct",
         "ppa_term_years", "ppa_inflation_pct",
+        "ppa_negative_price_rule",
     }
     assert set(PPA_SHEET_DEFAULTS) == expected
 

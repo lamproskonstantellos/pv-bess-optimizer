@@ -665,6 +665,15 @@ def build_yearly_cashflow(
     ppa_share_frac = max(0.0, min(1.0, float(
         econ.get("ppa_volume_share_pct", 0.0) or 0.0
     ) / 100.0))
+    # Negative-price suspension clause (Eqs. P6/P7): with the clause on,
+    # the fee-exempt covered export is the EXACT per-step KPI (suspended
+    # steps settle at spot and are NOT exempt), not the share-based
+    # approximation.  Without the clause the share-based algebra below
+    # is exact and stays bit-identical.
+    ppa_negative_rule = str(
+        econ.get("ppa_negative_price_rule", "none") or "none"
+    ).strip().lower()
+    ppa_exempt_export_mwh_1 = year1_kpis.get("ppa_fee_exempt_export_mwh")
     rev1_ppa = float(year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0)
     ppa_covered_dam_1 = float(
         year1_kpis.get("ppa_covered_dam_value_eur", 0.0) or 0.0
@@ -794,15 +803,33 @@ def build_yearly_cashflow(
             # by the offtaker, not the aggregator, so that share is exempt;
             # a CfD sells the full volume at DAM through the aggregator and
             # is not exempt.  Post-term the full export pays the fee.
-            _ppa_exempt_share = (
-                ppa_share_frac
-                if (ppa_enabled and ppa_settlement != "cfd" and y <= ppa_term)
-                else 0.0
+            _exemption_applies = (
+                ppa_enabled and ppa_settlement != "cfd" and y <= ppa_term
             )
-            route_to_market_fee_y = -route_to_market_fee_rate * (
-                pv_export_mwh_1 * pv_factor * (1.0 - _ppa_exempt_share)
-                + bess_export_mwh_1 * bess_factor
-            )
+            if (
+                _exemption_applies
+                and ppa_negative_rule == "suspend"
+                and ppa_exempt_export_mwh_1 is not None
+            ):
+                # Exact per-step exemption base under the suspension
+                # clause (Eqs. P6/P7): suspended-step export pays the
+                # fee, so the exempt volume is below share x export.
+                route_to_market_fee_y = -route_to_market_fee_rate * (
+                    max(
+                        (pv_export_mwh_1 - float(ppa_exempt_export_mwh_1))
+                        * pv_factor,
+                        0.0,
+                    )
+                    + bess_export_mwh_1 * bess_factor
+                )
+            else:
+                _ppa_exempt_share = (
+                    ppa_share_frac if _exemption_applies else 0.0
+                )
+                route_to_market_fee_y = -route_to_market_fee_rate * (
+                    pv_export_mwh_1 * pv_factor * (1.0 - _ppa_exempt_share)
+                    + bess_export_mwh_1 * bess_factor
+                )
             # Optimizer revenue share (Eq. E13d): a percentage of the POSITIVE
             # BESS wholesale trading margin (export minus grid charging,
             # already netted in rev1_dam_bess).  Clamped at zero — an

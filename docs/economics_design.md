@@ -18,7 +18,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 |---|---|---|---|
 | E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E25a (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U5 |
-| P | `ppa_design.md` | PPA settlement and dispatch coupling | P5 |
+| P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
 | B | (reserved) | balancing product structure | — |
 | I | (reserved) | intraday venue | — |

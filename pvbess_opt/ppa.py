@@ -29,12 +29,17 @@ reversion), and the availability derate list.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 __all__ = [
+    "PPA_NEGATIVE_PRICE_RULES",
     "PPA_SETTLEMENTS",
     "PPA_STRUCTURES",
     "PpaConfig",
+    "negative_price_mask",
     "resolve_ppa_config",
 ]
 
@@ -42,6 +47,19 @@ __all__ = [
 # profile (docs/ppa_design.md); the loader rejects it with guidance.
 PPA_STRUCTURES: tuple[str, ...] = ("pay_as_produced",)
 PPA_SETTLEMENTS: tuple[str, ...] = ("physical", "cfd")
+PPA_NEGATIVE_PRICE_RULES: tuple[str, ...] = ("none", "suspend")
+
+
+def negative_price_mask(dam_series: pd.Series) -> pd.Series:
+    """Per-step negative-DAM indicator ``m_t = 1{pi_DAM,t < 0}`` (Eq. P6).
+
+    STRICT inequality — a zero price is not a negative hour.  Shared
+    classifier: the PPA suspension clause (Eqs. P7/P8) consumes it
+    today and reference-period support settlements (negative-hour
+    eligibility) are expected to reuse it, so the definition lives in
+    exactly one place.
+    """
+    return dam_series.astype(float) < 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +79,7 @@ class PpaConfig:
     ppa_volume_share_pct: float = 100.0
     ppa_term_years: int = 10
     ppa_inflation_pct: float = 0.0
+    ppa_negative_price_rule: str = "none"
 
     @property
     def active(self) -> bool:
@@ -78,6 +97,16 @@ class PpaConfig:
         if not self.active:
             return 0.0
         return max(0.0, min(1.0, float(self.ppa_volume_share_pct) / 100.0))
+
+    @property
+    def suspension_active(self) -> bool:
+        """True when the negative-hour clause pauses the contract.
+
+        With the clause on, every step with DAM < 0 settles at spot for
+        the covered volume (physical: no-pay; cfd: the difference leg
+        is suspended while the market leg keeps selling) — Eqs. P6-P8.
+        """
+        return self.active and self.ppa_negative_price_rule == "suspend"
 
 
 def resolve_ppa_config(raw: dict[str, Any] | None) -> PpaConfig:
@@ -97,7 +126,9 @@ def resolve_ppa_config(raw: dict[str, Any] | None) -> PpaConfig:
             kwargs[fld.name] = bool(value)
         elif fld.name == "ppa_term_years":
             kwargs[fld.name] = int(value)
-        elif fld.name in ("ppa_structure", "ppa_settlement"):
+        elif fld.name in (
+            "ppa_structure", "ppa_settlement", "ppa_negative_price_rule",
+        ):
             kwargs[fld.name] = str(value).strip().lower()
         else:
             kwargs[fld.name] = float(value)

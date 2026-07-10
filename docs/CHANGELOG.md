@@ -88,6 +88,23 @@ Production release.
   summed into `net_cashflow_eur`, has no monthly counterpart, and the
   Revenue tornado driver scales it price-proportionally.
 
+### Added (PPA negative-price suspension clause)
+
+- `ppa_negative_price_rule` — `none` (default, unchanged as-produced
+  behaviour) or `suspend`: the contract pauses in every step with
+  DAM < 0 (strict; Eqs. P6-P8).  Physical settlement stops paying the
+  strike on the covered volume, which then faces spot; CfD suspends
+  the difference leg while the market leg keeps selling; both still
+  total identically per step.  The dispatch reacts — the effective PV
+  export price collapses to the DAM in suspended steps, so the MILP
+  curtails or charges the BESS instead of exporting covered PV at a
+  loss (the standard clause of post-2024 European pay-as-produced
+  terms and premium schemes).  With the clause on, the exact per-step
+  covered export surfaces as the availability-derated KPI
+  `ppa_fee_exempt_export_mwh` and the route-to-market exemption (E13c)
+  uses it instead of the share-based approximation; without it every
+  path is bit-identical to before.
+
 ### Changed (aggregator fee template default)
 
 - The `aggregator_fee_pct_revenue` template default drops from 10 % to

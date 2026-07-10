@@ -435,6 +435,18 @@ output bit-identical to a build without the feature.
   aggregator fee applies to it as market revenue).
 * ``ppa_inflation_pct``: yearly indexation of the strike,
   independent of ``retail_inflation_pct`` and ``dam_inflation_pct``.
+* ``ppa_negative_price_rule``: ``none`` (default: the covered volume
+  settles through negative hours unchanged) or ``suspend`` — the
+  contract pauses in every step with DAM < 0 (strict: a zero price is
+  not suspended).  Under ``physical`` the covered volume is not paid
+  the strike and faces spot; under ``cfd`` the difference leg is
+  suspended while the market leg keeps selling.  The dispatch reacts:
+  covered PV curtails or charges the BESS instead of exporting at a
+  loss (near-zero negative prices below the solver's tiebreak
+  curtailment weight may still export).  With the clause on, the
+  route-to-market exemption uses the exact per-step covered export
+  (KPI ``ppa_fee_exempt_export_mwh``) instead of the share-based
+  approximation.
 
 While under contract the PPA stream carries **no aggregator fee**
 (bilateral offtake, the same convention as balancing/TSO settlement) and
