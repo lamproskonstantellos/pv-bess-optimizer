@@ -1228,22 +1228,6 @@ def _parse_pv_path(raw: Any, default: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _flat_dict_from_sheet(df: pd.DataFrame) -> dict[str, Any]:
-    """Reduce a (key, value, ...) sheet to ``{key: value}``, skipping separators."""
-    if "key" not in df.columns or "value" not in df.columns:
-        return {}
-    out: dict[str, Any] = {}
-    for _, row in df.iterrows():
-        raw_key = row.get("key")
-        if not isinstance(raw_key, str):
-            continue
-        key = raw_key.strip()
-        if not key or key.startswith("#"):
-            continue
-        out[key] = row.get("value")
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Per-sheet typed parser
 # ---------------------------------------------------------------------------
@@ -2181,9 +2165,8 @@ def _read_kv_flat(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
     whereas ``pd.read_excel`` can mis-surface a genuinely NUMERIC 0/1 cell
     as a Python bool when it infers the mixed-type value column — which
     would make the boolean-in-numeric-field guard in ``_parse_kv_sheet``
-    fire on legitimate zeros.  Semantics mirror ``_flat_dict_from_sheet``:
-    requires the ``key`` / ``value`` header pair, skips blank and ``#``
-    separator keys.
+    fire on legitimate zeros.  Requires the ``key`` / ``value`` header
+    pair, skips blank and ``#`` separator keys.
     """
     from openpyxl import load_workbook
 

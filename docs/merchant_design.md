@@ -128,7 +128,12 @@ DAM) gross market revenue; PPA carries no fee, and balancing carries no
 energy-aggregator fee but MAY carry the optional, separate
 balancing-aggregator (BSP / route-to-market) fee
 (`balancing_aggregator_fee_pct_revenue`, default 0; see
-`docs/economics_design.md`).  The cashflow projection, degradation
+`docs/economics_design.md`).  The two structural market-access fees
+also apply in merchant mode when set: the per-MWh route-to-market fee
+(E13c) charges the full PV + BESS export volume, and the optimizer
+revenue share (E13d) charges the battery's positive trading margin —
+which is exactly the merchant battery's earnings profile, so this is
+the mode where the share typically binds.  The cashflow projection, degradation
 scaling, LCOE/LCOS and debt algebra are mode-agnostic.
 
 ## KPI definitions

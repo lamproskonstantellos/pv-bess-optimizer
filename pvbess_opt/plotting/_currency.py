@@ -90,37 +90,6 @@ def format_eur(
     return f"{sign}{EUR}{abs_v:.{small_decimals}f}"
 
 
-def format_eur_adaptive(
-    value: float,
-    *,
-    resolution: float,
-    format_mode: str = "auto",
-) -> str:
-    """Render ``value`` like :func:`format_eur`, escalating precision so
-    values ``resolution`` apart produce distinct strings.
-
-    The legend analogue of :class:`_EuroTickFormatter`: a Monte-Carlo
-    legend quoting P10 / P50 / P90 a few hundred EUR apart around
-    ``€1.18M`` must not collapse all three to ``€1.2M``.  Pass the
-    smallest pairwise difference between the quoted values as
-    ``resolution``; a non-positive resolution falls back to the fixed
-    default precision.
-    """
-    if value is None or (isinstance(value, float) and value != value):  # NaN
-        return ""
-    scale = _branch_scale(abs(float(value)), format_mode)
-    default_dec = 1 if (scale >= 1e6 and format_mode != "raw") else 0
-    dec = default_dec
-    if resolution is not None and resolution > 0.0:
-        needed = math.ceil(-math.log10(resolution / scale) - 1e-9)
-        dec = min(max(default_dec, needed), default_dec + _MAX_EXTRA_DECIMALS)
-    if scale >= 1e6 and format_mode != "raw":
-        return format_eur(float(value), format_mode, decimals=dec)
-    return format_eur(
-        float(value), format_mode, decimals=dec, small_decimals=dec,
-    )
-
-
 def _branch_scale(abs_v: float, format_mode: str) -> float:
     """Suffix scale :func:`format_eur` will use for ``abs_v`` in ``format_mode``."""
     if format_mode == "millions":

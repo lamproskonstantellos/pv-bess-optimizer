@@ -321,3 +321,147 @@ def test_stacking_aggregator_and_optimizer_warns(caplog):
         and "BOTH" in rec.getMessage()
         for rec in caplog.records
     )
+
+
+# ---------------------------------------------------------------------------
+# Rendering / surface coverage — the fee bands and rows actually appear
+# ---------------------------------------------------------------------------
+
+
+def _fee_econ_for_plots() -> dict:
+    return {"currency_format": "auto",
+            "route_to_market_fee_eur_per_mwh": RTM_RATE,
+            "optimizer_revenue_share_pct": OPT_SHARE_PCT}
+
+
+def test_waterfall_renders_both_fee_steps(tmp_path, monkeypatch):
+    """The BESS waterfall draws the two structural fee steps when set."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from pvbess_opt.plotting import bess_revenue as br
+
+    captured: dict = {}
+
+    def _spy(out_path):
+        ax = plt.gca()
+        captured["ticklabels"] = [t.get_text() for t in ax.get_xticklabels()]
+        out_path.write_bytes(b"%PDF-stub")
+        plt.close("all")
+        return out_path
+
+    monkeypatch.setattr(br, "save_figure", _spy)
+    kpis = dict(_kpis_positive_margin(),
+                revenue_bess_dam_eur=50_000.0)
+    br.plot_bess_revenue_waterfall(
+        kpis, tmp_path / "wf.pdf", econ=_fee_econ_for_plots(),
+    )
+    labels = set(captured["ticklabels"])
+    assert "Route-to-market fee" in labels
+    assert "Optimizer fee" in labels
+    assert "Total BESS revenue" in labels
+
+
+def test_revenue_stack_renders_both_fee_bands(tmp_path, monkeypatch):
+    """The yearly revenue stack legend carries the fee band labels."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from pvbess_opt.plotting import lifecycle as lc
+
+    captured: dict = {}
+
+    def _spy(out_path):
+        ax = plt.gcf().axes[0]
+        _handles, labels = ax.get_legend_handles_labels()
+        captured["labels"] = labels
+        out_path.write_bytes(b"%PDF-stub")
+        plt.close("all")
+        return out_path
+
+    monkeypatch.setattr(lc, "save_figure", _spy)
+    k = _kpis_positive_margin()
+    cf = build_yearly_cashflow(k, _econ(), _caps())
+    lc.plot_revenue_stack_yearly(
+        cf, k, tmp_path / "stack.pdf", econ=_econ(),
+    )
+    assert "Route-to-market fee" in captured["labels"]
+    assert "Optimizer fee" in captured["labels"]
+
+
+def test_summary_md_renders_fee_rows_only_when_set(tmp_path):
+    from pvbess_opt.io import write_summary_md
+
+    params = {"mode": "self_consumption", "pv_nameplate_kwp": 1000.0,
+              "bess_power_kw": 500.0, "bess_capacity_kwh": 1000.0,
+              "allow_bess_grid_charging": False}
+    fin_on = {"npv_eur": 1.0,
+              "total_route_to_market_fee_eur_lifecycle": -3841.0,
+              "total_optimizer_fee_eur_lifecycle": -1234.5}
+    out = write_summary_md(
+        tmp_path / "on" / "SUMMARY.md", kpis_year1={"profit_total_eur": 1.0},
+        financial_kpis=fin_on, params=params, solver_name="highs",
+    )
+    text = out.read_text(encoding="utf-8")
+    assert "Lifetime route-to-market fee [EUR]" in text
+    assert "Lifetime optimizer fee [EUR]" in text
+
+    fin_off = {"npv_eur": 1.0,
+               "total_route_to_market_fee_eur_lifecycle": 0.0,
+               "total_optimizer_fee_eur_lifecycle": 0.0}
+    out2 = write_summary_md(
+        tmp_path / "off" / "SUMMARY.md", kpis_year1={"profit_total_eur": 1.0},
+        financial_kpis=fin_off, params=params, solver_name="highs",
+    )
+    text2 = out2.read_text(encoding="utf-8")
+    assert "route-to-market" not in text2.lower()
+    assert "optimizer" not in text2.lower()
+
+
+def test_scenario_override_reaches_both_fee_keys():
+    """`economics.<fee key>` dotted targets apply through the scenario path."""
+    from pvbess_opt.scenarios import (
+        _apply_scenario_overrides,
+        validate_scenario_overrides,
+    )
+
+    scenario = {
+        "name": "fees-on",
+        "economics": {
+            "route_to_market_fee_eur_per_mwh": 2.5,
+            "optimizer_revenue_share_pct": 12.0,
+        },
+    }
+    validate_scenario_overrides(scenario)
+    typed = {"project": {}, "economics": {}, "simulation": {}, "ppa": {},
+             "pv": {}, "bess": {}, "balancing": {}}
+    out = _apply_scenario_overrides(typed, scenario)
+    assert out["economics"]["route_to_market_fee_eur_per_mwh"] == 2.5
+    assert out["economics"]["optimizer_revenue_share_pct"] == 12.0
+
+
+def test_yaml_roundtrip_preserves_nonzero_fee_values(tmp_path):
+    from pvbess_opt.io_read import load_structured_config
+
+    ts = tmp_path / "ts.csv"
+    ts.write_text(
+        "timestamp,pv_kwh,load_kwh,dam_price_eur_per_mwh\n"
+        + "\n".join(
+            f"2026-01-01 {h:02d}:00:00,100,50,80" for h in range(24)
+        )
+        + "\n"
+    )
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        f"timeseries_path: {ts}\n"
+        "economics:\n"
+        "  route_to_market_fee_eur_per_mwh: 2.5\n"
+        "  optimizer_revenue_share_pct: 12.0\n"
+    )
+    typed = load_structured_config(cfg)
+    assert typed["economics"]["route_to_market_fee_eur_per_mwh"] == 2.5
+    assert typed["economics"]["optimizer_revenue_share_pct"] == 12.0

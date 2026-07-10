@@ -116,6 +116,8 @@ _SELF_CONSUMPTION_FORESIGHT_FIGURES = _prefixed(
 def _build_workbook(
     dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
     balancing_aggregator_fee_pct: float = 0.0,
+    route_to_market_fee_eur_per_mwh: float = 0.0,
+    optimizer_revenue_share_pct: float = 0.0,
 ) -> Path:
     """Materialise a single-scenario workbook from the shipped input.
 
@@ -139,6 +141,17 @@ def _build_workbook(
     typed["balancing"]["balancing_enabled"] = balancing
     typed["economics"]["balancing_aggregator_fee_pct_revenue"] = (
         balancing_aggregator_fee_pct
+    )
+    # Representative structural market-access fees (both default 0 on the
+    # shipped workbook): the financial-gallery scenarios set them non-zero
+    # so the revenue stacks, cashflow bars and the BESS waterfall show the
+    # Route-to-market / Optimizer deduction bands -- same convention as the
+    # BSP fee above.
+    typed["economics"]["route_to_market_fee_eur_per_mwh"] = (
+        route_to_market_fee_eur_per_mwh
+    )
+    typed["economics"]["optimizer_revenue_share_pct"] = (
+        optimizer_revenue_share_pct
     )
     typed["ppa"]["ppa_enabled"] = False
     typed["simulation"]["uncertainty_enabled"] = False
@@ -164,11 +177,15 @@ def _build_workbook(
 def _run(dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
          mip_gap: float, time_limit: int,
          balancing_aggregator_fee_pct: float = 0.0,
+         route_to_market_fee_eur_per_mwh: float = 0.0,
+         optimizer_revenue_share_pct: float = 0.0,
          rolling_horizon: bool = False,
          monte_carlo: int | None = None) -> Path:
     wb = _build_workbook(
         dst_dir, mode=mode, balancing=balancing, one_day=one_day,
         balancing_aggregator_fee_pct=balancing_aggregator_fee_pct,
+        route_to_market_fee_eur_per_mwh=route_to_market_fee_eur_per_mwh,
+        optimizer_revenue_share_pct=optimizer_revenue_share_pct,
     )
     run(RunConfig(
         excel=wb, solver="highs", outdir=dst_dir / "out",
@@ -222,9 +239,14 @@ def main(argv: list[str] | None = None) -> int:
             merchant_run = _run(
                 tmp_dir / "merchant", mode="merchant", balancing=True,
                 one_day=False, mip_gap=args.mip_gap, time_limit=args.time_limit,
-                # Representative BSP / route-to-market fee so the gallery's
-                # revenue stack and waterfall show the deduction line.
+                # Representative fees so the gallery's revenue stack and
+                # waterfall show every deduction band: the BSP fee on the
+                # balancing products, the per-MWh route-to-market fee on
+                # exports, and the optimizer share on the battery's
+                # positive trading margin.
                 balancing_aggregator_fee_pct=10.0,
+                route_to_market_fee_eur_per_mwh=2.0,
+                optimizer_revenue_share_pct=15.0,
             )
             written += _curate(merchant_run, _MERCHANT_FIGURES)
 
@@ -232,6 +254,12 @@ def main(argv: list[str] | None = None) -> int:
             sc_run = _run(
                 tmp_dir / "sc", mode="self_consumption", balancing=False,
                 one_day=False, mip_gap=args.mip_gap, time_limit=args.time_limit,
+                # Route-to-market fee shows on the export volume; the
+                # optimizer share takes its cut of the battery's positive
+                # DAM trading margin (export minus grid charging, E13d),
+                # which is positive in this case study so both bands render.
+                route_to_market_fee_eur_per_mwh=2.0,
+                optimizer_revenue_share_pct=15.0,
             )
             written += _curate(sc_run, _SELF_CONSUMPTION_FINANCIAL_FIGURES)
 

@@ -350,9 +350,10 @@ capacity / activation prices are perturbed separately by
 Generated under `results/<run>/04_financial_plots/`:
 
 * Yearly revenue stack (PV-load, BESS-load, PV-DAM, BESS-DAM, the PPA
-  contract leg when a contract is on, 5 balancing products, energy
-  aggregator fee, balancing aggregator fee when set, grid-charging
-  cost) with net line.
+  contract leg when a contract is on, 5 balancing products, and every
+  fee that is set — energy aggregator, balancing aggregator,
+  route-to-market, optimizer share — plus the grid-charging cost) with
+  net line.
 * BESS revenue waterfall: one chart stepping from BESS-DAM through
   every balancing product, then down by the battery's exact share of
   each route-to-market fee, to the total BESS revenue.
@@ -416,8 +417,11 @@ battery state of charge overlaid.*
 
 ![merchant yearly revenue stack](docs/assets/merchant_revenue_stack.png)
 
-*Yearly revenue stack per operating year, net of the energy aggregator
-fee and the grid-charging cost, with the five balancing products stacked on the battery and the balancing aggregator fee deducted.*
+*Yearly revenue stack per operating year with the five balancing
+products stacked on the battery, and the deduction bands below zero:
+grid-charging cost, the balancing-aggregator (BSP) fee, the per-MWh
+route-to-market fee on exports, and the optimizer revenue share on the
+battery's positive trading margin.*
 
 ![merchant BESS revenue waterfall](docs/assets/merchant_bess_revenue_waterfall.png)
 
@@ -487,8 +491,11 @@ battery state of charge overlaid.*
 
 ![self-consumption yearly revenue stack](docs/assets/self_consumption_revenue_stack.png)
 
-*Yearly revenue stack per operating year, net of the energy aggregator
-fee and the grid-charging cost.*
+*Yearly revenue stack per operating year with the deduction bands below
+zero: grid-charging cost and the per-MWh route-to-market fee on exports
+(the optimizer share clamps to zero here — a grid-charging battery's
+trading margin is negative, and an optimizer never invoices a share of
+a loss).*
 
 ![self-consumption BESS revenue waterfall](docs/assets/self_consumption_bess_revenue_waterfall.png)
 

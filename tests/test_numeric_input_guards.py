@@ -16,6 +16,10 @@ properties:
    pandas would read as ``False``).
 3. The YAML/dict path applies the same guard on its faithful native
    types via ``_parse_value``.
+
+Also pins the related template-default contract: the aggregator fee
+ships at 0 % (fee-free, opt-in) on the defaults map, the row template
+and the shipped workbook.
 """
 
 from __future__ import annotations

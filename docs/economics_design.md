@@ -473,6 +473,9 @@ quarterly aggregates by $q = \lceil m/3 \rceil$.
 `total_capex_eur` / `total_devex_eur` / `total_capex_devex_eur`
 (lifecycle incl. replacement), `total_opex_eur_lifecycle`,
 `total_revenue_eur_lifecycle`, `total_aggregator_fee_eur_lifecycle`,
+`total_route_to_market_fee_eur_lifecycle` /
+`total_optimizer_fee_eur_lifecycle` (the structural market-access
+fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 `lifetime_bm_revenue_total_eur` (gross) /
 `lifetime_bm_capacity_revenue_total_eur` /
 `lifetime_bm_activation_revenue_total_eur` /
@@ -495,8 +498,11 @@ quarterly aggregates by $q = \lceil m/3 \rceil$.
 | (E5) | `lifetime._pv_factor` (mirrored inline in `build_yearly_cashflow`) |
 | (E6)-(E7) | `lifetime._bess_factor` + the cumulative-cycles loop in `build_yearly_cashflow` / `lifetime.build_lifetime_dispatch` |
 | (E8) | `availability.availability_factor`, `availability.apply_unavailability_derate` |
+| (E8a) | `availability.apply_unavailability_derate` (grid-import downtime correction) |
 | (E9)-(E12) | `build_yearly_cashflow` stream loop |
 | (E13) | `build_yearly_cashflow` fee clamp |
+| (E13b) | `build_yearly_cashflow` balancing-aggregator (BSP) fee clamp |
+| (E13c)-(E13d) | `build_yearly_cashflow` structural market-access fees (route-to-market / optimizer share) |
 | (E14)-(E15) | `build_yearly_cashflow` OPEX/replacement/net rows |
 | (E16)-(E19) | `economics.compute_financial_kpis`, `economics.calculate_irr`, `economics._payback_year` |
 | (E20) | `economics._amortization_schedule`, `_leverage_kpis`, `build_debt_schedule` |

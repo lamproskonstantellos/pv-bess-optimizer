@@ -16,6 +16,10 @@ Dispatch metrics
   downtime, so ``import = A * import_raw + a * load`` (``a`` the
   unavailability fraction, ``A = 1 - a``).  See the "Availability derate"
   note below and ``docs/economics_design.md`` (Eq. E8a).
+* ``pv_export_mwh`` / ``bess_export_mwh``: the grid-export split by
+  origin — the route-to-market fee bases (Eq. E13c in
+  ``docs/economics_design.md``); they derate with the total they
+  compose.
 * ``bess_total_charge_mwh`` / ``bess_total_discharge_mwh``.
 * ``pv_to_bess_mwh`` / ``bess_charge_grid_mwh``.
 * ``pv_generation_mwh`` / ``load_energy_mwh`` (load is 0 in merchant).

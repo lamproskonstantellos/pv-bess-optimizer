@@ -39,6 +39,7 @@ from .degradation import (
     plot_soh_trajectory,
 )
 from .emissions import (
+    energy_sankey_flows,
     plot_cfe_duration_curve,
     plot_energy_sankey,
 )
@@ -106,6 +107,7 @@ from .yearly import (
 
 __all__ = [
     "apply_ieee_style",
+    "energy_sankey_flows",
     "plot_balancing_mc_distribution",
     "plot_balancing_reservation_profile",
     "plot_bess_capacity_vs_activation_split",

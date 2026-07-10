@@ -49,9 +49,10 @@ __all__ = [
 class DriverSensitivity:
     """One tornado driver's base / low / high state.
 
-    Carries both the absolute driver values (``*_value``) and the
-    resulting metric outcomes (``*_outcome``) so a tornado plot can
-    annotate each bar end with the driver value that produced it.
+    Carries the absolute driver values (``*_value``) so a tornado plot
+    can annotate each bar end with the driver value that produced it;
+    the metric outcomes travel separately in the plot's low/high
+    arrays.
     """
 
     name: str               # e.g. "CAPEX" — the variable identifier
@@ -59,8 +60,6 @@ class DriverSensitivity:
     base_value: float        # base case absolute driver value
     low_value: float         # absolute driver value at the low end
     high_value: float        # absolute driver value at the high end
-    low_outcome: float       # IRR or NPV at the low driver end
-    high_outcome: float      # IRR or NPV at the high driver end
     sensitivity_pct: float   # the +/- magnitude used (e.g. 20.0)
 
 
@@ -388,22 +387,23 @@ def run_sensitivity_analysis(
         base_capex_total += float(
             base_yearly_cf.loc[_y0_mask, "devex_eur"].sum()
         )
-    base_opex_total = float(
-        base_yearly_cf.loc[
-            base_yearly_cf["project_year"] >= 1, "opex_eur"
-        ].sum()
-    )
-    after_y0_mask = base_yearly_cf["project_year"] >= 1
-    base_revenue_total = float(
-        base_yearly_cf.loc[after_y0_mask, "revenue_eur"].sum()
+    # Same convention for the OPEX / Revenue drivers: the perturbation
+    # scales EVERY year of the stream, but the recorded driver VALUE is
+    # the Year-1 figure so the EUR labels agree with the row labels
+    # ("Total annual OPEX", "Year-1 revenue base") and with the yearly
+    # cashflow chart.
+    _y1_mask = base_yearly_cf["project_year"] == 1
+    base_opex_year1 = float(base_yearly_cf.loc[_y1_mask, "opex_eur"].sum())
+    base_revenue_year1 = float(
+        base_yearly_cf.loc[_y1_mask, "revenue_eur"].sum()
     )
     if "balancing_revenue_eur" in base_yearly_cf.columns:
-        base_revenue_total += float(
-            base_yearly_cf.loc[after_y0_mask, "balancing_revenue_eur"].sum()
+        base_revenue_year1 += float(
+            base_yearly_cf.loc[_y1_mask, "balancing_revenue_eur"].sum()
         )
     if "ppa_revenue_eur" in base_yearly_cf.columns:
-        base_revenue_total += float(
-            base_yearly_cf.loc[after_y0_mask, "ppa_revenue_eur"].sum()
+        base_revenue_year1 += float(
+            base_yearly_cf.loc[_y1_mask, "ppa_revenue_eur"].sum()
         )
     base_rate = float(econ.get("discount_rate_pct", 7.0))
 
@@ -485,9 +485,9 @@ def run_sensitivity_analysis(
             continue
 
         if name == "OPEX":
-            base_value = base_opex_total
-            low_value = base_opex_total * (1.0 - delta)
-            high_value = base_opex_total * (1.0 + delta)
+            base_value = base_opex_year1
+            low_value = base_opex_year1 * (1.0 - delta)
+            high_value = base_opex_year1 * (1.0 + delta)
             low_kpis = compute_financial_kpis(
                 _scale_opex(base_yearly_cf, 1.0 - delta), econ,
             )
@@ -500,9 +500,9 @@ def run_sensitivity_analysis(
             continue
 
         if name == "Revenue":
-            base_value = base_revenue_total
-            low_value = base_revenue_total * (1.0 - delta)
-            high_value = base_revenue_total * (1.0 + delta)
+            base_value = base_revenue_year1
+            low_value = base_revenue_year1 * (1.0 - delta)
+            high_value = base_revenue_year1 * (1.0 + delta)
             low_kpis = compute_financial_kpis(
                 _scale_revenue(base_yearly_cf, 1.0 - delta), econ,
             )
@@ -644,8 +644,6 @@ def build_driver_sensitivities(
                 base_value=float(by_scen.loc["base", "value"]),  # type: ignore[arg-type]
                 low_value=float(by_scen.loc["low", "value"]),  # type: ignore[arg-type]
                 high_value=float(by_scen.loc["high", "value"]),  # type: ignore[arg-type]
-                low_outcome=float(by_scen.loc["low", metric]),  # type: ignore[arg-type]
-                high_outcome=float(by_scen.loc["high", metric]),  # type: ignore[arg-type]
                 sensitivity_pct=float(sens_pct),
             )
         except (TypeError, ValueError):
