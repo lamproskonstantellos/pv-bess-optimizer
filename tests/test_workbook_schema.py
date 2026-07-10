@@ -116,6 +116,7 @@ def test_economics_sheet_keys():
         "debt_repayment",
         "debt_sizing_mode", "target_dscr", "debt_sizing_case",
         "production_p90_factor_pct", "lender_cases_enabled",
+        "plot_dscr_profile",
         "grid_co2_intensity_kg_per_mwh", "grid_co2_annual_decline_pct",
     }
     assert set(ECONOMICS_SHEET_DEFAULTS) == expected

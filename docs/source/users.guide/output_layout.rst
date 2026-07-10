@@ -29,6 +29,7 @@ See :doc:`outputs` for the full reference.  Quick summary::
     │   ├── soh_trajectory.pdf                  # BESS projects
     │   ├── sensitivity_npv_tornado.pdf
     │   ├── sensitivity_irr_tornado.pdf
+    │   ├── dscr_profile.pdf                    # debt layer active
     │   ├── balancing_reservation_profile.pdf   # balancing on
     │   ├── balancing_mc_distribution.pdf       # balancing on
     │   ├── cfe_duration_curve.pdf              # emissions accounting on

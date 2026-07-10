@@ -337,6 +337,23 @@ Production release.
   against the haircut CFADS while the run's own cashflow stays the
   base case (a warning flags the degenerate factor-100 combination).
 
+### Added (DSCR-profile figure)
+
+- `dscr_profile.pdf` in the financial-plot family: per-year debt
+  service coverage over the tenor from the debt_schedule machinery,
+  with an optional `DSCR P90 case` companion line (Eq. E44 - same
+  committed debt, haircut cashflow) and, in target-DSCR sizing mode,
+  the target drawn as a dashed reference series carried in the
+  legend (house rule: no computed values as axes text; the DSCR = 1
+  break-even line is the same neutral rule line every cashflow
+  figure draws at zero).  Rendered only when a debt layer is active
+  (`gearing_pct > 0` or `debt_sizing_mode = target_dscr`) and gated
+  by the new `plot_dscr_profile` key (default TRUE - all-equity runs
+  emit no file, so default output directories are bit-identical).
+  Three theme registrations (`DSCR base case`, `DSCR P90 case`,
+  `Target DSCR`) with unique palette hexes join the canonical
+  label/colour/legend registries and their consistency sweeps.
+
 ### Fixed (debt-layer follow-ups)
 
 - The corporate-tax layer's debt-interest schedule now threads the

@@ -302,6 +302,9 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     # inert at their defaults (factor 100 = no haircut).
     "production_p90_factor_pct": 100.0,
     "lender_cases_enabled": False,
+    # DSCR-profile figure: rendered only when a debt layer is active,
+    # so the TRUE default emits no file for all-equity runs.
+    "plot_dscr_profile": True,
     # Grid emissions / 24/7 CFE accounting (off by default: intensity 0).
     "grid_co2_intensity_kg_per_mwh": 0.0,
     "grid_co2_annual_decline_pct": 0.0,
@@ -459,6 +462,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "ppa_enabled",
     "optimizer_floor_enabled",
     "lender_cases_enabled",
+    "plot_dscr_profile",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -979,6 +983,11 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "per-case min/avg DSCR, equity IRR, NPV and debt capacity, "
      "written to a lender_cases sheet and a SUMMARY block. Off by "
      "default."),
+    ("plot_dscr_profile", True, "bool",
+     "Render the per-year DSCR-profile figure when a debt layer is "
+     "active (gearing_pct > 0 or debt_sizing_mode = target_dscr). "
+     "All-equity runs emit no figure regardless, so the TRUE default "
+     "changes nothing for unlevered outputs."),
     ("grid_co2_intensity_kg_per_mwh", 0.0, "kg/MWh",
      "Grid carbon intensity for emissions / 24/7 CFE accounting "
      "(0 = off, the default; an optional grid_co2_kg_per_mwh time-series "

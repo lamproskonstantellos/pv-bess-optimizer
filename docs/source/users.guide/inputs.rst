@@ -458,6 +458,11 @@ inert at their defaults:
   committed debt as the run (frozen under target-DSCR sizing), so the
   table answers "same debt, worse resource year".  LCOE / LCOS are
   deliberately excluded from the table.
+* ``plot_dscr_profile`` (default TRUE): render the per-year
+  DSCR-profile figure (``dscr_profile.pdf``) when a debt layer is
+  active.  All-equity runs emit no figure regardless, so the TRUE
+  default changes nothing for unlevered outputs; see
+  :doc:`financial_plots`.
 
 In a YAML / JSON config the same settings can be supplied as a
 ``financing:`` block whose keys are expressed as fractions / years and

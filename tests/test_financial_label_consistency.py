@@ -25,6 +25,7 @@ import pytest
 
 from pvbess_opt.plotting.financial import (
     plot_cumulative_cashflow,
+    plot_dscr_profile,
     plot_monthly_cashflow_year1,
     plot_npv_waterfall,
     plot_payback,
@@ -116,6 +117,13 @@ def _monthly_cf() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _debt_schedule() -> pd.DataFrame:
+    return pd.DataFrame({
+        "year": [1.0, 2.0, 3.0, 4.0, 5.0],
+        "dscr": [1.6, 1.55, 1.5, 1.45, 1.4],
+    })
+
+
 def _y1_kpis() -> dict:
     return {
         "profit_load_from_pv_eur": 30_000.0,
@@ -188,6 +196,8 @@ def test_all_financial_plots_emit_only_canonical_labels(tmp_path, caplog):
         (plot_monthly_cashflow_year1, (mc, tmp_path / "monthly.pdf"), {}),
         (plot_revenue_stack_yearly, (yc, kpis, tmp_path / "stack.pdf"),
          {"econ": {"retail_inflation_pct": 2.0}}),
+        (plot_dscr_profile, (_debt_schedule(), tmp_path / "dscr.pdf"),
+         {"target_dscr": 1.3}),
     ]
     with caplog.at_level(logging.WARNING, logger="pvbess_opt.theme"):
         for fn, args, kwargs in plots:

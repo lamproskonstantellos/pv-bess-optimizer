@@ -57,6 +57,17 @@ A family of plots is produced when the financial pipeline runs
     ``cfe_duration_curve.pdf`` joins them when emissions accounting
     is enabled.
 
+11. ``dscr_profile.pdf``: per-year debt-service coverage over the
+    tenor.  Only for levered runs (``gearing_pct > 0`` or
+    ``debt_sizing_mode = target_dscr``; all-equity runs emit no
+    file), gated by the ``plot_dscr_profile`` key (default TRUE).
+    The base-case DSCR line comes from the ``debt_schedule`` sheet; a
+    ``DSCR P90 case`` companion line joins it when
+    ``production_p90_factor_pct < 100`` (same committed debt, haircut
+    cashflow), and in target-DSCR sizing mode the target is drawn as
+    a dashed reference line carried in the legend — never as text
+    inside the axes.
+
 When a PPA contract is enabled, the yearly revenue stack gains a
 ``PPA revenue`` bar drawn straight from the cashflow's
 ``ppa_revenue_eur`` column (term cutoff, escalation and the post-term

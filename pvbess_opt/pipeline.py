@@ -94,6 +94,7 @@ from pvbess_opt.plotting import (
     plot_daily_soc,
     plot_daily_supply,
     plot_daily_surplus,
+    plot_dscr_profile,
     plot_energy_sankey,
     plot_irr_tornado,
     plot_lcoe_summary,
@@ -583,6 +584,37 @@ def _generate_financial_plots(
                 fin_kpis, sensitivity_df, capacities, econ,
                 plots_dir / "lcos_summary.pdf",
             )
+        # DSCR profile (Eqs. E20/E41-E44): only when a debt layer is
+        # active — all-equity runs produce no schedule and therefore no
+        # file, so the TRUE default keeps default output directories
+        # bit-identical.
+        raw_plot_dscr = econ.get("plot_dscr_profile", True)
+        if bool(True if raw_plot_dscr is None else raw_plot_dscr):
+            dscr_schedule = build_debt_schedule(yearly_cf, econ)
+            if dscr_schedule is not None:
+                raw_p90 = econ.get("production_p90_factor_pct")
+                p90_frac = (
+                    100.0 if raw_p90 is None else float(raw_p90)
+                ) / 100.0
+                p90_schedule = (
+                    build_debt_schedule(
+                        apply_production_case(yearly_cf, p90_frac), econ,
+                    )
+                    if p90_frac < 1.0 else None
+                )
+                target: float | None = None
+                if str(
+                    econ.get("debt_sizing_mode", "manual") or "manual"
+                ).strip().lower() == "target_dscr":
+                    raw_target = econ.get("target_dscr")
+                    target = (
+                        1.30 if raw_target is None else float(raw_target)
+                    )
+                plot_dscr_profile(
+                    dscr_schedule, plots_dir / "dscr_profile.pdf",
+                    p90_schedule=p90_schedule, target_dscr=target,
+                    econ=econ,
+                )
     except Exception:
         logger.exception("Financial plot generation failed")
 
