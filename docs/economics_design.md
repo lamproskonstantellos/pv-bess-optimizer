@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E31a (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E32 (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -71,6 +71,10 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `state_support_clawback_threshold_eur_per_mw_year` | 0.0 | $\theta$ (two-way netting reference level per MW) |
 | economics | `state_support_clawback_share_pct` | 0.0 | $c$ (share of the difference netted, both directions) |
 | economics | `state_support_indexation_pct` | 0.0 | $i_s$ (escalates support AND threshold) |
+| economics | `capacity_market_eur_per_mw_year` | 0.0 | $\kappa$ (capacity payment per derated MW) |
+| economics | `capacity_market_derating_pct` | 100.0 | $\delta$ (duration-based derating class factor) |
+| economics | `capacity_market_year_from`, `capacity_market_year_to` | 1, 0 | capacity-contract window (E25) |
+| economics | `capacity_market_indexation_pct` | 0.0 | $i_{cm}$ (clearing-price escalation) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
 | economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
 | economics | `gearing_pct`, `debt_interest_rate_pct`, `debt_tenor_years`, `debt_repayment` | 0, 5.0, 15, annuity | debt layer |
@@ -706,6 +710,38 @@ rises, reaching full stabilisation of the market component at
 $c = 1$.  The clawback reads the deterministic analytic projection;
 per-seed Monte Carlo netting is out of scope (stated limitation).
 
+### Capacity-market payment with derating factor (Eq. E32)
+
+The simplest contracted structure: an annual payment on the DERATED
+power block over a contract window.  Five `economics` keys,
+default-off (`capacity_market_eur_per_mw_year = 0` ⇒ bit-identical).
+
+$$R^{\mathrm{cm}}_y = \kappa \cdot \frac{P^{B}}{1000} \cdot \delta
+\cdot A \cdot (1+i_{cm})^{\,y-1} \cdot
+\chi_y\!\left(y_f^{\mathrm{cm}}, y_t^{\mathrm{cm}}\right),
+\qquad \delta = \frac{\texttt{derating\_pct}}{100} \tag{E32}$$
+
+The derating factor is a plain user input (EU capacity mechanisms
+derate storage by duration relative to the stress-event window — enter
+the auction's published class factor); the model deliberately does NOT
+derive it from `bess_kwh / bess_kw`.  Convention (stated to avoid
+double-derating): the payment is **on the derated MW**.  No $f^{B}$
+fade (the obligation is on derated nameplate); availability applies
+(availability-tested payments).  Worked example:
+$\kappa = 50{,}000$, $\delta = 40\,\%$, $P^{B} = 1$ MW, $A = 0.99$
+⇒ 19,800 EUR in Year 1.
+
+`capacity_market_revenue_eur` folds into `net_cashflow_eur` (flat
+$1/12$ monthly — a level payment) and **counts toward the E31a netting
+base**, computed before $\mathrm{CB}_y$ in the year loop (order locked
+by test); the E25a base itself stays capacity-free (the payment is not
+wholesale trading margin).  NOT scaled by the Revenue driver
+(administered capacity price, the route-to-market precedent) — it
+joins the netting recompute at its un-scaled value.  Excluded from
+LCOE/LCOS.  Stacking warnings: overlap with a state-support window
+(cumulation rules typically restrict stacking) and with a `zeroed`
+toll (the toller usually holds the capacity obligation too).
+
 ### Financial KPIs
 
 $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$
@@ -855,6 +891,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E29)-(E29a) | `build_yearly_cashflow` toll_revenue_eur column + per-year merchant gating |
 | (E30)-(E30a) | `build_yearly_cashflow` optimizer fee/top-up pair; `sensitivity._scale_revenue` econ-threaded kink recompute |
 | (E31)-(E31a) | `build_yearly_cashflow` state_support_eur / state_support_clawback_eur pair + repayment-year flag |
+| (E32) | `build_yearly_cashflow` capacity_market_revenue_eur column (computed before the E31a netting) |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

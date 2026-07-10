@@ -187,6 +187,24 @@ Production release.
   overlapping a 'zeroed' toll (the netting tops up to the threshold
   every overlap year - two capacity payments for the same MW).
 
+### Added (capacity-market payment)
+
+- `capacity_market_eur_per_mw_year` + derating / window / indexation
+  keys on the economics sheet (default 0, bit-identical when off): a
+  capacity payment on the DERATED power block (Eq. E32) - the
+  derating factor is the auction's published storage class factor
+  (duration-based eligibility), the payment lands on derated MW by
+  stated convention, availability-scaled with no capacity-fade
+  scaling.  Counts toward the state-support netting base (Eq. E31a),
+  computed before the clawback in the year loop (order locked by
+  test) while the E25a base stays capacity-free.  Flat-1/12 monthly
+  allocation, lifetime KPI + conditional SUMMARY row,
+  'Capacity-market revenue' band (deep orange 800), LCOE/LCOS
+  invariant, NOT scaled by the Revenue tornado driver (administered
+  price).  Stacking warnings: overlap with a state-support window
+  (cumulation) and with a 'zeroed' toll (the toller usually holds the
+  capacity obligation).
+
 ### Added (imbalance settlement exposure)
 
 - `imbalance_enabled` on the simulation sheet (default FALSE,

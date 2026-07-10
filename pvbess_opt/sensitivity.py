@@ -176,6 +176,8 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("state_support_eur")
     if "state_support_clawback_eur" in df.columns:
         components.append("state_support_clawback_eur")
+    if "capacity_market_revenue_eur" in df.columns:
+        components.append("capacity_market_revenue_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -316,7 +318,11 @@ def _scale_revenue(
     # it is a fixed contractual EUR/MW payment — the driver perturbs
     # market prices, which a toll is by construction insulated from
     # (the same no-scale rationale as route_to_market_fee_eur and
-    # grid_charging_fee_eur above).
+    # grid_charging_fee_eur above).  capacity_market_revenue_eur
+    # (Eq. E32) does NOT scale either: an administratively set capacity
+    # price, not an energy price (the route_to_market_fee_eur
+    # precedent) — it still joins the E31a netting base below at its
+    # UN-scaled value.
 
     # Optimizer floor+share (Eq. E30): the fee/top-up pair is PIECEWISE
     # in the margin, so a constant scale is wrong once the floor is

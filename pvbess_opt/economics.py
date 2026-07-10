@@ -599,6 +599,22 @@ def build_yearly_cashflow(
         econ.get("state_support_indexation_pct", 0.0) or 0.0
     ) / 100.0
     _ss_repayment_years: list[int] = []
+    # Capacity-market payment (Eq. E32): paid on the DERATED power
+    # block over a contract window, availability-scaled, no fade; the
+    # revenue counts toward the E31a netting base.
+    cm_rate = max(0.0, float(
+        econ.get("capacity_market_eur_per_mw_year", 0.0) or 0.0
+    ))
+    cm_derating_frac = max(0.0, min(1.0, float(
+        econ.get("capacity_market_derating_pct", 100.0) or 0.0
+    ) / 100.0))
+    _raw_cm_from = econ.get("capacity_market_year_from", 1)
+    cm_year_from = int(1 if _raw_cm_from is None else _raw_cm_from)
+    _raw_cm_to = econ.get("capacity_market_year_to", 0)
+    cm_year_to = int(0 if _raw_cm_to is None else _raw_cm_to)
+    cm_infl = float(
+        econ.get("capacity_market_indexation_pct", 0.0) or 0.0
+    ) / 100.0
 
     # Split the Year-1 revenue base into retail (load-coverage)
     # and DAM (wholesale export) streams.  Retail revenue is indexed by
@@ -842,6 +858,7 @@ def build_yearly_cashflow(
             toll_revenue_y = 0.0
             state_support_y = 0.0
             state_support_clawback_y = 0.0
+            capacity_market_rev_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -1051,14 +1068,28 @@ def build_yearly_cashflow(
                 + balancing_capacity_y + balancing_activation_y
                 + balancing_aggregator_fee_y
             )
+            # Capacity-market payment (Eq. E32) — computed BEFORE the
+            # state-support netting because the capacity revenue counts
+            # as realised market revenue in its base (Eq. E31a).
+            _cm_in_phase = cm_rate > 0.0 and _contract_phase(
+                y, cm_year_from, cm_year_to, n_years,
+            )
+            if _cm_in_phase:
+                capacity_market_rev_y = (
+                    cm_rate * (bess_kw / 1000.0) * cm_derating_frac
+                    * contract_avail * (1.0 + cm_infl) ** (y - 1)
+                )
+            else:
+                capacity_market_rev_y = 0.0
             # State support (Eq. E31) and the two-way netting
             # (Eq. E31a): the gross support is availability-conditioned
             # on the power block (no fade), and the netting settles the
-            # realised market revenue (the E25a base) against the
-            # indexed threshold — clawback above it, compensation below
-            # it, both at the same share.  No floor is applied: a year
-            # whose netted support turns negative is a net repayment
-            # (collected and flagged once after the loop).
+            # realised market revenue (the E25a base plus the
+            # capacity-market revenue) against the indexed threshold —
+            # clawback above it, compensation below it, both at the
+            # same share.  No floor is applied: a year whose netted
+            # support turns negative is a net repayment (collected and
+            # flagged once after the loop).
             _ss_in_phase = ss_rate > 0.0 and _contract_phase(
                 y, ss_year_from, ss_year_to, n_years,
             )
@@ -1072,7 +1103,8 @@ def build_yearly_cashflow(
                         ss_threshold * (bess_kw / 1000.0) * _ss_g
                     )
                     state_support_clawback_y = -ss_share_frac * (
-                        bess_market_rev_y - _ss_theta_y
+                        bess_market_rev_y + capacity_market_rev_y
+                        - _ss_theta_y
                     ) + 0.0
                 else:
                     state_support_clawback_y = 0.0
@@ -1111,6 +1143,7 @@ def build_yearly_cashflow(
             + grid_charging_fee_y + imbalance_cost_y
             + toll_revenue_y
             + state_support_y + state_support_clawback_y
+            + capacity_market_rev_y
             + ppa_y + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -1138,6 +1171,9 @@ def build_yearly_cashflow(
                 "state_support_eur": float(state_support_y),
                 "state_support_clawback_eur": float(
                     state_support_clawback_y
+                ),
+                "capacity_market_revenue_eur": float(
+                    capacity_market_rev_y
                 ),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
@@ -1415,6 +1451,7 @@ def derive_monthly_cashflow(
     has_topup_col = "optimizer_floor_topup_eur" in yearly_cf.columns
     has_ss_col = "state_support_eur" in yearly_cf.columns
     has_ss_cb_col = "state_support_clawback_eur" in yearly_cf.columns
+    has_cm_col = "capacity_market_revenue_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
@@ -1471,6 +1508,10 @@ def derive_monthly_cashflow(
         ss_cb_y = (
             float(yearly_indexed.loc[y, "state_support_clawback_eur"])
             if has_ss_cb_col else 0.0
+        )
+        cm_y = (
+            float(yearly_indexed.loc[y, "capacity_market_revenue_eur"])
+            if has_cm_col else 0.0
         )
         ppa_y = (
             float(yearly_indexed.loc[y, "ppa_revenue_eur"])
@@ -1546,6 +1587,9 @@ def derive_monthly_cashflow(
             # the year's realised revenue, so it books in month 12.
             ss_m = ss_y / 12.0
             ss_cb_m = ss_cb_y if m == 12 else 0.0
+            # The capacity payment (Eq. E32) is a level contractual
+            # stream: flat 1/12 is exact.
+            cm_m = cm_y / 12.0
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
@@ -1560,6 +1604,7 @@ def derive_monthly_cashflow(
                 + gcf_fee_m + imb_m
                 + toll_m
                 + ss_m + ss_cb_m
+                + cm_m
                 + ppa_m + opex_m + capex_m + devex_m
             )
             # End-of-month discounting: month m of year y lands at
@@ -1586,6 +1631,7 @@ def derive_monthly_cashflow(
                     "toll_revenue_eur": float(toll_m),
                     "state_support_eur": float(ss_m),
                     "state_support_clawback_eur": float(ss_cb_m),
+                    "capacity_market_revenue_eur": float(cm_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -1607,6 +1653,7 @@ def derive_monthly_cashflow(
         "grid_charging_fee_eur", "imbalance_cost_eur",
         "toll_revenue_eur",
         "state_support_eur", "state_support_clawback_eur",
+        "capacity_market_revenue_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
@@ -1629,6 +1676,7 @@ def derive_monthly_cashflow(
                     "grid_charging_fee_eur", "imbalance_cost_eur",
                     "toll_revenue_eur",
                     "state_support_eur", "state_support_clawback_eur",
+                    "capacity_market_revenue_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
@@ -1811,6 +1859,10 @@ def compute_financial_kpis(
     total_state_support_clawback_eur_lifecycle = (
         float(df.loc[after_y0_mask, "state_support_clawback_eur"].sum())
         if "state_support_clawback_eur" in df.columns else 0.0
+    )
+    total_capacity_market_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "capacity_market_revenue_eur"].sum())
+        if "capacity_market_revenue_eur" in df.columns else 0.0
     )
     total_balancing_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
@@ -2152,6 +2204,10 @@ def compute_financial_kpis(
         )),
         "total_state_support_clawback_eur_lifecycle": float(round(
             total_state_support_clawback_eur_lifecycle, 2,
+        )),
+        # Capacity-market payment (Eq. E32); SUMMARY-optional.
+        "total_capacity_market_revenue_eur_lifecycle": float(round(
+            total_capacity_market_revenue_eur_lifecycle, 2,
         )),
         "lifetime_bm_revenue_total_eur": float(round(
             total_balancing_revenue_eur_lifecycle, 2,

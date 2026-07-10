@@ -257,6 +257,14 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "state_support_clawback_threshold_eur_per_mw_year": 0.0,
     "state_support_clawback_share_pct": 0.0,
     "state_support_indexation_pct": 0.0,
+    # Capacity-market payment with derating factor (Eq. E32): paid on
+    # the derated power block over a contract window; counts as
+    # realised market revenue for the E31a netting.  Default-off.
+    "capacity_market_eur_per_mw_year": 0.0,
+    "capacity_market_derating_pct": 100.0,
+    "capacity_market_year_from": 1,
+    "capacity_market_year_to": 0,
+    "capacity_market_indexation_pct": 0.0,
     "benchmark_lcoe_low_eur_per_mwh": BENCHMARK_LCOE_LOW_EUR_PER_MWH,
     "benchmark_lcoe_high_eur_per_mwh": BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     "benchmark_lcos_low_eur_per_mwh": BENCHMARK_LCOS_LOW_EUR_PER_MWH,
@@ -448,6 +456,8 @@ _INT_KEYS: frozenset[str] = frozenset({
     "optimizer_term_year_to",
     "state_support_year_from",
     "state_support_year_to",
+    "capacity_market_year_from",
+    "capacity_market_year_to",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -804,6 +814,28 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("state_support_indexation_pct", 0.0, "%/yr",
      "Annual escalation of the support level AND the threshold "
      "((1+i)^(y-1), Eq. E2). Default 0 = flat nominal."),
+    ("capacity_market_eur_per_mw_year", 0.0, "EUR/MW/yr",
+     "Capacity-market payment per DERATED MW per year. 0 = off "
+     "(default). Paid on bess_power_kw x capacity_market_derating_pct, "
+     "availability-scaled; no capacity-fade scaling. Counts as "
+     "realised market revenue for the state-support netting "
+     "(Eq. E31a). Surfaces as capacity_market_revenue_eur. Excluded "
+     "from LCOE/LCOS."),
+    ("capacity_market_derating_pct", 100.0, "%",
+     "Derating factor applied to BESS power for the capacity payment "
+     "(EU mechanisms derate storage by duration vs the stress-event "
+     "window; enter the auction's published class factor, e.g. "
+     "~40-95 % depending on duration). 100 = underated nameplate. In "
+     "[0, 100]. The payment is on the DERATED MW (convention stated "
+     "to avoid double-derating)."),
+    ("capacity_market_year_from", 1, "year",
+     "First project year of the capacity contract (inclusive)."),
+    ("capacity_market_year_to", 0, "year",
+     "Last project year (inclusive); 0 = end of life. Multi-year "
+     "new-build contracts are typically 10-17 years."),
+    ("capacity_market_indexation_pct", 0.0, "%/yr",
+     "Annual escalation of the clearing price ((1+i)^(y-1), Eq. E2); "
+     "many mechanisms CPI-index - default 0 = flat nominal."),
     ("benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
@@ -2708,6 +2740,52 @@ def validate_workbook_params(
                 "capacity payments for the same MW.",
             )
 
+    # Capacity-market payment (Eq. E32): non-negative rate/indexation,
+    # derating in [0, 100], valid contract window; stacking warnings
+    # for support cumulation and for a 'zeroed' toll (the toller
+    # usually holds the capacity obligation too — flagged, not
+    # blocked).
+    _require_non_negative(economics, "capacity_market_eur_per_mw_year")
+    _require_non_negative(economics, "capacity_market_indexation_pct")
+    _cm_derating = float(
+        economics.get("capacity_market_derating_pct", 100.0) or 0.0
+    )
+    if not (0.0 <= _cm_derating <= 100.0):
+        raise ValueError(
+            "'capacity_market_derating_pct' must be in [0, 100]; got "
+            f"{_cm_derating!r}."
+        )
+    _cm_window = _validate_phase_window("capacity_market")
+    _cm_rate = float(
+        economics.get("capacity_market_eur_per_mw_year", 0.0) or 0.0
+    )
+    if _cm_rate > 0.0:
+        _n_years_cm = int(project.get("project_lifecycle_years", 20) or 20)
+        _cm_to = _n_years_cm if _cm_window[1] == 0 else _cm_window[1]
+        if _ss_rate > 0.0:
+            _ss_to_cm = (
+                _n_years_cm if _ss_window[1] == 0 else _ss_window[1]
+            )
+            if _cm_window[0] <= _ss_to_cm and _ss_window[0] <= _cm_to:
+                logger.warning(
+                    "A capacity-market window overlaps a state-support "
+                    "window: support-cumulation rules typically "
+                    "restrict stacking the two schemes on the same MW "
+                    "(the capacity revenue does count toward the "
+                    "support's netting base, Eq. E31a).",
+                )
+        if _toll_rate > 0.0 and _toll_treatment == "zeroed":
+            _toll_to_cm = (
+                _n_years_cm if _toll_window[1] == 0 else _toll_window[1]
+            )
+            if _cm_window[0] <= _toll_to_cm and _toll_window[0] <= _cm_to:
+                logger.warning(
+                    "A capacity-market window overlaps a 'zeroed' BESS "
+                    "toll window: the toller usually holds the "
+                    "capacity obligation too — check which party "
+                    "collects the capacity payment.",
+                )
+
     # Grid-emissions accounting (24/7-CFE): a non-negative intensity and a
     # decline in [0, 100] %/yr.  A decline above 100 % makes the
     # ``(1 - decline)^y`` projection factor negative, flipping the grid
@@ -3334,6 +3412,8 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_state_support_eur_lifecycle", "Lifetime state support [EUR]"),
     ("total_state_support_clawback_eur_lifecycle",
      "Lifetime state-support netting [EUR]"),
+    ("total_capacity_market_revenue_eur_lifecycle",
+     "Lifetime capacity-market revenue [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the

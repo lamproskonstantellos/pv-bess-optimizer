@@ -291,6 +291,13 @@ def plot_revenue_stack_yearly(
         )
     else:
         support_net_arr = np.zeros_like(load_pv)
+    # Capacity-market payment (Eq. E32).
+    if "capacity_market_revenue_eur" in op.columns:
+        capacity_market_arr = (
+            op["capacity_market_revenue_eur"].astype(float).to_numpy()
+        )
+    else:
+        capacity_market_arr = np.zeros_like(load_pv)
     _toll_treatment = str(
         (econ or {}).get("bess_toll_merchant_treatment", "zeroed")
         or "zeroed"
@@ -477,6 +484,14 @@ def plot_revenue_stack_yearly(
             label="State support",
         )
         bottoms = bottoms + support_arr
+    if np.any(np.abs(capacity_market_arr) > 1e-9):
+        ax.bar(
+            years, capacity_market_arr, bottom=bottoms,
+            color=financial_color("Capacity-market revenue"),
+            edgecolor="black", linewidth=0.4,
+            label="Capacity-market revenue",
+        )
+        bottoms = bottoms + capacity_market_arr
     if np.any(np.abs(support_net_arr) > 1e-9):
         # Signed netting (Eq. E31a): compensation years stack with the
         # revenue components, clawback years below the fee stack (and
@@ -509,7 +524,10 @@ def plot_revenue_stack_yearly(
     # structural fees enter the yearly net the same way (their columns are
     # not folded into revenue_eur), so the line steps down by them too.
     net = net + bal_agg_fee + rtm_fee + opt_fee + gcf_fee + imb_cost
-    net = net + toll_arr + floor_topup_arr + support_arr + support_net_arr
+    net = (
+        net + toll_arr + floor_topup_arr + support_arr + support_net_arr
+        + capacity_market_arr
+    )
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The

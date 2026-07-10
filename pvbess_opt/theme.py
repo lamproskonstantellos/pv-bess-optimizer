@@ -307,6 +307,9 @@ FINANCIAL_COLORS: dict[str, str] = {
     # compensation above).
     "state_support":          "#FF8F00",  # Material amber 800
     "state_support_clawback": "#6A1B9A",  # Material purple 800
+    # Capacity-market payment (Eq. E32) — deep orange, the
+    # administered-price counterpart of the amber support band.
+    "capacity_market_revenue": "#D84315",  # Material deep orange 800
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -423,6 +426,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Tolling revenue",
     "State support",
     "State-support netting",
+    "Capacity-market revenue",
     "Grid-charging cost",
     "Energy aggregator fee",
     "Balancing aggregator fee",
@@ -469,6 +473,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Tolling revenue":                  "toll_revenue",
     "State support":                    "state_support",
     "State-support netting":            "state_support_clawback",
+    "Capacity-market revenue":          "capacity_market_revenue",
     "Grid-charging cost":               "grid_charge_cost",
     "Energy aggregator fee":            "aggregator_fee",
     "Balancing aggregator fee":         "balancing_aggregator_fee",
@@ -509,6 +514,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Tolling revenue",
     "State support",
     "State-support netting",
+    "Capacity-market revenue",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.

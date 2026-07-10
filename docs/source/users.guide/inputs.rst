@@ -300,6 +300,18 @@ Sheet ``economics``
   from LCOE/LCOS; the gross support is not scaled by the Revenue
   tornado driver while the netting is recomputed against the un-scaled
   threshold (revenue-stabilising).
+* ``capacity_market_eur_per_mw_year`` (default 0, off) /
+  ``capacity_market_derating_pct`` (default 100 %) /
+  ``capacity_market_year_from`` / ``capacity_market_year_to``
+  (defaults 1 / 0 = end of life) / ``capacity_market_indexation_pct``
+  (default 0): capacity-market payment on the DERATED power block
+  (Eq. E32).  Enter the auction's published storage class factor as
+  the derating (EU mechanisms derate storage by duration vs the
+  stress-event window); availability-scaled, no capacity-fade scaling.
+  Counts as realised market revenue for the state-support netting
+  (Eq. E31a).  Surfaces as ``capacity_market_revenue_eur`` (flat 1/12
+  monthly); excluded from LCOE/LCOS; not scaled by the Revenue
+  tornado driver (administered price).
 * ``optimizer_floor_enabled`` (default FALSE) /
   ``optimizer_floor_eur_per_kw_year`` (default 0) /
   ``optimizer_term_year_from`` / ``optimizer_term_year_to`` (defaults
