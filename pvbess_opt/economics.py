@@ -290,7 +290,89 @@ def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
         "ppa",
     ):
         merged.update(typed[section])
+    # The per-year trajectory block (Eq. E24) rides along under a
+    # reserved non-kv key: kv-sheet keys are lowercase snake_case
+    # scalars validated by the loader, so the flat merge stays lossless.
+    merged["trajectories"] = typed.get("trajectories")
     return merged
+
+
+# ---------------------------------------------------------------------------
+# Per-stream escalation (Eq. E24)
+# ---------------------------------------------------------------------------
+
+
+def _escalation_series(
+    stream: str,
+    inflation_frac: float,
+    n_years: int,
+    trajectories: dict[str, dict[str, Any]] | None,
+) -> list[float]:
+    """Per-year escalation factors ``g_y`` for ``stream`` (Eq. E24).
+
+    Index 0 is operating year 1.  Without a trajectory the series is the
+    flat scalar index ``(1 + i)^(y-1)``; a ``replace``-mode trajectory
+    substitutes its multipliers ``m_y``; ``overlay`` multiplies them on
+    top of the scalar index.  Both the yearly cashflow and the LCOE /
+    LCOS OPEX numerators MUST source their escalation from this one
+    helper so the metric and cashflow OPEX can never diverge (E24a).
+
+    The loader (``io.validate_workbook_params``) enforces full
+    1..project_lifecycle_years coverage and the ``m_1 == 1`` anchor; for
+    hand-built ``econ`` dicts that bypass it, a short vector holds its
+    LAST multiplier flat for the remaining years (predictable, never
+    silent-zero).
+    """
+    scalar = [(1.0 + inflation_frac) ** y for y in range(n_years)]
+    spec = (trajectories or {}).get(stream)
+    if not spec:
+        return scalar
+    values = [float(v) for v in spec["values"]][:n_years]
+    if len(values) < n_years:
+        values = values + [values[-1]] * (n_years - len(values))
+    if str(spec.get("mode", "replace")) == "replace":
+        return values
+    return [s * m for s, m in zip(scalar, values, strict=True)]
+
+
+def _contract_phase(
+    y: int, year_from: int, year_to: int, n_years: int,
+) -> bool:
+    """Contract phase-window indicator chi_y (Eq. E25).
+
+    True when operating year ``y`` lies in ``[year_from, year_to]``
+    inclusive; ``year_to = 0`` means end-of-life (``n_years``),
+    generalising the ``y <= ppa_term`` in-term gating the PPA stream
+    already uses.  Year 0 (construction) is never inside any phase.
+    Callers validate ``year_from >= 1`` and effective
+    ``year_to >= year_from`` at load; this helper is pure.
+    """
+    if y < 1:
+        return False
+    effective_to = n_years if int(year_to) == 0 else int(year_to)
+    return int(year_from) <= int(y) <= effective_to
+
+
+def _opex_escalation_series(
+    leg: str,
+    inflation_frac: float,
+    n_years: int,
+    trajectories: dict[str, dict[str, Any]] | None,
+) -> list[float]:
+    """OPEX escalation for one asset leg (Eq. E24a).
+
+    ``leg`` is ``opex_pv`` or ``opex_bess``.  When either per-asset
+    split stream is declared, each leg escalates on its own series (an
+    absent split leg falls back to the flat scalar); otherwise both legs
+    share the ``opex`` stream.  The yearly cashflow's OPEX row and the
+    LCOE / LCOS discounted-OPEX numerators all route through here — one
+    source, no metric drift.
+    """
+    if trajectories and (
+        "opex_pv" in trajectories or "opex_bess" in trajectories
+    ):
+        return _escalation_series(leg, inflation_frac, n_years, trajectories)
+    return _escalation_series("opex", inflation_frac, n_years, trajectories)
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +602,38 @@ def build_yearly_cashflow(
     opex_infl = float(econ["opex_inflation_pct"]) / 100.0
     discount_rate = float(econ["discount_rate_pct"]) / 100.0
     bm_infl = float(econ.get("bm_inflation_pct", 0.0) or 0.0) / 100.0
+
+    # Per-stream escalation series (Eq. E24): flat scalar indices unless
+    # a trajectory reshapes the stream.  The CfD DAM leg, the post-term
+    # PPA reversion and the optimizer-fee base (E13d) all ride the SAME
+    # DAM series as the merchant DAM revenue; the PPA strike escalates
+    # contractually (ppa_inflation_pct, no trajectory by design).
+    trajectories = econ.get("trajectories") or None
+    g_retail = _escalation_series(
+        "revenue_retail", retail_infl, n_years, trajectories,
+    )
+    g_dam = _escalation_series("revenue_dam", dam_infl, n_years, trajectories)
+    g_bm_cap = _escalation_series(
+        "balancing_capacity", bm_infl, n_years, trajectories,
+    )
+    g_bm_act = _escalation_series(
+        "balancing_activation", bm_infl, n_years, trajectories,
+    )
+    # Per-asset OPEX decomposition (Eq. E24a) — shared with the LCOE /
+    # LCOS numerators through _opex_escalation_series.  The split branch
+    # is entered ONLY when a per-asset stream is declared: the shared
+    # path keeps the historical -(pv+bess) * g grouping so a run without
+    # split trajectories stays bit-identical (float multiplication does
+    # not distribute exactly).
+    _split_opex = bool(trajectories) and bool(
+        {"opex_pv", "opex_bess"} & set(trajectories or {}),
+    )
+    _g_opex_pv = _opex_escalation_series(
+        "opex_pv", opex_infl, n_years, trajectories,
+    )
+    _g_opex_bess = _opex_escalation_series(
+        "opex_bess", opex_infl, n_years, trajectories,
+    )
     # Year-1 balancing revenue lines come from the KPI dict; they
     # already carry the BESS degradation factor for Year 1 (which is
     # 1.0) and degrade on the BESS capacity-fade curve via bess_factor
@@ -551,6 +665,15 @@ def build_yearly_cashflow(
     ppa_share_frac = max(0.0, min(1.0, float(
         econ.get("ppa_volume_share_pct", 0.0) or 0.0
     ) / 100.0))
+    # Negative-price suspension clause (Eqs. P6/P7): with the clause on,
+    # the fee-exempt covered export is the EXACT per-step KPI (suspended
+    # steps settle at spot and are NOT exempt), not the share-based
+    # approximation.  Without the clause the share-based algebra below
+    # is exact and stays bit-identical.
+    ppa_negative_rule = str(
+        econ.get("ppa_negative_price_rule", "none") or "none"
+    ).strip().lower()
+    ppa_exempt_export_mwh_1 = year1_kpis.get("ppa_fee_exempt_export_mwh")
     rev1_ppa = float(year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0)
     ppa_covered_dam_1 = float(
         year1_kpis.get("ppa_covered_dam_value_eur", 0.0) or 0.0
@@ -600,6 +723,7 @@ def build_yearly_cashflow(
             route_to_market_fee_y = 0.0
             optimizer_fee_y = 0.0
             ppa_y = 0.0
+            bess_market_rev_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -613,10 +737,10 @@ def build_yearly_cashflow(
             # per stream (retail vs DAM index).
             revenue_retail_y = (
                 rev1_retail_pv * pv_factor + rev1_retail_bess * bess_factor
-            ) * (1.0 + retail_infl) ** (y - 1)
+            ) * g_retail[y - 1]
             revenue_dam_y = (
                 rev1_dam_pv * pv_factor + rev1_dam_bess * bess_factor
-            ) * (1.0 + dam_infl) ** (y - 1)
+            ) * g_dam[y - 1]
             # PPA stream: in-term contract leg, or the post-term
             # physical reversion of the covered volume to the DAM
             # stream (where the fee below applies to it).
@@ -627,8 +751,7 @@ def build_yearly_cashflow(
                 )
                 if ppa_settlement == "cfd":
                     ppa_y = strike_leg - (
-                        ppa_covered_dam_1 * pv_factor
-                        * (1.0 + dam_infl) ** (y - 1)
+                        ppa_covered_dam_1 * pv_factor * g_dam[y - 1]
                     )
                 else:
                     ppa_y = strike_leg
@@ -636,8 +759,7 @@ def build_yearly_cashflow(
                 ppa_y = 0.0
                 if ppa_enabled and ppa_settlement != "cfd":
                     revenue_dam_y += (
-                        ppa_covered_dam_1 * pv_factor
-                        * (1.0 + dam_infl) ** (y - 1)
+                        ppa_covered_dam_1 * pv_factor * g_dam[y - 1]
                     )
             revenue_gross_y = revenue_retail_y + revenue_dam_y
             # The aggregator fee is by spec a non-negative deduction
@@ -647,17 +769,23 @@ def build_yearly_cashflow(
             # revenue_gross_y < 0 (a regime that can occur in pure-
             # arbitrage projects with sustained negative DAM hours).
             aggregator_fee_y = -max(revenue_gross_y, 0.0) * aggregator_fee_frac
-            opex_y = opex_1 * (1.0 + opex_infl) ** (y - 1)
+            if _split_opex:
+                opex_y = -(
+                    opex_pv_1 * _g_opex_pv[y - 1]
+                    + opex_bess_1 * _g_opex_bess[y - 1]
+                )
+            else:
+                opex_y = opex_1 * _g_opex_pv[y - 1]
             if bess_repl_year > 0 and y == bess_repl_year:
                 capex_y = capex_bess_y0 * (bess_repl_cost_pct / 100.0)
             else:
                 capex_y = 0.0
             devex_y = 0.0
             balancing_capacity_y = (
-                bm_cap_y1 * bess_factor * (1.0 + bm_infl) ** (y - 1)
+                bm_cap_y1 * bess_factor * g_bm_cap[y - 1]
             )
             balancing_activation_y = (
-                bm_act_y1 * bess_factor * (1.0 + bm_infl) ** (y - 1)
+                bm_act_y1 * bess_factor * g_bm_act[y - 1]
             )
             # Optional route-to-market (BSP) fee on GROSS balancing revenue.
             # A non-negative deduction, clamped at a zero-gross floor exactly
@@ -675,15 +803,33 @@ def build_yearly_cashflow(
             # by the offtaker, not the aggregator, so that share is exempt;
             # a CfD sells the full volume at DAM through the aggregator and
             # is not exempt.  Post-term the full export pays the fee.
-            _ppa_exempt_share = (
-                ppa_share_frac
-                if (ppa_enabled and ppa_settlement != "cfd" and y <= ppa_term)
-                else 0.0
+            _exemption_applies = (
+                ppa_enabled and ppa_settlement != "cfd" and y <= ppa_term
             )
-            route_to_market_fee_y = -route_to_market_fee_rate * (
-                pv_export_mwh_1 * pv_factor * (1.0 - _ppa_exempt_share)
-                + bess_export_mwh_1 * bess_factor
-            )
+            if (
+                _exemption_applies
+                and ppa_negative_rule == "suspend"
+                and ppa_exempt_export_mwh_1 is not None
+            ):
+                # Exact per-step exemption base under the suspension
+                # clause (Eqs. P6/P7): suspended-step export pays the
+                # fee, so the exempt volume is below share x export.
+                route_to_market_fee_y = -route_to_market_fee_rate * (
+                    max(
+                        (pv_export_mwh_1 - float(ppa_exempt_export_mwh_1))
+                        * pv_factor,
+                        0.0,
+                    )
+                    + bess_export_mwh_1 * bess_factor
+                )
+            else:
+                _ppa_exempt_share = (
+                    ppa_share_frac if _exemption_applies else 0.0
+                )
+                route_to_market_fee_y = -route_to_market_fee_rate * (
+                    pv_export_mwh_1 * pv_factor * (1.0 - _ppa_exempt_share)
+                    + bess_export_mwh_1 * bess_factor
+                )
             # Optimizer revenue share (Eq. E13d): a percentage of the POSITIVE
             # BESS wholesale trading margin (export minus grid charging,
             # already netted in rev1_dam_bess).  Clamped at zero — an
@@ -693,9 +839,21 @@ def build_yearly_cashflow(
             # The trailing +0.0 normalises the -0.0 produced when the
             # clamp binds (share x 0), keeping the column a clean zero.
             optimizer_fee_y = -optimizer_share_frac * max(
-                rev1_dam_bess * bess_factor * (1.0 + dam_infl) ** (y - 1),
+                rev1_dam_bess * bess_factor * g_dam[y - 1],
                 0.0,
             ) + 0.0
+            # BESS market-revenue base (Eq. E25a): the battery's
+            # wholesale trading margin (the E13d base, UNclamped) plus
+            # balancing revenue net of the BSP fee.  Informational only
+            # — the single netting base the contracted structures
+            # (tolling / floor+share / state-support clawback) read; it
+            # is NOT summed into net_cashflow_eur.  Availability-derated
+            # by construction (every input already carries A per E8).
+            bess_market_rev_y = (
+                rev1_dam_bess * bess_factor * g_dam[y - 1]
+                + balancing_capacity_y + balancing_activation_y
+                + balancing_aggregator_fee_y
+            )
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -741,6 +899,7 @@ def build_yearly_cashflow(
                 "balancing_activation_revenue_eur": float(balancing_activation_y),
                 "balancing_revenue_eur": float(balancing_revenue_y),
                 "balancing_aggregator_fee_eur": float(balancing_aggregator_fee_y),
+                "bess_market_revenue_eur": float(bess_market_rev_y),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -772,6 +931,12 @@ def derive_monthly_cashflow(
     Requires ``compute_kpis`` to have been called first so the per-step
     EUR columns are present on ``res``; raises otherwise rather than
     silently defaulting revenue to zero.
+
+    The informational ``bess_market_revenue_eur`` yearly column
+    (Eq. E25a) deliberately has NO monthly counterpart: it is a netting
+    base composed of streams that already reconcile individually, not a
+    cash flow of its own, so the monthly/yearly reconciliation contract
+    covers it implicitly through its components.
 
     Output frame columns
     --------------------
@@ -1368,6 +1533,13 @@ def compute_financial_kpis(
 
             opex_pv_per_kwp = float(econ.get("opex_pv_eur_per_kwp", 0.0))
             opex_infl_lcoe = float(econ.get("opex_inflation_pct", 0.0) or 0.0) / 100.0
+            # The SAME escalation series as the cashflow's OPEX row
+            # (Eq. E24a) — an OPEX trajectory must move LCOE identically.
+            _g_lcoe_opex = _opex_escalation_series(
+                "opex_pv", opex_infl_lcoe,
+                int(df.loc[op_mask, project_year_col].max()),
+                econ.get("trajectories") or None,
+            )
             disc_pv_opex = 0.0
             disc_pv_mwh = 0.0
             for y in df.loc[op_mask, project_year_col]:
@@ -1376,7 +1548,7 @@ def compute_financial_kpis(
                     continue
                 disc_y = float(disc_series.loc[yi])
                 opex_pv_y = (
-                    opex_pv_per_kwp * pv_kwp * (1.0 + opex_infl_lcoe) ** (yi - 1)
+                    opex_pv_per_kwp * pv_kwp * _g_lcoe_opex[yi - 1]
                 )
                 disc_pv_opex += disc_y * opex_pv_y
                 if ly is not None and yi in ly.index:
@@ -1435,13 +1607,19 @@ def compute_financial_kpis(
                 if "project_year" in lifetime_yearly.columns else None
             disc_series = df.set_index(project_year_col)["discount_factor"]
             opex_infl = float(econ.get("opex_inflation_pct", 0.0)) / 100.0
+            # Same series as the cashflow's BESS OPEX leg (Eq. E24a).
+            _g_lcos_opex = _opex_escalation_series(
+                "opex_bess", opex_infl,
+                int(df.loc[op_mask, project_year_col].max()),
+                econ.get("trajectories") or None,
+            )
             for y in df.loc[op_mask, project_year_col]:
                 yi = int(y)
                 if yi == 0:
                     continue
                 disc_y = float(disc_series.loc[yi])
                 opex_bess_y = (
-                    opex_bess_per_kw * bess_kw * (1.0 + opex_infl) ** (yi - 1)
+                    opex_bess_per_kw * bess_kw * _g_lcos_opex[yi - 1]
                 )
                 disc_bess_opex += disc_y * opex_bess_y
                 if ly is not None and yi in ly.index:

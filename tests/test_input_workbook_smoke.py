@@ -33,7 +33,7 @@ def test_repo_input_xlsx_has_all_sheets():
         "timeseries", "project", "pv", "bess", "economics",
         "simulation", "balancing", "ppa", "max_injection_profile",
         "max_injection_profile_pv", "max_injection_profile_bess",
-        "sizing", "scenarios",
+        "sizing", "scenarios", "trajectories",
     }
 
 

@@ -26,6 +26,9 @@ in order:
    their short numeric columns read better with centered headers.  The
    general house style deliberately leaves header alignment at the
    Excel default (see :mod:`pvbess_opt.io_style`).
+6. Create the optional ``trajectories`` sheet (per-year stream
+   multipliers, Eq. E24) with its shipped disabled example when the
+   workbook predates it; an existing sheet is left untouched.
 """
 
 from __future__ import annotations
@@ -269,6 +272,32 @@ def _ensure_parameter_sheets(wb) -> None:
             ws.append([key, default, unit, notes])
 
 
+def _ensure_trajectories_sheet(wb) -> bool:
+    """Create the optional ``trajectories`` sheet when absent.
+
+    Written with the shipped disabled example
+    (:data:`pvbess_opt.io._TRAJECTORIES_EXAMPLE_ROWS`) so the tidy
+    per-year multiplier format is self-documenting; an existing sheet is
+    left untouched (idempotent — user values are never rewritten).
+    Returns True when the sheet was created.
+    """
+    if "trajectories" in wb.sheetnames:
+        return False
+    from pvbess_opt.io import (
+        _TRAJECTORIES_EXAMPLE_ROWS,
+        TRAJECTORIES_SHEET_COLUMNS,
+    )
+
+    logger.info(
+        "creating missing 'trajectories' sheet with the disabled example.",
+    )
+    ws = wb.create_sheet("trajectories")
+    ws.append(list(TRAJECTORIES_SHEET_COLUMNS))
+    for row in _TRAJECTORIES_EXAMPLE_ROWS:
+        ws.append(list(row))
+    return True
+
+
 def polish_workbook(path: Path) -> dict[str, int]:
     """Polish ``path`` in place and return per-sheet diagnostics.
 
@@ -282,6 +311,7 @@ def polish_workbook(path: Path) -> dict[str, int]:
     if "bess" in wb.sheetnames:
         _migrate_legacy_bess_capex(wb["bess"])
     _ensure_parameter_sheets(wb)
+    _ensure_trajectories_sheet(wb)
     cleared_by_sheet: dict[str, int] = {}
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]

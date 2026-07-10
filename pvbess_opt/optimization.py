@@ -1091,15 +1091,32 @@ def build_model(
     # one effective PV-export price serves both.  This deliberately lets
     # covered PV keep exporting through negative-DAM hours while the
     # uncovered share curtails (the documented behaviour of
-    # generation-settled as-produced contracts; see docs/ppa_design.md).
+    # generation-settled as-produced contracts; see docs/ppa_design.md)
+    # — UNLESS the negative-price suspension clause opts out of it: with
+    # ppa_negative_price_rule = 'suspend', every step with DAM < 0
+    # (strict, Eq. P6) settles the covered volume at spot too, so the
+    # effective export price collapses to the DAM (Eq. P8) and the MILP
+    # rationally curtails or routes PV into the BESS instead of
+    # exporting at a loss.  The mask derives from THIS call's dam_price,
+    # so rolling-horizon windows recompute it per window.
     ppa_cfg = resolve_ppa_config(params.get("ppa"))
     if ppa_cfg.active and pv_present:
         s_ppa = ppa_cfg.share_frac
         strike = float(ppa_cfg.ppa_price_eur_per_mwh)
-        pv_export_price = {
-            t: (1.0 - s_ppa) * dam_price[t] + s_ppa * strike
-            for t in time_index
-        }
+        if ppa_cfg.suspension_active:
+            pv_export_price = {
+                t: (
+                    dam_price[t]
+                    if dam_price[t] < 0.0
+                    else (1.0 - s_ppa) * dam_price[t] + s_ppa * strike
+                )
+                for t in time_index
+            }
+        else:
+            pv_export_price = {
+                t: (1.0 - s_ppa) * dam_price[t] + s_ppa * strike
+                for t in time_index
+            }
     else:
         pv_export_price = dam_price
 

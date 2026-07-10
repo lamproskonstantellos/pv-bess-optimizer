@@ -64,6 +64,12 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     # total they compose.
     "pv_export_mwh",
     "bess_export_mwh",
+    # Fee-exempt covered export under the PPA negative-price suspension
+    # clause (Eqs. P6/P7): a metered-export volume that scales linearly
+    # with availability exactly like pv_export_mwh, whose fee role it
+    # refines.  Absent unless the clause is on (missing keys are
+    # skipped).
+    "ppa_fee_exempt_export_mwh",
     # ``system_total_import_mwh`` is scaled by ``factor`` here like the rest,
     # then corrected in ``apply_unavailability_derate`` to add the downtime
     # load the grid must cover (it RISES with unavailability, unlike the

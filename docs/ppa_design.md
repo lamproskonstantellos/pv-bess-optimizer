@@ -108,10 +108,45 @@ Consequences:
   rational) while the covered share keeps exporting as long as
   $p^{\mathrm{eff}}_t > 0$, exactly the documented behaviour of
   as-produced, generation-settled contracts.  Deliberate: the engine
-  models the contract the user signed, distortion included.
+  models the contract the user signed, distortion included — unless
+  the contract carries the negative-price suspension clause below,
+  which opts out of it.
 * Storage arbitrage and curtailment decisions see the contract price,
   so a high strike shifts PV-vs-BESS export priority under binding
   injection caps.
+
+### Negative-price suspension (Eqs. P6-P8)
+
+`ppa_negative_price_rule = 'suspend'` (default `'none'`) pauses the
+contract in negative-DAM steps — the standard clause of post-2024
+European pay-as-produced offtake terms and premium schemes.  The
+per-step mask (shared classifier `ppa.negative_price_mask`; strict
+inequality, a zero price is not suspended):
+
+$$m_t = \mathbf{1}\left[\, \pi^{\mathrm{DAM}}_t < 0 \,\right] \tag{P6}$$
+
+Settlement on the covered volume $\mathrm{cov}_t = s\,(1-m_t)\,x^{pg}_t$
+(Eq. P7): physical pays the strike on $\mathrm{cov}_t$ only and the
+affected export re-enters the market column at spot; cfd suspends the
+difference leg while the market leg keeps selling the full volume at
+DAM.  Both settlements still total identically per step.  The dispatch
+price (supersedes P4 when the clause is on):
+
+$$p^{\mathrm{eff}}_t = m_t\, \pi^{\mathrm{DAM}}_t
++ (1-m_t)\left[(1-s)\, \pi^{\mathrm{DAM}}_t + s\, \pi^{\mathrm{PPA}}\right] \tag{P8}$$
+
+so covered PV faces spot in suspended steps and the MILP rationally
+curtails or routes PV into the BESS instead of exporting at a loss
+(note: the tiebreak curtailment weight means near-zero negative prices
+with $|\pi^{\mathrm{DAM}}_t|$ below the tiebreak weight may still
+export).  The Year-1 KPI bases absorb the mask, so the multi-year
+machinery (P5/E12) is unchanged except the route-to-market exemption
+base: with the clause on, the exact per-step covered export surfaces
+as the availability-derated KPI `ppa_fee_exempt_export_mwh` and the
+E13c exemption uses it instead of the share-based approximation
+(bit-identical fallback without the clause).  The mask derives from
+each solve's own price slice, so rolling-horizon windows recompute it
+per window.
 
 ## Settlement & cashflow equations
 
@@ -185,6 +220,8 @@ Scope rules (one scope across every consumer, per
 | validation | `io._validate_ppa_config`; baseload rejection `io.py` (`_ALLOWED_VALUES['ppa_structure']`) |
 | plots | PPA bar in the yearly revenue stack + lifecycle stack; `PPA price` tornado driver (`docs/source/users.guide/financial_plots.rst`) |
 
+| negative-price suspension | `ppa.negative_price_mask` + `PpaConfig.suspension_active` (P6); `kpis.add_economic_columns` masked settlement (P7); `optimization.build_model` effective export price (P8); `economics.build_yearly_cashflow` exact fee-exemption base; `availability` derate list (`ppa_fee_exempt_export_mwh`) |
+
 ## Validation & tests
 
 * `tests/test_ppa_engine.py`: cent-level locks on Eqs. (P1)-(P5),
@@ -228,9 +265,9 @@ $\pi^{\mathrm{PPA}} = 65$, $s = 0.8$:
   the profile with the BESS.  That is a contract-vs-physics feature
   of its own; the enum reserves `ppa_structure = 'baseload'` as a
   rejected-with-guidance value.
-* Negative-price suspension clauses (payments paused while DAM < 0)
-  and deemed-volume / production-decoupled CfDs change the dispatch
-  incentive and are left as follow-ups.
+* Negative-price suspension clauses are implemented
+  (`ppa_negative_price_rule = 'suspend'`, Eqs. P6-P8); deemed-volume /
+  production-decoupled CfDs remain follow-ups.
 * The Year-1 dispatch is optimised under the contract and Years 2..N
   reuse its shape (the analytic projection), so a contract expiring
   mid-horizon does not re-shape post-term *physical* dispatch.  Only

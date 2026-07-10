@@ -5,7 +5,7 @@ Covers:
 * The core sheet layout (``timeseries`` / ``project`` / ``pv`` / ``bess`` /
   ``economics`` / ``simulation`` / ``balancing`` /
   ``max_injection_profile``) plus the optional ``sizing`` / ``scenarios``
-  sweep sheets.
+  / ``trajectories`` sheets.
 * Round-trip preservation through ``write_workbook`` /
   ``read_workbook``.
 * Sheet-aware unknown-key warnings.
@@ -126,6 +126,7 @@ def test_ppa_sheet_keys():
         "ppa_enabled", "ppa_structure", "ppa_settlement",
         "ppa_price_eur_per_mwh", "ppa_volume_share_pct",
         "ppa_term_years", "ppa_inflation_pct",
+        "ppa_negative_price_rule",
     }
     assert set(PPA_SHEET_DEFAULTS) == expected
 
@@ -156,7 +157,7 @@ def test_all_sheets_present(repo_input_xlsx):
         "timeseries", "project", "pv", "bess", "economics",
         "simulation", "balancing", "ppa", "max_injection_profile",
         "max_injection_profile_pv", "max_injection_profile_bess",
-        "sizing", "scenarios",
+        "sizing", "scenarios", "trajectories",
     }
 
 

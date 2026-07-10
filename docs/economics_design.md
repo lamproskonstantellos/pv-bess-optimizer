@@ -6,6 +6,26 @@ aggregates, the aggregator fee, degradation scaling, replacement,
 debt, the headline financial KPIs, and LCOE/LCOS.  Notation follows
 the shared table in `docs/README.md`.
 
+## Equation tag registry
+
+Every numbered equation across the design documents draws its tag from
+one global registry so tags never collide (the availability import
+correction had to be renumbered E8a after a duplicate-E9 incident —
+allocate here first, then write the equation).  One counter per
+namespace; a tag, once merged, is never reused or renumbered.
+
+| Namespace | Owner document | Scope | Highest allocated |
+|---|---|---|---|
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E25a (+ suffixed E8a, E13a-E13d) |
+| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U5 |
+| P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
+| S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
+| B | (reserved) | balancing product structure | — |
+| I | (reserved) | intraday venue | — |
+
+New equations take the next free tag in their namespace at merge time
+and add a row to the owning document's implementation map.
+
 ## Purpose & scope
 
 The MILP (see `docs/self_consumption_design.md` /
@@ -297,6 +317,58 @@ its own signed `balancing_aggregator_fee_eur` cashflow column, and is
 balancing revenue. A realistic range is ~5-20 % for behind-the-meter /
 smaller assets; 0 for utility-scale BSPs that self-dispatch.
 
+### Per-year trajectory vectors (Eq. E24/E24a)
+
+Every stream's flat inflation index generalises to a per-year
+escalation series sourced from the optional `trajectories` input
+surface (workbook sheet / YAML block, `docs/source/users.guide/inputs.rst`):
+
+$$g^s_y = \begin{cases}
+(1+i_s)^{y-1} & \text{no trajectory for stream } s\\
+m^s_y & \text{mode replace}\\
+(1+i_s)^{y-1}\, m^s_y & \text{mode overlay}
+\end{cases} \qquad m^s_1 = 1 \tag{E24}$$
+
+E24 substitutes the escalation factor wherever a stream index appears:
+retail (E9), DAM (E10) **including** the CfD DAM leg and the post-term
+PPA physical reversion (E12) and the optimizer-share base (E13d) — all
+DAM-priced quantities ride the same series — and balancing capacity /
+activation (E11, independently shapeable; the BSP fee E13b inherits the
+shape through proportionality).  Deliberate exclusions: the PPA strike
+escalates contractually via $i_{\mathrm{PPA}}$, and the route-to-market
+fee (E13c) is a flat per-MWh volume charge.  Typical uses: a DAM
+capture-rate decline as PV build-out compresses solar-hour prices, an
+ancillary-services price decay as the balancing fleet saturates, and
+stepped OPEX (post-warranty LTSA step, insurance).
+
+The OPEX row decomposes per asset leg (Eq. E24a):
+
+$$O_y = -\left(o_{\mathrm{PV}}\,\mathrm{kWp}\; g^{\mathrm{opex\_pv}}_y
++ o_{\mathrm{B}}\, P_{\mathrm{B}}\; g^{\mathrm{opex\_bess}}_y\right) \tag{E24a}$$
+
+where the per-asset streams `opex_pv` / `opex_bess` (mutually exclusive
+with the shared `opex` stream) default to the shared series when not
+declared.  The LCOE (E21) and LCOS (E22) discounted-OPEX numerators use
+the **identical** series through the same helper
+(`economics._opex_escalation_series`), so the cashflow OPEX and the
+metric OPEX can never diverge; OPEX trajectories therefore move
+LCOE/LCOS (plant O&M is in both metrics) while revenue and balancing
+trajectories never do (the metrics are revenue-agnostic).  The Year-1
+anchor $m^s_1 = 1$ keeps the Year-1 cashflow equal to the dispatch-KPI
+base, preserving the `profit_total_eur` reconciliation guard.
+
+In the sensitivity tornado the Revenue driver's uniform $\pm\delta$
+scaling commutes with per-year multipliers (it perturbs the price
+LEVEL on top of the trajectory SHAPE), so trajectory-shaped revenue
+columns and `optimizer_fee_eur` scale with the driver while
+`route_to_market_fee_eur` remains volume-based and untouched.
+
+Price decks (`docs/source/users.guide/inputs.rst`) are the structural
+complement: a scenario's deck swaps the Year-1 price inputs and
+re-solves the dispatch, then the multi-year projection applies
+E9-E15 (and any trajectories) unchanged — an input swap, deliberately
+NOT a new equation.
+
 ### Route-to-market and optimizer fees (structural market-access costs)
 
 Two structural fees model how European producers actually pay for
@@ -367,6 +439,39 @@ with $V_y$ the DEVEX column (Year 0 only) and Year 0 carrying
 $\mathrm{CF}_0 = \mathrm{CAPEX}_0 + \mathrm{DEVEX}_0$.  Discounted:
 $\mathrm{DCF}_y = \mathrm{CF}_y \cdot D_y$; cumulative columns
 accumulate both.
+
+### Contracted BESS revenue layer (foundations)
+
+Two primitives every contracted BESS structure (tolling, optimizer
+floor + share, state support with clawback, capacity market) will
+read; both land ahead of the structures themselves and change no
+result.
+
+Phase-window indicator (`economics._contract_phase`):
+
+$$\chi_y(y_f, y_t) = \mathbf{1}\left[\, y_f \le y \le y_t' \,\right],
+\qquad y_t' = \begin{cases} Y & y_t = 0\\ y_t & \text{else} \end{cases} \tag{E25}$$
+
+with $y_f \ge 1$; Year 0 is never inside any phase.  This generalises
+the `y <= ppa_term` in-term gating the PPA stream already uses.
+
+BESS market-revenue base (informational `bess_market_revenue_eur`
+column):
+
+$$M_y = R^{\mathrm{DAM,B}}_1\, f^{B}_y\, g^{\mathrm{dam}}_y
++ R^{\mathrm{bm,cap}}_y + R^{\mathrm{bm,act}}_y + F^{\mathrm{bm}}_y \tag{E25a}$$
+
+— the battery's wholesale trading margin (the E13d base, **unclamped**:
+a loss year stays negative) plus balancing revenue net of the BSP fee,
+riding the DAM escalation series $g^{\mathrm{dam}}_y$ (E24).  It
+excludes self-consumption savings, the PPA stream and every contracted
+stream, and is availability-derated by construction (all inputs carry
+$A$ per E8).  The column is **informational**: it is NOT summed into
+`net_cashflow_eur` (the sensitivity `_recompute_net` excludes it
+explicitly) and has no monthly counterpart — it is the single netting
+base the contracted structures will read, and the Revenue tornado
+driver scales it (price-proportional) so piecewise contract terms can
+be recomputed exactly from a scaled base.
 
 ### Financial KPIs
 
@@ -507,6 +612,10 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E16)-(E19) | `economics.compute_financial_kpis`, `economics.calculate_irr`, `economics._payback_year` |
 | (E20) | `economics._amortization_schedule`, `_leverage_kpis`, `build_debt_schedule` |
 | (E21)-(E23) | `compute_financial_kpis` LCOE/LCOS block |
+| (E24) | `economics._escalation_series` (all six escalation sites in `build_yearly_cashflow`) |
+| (E24a) | `economics._opex_escalation_series` (cashflow OPEX row + LCOE/LCOS OPEX numerators) |
+| (E25) | `economics._contract_phase` |
+| (E25a) | `build_yearly_cashflow` bess_market_revenue_eur column |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

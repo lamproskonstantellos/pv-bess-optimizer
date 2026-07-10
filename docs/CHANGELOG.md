@@ -34,6 +34,77 @@ Production release.
   warns when the legacy `aggregator_fee_pct_revenue` and the optimizer
   share are combined (double-charging the battery's wholesale stream).
 
+### Added (per-year stream trajectories)
+
+- Optional per-year escalation vectors per revenue/cost stream
+  (Eq. E24/E24a), default-off and bit-identical when unset: a new
+  `trajectories` workbook sheet (tidy: `enabled|stream|mode|year|value`)
+  and equivalent YAML `trajectories:` block reshape `revenue_dam`
+  (PV capture-rate decline; the CfD DAM leg, the post-term PPA
+  reversion and the optimizer-share base ride the same series),
+  `revenue_retail`, `balancing_capacity` / `balancing_activation`
+  (ancillary-services price decay as the fleet saturates) and `opex`
+  or the per-asset `opex_pv` / `opex_bess` split (post-warranty LTSA
+  step, insurance) — `replace` substitutes the stream's flat
+  `(1+i)^(y-1)` index (the loader warns when the matching
+  `*_inflation_pct` is also non-zero), `overlay` multiplies on top.
+  Vectors must cover every operating year and anchor at 1.0 in year 1
+  (the Year-1 cashflow stays equal to the dispatch base).  The LCOE /
+  LCOS discounted-OPEX numerators consume the identical series as the
+  cashflow OPEX row, so metric and cashflow OPEX cannot diverge; the
+  PPA strike and the route-to-market fee deliberately take no
+  trajectory.  YAML scenario files can override trajectories per
+  scenario (the Excel scenarios sheet cannot carry per-year vectors
+  and says so).  The polish script adds the disabled sheet to
+  workbooks that predate it.
+
+### Added (multi-scenario price decks)
+
+- Named price decks as first-class scenario inputs: `<column>__<deck>`
+  variant columns on the base `timeseries` sheet (DAM, retail and the
+  balancing price columns; double underscore reserved and validated)
+  stay inert in a normal run and are selected per scenario with the
+  bare `price_deck` target — the deck's columns are copied onto the
+  canonical names before the per-scenario re-solve, so Low/Central/High
+  fundamentals change the DISPATCH, not just the cashflow scaling.
+  Partial decks fall back to base columns (INFO); a deck matching no
+  variant column fails before any solver time; deck-resolved balancing
+  columns win over the scalar fallback.  YAML configs may keep decks in
+  external files via a top-level `price_decks:` mapping.  The
+  comparison table/workbook and the comparison bars carry a deck
+  column / `[deck]` tick suffix only when a deck is used (deck-free
+  batches stay bit-identical).
+
+### Added (contracted-BESS foundations)
+
+- Two shared primitives for the upcoming contracted BESS revenue
+  structures, result-neutral by construction: the contract phase-window
+  indicator `economics._contract_phase` (Eq. E25; `year_to = 0` means
+  end-of-life, Year 0 is never in a phase) and the informational yearly
+  column `bess_market_revenue_eur` (Eq. E25a) — the battery's UNclamped
+  wholesale trading margin plus balancing revenue net of the BSP fee,
+  riding the DAM escalation series.  The column is the single netting
+  base tolling / floor+share / clawback structures will read; it is not
+  summed into `net_cashflow_eur`, has no monthly counterpart, and the
+  Revenue tornado driver scales it price-proportionally.
+
+### Added (PPA negative-price suspension clause)
+
+- `ppa_negative_price_rule` — `none` (default, unchanged as-produced
+  behaviour) or `suspend`: the contract pauses in every step with
+  DAM < 0 (strict; Eqs. P6-P8).  Physical settlement stops paying the
+  strike on the covered volume, which then faces spot; CfD suspends
+  the difference leg while the market leg keeps selling; both still
+  total identically per step.  The dispatch reacts — the effective PV
+  export price collapses to the DAM in suspended steps, so the MILP
+  curtails or charges the BESS instead of exporting covered PV at a
+  loss (the standard clause of post-2024 European pay-as-produced
+  terms and premium schemes).  With the clause on, the exact per-step
+  covered export surfaces as the availability-derated KPI
+  `ppa_fee_exempt_export_mwh` and the route-to-market exemption (E13c)
+  uses it instead of the share-based approximation; without it every
+  path is bit-identical to before.
+
 ### Changed (aggregator fee template default)
 
 - The `aggregator_fee_pct_revenue` template default drops from 10 % to

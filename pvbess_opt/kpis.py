@@ -356,17 +356,46 @@ def add_economic_columns(
     if ppa_cfg.active:
         share = ppa_cfg.share_frac
         strike = float(ppa_cfg.ppa_price_eur_per_mwh)
-        covered_mwh = share * res["pv_to_grid_kwh"] / 1000.0
-        res["ppa_covered_dam_value_eur"] = covered_mwh * dam_series
-        if ppa_cfg.ppa_settlement == "physical":
-            # The covered volume is paid the strike and never touches
-            # the DAM; the market column keeps the uncovered share only.
-            res["revenue_pv_ppa_eur"] = covered_mwh * strike
-            res["profit_export_from_pv_eur"] = (
-                (1.0 - share) * res["pv_to_grid_kwh"] / 1000.0 * dam_series
+        if ppa_cfg.suspension_active:
+            # Negative-price suspension (Eqs. P6/P7): in every step
+            # with DAM < 0 the contract is paused — the covered volume
+            # collapses to zero and the affected export settles at spot
+            # in the market column.  Physical and CfD still total
+            # identically per step.
+            from .ppa import negative_price_mask
+
+            not_suspended = (~negative_price_mask(dam_series)).astype(
+                float,
             )
-        else:  # cfd — two-way settlement on top of full DAM exposure.
-            res["revenue_pv_ppa_eur"] = covered_mwh * (strike - dam_series)
+            covered_kwh = share * res["pv_to_grid_kwh"] * not_suspended
+            covered_mwh = covered_kwh / 1000.0
+            res["ppa_covered_dam_value_eur"] = covered_mwh * dam_series
+            if ppa_cfg.ppa_settlement == "physical":
+                res["revenue_pv_ppa_eur"] = covered_mwh * strike
+                res["profit_export_from_pv_eur"] = (
+                    (res["pv_to_grid_kwh"] - covered_kwh)
+                    / 1000.0 * dam_series
+                )
+            else:  # cfd — difference leg suspended, market leg full.
+                res["revenue_pv_ppa_eur"] = covered_mwh * (
+                    strike - dam_series
+                )
+        else:
+            covered_mwh = share * res["pv_to_grid_kwh"] / 1000.0
+            res["ppa_covered_dam_value_eur"] = covered_mwh * dam_series
+            if ppa_cfg.ppa_settlement == "physical":
+                # The covered volume is paid the strike and never
+                # touches the DAM; the market column keeps the
+                # uncovered share only.
+                res["revenue_pv_ppa_eur"] = covered_mwh * strike
+                res["profit_export_from_pv_eur"] = (
+                    (1.0 - share) * res["pv_to_grid_kwh"]
+                    / 1000.0 * dam_series
+                )
+            else:  # cfd — two-way settlement on top of full DAM exposure.
+                res["revenue_pv_ppa_eur"] = covered_mwh * (
+                    strike - dam_series
+                )
     return res
 
 
@@ -460,6 +489,34 @@ def compute_kpis(
     pv_export = _sum_mwh(res, "pv_to_grid_kwh")
     bess_export = _sum_mwh(res, "bess_dis_grid_kwh")
     total_export = pv_export + bess_export
+
+    # Fee-exempt covered export (Eqs. P6/P7 + E13c): under a PHYSICAL
+    # (sleeved) in-term contract the covered PV export is routed by the
+    # offtaker and pays no route-to-market fee.  With the negative-price
+    # suspension clause the covered volume excludes suspended steps, so
+    # the share-based approximation over-states the exemption — the
+    # exact per-step sum is exported as its own KPI (only when the
+    # clause is on; without it the cashflow's share-based algebra is
+    # exact and stays bit-identical).
+    _ppa_cfg_kpi = resolve_ppa_config(params.get("ppa"))
+    ppa_fee_exempt_export_mwh: float | None = None
+    if (
+        _ppa_cfg_kpi.suspension_active
+        and _ppa_cfg_kpi.ppa_settlement == "physical"
+        and "pv_to_grid_kwh" in res.columns
+        and "dam_price_eur_per_mwh" in res.columns
+    ):
+        from .ppa import negative_price_mask
+
+        _not_susp = (
+            ~negative_price_mask(res["dam_price_eur_per_mwh"].fillna(0.0))
+        ).astype(float)
+        ppa_fee_exempt_export_mwh = float(
+            (
+                _ppa_cfg_kpi.share_frac
+                * res["pv_to_grid_kwh"].fillna(0.0) * _not_susp
+            ).sum() / 1000.0
+        )
     total_import = (
         _sum_mwh(res, "grid_to_load_kwh") + _sum_mwh(res, "bess_charge_grid_kwh")
     )
@@ -538,6 +595,11 @@ def compute_kpis(
         "system_total_export_mwh": round(total_export, 4),
         "pv_export_mwh": round(pv_export, 4),
         "bess_export_mwh": round(bess_export, 4),
+        **(
+            {"ppa_fee_exempt_export_mwh":
+                 round(ppa_fee_exempt_export_mwh, 4)}
+            if ppa_fee_exempt_export_mwh is not None else {}
+        ),
         "bess_total_charge_mwh": round(total_charge, 4),
         "pv_to_bess_mwh": round(pv_to_bess, 4),
         "bess_charge_grid_mwh": round(bess_charge_grid, 4),

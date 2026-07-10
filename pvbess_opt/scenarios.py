@@ -88,7 +88,7 @@ _OVERRIDE_SECTIONS: tuple[str, ...] = (
     "project", "pv", "bess", "economics", "simulation", "balancing", "ppa",
 )
 _BARE_SPECIALS: frozenset[str] = frozenset({
-    "name", "inherits", "capex_multiplier",
+    "name", "inherits", "capex_multiplier", "price_deck",
 })
 
 
@@ -107,10 +107,47 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
 
     name = scenario.get("name", "<unnamed>")
     for section, value in scenario.items():
+        if section == "price_deck":
+            # A deck is a NAME into the base timeseries' variant
+            # columns; existence of matching columns is checked
+            # fail-fast in run_scenario_batch (needs the base ts).
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(
+                    f"scenario {name!r}: 'price_deck' must be a "
+                    f"non-empty deck name (matching the "
+                    f"<column>__<deck> variant columns of the base "
+                    f"timeseries)."
+                )
+            continue
         if section in _BARE_SPECIALS:
             continue
         if section == "balancing" and not isinstance(value, dict):
             continue  # bare on/off scalar
+        if section == "trajectories":
+            # Per-year stream multipliers (Eq. E24) — YAML scenario
+            # files only: a single scenarios-sheet cell cannot carry a
+            # per-year vector.
+            from .io import _normalise_trajectories_block
+
+            if not isinstance(value, dict):
+                raise ValueError(
+                    f"scenario {name!r}: 'trajectories' must be a "
+                    f"mapping of stream name to a values list or "
+                    f"{{mode, values}} block."
+                )
+            for stream, spec in value.items():
+                if not isinstance(spec, (list, tuple, dict)):
+                    raise ValueError(
+                        f"scenario {name!r}: trajectories.{stream} needs "
+                        "a per-year vector, which a single "
+                        "scenarios-sheet cell cannot carry; declare the "
+                        "override in a YAML scenarios file passed with "
+                        "--scenarios."
+                    )
+            _normalise_trajectories_block(
+                value, source=f"scenario {name!r}",
+            )
+            continue
         if section not in _OVERRIDE_SECTIONS:
             owner = _KEY_TO_SHEET.get(section)
             hint = (
@@ -146,6 +183,58 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
             raise ValueError(
                 f"scenario {name!r}: unknown key {section}.{key!r}{hint}"
             )
+
+
+def _strip_price_deck_variants(ts: pd.DataFrame) -> pd.DataFrame:
+    """Drop every ``<base>__<deck>`` variant column from ``ts``.
+
+    Variant columns are inert in a normal run; the per-scenario MILP
+    never sees them (smaller materialized workbooks, and the balancing
+    scalar fallback on the re-read operates on the canonical columns
+    the deck resolution produced).
+    """
+    variants = [c for c in ts.columns if "__" in str(c)]
+    return ts.drop(columns=variants) if variants else ts
+
+
+def _apply_price_deck(
+    ts: pd.DataFrame, deck: str, *, scenario_name: str,
+) -> pd.DataFrame:
+    """Resolve a named price deck onto the canonical price columns.
+
+    Copies every ``<base>__<deck>`` variant onto ``<base>`` (partial
+    decks allowed: a canonical column without a variant for this deck
+    keeps its base values, INFO-logged), then strips ALL variant
+    columns.  Raises when the deck matches no variant column — the
+    batch runner calls this fail-fast before any solver time is spent.
+    """
+    from .io import PRICE_DECK_BASE_COLUMNS
+
+    deck = str(deck).strip().lower()
+    ts = ts.copy()
+    hits = 0
+    for base in PRICE_DECK_BASE_COLUMNS:
+        variant = f"{base}__{deck}"
+        if variant in ts.columns:
+            ts[base] = ts[variant].astype(float)
+            hits += 1
+        elif base in ts.columns:
+            logger.info(
+                "scenario %r price deck %r: no %s variant column; the "
+                "base column's values are kept.",
+                scenario_name, deck, base,
+            )
+    if hits == 0:
+        available = sorted({
+            str(c).split("__", 1)[1]
+            for c in ts.columns if "__" in str(c)
+        })
+        raise ValueError(
+            f"scenario {scenario_name!r}: price deck {deck!r} matches no "
+            f"<column>__{deck} variant column in the base timeseries; "
+            f"decks available: {available or 'none'}."
+        )
+    return _strip_price_deck_variants(ts)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -219,6 +308,38 @@ def _apply_scenario_overrides(
             _to_float(typed["project"].get("site_capex_eur", 0.0)) * m
         )
 
+    # Trajectory overrides merge per stream: an overridden stream
+    # replaces the base workbook's vector wholesale, untouched base
+    # streams are kept.  Lifecycle coverage and the Year-1 anchor are
+    # re-validated on the materialize round-trip (read_workbook →
+    # validate_workbook_params), so a scenario that also overrides
+    # project_lifecycle_years is checked against the NEW length.
+    traj_override = scenario.get("trajectories")
+    if traj_override is not None:
+        from .io import _normalise_trajectories_block
+
+        block = _normalise_trajectories_block(
+            traj_override,
+            source=f"scenario {scenario.get('name', '<unnamed>')!r}",
+        )
+        base_block = typed.get("trajectories") or {}
+        typed["trajectories"] = {
+            **copy.deepcopy(base_block), **(block or {}),
+        } or None
+
+    # Price deck resolution happens BEFORE the workbook is written, so
+    # the balancing scalar fallback on the re-read sees the deck values
+    # in the canonical columns; without a deck the inert variant
+    # columns are stripped so the per-scenario MILP never sees them.
+    deck = scenario.get("price_deck")
+    if deck is not None and "ts" in typed:
+        typed["ts"] = _apply_price_deck(
+            typed["ts"], str(deck),
+            scenario_name=str(scenario.get("name", "<unnamed>")),
+        )
+    elif "ts" in typed:
+        typed["ts"] = _strip_price_deck_variants(typed["ts"])
+
     # The base PV profile is already resolved; scenarios rescale it by
     # nameplate through the standard read path, so force file mode.
     typed["pv"]["pv_source"] = "file"
@@ -258,6 +379,7 @@ def evaluate_scenario(
 
     row: dict[str, Any] = {
         "name": scenario.get("name", "scenario"),
+        "price_deck": str(scenario.get("price_deck") or ""),
         "pv_nameplate_kwp": _to_float(params.get("pv_nameplate_kwp", 0.0)),
         "bess_power_kw": _to_float(params.get("bess_power_kw", 0.0)),
         "bess_capacity_kwh": _to_float(params.get("bess_capacity_kwh", 0.0)),
@@ -288,11 +410,27 @@ def run_scenario_batch(
     # scenario N failing after N-1 solves wastes minutes per batch.
     for scn in resolved:
         validate_scenario_overrides(scn)
+        deck = scn.get("price_deck")
+        if deck is not None and "ts" in base_typed:
+            # Raises on a deck with no matching variant columns; the
+            # resolved frame itself is discarded here.
+            _apply_price_deck(
+                base_typed["ts"], str(deck),
+                scenario_name=str(scn.get("name", "<unnamed>")),
+            )
     rows = [
         evaluate_scenario(base_typed, scn, solver_opts=solver_opts)
         for scn in resolved
     ]
-    return pd.DataFrame(rows, columns=list(_COMPARISON_COLUMNS))
+    # The comparison gains a price_deck column ONLY when at least one
+    # scenario names a deck, keeping deck-free batches bit-identical.
+    columns = list(_COMPARISON_COLUMNS)
+    if any(r.get("price_deck") for r in rows):
+        columns.insert(1, "price_deck")
+    else:
+        for r in rows:
+            r.pop("price_deck", None)
+    return pd.DataFrame(rows, columns=columns)
 
 
 # ---------------------------------------------------------------------------
