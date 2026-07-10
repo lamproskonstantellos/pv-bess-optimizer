@@ -291,6 +291,8 @@ FINANCIAL_COLORS: dict[str, str] = {
     # Charging-side grid fee (Eq. E26/E27) — lightest shade of the fee
     # family, adjacent to the Grid-charging cost it accompanies.
     "grid_charging_fee":   "#F06292",  # Material pink 300
+    # Imbalance settlement cost (Eqs. U6-U9 / E28).
+    "imbalance_cost":      "#4E342E",  # Material brown 800
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -410,6 +412,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Route-to-market fee",
     "Optimizer fee",
     "Grid-charging fee",
+    "Imbalance cost",
     # Balancing-product subcomponents (FCR / aFRR / mFRR)
     "FCR",
     "aFRR-up",
@@ -451,6 +454,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Route-to-market fee":              "route_to_market_fee",
     "Optimizer fee":                    "optimizer_fee",
     "Grid-charging fee":                "grid_charging_fee",
+    "Imbalance cost":                   "imbalance_cost",
     "FCR":                              "bm_fcr",
     "aFRR-up":                          "bm_afrr_up",
     "aFRR-down":                        "bm_afrr_dn",
@@ -498,6 +502,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Route-to-market fee",
     "Optimizer fee",
     "Grid-charging fee",
+    "Imbalance cost",
 )
 
 

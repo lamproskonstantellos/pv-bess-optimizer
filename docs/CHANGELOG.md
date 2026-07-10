@@ -126,6 +126,30 @@ Production release.
   pair a one-cell scenario change; a latched warning flags a wedge
   that can never bind because grid charging is disallowed.
 
+### Added (imbalance settlement exposure)
+
+- `imbalance_enabled` on the simulation sheet (default FALSE,
+  bit-identical when off — the nomination capture consumes no rng
+  draws, so existing Monte Carlo seeds reproduce exactly): ex-post
+  settlement of forecast-error deviations on the rolling-horizon
+  machinery (Eqs. U6-U9).  Each window's noisy lookahead slice is the
+  day-ahead nomination for the next commit block; the realised net
+  grid position settles against it at actual prices under a dual-
+  (incentive-compatible, non-negative cost) or single-price
+  (sign-indefinite) regime, with sign-aware DAM proxies when the
+  optional imbalance price columns are absent.  A paired analytic
+  PV-only counterfactual yields `bess_imbalance_hedge_value_eur` — the
+  quantified co-location benefit of the BESS against deviation
+  exposure.  Per-seed columns join the rolling_horizon_mc output; the
+  pipeline aggregates mean and P10/P50/P90 into the KPI dict and
+  SUMMARY digest; the availability derate applies uniformly (cancels
+  in the paired hedge).  The MC mean projects into the yearly cashflow
+  as its own `imbalance_cost_eur` column (Eq. E28: PV-curve volume,
+  DAM-series prices; PV-shape monthly allocation E28a), excluded from
+  LCOE/LCOS, scaled by the Revenue tornado driver, with a lifetime
+  total, conditional SUMMARY row and its own "Imbalance cost" figure
+  band.
+
 ### Changed (aggregator fee template default)
 
 - The `aggregator_fee_pct_revenue` template default drops from 10 % to

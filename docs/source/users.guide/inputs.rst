@@ -352,6 +352,19 @@ mapped onto the ``economics`` keys above::
       co2_intensity: 350       # → grid_co2_intensity_kg_per_mwh
       co2_annual_decline: 0.02  # → grid_co2_annual_decline_pct = 2
 
+The four ``imbalance_*`` keys switch on the ex-post imbalance
+settlement of forecast-error deviations (requires the rolling-horizon
+Monte Carlo and ``uncertainty_window_hours >= 2 x
+uncertainty_commit_hours``): ``imbalance_enabled``,
+``imbalance_pricing`` (``dual`` settles short/long deviations at their
+own prices, cost non-negative under incentive-compatible prices;
+``single`` settles both at one price and requires the
+``imbalance_price_eur_per_mwh`` timeseries column), and the two
+DAM-proxy multipliers used per side when the optional
+``imbalance_price_short_eur_per_mwh`` /
+``imbalance_price_long_eur_per_mwh`` columns are absent (sign-aware,
+so negative-price hours keep the spread ordering).
+
 Sheet ``balancing``
 -------------------
 

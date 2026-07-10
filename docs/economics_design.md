@@ -16,8 +16,8 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E27 (+ suffixed E8a, E13a-E13d) |
-| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U5 |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E28a (+ suffixed E8a, E13a-E13d) |
+| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
 | B | (reserved) | balancing product structure | — |
@@ -479,6 +479,27 @@ every market/venue fee.  The no-breakdown cashflow fallback adds the
 fee back to the gross it derives from `profit_total_eur` (which
 already nets it), so the column carries the deduction exactly once.
 
+### Imbalance settlement line (Eqs. E28/E28a)
+
+The rolling-horizon Monte Carlo's Year-1 settlement MEAN (unbiased,
+additive expected value; a P50 would understate a right-skewed,
+spike-driven cost — the percentiles carry the distribution) projects
+as its own signed column:
+
+$$I_y = -\,\bar{I}_1\; f^{PV}_y\; g^{\mathrm{dam}}_y \tag{E28}$$
+
+— the deviation volume is PV-forecast-error-driven (fades on the PV
+curve) and the settlement prices ride the DAM escalation series.
+Monthly allocation follows the Year-1 PV production shape with exact
+reconciliation (Eq. E28a).  Included in the net and NPV/IRR/payback;
+**excluded from LCOE/LCOS** (market settlement cost, the market-fees
+convention); folded by the sensitivity net recompute and SCALED by the
+Revenue driver (price-spread times volume — price-proportional, like
+the balancing columns).  Lifetime total
+`total_imbalance_cost_eur_lifecycle` renders in SUMMARY.md when
+non-zero and the "Imbalance cost" band joins every cashflow figure,
+drawn only when non-zero.
+
 ### Contracted BESS revenue layer (foundations)
 
 Two primitives every contracted BESS structure (tolling, optimizer
@@ -657,6 +678,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E25a) | `build_yearly_cashflow` bess_market_revenue_eur column |
 | (E26) | `build_model` grid-charge wedge; `kpis.add_economic_columns` fee column |
 | (E27) | `build_yearly_cashflow` grid_charging_fee_eur column + monthly allocation |
+| (E28)-(E28a) | `build_yearly_cashflow` imbalance_cost_eur column + PV-shape monthly allocation |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

@@ -510,6 +510,14 @@ def build_yearly_cashflow(
     grid_charging_fee_1 = float(
         year1_kpis.get("expense_grid_charging_fee_eur", 0.0) or 0.0
     )
+    # Imbalance settlement (Eq. E28): the Year-1 base is the
+    # availability-derated Monte Carlo MEAN (unbiased expected-value
+    # estimate; the percentiles carry the distribution).  The deviation
+    # volume is PV-forecast-error-driven, so it fades on the PV curve,
+    # and the settlement prices ride the DAM series.
+    imbalance_cost_1 = float(
+        year1_kpis.get("imbalance_cost_year1_eur", 0.0) or 0.0
+    )
     route_to_market_fee_rate = max(0.0, float(
         econ.get("route_to_market_fee_eur_per_mwh", 0.0) or 0.0
     ))
@@ -742,6 +750,7 @@ def build_yearly_cashflow(
             route_to_market_fee_y = 0.0
             optimizer_fee_y = 0.0
             grid_charging_fee_y = 0.0
+            imbalance_cost_y = 0.0
             ppa_y = 0.0
             bess_market_rev_y = 0.0
         else:
@@ -865,6 +874,11 @@ def build_yearly_cashflow(
             # Charging-side grid fee (Eq. E27): flat regulated rate on a
             # charged volume that fades on the BESS capacity curve.
             grid_charging_fee_y = -grid_charging_fee_1 * bess_factor
+            # Imbalance settlement (Eq. E28): PV-error-driven volume on
+            # the PV curve, prices on the DAM escalation series.
+            imbalance_cost_y = (
+                -imbalance_cost_1 * pv_factor * g_dam[y - 1]
+            )
             # BESS market-revenue base (Eq. E25a): the battery's
             # wholesale trading margin (the E13d base, UNclamped) plus
             # balancing revenue net of the BSP fee.  Informational only
@@ -903,7 +917,7 @@ def build_yearly_cashflow(
         net_cf = (
             revenue_net_y + balancing_revenue_y + balancing_aggregator_fee_y
             + route_to_market_fee_y + optimizer_fee_y
-            + grid_charging_fee_y
+            + grid_charging_fee_y + imbalance_cost_y
             + ppa_y + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -920,6 +934,7 @@ def build_yearly_cashflow(
                 "route_to_market_fee_eur": float(route_to_market_fee_y),
                 "optimizer_fee_eur": float(optimizer_fee_y),
                 "grid_charging_fee_eur": float(grid_charging_fee_y),
+                "imbalance_cost_eur": float(imbalance_cost_y),
                 "balancing_capacity_revenue_eur": float(balancing_capacity_y),
                 "balancing_activation_revenue_eur": float(balancing_activation_y),
                 "balancing_revenue_eur": float(balancing_revenue_y),
@@ -1183,6 +1198,7 @@ def derive_monthly_cashflow(
     has_rtm_col = "route_to_market_fee_eur" in yearly_cf.columns
     has_opt_col = "optimizer_fee_eur" in yearly_cf.columns
     has_gcf_col = "grid_charging_fee_eur" in yearly_cf.columns
+    has_imb_col = "imbalance_cost_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
@@ -1219,6 +1235,10 @@ def derive_monthly_cashflow(
         gcf_fee_y = (
             float(yearly_indexed.loc[y, "grid_charging_fee_eur"])
             if has_gcf_col else 0.0
+        )
+        imb_y = (
+            float(yearly_indexed.loc[y, "imbalance_cost_eur"])
+            if has_imb_col else 0.0
         )
         ppa_y = (
             float(yearly_indexed.loc[y, "ppa_revenue_eur"])
@@ -1271,6 +1291,15 @@ def derive_monthly_cashflow(
             opt_fee_m = float(fee_share.loc[m]) * opt_fee_y
             # The charging-side fee rides its own Year-1 charging shape.
             gcf_fee_m = float(gcf_share.loc[m]) * gcf_fee_y
+            # Imbalance cost rides the PV production shape (Eq. E28a):
+            # the deviation volume is PV-forecast-error-driven.  The
+            # PV shares sum to one, so the monthly sum reconciles the
+            # yearly column exactly.
+            pv_y1_total = float(monthly_pv_mwh_y1.sum())
+            if pv_y1_total > 1e-9:
+                imb_m = float(monthly_pv_mwh_y1.loc[m]) / pv_y1_total * imb_y
+            else:
+                imb_m = imb_y / 12.0
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
@@ -1281,7 +1310,7 @@ def derive_monthly_cashflow(
             # aggregator fee (fee_m is informational on the monthly frame).
             net_m = (
                 rev_m + balancing_m + bal_fee_m + rtm_fee_m + opt_fee_m
-                + gcf_fee_m
+                + gcf_fee_m + imb_m
                 + ppa_m + opex_m + capex_m + devex_m
             )
             # End-of-month discounting: month m of year y lands at
@@ -1303,6 +1332,7 @@ def derive_monthly_cashflow(
                     "route_to_market_fee_eur": float(rtm_fee_m),
                     "optimizer_fee_eur": float(opt_fee_m),
                     "grid_charging_fee_eur": float(gcf_fee_m),
+                    "imbalance_cost_eur": float(imb_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -1320,7 +1350,7 @@ def derive_monthly_cashflow(
         "period_type", "pv_production_mwh", "revenue_eur",
         "balancing_revenue_eur", "balancing_aggregator_fee_eur",
         "route_to_market_fee_eur", "optimizer_fee_eur",
-        "grid_charging_fee_eur",
+        "grid_charging_fee_eur", "imbalance_cost_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
@@ -1339,7 +1369,7 @@ def derive_monthly_cashflow(
                     "pv_production_mwh", "revenue_eur",
                     "balancing_revenue_eur", "balancing_aggregator_fee_eur",
                     "route_to_market_fee_eur", "optimizer_fee_eur",
-                    "grid_charging_fee_eur",
+                    "grid_charging_fee_eur", "imbalance_cost_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
@@ -1502,6 +1532,10 @@ def compute_financial_kpis(
     total_grid_charging_fee_eur_lifecycle = (
         float(df.loc[after_y0_mask, "grid_charging_fee_eur"].sum())
         if "grid_charging_fee_eur" in df.columns else 0.0
+    )
+    total_imbalance_cost_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "imbalance_cost_eur"].sum())
+        if "imbalance_cost_eur" in df.columns else 0.0
     )
     total_balancing_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
@@ -1820,6 +1854,9 @@ def compute_financial_kpis(
         )),
         "total_grid_charging_fee_eur_lifecycle": float(round(
             total_grid_charging_fee_eur_lifecycle, 2,
+        )),
+        "total_imbalance_cost_eur_lifecycle": float(round(
+            total_imbalance_cost_eur_lifecycle, 2,
         )),
         "total_optimizer_fee_eur_lifecycle": float(round(
             total_optimizer_fee_eur_lifecycle, 2,
