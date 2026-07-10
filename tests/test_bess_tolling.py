@@ -219,10 +219,12 @@ def test_zeroing_scope_lock():
             float(base.loc[y, "imbalance_cost_eur"]), abs=1e-9,
         ), y
     # Post-toll years are bit-equal to the merchant baseline.
+    from pvbess_opt.economics import TAX_LAYER_COLUMNS
+
     for y in range(6, N_YEARS + 1):
         for col in base.columns:
             if col in ("cumulative_cf_eur", "cumulative_dcf_eur",
-                       "toll_revenue_eur"):
+                       "toll_revenue_eur", *TAX_LAYER_COLUMNS):
                 continue  # cumulatives carry the toll-years history
             assert float(cf.loc[y, col]) == float(base.loc[y, col]), (y, col)
 
@@ -233,10 +235,12 @@ def test_retained_treatment_stacks_on_top():
         _kpis(), _toll_econ(bess_toll_merchant_treatment="retained"),
         _caps(),
     )
+    from pvbess_opt.economics import TAX_LAYER_COLUMNS
+
     for col in base.columns:
         if col in ("toll_revenue_eur", "net_cashflow_eur",
                    "discounted_cf_eur", "cumulative_cf_eur",
-                   "cumulative_dcf_eur"):
+                   "cumulative_dcf_eur", *TAX_LAYER_COLUMNS):
             continue
         pd.testing.assert_series_equal(cf[col], base[col])
     diff = cf["net_cashflow_eur"] - base["net_cashflow_eur"]
@@ -324,7 +328,15 @@ def test_sensitivity_recompute_and_no_revenue_scaling():
     pd.testing.assert_series_equal(
         recomputed["net_cashflow_eur"], cf["net_cashflow_eur"],
     )
-    pd.testing.assert_frame_equal(_scale_revenue(cf, 1.0), cf)
+    # Perturbed frames deliberately drop the tax-layer columns
+    # (Eqs. E34-E38 stale-value guard), so the no-op compares
+    # against the pre-tax view.
+    from pvbess_opt.economics import TAX_LAYER_COLUMNS
+
+    pd.testing.assert_frame_equal(
+        _scale_revenue(cf, 1.0),
+        cf.drop(columns=list(TAX_LAYER_COLUMNS)),
+    )
     scaled = _scale_revenue(cf, 1.1)
     # Fixed contractual EUR/MW: the toll does NOT scale with the driver.
     pd.testing.assert_series_equal(

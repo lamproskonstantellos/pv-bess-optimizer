@@ -317,7 +317,15 @@ def test_scale_revenue_unit_factor_is_noop_with_trajectories():
         trajectories=_traj("revenue_dam", [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]),
     )
     cf = build_yearly_cashflow(_kpis(), econ, _caps())
-    pd.testing.assert_frame_equal(_scale_revenue(cf, 1.0), cf)
+    # Perturbed frames deliberately drop the tax-layer columns
+    # (Eqs. E34-E38 stale-value guard), so the no-op compares
+    # against the pre-tax view.
+    from pvbess_opt.economics import TAX_LAYER_COLUMNS
+
+    pd.testing.assert_frame_equal(
+        _scale_revenue(cf, 1.0),
+        cf.drop(columns=list(TAX_LAYER_COLUMNS)),
+    )
 
 
 def test_recompute_net_identity_with_trajectories():

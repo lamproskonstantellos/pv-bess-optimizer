@@ -195,7 +195,15 @@ def test_recompute_net_folds_the_fee_and_revenue_driver_skips_it():
     pd.testing.assert_series_equal(
         recomputed["net_cashflow_eur"], cf["net_cashflow_eur"],
     )
-    pd.testing.assert_frame_equal(_scale_revenue(cf, 1.0), cf)
+    # Perturbed frames deliberately drop the tax-layer columns
+    # (Eqs. E34-E38 stale-value guard), so the no-op compares
+    # against the pre-tax view.
+    from pvbess_opt.economics import TAX_LAYER_COLUMNS
+
+    pd.testing.assert_frame_equal(
+        _scale_revenue(cf, 1.0),
+        cf.drop(columns=list(TAX_LAYER_COLUMNS)),
+    )
     scaled = _scale_revenue(cf, 1.2)
     pd.testing.assert_series_equal(
         scaled["grid_charging_fee_eur"], cf["grid_charging_fee_eur"],

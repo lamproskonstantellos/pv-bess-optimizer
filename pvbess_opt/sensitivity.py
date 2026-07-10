@@ -36,6 +36,7 @@ from .constants import (
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
 )
 from .economics import (
+    TAX_LAYER_COLUMNS,
     _contract_phase,
     build_yearly_cashflow,
     compute_financial_kpis,
@@ -153,6 +154,15 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
     while the base KPI still includes it — the symptom that surfaced
     in the IRR / NPV tornadoes after the balancing block landed.
     """
+    # Tax-layer columns (Eqs. E34-E38) are DROPPED from perturbed
+    # frames: taxes are nonlinear (the taxable-base clamp and the loss
+    # carry-forward), so scaled copies would be silently stale.  The
+    # pre-tax tornado never reads them; post-tax metrics come from
+    # full rebuilds only (the DiscountRate-driver path regenerates
+    # them correctly through build_yearly_cashflow).
+    df = df.drop(
+        columns=[c for c in TAX_LAYER_COLUMNS if c in df.columns],
+    )
     components = ["revenue_eur", "opex_eur", "capex_eur"]
     if "devex_eur" in df.columns:
         components.append("devex_eur")

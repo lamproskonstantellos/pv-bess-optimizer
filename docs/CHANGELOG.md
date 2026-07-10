@@ -245,6 +245,29 @@ Production release.
   preserves the clamp).  Being inside EBITDA it is automatically
   deductible from taxable income once the tax layer lands.
 
+### Added (depreciation + corporate tax engine)
+
+- `corporate_tax_rate_pct` + three straight-line lives +
+  `tax_loss_carryforward_years` on the economics sheet (default rate
+  0, bit-identical: every tax column is an exact zero and the
+  post-tax family passes through value-identical to pre-tax): the
+  pure post-processing tax layer `economics.apply_tax_layer`
+  (Eqs. E34-E38), called at the end of build_yearly_cashflow so the
+  frame always carries the columns.  Per-asset straight-line
+  depreciation (PV, BESS incl. a replacement tranche in service the
+  year AFTER its month-12 booking, site lump sums; N=0 = no claim;
+  horizon truncation, no terminal write-off), taxable income =
+  EBITDA - depreciation - E20 debt interest (the levy is deductible
+  by construction), FIFO loss carry-forward (unlimited default,
+  optional expiry window), TAX_y <= 0 always.  Post-tax columns
+  discount at the single WACC (documented convention).  Monthly:
+  month-12 tax booking with exact post-tax reconciliation.
+  Sensitivity: perturbed frames DROP all tax-layer columns (nonlinear
+  - stale-value guard); the pre-tax tornado is byte-identical with
+  the layer on or off.  No default figures change (the post-tax net
+  is a separate column family).  Locked by hand-computed schedules,
+  a FIFO-expiry worked example and an independent levered reference.
+
 ### Added (imbalance settlement exposure)
 
 - `imbalance_enabled` on the simulation sheet (default FALSE,

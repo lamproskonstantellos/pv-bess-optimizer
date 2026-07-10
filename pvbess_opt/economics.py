@@ -1225,6 +1225,213 @@ def build_yearly_cashflow(
     df = pd.DataFrame(rows)
     df["cumulative_cf_eur"] = df["net_cashflow_eur"].cumsum()
     df["cumulative_dcf_eur"] = df["discounted_cf_eur"].cumsum()
+    # Tax + depreciation layer (Eqs. E34-E38), applied LAST so the
+    # frame always carries the post-tax column family; a zero rate
+    # appends exact zeros / value-identical pass-through columns.
+    return apply_tax_layer(df, econ, capacities)
+
+
+# ---------------------------------------------------------------------------
+# Tax + depreciation layer (Eqs. E34-E38)
+# ---------------------------------------------------------------------------
+
+
+# The columns apply_tax_layer appends.  The sensitivity scaled-frame
+# helpers DROP them from perturbed frames: taxes are nonlinear (the
+# TB clamp and the loss carry-forward), so scaled copies would be
+# silently stale — the pre-tax tornado never reads them, and the
+# post-tax metrics come from full rebuilds only.
+TAX_LAYER_COLUMNS: tuple[str, ...] = (
+    "depreciation_eur",
+    "debt_interest_eur",
+    "taxable_income_eur",
+    "tax_loss_carryforward_eur",
+    "corporate_tax_eur",
+    "net_cashflow_post_tax_eur",
+    "discounted_cf_post_tax_eur",
+    "cumulative_cf_post_tax_eur",
+    "cumulative_dcf_post_tax_eur",
+)
+
+
+def apply_tax_layer(
+    yearly_cf: pd.DataFrame,
+    econ: dict[str, Any],
+    capacities: dict[str, float],
+) -> pd.DataFrame:
+    """Append the post-tax column family to the yearly cashflow.
+
+    A pure post-processing layer over the pre-tax frame (Eqs.
+    E34-E38): per-asset straight-line depreciation (PV, BESS incl. the
+    replacement tranche, site lump sums), taxable income = EBITDA -
+    depreciation - debt interest (the E20 schedule), loss carry-forward
+    (unlimited by default, optional FIFO expiry window), and corporate
+    tax at ``corporate_tax_rate_pct``.  The pre-tax columns are NEVER
+    touched — ``net_cashflow_eur`` keeps its E15 definition and the
+    published pre-tax KPIs stay the baseline.  With a zero rate the
+    tax columns are exact zeros and the post-tax family is a
+    value-identical copy of the pre-tax family (no depreciation
+    schedule is computed — noise-free).
+
+    Convention (documented, deliberate): deducting debt interest (the
+    levered tax shield) while discounting the post-tax PROJECT
+    cashflow at the single WACC mixes capital-structure effects into
+    project NPV; the definition collapses to unlevered when
+    ``gearing_pct = 0``.  Depreciation tranches truncate at the
+    horizon (no terminal book-value write-off); ``TAX_y <= 0`` always
+    (losses only carry forward, never rebate).
+    """
+    df = yearly_cf
+    tau = max(0.0, min(1.0, float(
+        econ.get("corporate_tax_rate_pct", 0.0) or 0.0
+    ) / 100.0))
+    if tau <= 0.0:
+        df["depreciation_eur"] = 0.0
+        df["debt_interest_eur"] = 0.0
+        df["taxable_income_eur"] = 0.0
+        df["tax_loss_carryforward_eur"] = 0.0
+        df["corporate_tax_eur"] = 0.0
+        df["net_cashflow_post_tax_eur"] = df["net_cashflow_eur"]
+        df["discounted_cf_post_tax_eur"] = df["discounted_cf_eur"]
+        df["cumulative_cf_post_tax_eur"] = df["cumulative_cf_eur"]
+        df["cumulative_dcf_post_tax_eur"] = df["cumulative_dcf_eur"]
+        return df
+
+    n_years = int(df["project_year"].max())
+    pv_kwp = float(capacities.get("pv_kwp", 0.0) or 0.0)
+    bess_kw = float(capacities.get("bess_kw", 0.0) or 0.0)
+    bess_kwh = float(capacities.get("bess_kwh", 0.0) or 0.0)
+
+    def _life(key: str, default: int) -> int:
+        raw = econ.get(key, default)
+        return max(0, int(default if raw is None else raw))
+
+    # Straight-line tranches (Eq. E34): (base, first year, life).
+    # All Year-1 starts except the replacement tranche, which enters
+    # service the year AFTER its month-12 booking (Eq. E4 convention).
+    bess_capex = float(econ.get("capex_bess_eur_per_kwh", 0.0) or 0.0) \
+        * bess_kwh
+    tranches: list[tuple[float, int, int]] = [
+        (
+            (float(econ.get("capex_pv_eur_per_kw", 0.0) or 0.0)
+             + float(econ.get("devex_pv_eur_per_kw", 0.0) or 0.0))
+            * pv_kwp,
+            1,
+            _life("depreciation_years_pv", 20),
+        ),
+        (
+            bess_capex
+            + float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0)
+            * bess_kw,
+            1,
+            _life("depreciation_years_bess", 10),
+        ),
+        (
+            float(econ.get("site_capex_eur", 0.0) or 0.0)
+            + float(econ.get("site_devex_eur", 0.0) or 0.0),
+            1,
+            _life("depreciation_years_site", 20),
+        ),
+    ]
+    repl_year = effective_bess_replacement_year(econ)
+    repl_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
+    if repl_year > 0 and repl_pct > 0.0:
+        tranches.append((
+            bess_capex * repl_pct / 100.0,
+            repl_year + 1,
+            _life("depreciation_years_bess", 10),
+        ))
+
+    # Debt interest (the E20 schedule on gearing x |CF_0|; zero when
+    # all-equity or beyond the tenor).
+    gearing, rate, tenor, repayment = _financing_params(econ)
+    net_cf_arr = df["net_cashflow_eur"].to_numpy(dtype=float)
+    interest_by_year: dict[int, float] = {}
+    if gearing > 0.0 and net_cf_arr.size >= 1 and net_cf_arr[0] < 0.0:
+        for row in _amortization_schedule(
+            gearing * (-float(net_cf_arr[0])), rate, tenor, repayment,
+        ):
+            interest_by_year[int(row["year"])] = float(row["interest_eur"])
+
+    carryforward_window = _life("tax_loss_carryforward_years", 0)
+    _years_list = df["project_year"].astype(int).to_list()
+    _net_list = df["net_cashflow_eur"].astype(float).to_list()
+    _capex_list = df["capex_eur"].astype(float).to_list()
+    _devex_list = df["devex_eur"].astype(float).to_list()
+    dep_col: list[float] = []
+    int_col: list[float] = []
+    ti_col: list[float] = []
+    loss_col: list[float] = []
+    tax_col: list[float] = []
+    # Loss vintages as [year_arisen, remaining_eur], consumed FIFO
+    # (Eq. E36); with a positive window W a vintage expires once
+    # y - year_arisen > W.
+    vintages: list[list[float]] = []
+    for i, y in enumerate(_years_list):
+        if y == 0:
+            dep_col.append(0.0)
+            int_col.append(0.0)
+            ti_col.append(0.0)
+            loss_col.append(0.0)
+            tax_col.append(0.0)
+            continue
+        dep_y = 0.0
+        for base, y0, life in tranches:
+            if life > 0 and base > 0.0 and y0 <= y <= min(
+                n_years, y0 + life - 1,
+            ):
+                dep_y += base / life
+        int_y = interest_by_year.get(int(y), 0.0)
+        # EBITDA (Eq. E35): the operating net before investment events
+        # — revenue net of every fee and the levy, plus balancing, PPA
+        # and OPEX; the levy is therefore deductible by construction.
+        ebitda_y = _net_list[i] - _capex_list[i] - _devex_list[i]
+        ti_y = ebitda_y - dep_y - int_y
+        if carryforward_window > 0:
+            vintages = [
+                v for v in vintages
+                if (y - v[0]) <= carryforward_window
+            ]
+        if ti_y > 0.0:
+            remaining = ti_y
+            for v in vintages:
+                used = min(v[1], remaining)
+                v[1] -= used
+                remaining -= used
+                if remaining <= 0.0:
+                    break
+            vintages = [v for v in vintages if v[1] > 1e-12]
+            tb_y = remaining
+        else:
+            if ti_y < 0.0:
+                vintages.append([float(y), -ti_y])
+            tb_y = 0.0
+        dep_col.append(dep_y)
+        int_col.append(int_y)
+        ti_col.append(ti_y)
+        loss_col.append(sum(v[1] for v in vintages))
+        tax_col.append(-tau * tb_y + 0.0)
+
+    df["depreciation_eur"] = dep_col
+    df["debt_interest_eur"] = int_col
+    df["taxable_income_eur"] = ti_col
+    df["tax_loss_carryforward_eur"] = loss_col
+    df["corporate_tax_eur"] = tax_col
+    # Post-tax family (Eq. E38): same discount rate (single-WACC
+    # convention, documented above).
+    df["net_cashflow_post_tax_eur"] = (
+        df["net_cashflow_eur"] + df["corporate_tax_eur"]
+    )
+    df["discounted_cf_post_tax_eur"] = (
+        df["net_cashflow_post_tax_eur"]
+        * df["discount_factor"].astype(float)
+    )
+    df["cumulative_cf_post_tax_eur"] = (
+        df["net_cashflow_post_tax_eur"].cumsum()
+    )
+    df["cumulative_dcf_post_tax_eur"] = (
+        df["discounted_cf_post_tax_eur"].cumsum()
+    )
     return df
 
 
@@ -1480,6 +1687,7 @@ def derive_monthly_cashflow(
     has_ss_cb_col = "state_support_clawback_eur" in yearly_cf.columns
     has_cm_col = "capacity_market_revenue_eur" in yearly_cf.columns
     has_levy_col = "revenue_levy_eur" in yearly_cf.columns
+    has_tax_col = "corporate_tax_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
@@ -1544,6 +1752,10 @@ def derive_monthly_cashflow(
         levy_y = (
             float(yearly_indexed.loc[y, "revenue_levy_eur"])
             if has_levy_col else 0.0
+        )
+        tax_y = (
+            float(yearly_indexed.loc[y, "corporate_tax_eur"])
+            if has_tax_col else 0.0
         )
         ppa_y = (
             float(yearly_indexed.loc[y, "ppa_revenue_eur"])
@@ -1627,6 +1839,13 @@ def derive_monthly_cashflow(
             # approximation as the structural fees; shares sum to one,
             # so the yearly reconciliation is exact).
             levy_m = float(fee_share.loc[m]) * levy_y
+            # Corporate tax (Eq. E37) settles annually, so it books in
+            # month 12 — the December factor equals the yearly
+            # 1/(1+r)^y factor (Eq. E4), keeping the monthly and yearly
+            # post-tax DCFs in exact agreement.  Depreciation, taxable
+            # income and the carry-forward stay yearly-only (annual
+            # accounting concepts, no monthly counterpart).
+            tax_m = tax_y if m == 12 else 0.0
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
@@ -1651,6 +1870,7 @@ def derive_monthly_cashflow(
             # discount less — the months of year y occur DURING year y.
             t_years = float(y) - 1.0 + m / 12.0
             disc_factor = 1.0 / (1.0 + discount_rate) ** t_years
+            net_post_tax_m = net_m + tax_m
             rows.append(
                 {
                     "project_year": int(y),
@@ -1678,6 +1898,11 @@ def derive_monthly_cashflow(
                     "devex_eur": float(devex_m),
                     "net_cashflow_eur": float(net_m),
                     "discounted_cf_eur": float(net_m * disc_factor),
+                    "corporate_tax_eur": float(tax_m),
+                    "net_cashflow_post_tax_eur": float(net_post_tax_m),
+                    "discounted_cf_post_tax_eur": float(
+                        net_post_tax_m * disc_factor
+                    ),
                 }
             )
 
@@ -1697,6 +1922,8 @@ def derive_monthly_cashflow(
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
+        "corporate_tax_eur",
+        "net_cashflow_post_tax_eur", "discounted_cf_post_tax_eur",
     ]
     if monthly_cf.empty:
         quarterly_cf = pd.DataFrame(columns=monthly_columns)
@@ -1721,6 +1948,9 @@ def derive_monthly_cashflow(
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
+                    "corporate_tax_eur",
+                    "net_cashflow_post_tax_eur",
+                    "discounted_cf_post_tax_eur",
                 ]
             ].sum()
         )

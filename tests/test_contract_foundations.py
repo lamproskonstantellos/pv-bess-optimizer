@@ -191,7 +191,15 @@ def test_scale_revenue_scales_the_base_and_unit_is_noop():
         _econ(aggregator_fee_pct_revenue=5.0),
         _caps(),
     )
-    pd.testing.assert_frame_equal(_scale_revenue(cf, 1.0), cf)
+    # Perturbed frames deliberately drop the tax-layer columns
+    # (Eqs. E34-E38 stale-value guard), so the no-op compares
+    # against the pre-tax view.
+    from pvbess_opt.economics import TAX_LAYER_COLUMNS
+
+    pd.testing.assert_frame_equal(
+        _scale_revenue(cf, 1.0),
+        cf.drop(columns=list(TAX_LAYER_COLUMNS)),
+    )
     scaled = _scale_revenue(cf, 1.1)
     pd.testing.assert_series_equal(
         scaled["bess_market_revenue_eur"],

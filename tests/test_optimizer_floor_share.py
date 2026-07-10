@@ -308,7 +308,15 @@ def test_scale_revenue_noop_and_legacy_path():
         ), col
     # Legacy 2-arg path stays a bit-exact no-op with the floor off.
     plain_cf = build_yearly_cashflow(_kpis(), _econ(), _caps())
-    pd.testing.assert_frame_equal(_scale_revenue(plain_cf, 1.0), plain_cf)
+    # Perturbed frames deliberately drop the tax-layer columns
+    # (Eqs. E34-E38 stale-value guard), so the no-op compares
+    # against the pre-tax view.
+    from pvbess_opt.economics import TAX_LAYER_COLUMNS
+
+    pd.testing.assert_frame_equal(
+        _scale_revenue(plain_cf, 1.0),
+        plain_cf.drop(columns=list(TAX_LAYER_COLUMNS)),
+    )
     # The net recompute folds the top-up column.
     recomputed = _recompute_net(cf.copy())
     pd.testing.assert_series_equal(

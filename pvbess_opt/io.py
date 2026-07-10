@@ -268,6 +268,15 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     # Revenue levy on gross market turnover (Eq. E33), e.g. the 3 %
     # special RES turnover levy applied in Greece.  Default-off.
     "revenue_levy_pct": 0.0,
+    # Depreciation + corporate tax layer (Eqs. E34-E38): post-tax
+    # cashflow columns appended by economics.apply_tax_layer.  The
+    # rate default of 0 keeps every existing result bit-identical
+    # (the depreciation lives are inert while the rate is 0).
+    "corporate_tax_rate_pct": 0.0,
+    "depreciation_years_pv": 20,
+    "depreciation_years_bess": 10,
+    "depreciation_years_site": 20,
+    "tax_loss_carryforward_years": 0,
     "benchmark_lcoe_low_eur_per_mwh": BENCHMARK_LCOE_LOW_EUR_PER_MWH,
     "benchmark_lcoe_high_eur_per_mwh": BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     "benchmark_lcos_low_eur_per_mwh": BENCHMARK_LCOS_LOW_EUR_PER_MWH,
@@ -461,6 +470,10 @@ _INT_KEYS: frozenset[str] = frozenset({
     "state_support_year_to",
     "capacity_market_year_from",
     "capacity_market_year_to",
+    "depreciation_years_pv",
+    "depreciation_years_bess",
+    "depreciation_years_site",
+    "tax_loss_carryforward_years",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -853,6 +866,35 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "column inside net_cashflow_eur (clamped: negative turnover never "
      "yields a rebate). Excluded from LCOE/LCOS. Validated in "
      "[0, 100]."),
+    ("corporate_tax_rate_pct", 0.0, "%",
+     "Corporate income tax rate applied to taxable income = EBITDA - "
+     "straight-line depreciation - debt interest, with loss "
+     "carry-forward (Eqs. E34-E38). 0 = pre-tax only (default): the "
+     "post-tax cashflow columns pass through equal to pre-tax and the "
+     "post-tax KPIs report n/a, so existing results are bit-identical. "
+     "Reference: 22 % corporate rate in Greece (2024). Validated in "
+     "[0, 100]."),
+    ("depreciation_years_pv", 20, "years",
+     "Straight-line tax depreciation life of the PV block (CAPEX + "
+     "DEVEX per kW x kWp), first claimed in operating Year 1. Inert "
+     "while corporate_tax_rate_pct = 0. 0 = no depreciation claimed "
+     "for this asset class. Unclaimed depreciation beyond the project "
+     "horizon is lost (no terminal-value write-off)."),
+    ("depreciation_years_bess", 10, "years",
+     "Straight-line life of the BESS block (energy-basis CAPEX + "
+     "power-basis DEVEX), from Year 1. A scheduled/auto replacement "
+     "starts its OWN straight-line tranche (base = replacement CAPEX) "
+     "the year AFTER it is charged - consistent with the month-12 "
+     "booking convention (Eq. E4). Inert while "
+     "corporate_tax_rate_pct = 0."),
+    ("depreciation_years_site", 20, "years",
+     "Straight-line life of the site-wide lump sums (site_capex_eur + "
+     "site_devex_eur), from Year 1. Inert while "
+     "corporate_tax_rate_pct = 0."),
+    ("tax_loss_carryforward_years", 0, "years",
+     "Loss carry-forward window: 0 = unlimited (default). A positive N "
+     "expires unused losses N years after the year they arose (FIFO), "
+     "e.g. 5 in Greece. Inert while corporate_tax_rate_pct = 0."),
     ("benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
@@ -2725,6 +2767,25 @@ def validate_workbook_params(
     # The per-MWh route-to-market fee is a non-negative charge on exported
     # energy (a negative value would be a rebate, never a fee).
     _require_non_negative(economics, "route_to_market_fee_eur_per_mwh")
+
+    # Tax + depreciation layer (Eqs. E34-E38): the rate lives in
+    # [0, 100]; the straight-line lives and the carry-forward window
+    # are non-negative year counts (all inert while the rate is 0).
+    _tax_rate = float(
+        economics.get("corporate_tax_rate_pct", 0.0) or 0.0
+    )
+    if not (0.0 <= _tax_rate <= 100.0):
+        raise ValueError(
+            f"'corporate_tax_rate_pct' must be in [0, 100]; got "
+            f"{_tax_rate!r}."
+        )
+    for key in (
+        "depreciation_years_pv",
+        "depreciation_years_bess",
+        "depreciation_years_site",
+        "tax_loss_carryforward_years",
+    ):
+        _require_non_negative(economics, key)
 
     # The legacy percentage-of-gross fee and the optimizer share both charge
     # the battery's wholesale stream: stacking them double-charges it.  Warn

@@ -336,6 +336,21 @@ Sheet ``economics``
   to include balancing net of the BSP fee.  FALSE keeps the plain
   share bit-identical.  Excluded from LCOE/LCOS; the Revenue tornado
   recomputes the fee/top-up pair exactly at the floor kink.
+* ``corporate_tax_rate_pct`` (default 0, pre-tax only) /
+  ``depreciation_years_pv`` / ``depreciation_years_bess`` /
+  ``depreciation_years_site`` (defaults 20 / 10 / 20) /
+  ``tax_loss_carryforward_years`` (default 0 = unlimited): the
+  depreciation + corporate tax layer (Eqs. E34-E38).  Taxable income
+  = EBITDA - straight-line depreciation - debt interest, with FIFO
+  loss carry-forward (a positive window expires aged vintages; e.g. 5
+  in Greece); a BESS replacement starts its own tranche the year
+  after the month-12 booking; tranches truncate at the horizon.  Tax
+  is never positive (losses only carry forward).  Appends the
+  post-tax column family (``net_cashflow_post_tax_eur``, discounted
+  and cumulative variants, month-12 monthly booking) while the
+  pre-tax columns and KPIs remain the published baseline; at rate 0
+  everything passes through bit-identically.  Reference: 22 %
+  corporate rate in Greece (2024).
 * ``sensitivity_enabled`` / ``sensitivity_capex_delta_pct`` /
   ``sensitivity_opex_delta_pct`` /
   ``sensitivity_revenue_delta_pct`` /

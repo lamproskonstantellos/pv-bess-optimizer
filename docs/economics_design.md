@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E33 (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E38 (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -76,6 +76,9 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `capacity_market_year_from`, `capacity_market_year_to` | 1, 0 | capacity-contract window (E25) |
 | economics | `capacity_market_indexation_pct` | 0.0 | $i_{cm}$ (clearing-price escalation) |
 | economics | `revenue_levy_pct` | 0.0 | $\lambda$ (levy on gross market turnover, E33) |
+| economics | `corporate_tax_rate_pct` | 0.0 | $\tau$ (income tax on E36 taxable income; 0 = pre-tax only) |
+| economics | `depreciation_years_pv`, `depreciation_years_bess`, `depreciation_years_site` | 20, 10, 20 | $N_a$ (straight-line lives per asset class; inert at $\tau = 0$) |
+| economics | `tax_loss_carryforward_years` | 0 | $W$ (FIFO loss expiry window; 0 = unlimited) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
 | economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
 | economics | `gearing_pct`, `debt_interest_rate_pct`, `debt_tenor_years`, `debt_repayment` | 0, 5.0, 15, annuity | debt layer |
@@ -827,6 +830,86 @@ it.  Excluded from LCOE/LCOS; lifetime total renders in SUMMARY.md
 only when set.  Note the levy changes PRE-tax headline KPIs when set —
 deliberate: it is an operating cost, not an income tax.
 
+### Tax and depreciation layer (Eqs. E34-E38; pre-tax when the rate is 0)
+
+`economics.apply_tax_layer(yearly_cf, econ, capacities)` is a pure
+post-processing layer called at the end of `build_yearly_cashflow`, so
+the frame always carries the post-tax column family.  The pre-tax
+columns are **never touched** — `net_cashflow_eur` keeps its E15
+definition and the published pre-tax KPIs remain the baseline.  With
+`corporate_tax_rate_pct = 0` (default) every tax column is an exact
+zero and the post-tax family passes through value-identical to the
+pre-tax family (no schedule is computed — noise-free bit-identity).
+
+Straight-line depreciation over asset classes
+$a \in \{\mathrm{PV}, \mathrm{BESS}, \mathrm{site},
+\mathrm{BESS\text{-}replacement}\}$:
+
+$$\mathrm{DEP}_y = \sum_a \frac{\mathrm{base}_a}{N_a}\,
+\mathbf{1}\!\left[\, y_{a0} \le y \le \min\!\left(Y,\,
+y_{a0} + N_a - 1\right) \right] \tag{E34}$$
+
+with $\mathrm{base}_{PV} = (c^{PV} + v^{PV})\,\mathrm{kWp}$,
+$\mathrm{base}_B = c^{B} E^{\mathrm{cap}} + v^{B} P^{B}$,
+$\mathrm{base}_{site} = \mathrm{site\_capex} + \mathrm{site\_devex}$
+(all $y_{a0} = 1$), and the replacement tranche
+$\mathrm{base}_r = c^{B} E^{\mathrm{cap}}\, p_r / 100$ in service from
+$y_{r0} = y_r + 1$ (the asset enters service after its month-12
+booking, Eq. E4) over $N_{\mathrm{BESS}}$ years.  $N_a = 0$ ⇒ no
+claim; tranches truncate at the horizon $Y$ (unclaimed depreciation is
+lost — no terminal write-off).
+
+$$\mathrm{EBITDA}_y = \mathrm{CF}_y - C_y - V_y \;\; (y \ge 1),
+\qquad \mathrm{EBITDA}_0 = 0 \tag{E35}$$
+
+— the operating net before investment events: revenue net of every
+E13-family fee and the E33 levy (the levy is therefore deductible by
+construction), plus balancing, PPA, the contracted streams and OPEX.
+
+$$\mathrm{TI}_y = \mathrm{EBITDA}_y - \mathrm{DEP}_y - \mathrm{INT}_y,
+\qquad \mathrm{TB}_y = \max\!\left(0,\, \mathrm{TI}_y -
+L_{y-1}\right) \tag{E36}$$
+
+with $\mathrm{INT}_y$ the E20 schedule interest on
+$\text{gearing} \times |\mathrm{CF}_0|$ (zero when all-equity or
+beyond the tenor) and $L_y$ the loss pool: losses accumulate as
+vintages, profits absorb them FIFO, and with
+`tax_loss_carryforward_years` $= W > 0$ a vintage expires $W$ years
+after it arose ($W = 0$ = unlimited, the default).
+
+$$\mathrm{TAX}_y = -\tau\, \mathrm{TB}_y \;\le\; 0 \tag{E37}$$
+
+(no negative-tax rebates; losses only carry forward).
+
+$$\mathrm{CF}^{pt}_y = \mathrm{CF}_y + \mathrm{TAX}_y, \qquad
+\mathrm{DCF}^{pt}_y = \mathrm{CF}^{pt}_y \cdot D_y \tag{E38}$$
+
+— the same discount rate E3 (single-WACC convention: the levered
+interest shield mixes capital-structure effects into project NPV,
+collapsing to unlevered at zero gearing; documented in Assumptions &
+limitations).  Appended columns: `depreciation_eur`,
+`debt_interest_eur`, `taxable_income_eur`,
+`tax_loss_carryforward_eur` (the balance carried OUT of the year),
+`corporate_tax_eur` ($\le 0$) and the post-tax family
+`net_cashflow_post_tax_eur` / `discounted_cf_post_tax_eur` /
+`cumulative_cf_post_tax_eur` / `cumulative_dcf_post_tax_eur`.
+Monthly: `corporate_tax_eur` books in **month 12** (annual
+settlement; December's E4 factor equals the yearly E3 factor, so the
+monthly and yearly post-tax DCFs agree exactly); depreciation,
+taxable income and the carry-forward stay yearly-only (annual
+accounting concepts).  Sensitivity: the scaled-frame helpers **drop**
+every tax-layer column from perturbed frames — taxes are nonlinear
+(the TB clamp and the carry-forward), so scaled copies would be
+silently stale; the pre-tax tornado is unaffected and stays the
+published baseline.  No default figures change (the post-tax net is a
+separate column family, so every existing stack keeps its
+segment-sum == net-line identity).  Worked example: 4/2/8-year lives
+over an 8-year horizon put the early years into loss (carry-forward
+builds), the loss pool absorbs FIFO once depreciation runs out, and
+tax turns on in the late years — locked to hand-computed cents in
+`tests/test_tax_depreciation.py`, alongside an independent levered
+reference case.
+
 ### Financial KPIs
 
 $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$
@@ -978,6 +1061,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E31)-(E31a) | `build_yearly_cashflow` state_support_eur / state_support_clawback_eur pair + repayment-year flag |
 | (E32) | `build_yearly_cashflow` capacity_market_revenue_eur column (computed before the E31a netting) |
 | (E33) | `build_yearly_cashflow` revenue_levy_eur clamp + fee-share monthly allocation |
+| (E34)-(E38) | `economics.apply_tax_layer` (straight-line tranches, EBITDA, FIFO carry-forward, tax clamp, post-tax family) |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests
@@ -1035,7 +1119,16 @@ $396.29\,u^2 + 400\,u - 1000 = 0$).
   fee schedules.
 * Debt sizes on gearing × Year-0 outlay only (no DSCR-sculpted
   sizing); interest during construction is not modelled.
-* No tax, depreciation, or working-capital layers.
+* The tax layer (Eqs. E34-E38) models straight-line depreciation,
+  interest deductibility and FIFO loss carry-forward only — no
+  deferred tax, no VAT, no working capital, no interest during
+  construction, no terminal book-value write-off (a replacement
+  tranche truncates at the horizon, understating the shield of a late
+  replacement), and the post-tax project cashflow discounts at the
+  single WACC (the levered interest shield mixes capital-structure
+  effects into project NPV; collapses to unlevered at
+  ``gearing_pct = 0``).  The clawback and tax layers read the
+  deterministic analytic projection, not per-seed Monte Carlo paths.
 * LCOE/LCOS exclude site-wide lump sums and all revenue, because they
   are comparability metrics, not project-cost accounting.
 
