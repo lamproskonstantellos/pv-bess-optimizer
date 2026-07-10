@@ -2288,6 +2288,26 @@ def compute_financial_kpis(
             "convention).",
             site_capex, site_devex,
         )
+
+    # ---- Contracted-revenue audit -----------------------------------------
+    # One INFO line in the run log when any contracted structure is
+    # active (matching the LCOE/LCOS audit's noise discipline: silent
+    # in the all-merchant default).
+    _contract_totals = (
+        total_toll_revenue_eur_lifecycle,
+        total_optimizer_floor_topup_eur_lifecycle,
+        total_state_support_eur_lifecycle,
+        total_state_support_clawback_eur_lifecycle,
+        total_capacity_market_revenue_eur_lifecycle,
+    )
+    if any(abs(v) > 1e-9 for v in _contract_totals):
+        logger.info(
+            "[contracted revenue] toll = %.2f, floor top-up = %.2f, "
+            "support = %.2f, netting = %.2f, capacity = %.2f "
+            "(lifetime EUR; all excluded from LCOE/LCOS and folded "
+            "into net_cashflow_eur).",
+            *_contract_totals,
+        )
     return out
 
 

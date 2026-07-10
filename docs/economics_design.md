@@ -742,6 +742,46 @@ LCOE/LCOS.  Stacking warnings: overlap with a state-support window
 (cumulation rules typically restrict stacking) and with a `zeroed`
 toll (the toller usually holds the capacity obligation too).
 
+### Contracted-layer conventions and stacking-interaction matrix
+
+Per-structure conventions (one row per contracted stream):
+
+| Structure | Column(s) | Availability $A$ | $f^{B}$ fade | Monthly booking | Revenue-driver scaling | Netting/share base |
+|---|---|---|---|---|---|---|
+| Tolling (E29/E29a) | `toll_revenue_eur` | yes (payment conditioned) | no (power block) | flat 1/12 | no (fixed contractual) | — (gates the merchant streams instead) |
+| Optimizer floor+share (E30/E30a) | `optimizer_fee_eur` ($\le 0$), `optimizer_floor_topup_eur` ($\ge 0$) | yes (floor level) | no | fee: revenue-share weights; top-up: month 12 | piecewise recompute (scaled margin vs un-scaled floor) | E13d DAM margin or E25a base |
+| State support (E31/E31a) | `state_support_eur` ($\ge 0$), `state_support_clawback_eur` (signed) | yes (support level; threshold NOT derated) | no | support: flat 1/12; netting: month 12 | support: no; netting: exact recompute vs un-scaled threshold | E25a base + E32 revenue |
+| Capacity market (E32) | `capacity_market_revenue_eur` | yes (availability-tested) | no (derated nameplate) | flat 1/12 | no (administered price) | joins the E31a base |
+
+All five columns fold into `net_cashflow_eur`, carry SUMMARY-optional
+lifetime totals, and are **excluded from LCOE and LCOS** (the metrics
+stay revenue-agnostic energy-cost figures; test-locked per structure).
+When any structure is active, `compute_financial_kpis` emits one
+`[contracted revenue]` INFO line in the run log with the five lifetime
+totals (the LCOE/LCOS audit's noise discipline: silent in the
+all-merchant default).
+
+Stacking warnings live in one data-driven table
+(`io._CONTRACT_STACKING_RULES`) — a validation-time pass evaluates
+every rule against the parsed contract windows
+(`io._phase_windows_overlap`; phase-disjoint configurations never
+warn, locked by the parametrised matrix test).  Warned combinations
+and why:
+
+| Rule | Fires when | Why |
+|---|---|---|
+| `toll_no_op` | toll rate set, `bess_power_kw = 0` | the stream is a no-op |
+| `toll_retained` | toll active with treatment `retained` | toll + full merchant streams double-monetise the same MW |
+| `toll_x_optimizer_share` | toll and optimizer share active, windows overlap | under `zeroed` the share is gated in toll years; otherwise the two double-charge the same wholesale stream |
+| `toll_x_optimizer_floor` | floor enabled, `zeroed` toll overlaps the optimizer term | the toll zeroes the margin — a full floor top-up every overlap year (double-charging the counterparties) |
+| `toll_x_state_support` | support window overlaps a `zeroed` toll | the netting base is zero, so the netting tops up to $\theta_y$ every overlap year — two capacity payments for the same MW |
+| `capacity_x_state_support` | capacity and support windows overlap | support-cumulation rules typically restrict stacking (the capacity revenue does count toward the E31a base) |
+| `capacity_x_toll` | capacity window overlaps a `zeroed` toll | the toller usually holds the capacity obligation too |
+
+A matrix row is reserved for the Phase-5 sliding-FiP / two-way-CfD
+support scheme × state-support cumulation warning (activated when
+those keys land).
+
 ### Financial KPIs
 
 $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$

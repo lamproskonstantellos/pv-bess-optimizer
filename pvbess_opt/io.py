@@ -2489,6 +2489,117 @@ def validate_pv_location_fields(pv: dict[str, Any]) -> None:
             )
 
 
+def _phase_windows_overlap(
+    a: tuple[int, int], b: tuple[int, int], n_years: int,
+) -> bool:
+    """True when two E25 phase windows share at least one project year.
+
+    ``year_to == 0`` resolves to ``n_years`` (end of life) before the
+    inclusive-interval intersection test.
+    """
+    a_to = n_years if a[1] == 0 else a[1]
+    b_to = n_years if b[1] == 0 else b[1]
+    return a[0] <= b_to and b[0] <= a_to
+
+
+# Contract stacking-warning matrix: every warning about STACKING two
+# contracted-revenue structures (or mis-stacking one against the
+# merchant streams) lives in this one reviewable table —
+# (rule id, fire predicate over the parsed contract context, message,
+# lazy %-args).  Predicates are pure functions of the context dict
+# assembled in validate_workbook_params; windows compare via
+# _phase_windows_overlap so phase-disjoint configurations stay silent.
+# The messages are the exact strings the per-feature warnings used
+# (caplog-locked by the feature test files).  Hard validation errors
+# (ranges, enums, window rules) deliberately stay inline — this table
+# is warnings-only (stacking is flagged, never blocked).
+_CONTRACT_STACKING_RULES: tuple[tuple[str, Any, str, Any], ...] = (
+    ("toll_no_op",
+     lambda c: c["toll_rate"] > 0.0 and c["bess_kw"] <= 0.0,
+     "bess_toll_eur_per_mw_year is set (%.4g EUR/MW/yr) but "
+     "bess_power_kw is 0: the toll stream is a no-op.",
+     lambda c: (c["toll_rate"],)),
+    ("toll_retained",
+     lambda c: c["toll_rate"] > 0.0 and c["toll_treatment"] == "retained",
+     "bess_toll_merchant_treatment = 'retained': the toll "
+     "stacks on top of retained merchant streams, "
+     "double-monetising the same MW. Use only for "
+     "capacity-overlay contracts.",
+     lambda _c: ()),
+    ("toll_x_optimizer_share",
+     lambda c: (
+         c["toll_rate"] > 0.0 and c["opt_share_pct"] > 0.0
+         and _phase_windows_overlap(
+             c["toll_window"], c["opt_term_window"], c["n_years"],
+         )
+     ),
+     "The toll window overlaps an active optimizer revenue "
+     "share (optimizer_revenue_share_pct = %.4g %%): under "
+     "'zeroed' treatment the optimizer share is gated to zero "
+     "in toll years; the two structures double-charge the "
+     "same wholesale stream otherwise.",
+     lambda c: (c["opt_share_pct"],)),
+    ("toll_x_optimizer_floor",
+     lambda c: (
+         c["floor_enabled"] and c["toll_rate"] > 0.0
+         and c["toll_treatment"] == "zeroed"
+         and _phase_windows_overlap(
+             c["toll_window"], c["opt_term_window"], c["n_years"],
+         )
+     ),
+     "optimizer_floor_enabled while a 'zeroed' BESS toll "
+     "window overlaps the optimizer term: the toll zeroes "
+     "the margin in overlap years, forcing a full floor "
+     "top-up every year — double-charging the "
+     "counterparties.",
+     lambda _c: ()),
+    ("toll_x_state_support",
+     lambda c: (
+         c["ss_rate"] > 0.0 and c["toll_rate"] > 0.0
+         and c["toll_treatment"] == "zeroed"
+         and _phase_windows_overlap(
+             c["toll_window"], c["ss_window"], c["n_years"],
+         )
+     ),
+     "A state-support window overlaps a 'zeroed' BESS toll "
+     "window: realised market revenue is zero in toll "
+     "years, so the two-way netting tops the support up to "
+     "the threshold every overlap year — cumulating two "
+     "capacity payments for the same MW.",
+     lambda _c: ()),
+    ("capacity_x_state_support",
+     lambda c: (
+         c["cm_rate"] > 0.0 and c["ss_rate"] > 0.0
+         and _phase_windows_overlap(
+             c["cm_window"], c["ss_window"], c["n_years"],
+         )
+     ),
+     "A capacity-market window overlaps a state-support "
+     "window: support-cumulation rules typically "
+     "restrict stacking the two schemes on the same MW "
+     "(the capacity revenue does count toward the "
+     "support's netting base, Eq. E31a).",
+     lambda _c: ()),
+    ("capacity_x_toll",
+     lambda c: (
+         c["cm_rate"] > 0.0 and c["toll_rate"] > 0.0
+         and c["toll_treatment"] == "zeroed"
+         and _phase_windows_overlap(
+             c["cm_window"], c["toll_window"], c["n_years"],
+         )
+     ),
+     "A capacity-market window overlaps a 'zeroed' BESS "
+     "toll window: the toller usually holds the "
+     "capacity obligation too — check which party "
+     "collects the capacity payment.",
+     lambda _c: ()),
+    # Reserved: a support-scheme (sliding FiP / two-way CfD) x
+    # state_support cumulation rule lands here once those keys ship;
+    # keep it adjacent to capacity_x_state_support (same cumulation
+    # rationale).
+)
+
+
 def validate_workbook_params(
     typed: dict[str, Any], *, dt_minutes: int | None = None,
 ) -> None:
@@ -2636,8 +2747,7 @@ def validate_workbook_params(
         return y_from, y_to
 
     # BESS tolling agreement (Eqs. E29/E29a): non-negative rate and
-    # indexation over a valid phase window; stacking configurations
-    # warn (never block) so deliberate contract overlays stay possible.
+    # indexation over a valid phase window.
     _require_non_negative(economics, "bess_toll_eur_per_mw_year")
     _require_non_negative(economics, "bess_toll_indexation_pct")
     _toll_window = _validate_phase_window("bess_toll")
@@ -2652,29 +2762,6 @@ def validate_workbook_params(
     _toll_rate = float(
         economics.get("bess_toll_eur_per_mw_year", 0.0) or 0.0
     )
-    if _toll_rate > 0.0:
-        if float(bess.get("bess_power_kw", 0.0) or 0.0) <= 0.0:
-            logger.warning(
-                "bess_toll_eur_per_mw_year is set (%.4g EUR/MW/yr) but "
-                "bess_power_kw is 0: the toll stream is a no-op.",
-                _toll_rate,
-            )
-        if _toll_treatment == "retained":
-            logger.warning(
-                "bess_toll_merchant_treatment = 'retained': the toll "
-                "stacks on top of retained merchant streams, "
-                "double-monetising the same MW. Use only for "
-                "capacity-overlay contracts.",
-            )
-        if _opt_pct > 0.0:
-            logger.warning(
-                "The toll window overlaps an active optimizer revenue "
-                "share (optimizer_revenue_share_pct = %.4g %%): under "
-                "'zeroed' treatment the optimizer share is gated to zero "
-                "in toll years; the two structures double-charge the "
-                "same wholesale stream otherwise.",
-                _opt_pct,
-            )
 
     # Optimizer floor + share-above-floor (Eqs. E30/E30a): non-negative
     # floor over a valid term window; the margin basis is enum-checked.
@@ -2689,29 +2776,6 @@ def validate_workbook_params(
             f"'dam_plus_balancing'; got {_margin_basis!r}."
         )
     _floor_enabled = bool(economics.get("optimizer_floor_enabled", False))
-    if _floor_enabled and _toll_rate > 0.0 and _toll_treatment == "zeroed":
-        # Resolve the two windows' end-of-life sentinels and warn on
-        # overlap: the toll zeroes the margin, so every overlap year
-        # forces a full floor top-up — double-charging the
-        # counterparties.
-        _n_years_pw = int(
-            project.get("project_lifecycle_years", 20) or 20
-        )
-        _toll_to = _n_years_pw if _toll_window[1] == 0 else _toll_window[1]
-        _term_to = (
-            _n_years_pw if _opt_term_window[1] == 0 else _opt_term_window[1]
-        )
-        if (
-            _toll_window[0] <= _term_to
-            and _opt_term_window[0] <= _toll_to
-        ):
-            logger.warning(
-                "optimizer_floor_enabled while a 'zeroed' BESS toll "
-                "window overlaps the optimizer term: the toll zeroes "
-                "the margin in overlap years, forcing a full floor "
-                "top-up every year — double-charging the "
-                "counterparties.",
-            )
 
     # State support with two-way clawback (Eqs. E31/E31a): non-negative
     # levels over a valid support window; the netting share shares the
@@ -2725,26 +2789,9 @@ def validate_workbook_params(
     _ss_rate = float(
         economics.get("state_support_eur_per_mw_year", 0.0) or 0.0
     )
-    if _ss_rate > 0.0 and _toll_rate > 0.0 and _toll_treatment == "zeroed":
-        _n_years_ss = int(project.get("project_lifecycle_years", 20) or 20)
-        _toll_to_ss = (
-            _n_years_ss if _toll_window[1] == 0 else _toll_window[1]
-        )
-        _ss_to = _n_years_ss if _ss_window[1] == 0 else _ss_window[1]
-        if _toll_window[0] <= _ss_to and _ss_window[0] <= _toll_to_ss:
-            logger.warning(
-                "A state-support window overlaps a 'zeroed' BESS toll "
-                "window: realised market revenue is zero in toll "
-                "years, so the two-way netting tops the support up to "
-                "the threshold every overlap year — cumulating two "
-                "capacity payments for the same MW.",
-            )
 
     # Capacity-market payment (Eq. E32): non-negative rate/indexation,
-    # derating in [0, 100], valid contract window; stacking warnings
-    # for support cumulation and for a 'zeroed' toll (the toller
-    # usually holds the capacity obligation too — flagged, not
-    # blocked).
+    # derating in [0, 100], valid contract window.
     _require_non_negative(economics, "capacity_market_eur_per_mw_year")
     _require_non_negative(economics, "capacity_market_indexation_pct")
     _cm_derating = float(
@@ -2759,32 +2806,29 @@ def validate_workbook_params(
     _cm_rate = float(
         economics.get("capacity_market_eur_per_mw_year", 0.0) or 0.0
     )
-    if _cm_rate > 0.0:
-        _n_years_cm = int(project.get("project_lifecycle_years", 20) or 20)
-        _cm_to = _n_years_cm if _cm_window[1] == 0 else _cm_window[1]
-        if _ss_rate > 0.0:
-            _ss_to_cm = (
-                _n_years_cm if _ss_window[1] == 0 else _ss_window[1]
-            )
-            if _cm_window[0] <= _ss_to_cm and _ss_window[0] <= _cm_to:
-                logger.warning(
-                    "A capacity-market window overlaps a state-support "
-                    "window: support-cumulation rules typically "
-                    "restrict stacking the two schemes on the same MW "
-                    "(the capacity revenue does count toward the "
-                    "support's netting base, Eq. E31a).",
-                )
-        if _toll_rate > 0.0 and _toll_treatment == "zeroed":
-            _toll_to_cm = (
-                _n_years_cm if _toll_window[1] == 0 else _toll_window[1]
-            )
-            if _cm_window[0] <= _toll_to_cm and _toll_window[0] <= _cm_to:
-                logger.warning(
-                    "A capacity-market window overlaps a 'zeroed' BESS "
-                    "toll window: the toller usually holds the "
-                    "capacity obligation too — check which party "
-                    "collects the capacity payment.",
-                )
+
+    # Contract stacking warnings — one data-driven pass over
+    # _CONTRACT_STACKING_RULES (never blocking; deliberate contract
+    # overlays stay possible).  Every predicate reads this context.
+    _contract_ctx: dict[str, Any] = {
+        "n_years": int(project.get("project_lifecycle_years", 20) or 20),
+        "bess_kw": float(bess.get("bess_power_kw", 0.0) or 0.0),
+        "toll_rate": _toll_rate,
+        "toll_treatment": _toll_treatment,
+        "toll_window": _toll_window,
+        "opt_share_pct": _opt_pct,
+        "opt_term_window": _opt_term_window,
+        "floor_enabled": _floor_enabled,
+        "ss_rate": _ss_rate,
+        "ss_window": _ss_window,
+        "cm_rate": _cm_rate,
+        "cm_window": _cm_window,
+    }
+    for _rule_id, _rule_fires, _rule_msg, _rule_args in (
+        _CONTRACT_STACKING_RULES
+    ):
+        if _rule_fires(_contract_ctx):
+            logger.warning(_rule_msg, *_rule_args(_contract_ctx))
 
     # Grid-emissions accounting (24/7-CFE): a non-negative intensity and a
     # decline in [0, 100] %/yr.  A decline above 100 % makes the

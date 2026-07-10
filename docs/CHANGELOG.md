@@ -205,6 +205,26 @@ Production release.
   (cumulation) and with a 'zeroed' toll (the toller usually holds the
   capacity obligation).
 
+### Changed (contract stacking-warning matrix + run-log audit)
+
+- The per-feature contract stacking warnings (toll no-op / 'retained'
+  double-monetisation / toll x optimizer share / toll x floor /
+  toll x state support / capacity x support / capacity x toll) now
+  live in one data-driven `io._CONTRACT_STACKING_RULES` table
+  evaluated in a single validation pass over the parsed phase windows
+  (`io._phase_windows_overlap`) - exact message strings preserved, and
+  phase-disjoint configurations are locked silent by a parametrised
+  matrix test (the toll x optimizer-share rule now honours the
+  optimizer term window instead of firing whole-life).  A matrix row
+  is reserved for the Phase-5 support-scheme x state-support
+  cumulation rule.  `compute_financial_kpis` emits one
+  `[contracted revenue]` INFO audit line (five lifetime totals) when
+  any contracted structure is active; the design doc gains the
+  per-structure conventions table and the stacking-interaction table,
+  and the uncertainty design documents the contracted-revenue tornado
+  damping (fixed streams unscaled; piecewise terms recomputed at
+  their kinks).
+
 ### Added (imbalance settlement exposure)
 
 - `imbalance_enabled` on the simulation sheet (default FALSE,
