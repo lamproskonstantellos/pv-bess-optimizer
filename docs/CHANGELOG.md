@@ -60,6 +60,12 @@
   column and would have tripped the guard on legitimate zeros.  The
   YAML/JSON config path applies the same guard on its faithful native
   types.
+- The tornado OPEX and Revenue driver values now report the Year-1
+  figures their row labels promise ("Total annual OPEX", "Year-1
+  revenue base") instead of lifetime sums, matching the convention the
+  CAPEX driver already followed (Year-0 outlay).  The perturbation
+  itself is unchanged — it scales every year of the stream by the same
+  factor — only the EUR endpoint annotations move.
 
 ## 1.0.0 (2026-07-06)
 

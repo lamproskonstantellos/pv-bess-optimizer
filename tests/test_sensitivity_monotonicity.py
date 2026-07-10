@@ -144,18 +144,20 @@ def test_revenue_driver_value_includes_balancing():
     """The Revenue driver's reported base value must include balancing.
 
     The ``value`` column on the ``base`` row of the Revenue driver is
-    the total Year-1+ revenue swept by the +/- scenarios; it must be
-    the sum of DAM + retail + balancing rather than DAM + retail
-    alone.  Otherwise the dumbbell tornado would annotate the wrong
-    EUR base.
+    the Year-1 revenue base (the +/- scenarios scale every subsequent
+    year by the same factor, so the label's EUR values stay Year-1);
+    it must be the sum of DAM + retail + balancing rather than DAM +
+    retail alone.  Otherwise the dumbbell tornado would annotate the
+    wrong EUR base.
     """
     econ, caps, kpis = _econ(), _capacities(), _year1_kpis_with_balancing()
     sens = run_sensitivity_analysis(kpis, econ, caps, _base_kpis(econ, caps, kpis))
     base_value = _scenario(sens, "Revenue", "base", "value")
     # Build the yearly cashflow ourselves and sum revenue + balancing.
     cf = build_yearly_cashflow(kpis, econ, caps)
+    year1 = cf["project_year"] == 1
     expected = float(
-        cf.loc[cf["project_year"] >= 1, "revenue_eur"].sum()
-        + cf.loc[cf["project_year"] >= 1, "balancing_revenue_eur"].sum()
+        cf.loc[year1, "revenue_eur"].sum()
+        + cf.loc[year1, "balancing_revenue_eur"].sum()
     )
     assert abs(base_value - expected) < 1e-6
