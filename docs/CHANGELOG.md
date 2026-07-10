@@ -268,6 +268,22 @@ Production release.
   is a separate column family).  Locked by hand-computed schedules,
   a FIFO-expiry worked example and an independent levered reference.
 
+### Added (post-tax financial KPIs)
+
+- `npv_post_tax_eur` / `irr_post_tax_pct` / `equity_irr_post_tax_pct`
+  (post-tax equity flows via the E20 schedule) + the post-tax payback
+  pair + `total_corporate_tax_eur_lifecycle` /
+  `total_depreciation_eur_lifecycle` and a `corporate_tax_rate_pct`
+  echo (Eq. E39), reported ALONGSIDE the pre-tax baseline - the
+  pre-tax KPI keys and values are untouched in every configuration
+  (regression-locked).  Every post-tax KPI is NaN while the rate is 0
+  (the all-equity equity_irr precedent: 'n/a' = tax not modelled), so
+  the SUMMARY optional-row renderer self-skips the four new rows and
+  zero-default digests stay byte-identical.  min_dscr deliberately
+  stays pre-tax (a CFADS-based post-tax DSCR is a stated non-goal).
+  Users-guide section 'Tax, depreciation and the revenue levy' and a
+  README feature paragraph for the Greek contracted + fiscal layer.
+
 ### Added (imbalance settlement exposure)
 
 - `imbalance_enabled` on the simulation sheet (default FALSE,

@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E38 (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E39 (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -910,6 +910,29 @@ tax turns on in the late years — locked to hand-computed cents in
 `tests/test_tax_depreciation.py`, alongside an independent levered
 reference case.
 
+Post-tax KPIs (Eq. E39) surface the layer as headline metrics
+**alongside** (never replacing) the pre-tax baseline:
+
+$$\mathrm{CF}^{eq,pt}_0 = \mathrm{CF}^{pt}_0 + B, \qquad
+\mathrm{CF}^{eq,pt}_y = \mathrm{CF}^{pt}_y - s_y \;\;
+(1 \le y \le T_d), \qquad
+\mathrm{equity\ IRR}^{pt} = \mathrm{IRR}\!\left(
+\mathrm{CF}^{eq,pt}\right) \tag{E39}$$
+
+with $B$, $s_y$ from the E20 schedule.  `compute_financial_kpis`
+emits `npv_post_tax_eur` (sum of the discounted post-tax column),
+`irr_post_tax_pct`, `equity_irr_post_tax_pct`,
+`simple_payback_post_tax_years` /
+`discounted_payback_post_tax_years` (the E19 interpolation on the
+post-tax cumulatives), `total_corporate_tax_eur_lifecycle` ($\le 0$),
+`total_depreciation_eur_lifecycle` and a `corporate_tax_rate_pct`
+echo (the `gearing_pct` precedent).  Every post-tax KPI reports
+**NaN while the rate is 0** (the all-equity `equity_irr_pct`
+precedent: n/a = not modelled — never a duplicate of the pre-tax
+value), so the SUMMARY optional-row renderer self-skips them and
+zero-default digests stay byte-identical.  `min_dscr` deliberately
+stays pre-tax (a CFADS-based post-tax DSCR is a stated non-goal).
+
 ### Financial KPIs
 
 $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$
@@ -1062,6 +1085,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E32) | `build_yearly_cashflow` capacity_market_revenue_eur column (computed before the E31a netting) |
 | (E33) | `build_yearly_cashflow` revenue_levy_eur clamp + fee-share monthly allocation |
 | (E34)-(E38) | `economics.apply_tax_layer` (straight-line tranches, EBITDA, FIFO carry-forward, tax clamp, post-tax family) |
+| (E39) | `compute_financial_kpis` post-tax KPI block (NaN-gated on the rate) |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

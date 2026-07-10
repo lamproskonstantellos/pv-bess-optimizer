@@ -3538,6 +3538,15 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_capacity_market_revenue_eur_lifecycle",
      "Lifetime capacity-market revenue [EUR]"),
     ("total_revenue_levy_eur_lifecycle", "Lifetime revenue levy [EUR]"),
+    # Post-tax family (Eq. E39): NaN while the tax layer is off, so the
+    # non-zero/NaN-skipping renderer keeps zero-default digests
+    # noise-free ('n/a' = tax not modelled, never a duplicate of the
+    # pre-tax baseline).
+    ("npv_post_tax_eur", "NPV post-tax [EUR]"),
+    ("irr_post_tax_pct", "IRR post-tax [%]"),
+    ("equity_irr_post_tax_pct", "Equity IRR post-tax [%]"),
+    ("total_corporate_tax_eur_lifecycle",
+     "Lifetime corporate tax [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the

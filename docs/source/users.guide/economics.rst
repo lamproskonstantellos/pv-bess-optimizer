@@ -57,6 +57,36 @@ load unchanged and default it to 0.
 ``bess_calendar_fade_pct_y_final``, ``bess_cycle_fade_pct_y_final`` and
 ``bess_total_fade_pct_y_final``; the first two sum to the third.
 
+Tax, depreciation and the revenue levy
+--------------------------------------
+
+Three opt-in fiscal layers ride the ``economics`` sheet, all
+default-off and bit-identical when unset:
+
+* ``revenue_levy_pct`` charges gross MARKET turnover (DAM export
+  revenue gross of the aggregator fee, balancing gross of the BSP fee,
+  the PPA contract leg) - the 3 % special RES turnover levy applied in
+  Greece is the reference.  It is a pre-tax operating cost inside
+  ``net_cashflow_eur`` and therefore deductible from taxable income by
+  construction.
+* ``corporate_tax_rate_pct`` with the three straight-line lives
+  (``depreciation_years_pv`` / ``depreciation_years_bess`` /
+  ``depreciation_years_site``) and ``tax_loss_carryforward_years``
+  computes taxable income = EBITDA - depreciation - debt interest with
+  FIFO loss carry-forward, and appends the post-tax cashflow column
+  family (``net_cashflow_post_tax_eur`` and friends; the tax books in
+  month 12 on the monthly sheet).  Tax is never positive - losses only
+  carry forward.
+* The post-tax KPIs (``npv_post_tax_eur``, ``irr_post_tax_pct``,
+  ``equity_irr_post_tax_pct``, the post-tax paybacks and the lifetime
+  tax/depreciation totals) report alongside the pre-tax baseline and
+  show "n/a" while the rate is 0; the pre-tax KPIs never change under
+  any tax setting.  A worked mini-example: at a 22 % rate with 20/10/20
+  lives, early years typically run at a taxable loss (high
+  depreciation), the carry-forward absorbs the first profitable years,
+  and cash tax starts once the pool is consumed - NPV post-tax then
+  sits below the pre-tax NPV by the discounted tax stream.
+
 Why analytical scaling instead of solving N MILPs?
 --------------------------------------------------
 
@@ -144,6 +174,13 @@ Headline financial KPIs returned by
   ``total_optimizer_fee_eur_lifecycle``: lifecycle totals of the
   route-to-market fee structures (all ≤ 0; the latter two render in
   ``SUMMARY.md`` only when the corresponding knob is set)
+* ``npv_post_tax_eur`` / ``irr_post_tax_pct`` /
+  ``equity_irr_post_tax_pct`` / ``simple_payback_post_tax_years`` /
+  ``discounted_payback_post_tax_years`` /
+  ``total_corporate_tax_eur_lifecycle`` /
+  ``total_depreciation_eur_lifecycle``: the post-tax KPI family
+  (Eq. E39), additive to the pre-tax baseline; all report NaN
+  ("n/a" = tax not modelled) while ``corporate_tax_rate_pct`` is 0
 * ``project_start_year`` / ``project_end_year``
 * ``bess_calendar_fade_pct_y_final`` / ``bess_cycle_fade_pct_y_final`` /
   ``bess_total_fade_pct_y_final``: year-N BESS capacity-fade split

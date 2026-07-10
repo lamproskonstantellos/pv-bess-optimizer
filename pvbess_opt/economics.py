@@ -2139,6 +2139,50 @@ def compute_financial_kpis(
         float(df.loc[after_y0_mask, "revenue_levy_eur"].sum())
         if "revenue_levy_eur" in df.columns else 0.0
     )
+
+    # ---- Post-tax KPIs (Eq. E39) -------------------------------------------
+    # Reported ALONGSIDE (never replacing) the pre-tax baseline, and
+    # NaN whenever the tax layer is off (the equity_irr all-equity
+    # precedent: n/a = not modelled) so the SUMMARY digest self-skips
+    # the rows and zero-default outputs stay noise-free.  min_dscr
+    # deliberately stays pre-tax (a CFADS-based post-tax DSCR is a
+    # stated non-goal).
+    _tax_rate_pct = float(
+        econ.get("corporate_tax_rate_pct", 0.0) or 0.0
+    )
+    npv_post_tax = float("nan")
+    irr_post_tax_pct = float("nan")
+    equity_irr_post_tax_pct = float("nan")
+    payback_post_tax = float("nan")
+    discounted_payback_post_tax = float("nan")
+    total_corporate_tax_eur_lifecycle = float("nan")
+    total_depreciation_eur_lifecycle = float("nan")
+    if _tax_rate_pct > 0.0 and "net_cashflow_post_tax_eur" in df.columns:
+        npv_post_tax = float(df["discounted_cf_post_tax_eur"].sum())
+        cf_pt_array = df["net_cashflow_post_tax_eur"].to_numpy(dtype=float)
+        _irr_pt = calculate_irr(cf_pt_array)
+        irr_post_tax_pct = (
+            float("nan") if np.isnan(_irr_pt) else _irr_pt * 100.0
+        )
+        # Post-tax equity flows (Eq. E39): the E20 schedule applied to
+        # the post-tax project cashflow; NaN when all-equity.
+        equity_irr_post_tax_pct, _ = _leverage_kpis(cf_pt_array, econ)
+        payback_post_tax = _payback_year(
+            project_years,
+            df["cumulative_cf_post_tax_eur"].to_numpy(dtype=float),
+            cf_pt_array,
+        )
+        discounted_payback_post_tax = _payback_year(
+            project_years,
+            df["cumulative_dcf_post_tax_eur"].to_numpy(dtype=float),
+            df["discounted_cf_post_tax_eur"].to_numpy(dtype=float),
+        )
+        total_corporate_tax_eur_lifecycle = float(
+            df.loc[after_y0_mask, "corporate_tax_eur"].sum()
+        )
+        total_depreciation_eur_lifecycle = float(
+            df.loc[after_y0_mask, "depreciation_eur"].sum()
+        )
     total_balancing_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
         if "balancing_revenue_eur" in df.columns else 0.0
@@ -2489,6 +2533,39 @@ def compute_financial_kpis(
         "total_revenue_levy_eur_lifecycle": float(round(
             total_revenue_levy_eur_lifecycle, 2,
         )),
+        # Post-tax KPI family (Eq. E39) — additive to the pre-tax
+        # baseline; all NaN while corporate_tax_rate_pct = 0.
+        "npv_post_tax_eur": (
+            float("nan") if np.isnan(npv_post_tax)
+            else float(round(npv_post_tax, 2))
+        ),
+        "irr_post_tax_pct": (
+            float("nan") if np.isnan(irr_post_tax_pct)
+            else float(round(irr_post_tax_pct, 4))
+        ),
+        "equity_irr_post_tax_pct": (
+            float("nan") if np.isnan(equity_irr_post_tax_pct)
+            else float(round(equity_irr_post_tax_pct, 4))
+        ),
+        "simple_payback_post_tax_years": (
+            float("nan") if np.isnan(payback_post_tax)
+            else float(round(payback_post_tax, 4))
+        ),
+        "discounted_payback_post_tax_years": (
+            float("nan") if np.isnan(discounted_payback_post_tax)
+            else float(round(discounted_payback_post_tax, 4))
+        ),
+        "total_corporate_tax_eur_lifecycle": (
+            float("nan") if np.isnan(total_corporate_tax_eur_lifecycle)
+            else float(round(total_corporate_tax_eur_lifecycle, 2))
+        ),
+        "total_depreciation_eur_lifecycle": (
+            float("nan") if np.isnan(total_depreciation_eur_lifecycle)
+            else float(round(total_depreciation_eur_lifecycle, 2))
+        ),
+        # Echo (the gearing_pct precedent) so downstream consumers can
+        # gate on the configured rate without re-reading econ.
+        "corporate_tax_rate_pct": float(round(_tax_rate_pct, 4)),
         "lifetime_bm_revenue_total_eur": float(round(
             total_balancing_revenue_eur_lifecycle, 2,
         )),
