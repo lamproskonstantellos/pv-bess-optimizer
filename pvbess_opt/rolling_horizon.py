@@ -57,7 +57,9 @@ __all__ = [
     "monte_carlo_balancing",
     "monte_carlo_rolling",
     "realise_balancing_scenario",
+    "resolve_imbalance_prices",
     "rolling_horizon_dispatch",
+    "settle_imbalance",
 ]
 
 
@@ -85,6 +87,123 @@ PRICE_COLUMNS: tuple[str, ...] = (
     "mfrr_up_activation_price_eur_per_mwh",
     "mfrr_dn_activation_price_eur_per_mwh",
 )
+
+
+# ---------------------------------------------------------------------------
+# Imbalance settlement (Eqs. U6-U9)
+# ---------------------------------------------------------------------------
+
+# The three optional imbalance price columns are actuals-only inputs:
+# they are never forecast-noised (deviation settlement prices are not
+# known day-ahead by construction), so they deliberately stay OUT of
+# PRICE_COLUMNS — the settlement always reads them from the original
+# noise-free timeseries.
+IMBALANCE_PRICE_COLUMNS: tuple[str, ...] = (
+    "imbalance_price_eur_per_mwh",           # single-price regime
+    "imbalance_price_short_eur_per_mwh",     # dual regime, short side
+    "imbalance_price_long_eur_per_mwh",      # dual regime, long side
+)
+
+_IMBALANCE_PROXY_WARNED = False
+
+
+def resolve_imbalance_prices(
+    ts: pd.DataFrame,
+    dam: np.ndarray,
+    *,
+    pricing: str,
+    mult_short: float,
+    mult_long: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-step (short, long) imbalance price arrays.
+
+    Dual regime: each side reads its own column when present, else the
+    sign-aware DAM proxy (Eq. U8a) — ``pi_short = DAM + (m_s - 1)|DAM|``
+    and ``pi_long = DAM - (1 - m_l)|DAM|``, so ``long <= DAM <= short``
+    holds in negative-price hours too (a naive ``DAM x m`` flips the
+    spread sign there).  Single regime: both sides are the mandatory
+    ``imbalance_price_eur_per_mwh`` column (the loader validates its
+    presence — a lone imbalance price has no canonical DAM relationship
+    to proxy).
+    """
+    global _IMBALANCE_PROXY_WARNED
+    n = len(dam)
+    if pricing == "single":
+        col = ts["imbalance_price_eur_per_mwh"].astype(float).to_numpy()[:n]
+        return col, col
+    abs_dam = np.abs(dam)
+    if "imbalance_price_short_eur_per_mwh" in ts.columns:
+        short = (
+            ts["imbalance_price_short_eur_per_mwh"]
+            .astype(float).to_numpy()[:n]
+        )
+    else:
+        short = dam + (float(mult_short) - 1.0) * abs_dam
+        if not _IMBALANCE_PROXY_WARNED:
+            logger.warning(
+                "imbalance settlement: no imbalance_price_short_eur_per_mwh "
+                "column; using the sign-aware DAM proxy (Eq. U8a) with "
+                "imbalance_price_mult_short=%.3g.", float(mult_short),
+            )
+            _IMBALANCE_PROXY_WARNED = True
+    if "imbalance_price_long_eur_per_mwh" in ts.columns:
+        long_ = (
+            ts["imbalance_price_long_eur_per_mwh"]
+            .astype(float).to_numpy()[:n]
+        )
+    else:
+        long_ = dam - (1.0 - float(mult_long)) * abs_dam
+    return short, long_
+
+
+def settle_imbalance(
+    deviation_mwh: np.ndarray,
+    dam: np.ndarray,
+    price_short: np.ndarray,
+    price_long: np.ndarray,
+    *,
+    pricing: str,
+) -> np.ndarray:
+    """Per-step settlement cost relative to the DAM-booked revenue.
+
+    The realised dispatch is already re-priced at DAM by the
+    actuals-restore path, so the settlement is the CORRECTION for the
+    deviation volume — no double counting.  Dual regime (Eq. U7):
+
+        C_t = max(-D,0)(pi_short - DAM) + max(D,0)(DAM - pi_long)
+
+    non-negative whenever ``long <= DAM <= short`` (incentive-compatible
+    dual pricing).  Single regime (Eq. U8): ``C_t = (pi_imb - DAM)(-D)``
+    — sign-indefinite, an imbalance can profit; the classic single- vs
+    dual-price distinction and the reason for the regime switch.
+    ``D > 0`` is long (over-delivery vs nomination), ``D < 0`` short.
+    """
+    d = np.asarray(deviation_mwh, dtype=float)
+    if pricing == "single":
+        return (price_short - dam) * (-d)
+    short_vol = np.clip(-d, 0.0, None)
+    long_vol = np.clip(d, 0.0, None)
+    return short_vol * (price_short - dam) + long_vol * (dam - price_long)
+
+
+def _net_grid_position_kwh(frame: pd.DataFrame) -> np.ndarray:
+    """Per-step net grid position (kWh): injection minus offtake.
+
+    ``grid_to_load_kwh`` is absent in merchant mode and the BESS
+    grid-charge column can be absent in surplus-only configurations;
+    missing columns contribute zero.
+    """
+    n = len(frame)
+    out = np.zeros(n, dtype=float)
+    for col, sign in (
+        ("pv_to_grid_kwh", 1.0),
+        ("bess_dis_grid_kwh", 1.0),
+        ("grid_to_load_kwh", -1.0),
+        ("bess_charge_grid_kwh", -1.0),
+    ):
+        if col in frame.columns:
+            out = out + sign * frame[col].fillna(0.0).astype(float).to_numpy()
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +382,10 @@ def rolling_horizon_dispatch(
     enable_pv: bool = True,
     enable_load: bool = True,
     evaluate_with_actuals: bool = True,
+    imbalance_enabled: bool = False,
+    imbalance_pricing: str = "dual",
+    imbalance_price_mult_short: float = 1.25,
+    imbalance_price_mult_long: float = 0.75,
     solver_name: str = "highs",
     **solve_kwargs: Any,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -353,6 +476,17 @@ def rolling_horizon_dispatch(
     initial_soc_kwh: float | None = None
     committed_chunks: list[pd.DataFrame] = []
 
+    # Imbalance settlement (Eq. U6): per-step DA nominations for each
+    # commit block come from the PREVIOUS window's noisy lookahead slice
+    # [commit, 2*commit) — the only forecast-based schedule the
+    # machinery produces (committed rows are byte-identical to actuals
+    # by design).  NaN marks steps without a nomination (the first
+    # block, and tail steps beyond the last lookahead), which settle at
+    # zero deviation.  Capture happens AFTER each solve and consumes NO
+    # rng draws, so existing seeds reproduce bit-identically.
+    nomination_kwh = np.full(n, np.nan, dtype=float)
+    nomination_pv_kwh = np.full(n, np.nan, dtype=float)
+
     # Year-close target: when the annual benchmark closes its SOC cycle
     # (terminal_soc_equal), the window(s) covering the final step must
     # return the battery to the year-initial SOC so the realised profit
@@ -414,6 +548,24 @@ def rolling_horizon_dispatch(
 
         # Keep the first ``commit_steps`` slice of the solved dispatch.
         local_commit_n = commit_end_global - cursor
+        if imbalance_enabled:
+            look_end = min(local_commit_n + commit_steps, len(res_window))
+            if look_end > local_commit_n:
+                look = res_window.iloc[local_commit_n:look_end]
+                g_start = cursor + local_commit_n
+                g_end = min(g_start + (look_end - local_commit_n), n)
+                span = g_end - g_start
+                nomination_kwh[g_start:g_end] = (
+                    _net_grid_position_kwh(look)[:span]
+                )
+                # Noisy PV lookahead for the PV-only counterfactual
+                # (Eq. U9) — the SAME seed's forecast, so the hedge
+                # value is paired by construction.
+                if "pv_kwh" in window_noisy.columns:
+                    nomination_pv_kwh[g_start:g_end] = (
+                        window_noisy["pv_kwh"].astype(float)
+                        .to_numpy()[local_commit_n:look_end][:span]
+                    )
         committed = res_window.iloc[:local_commit_n].copy()
         # Re-attach the original (un-noised) timestamps so the year-long
         # frame lines up with ``ts``.
@@ -494,6 +646,68 @@ def rolling_horizon_dispatch(
         full = add_economic_columns(full, params)
 
     kpis = compute_kpis(full, params, verify_balance=False)
+
+    if imbalance_enabled:
+        # Ex-post deviation settlement (Eqs. U6-U9), always against the
+        # ORIGINAL noise-free prices (imbalance prices are actuals; the
+        # realised revenue was already re-priced at DAM by the
+        # actuals-restore path, so the settlement is exactly the
+        # correction for the deviation volume).
+        gamma_real = _net_grid_position_kwh(full)[:n]
+        nom_mask = ~np.isnan(nomination_kwh)
+        deviation_mwh = np.zeros(n, dtype=float)
+        deviation_mwh[nom_mask] = (
+            gamma_real[nom_mask] - nomination_kwh[nom_mask]
+        ) / 1000.0
+        dam_actual = (
+            ts["dam_price_eur_per_mwh"].astype(float).to_numpy()[:n]
+        )
+        p_short, p_long = resolve_imbalance_prices(
+            ts, dam_actual,
+            pricing=imbalance_pricing,
+            mult_short=imbalance_price_mult_short,
+            mult_long=imbalance_price_mult_long,
+        )
+        cost = settle_imbalance(
+            deviation_mwh, dam_actual, p_short, p_long,
+            pricing=imbalance_pricing,
+        )
+        kpis["imbalance_cost_eur"] = round(float(cost.sum()), 2)
+        kpis["imbalance_short_mwh"] = round(
+            float(np.clip(-deviation_mwh, 0.0, None).sum()), 4,
+        )
+        kpis["imbalance_long_mwh"] = round(
+            float(np.clip(deviation_mwh, 0.0, None).sum()), 4,
+        )
+        # PV-only counterfactual (Eq. U9): a plant with zero dispatch
+        # freedom nominates min(forecast PV, cap) and delivers
+        # min(actual PV, cap) — exact, no extra solve, paired with this
+        # seed's noise draws by construction.  Cap approximated flat at
+        # p_grid_export_max_kw x dt (hour-profile sub-caps ignored).
+        pv_actual = (
+            ts["pv_kwh"].astype(float).to_numpy()[:n]
+            if "pv_kwh" in ts.columns else np.zeros(n)
+        )
+        cap_kwh = float(
+            params.get("p_grid_export_max_kw", 0.0) or 0.0
+        ) * dt_h_value
+        if cap_kwh <= 0.0:
+            cap_kwh = float("inf")
+        pv_mask = ~np.isnan(nomination_pv_kwh)
+        dev_pv_mwh = np.zeros(n, dtype=float)
+        dev_pv_mwh[pv_mask] = (
+            np.minimum(pv_actual[pv_mask], cap_kwh)
+            - np.minimum(nomination_pv_kwh[pv_mask], cap_kwh)
+        ) / 1000.0
+        cost_pv = settle_imbalance(
+            dev_pv_mwh, dam_actual, p_short, p_long,
+            pricing=imbalance_pricing,
+        )
+        kpis["imbalance_cost_pv_only_eur"] = round(float(cost_pv.sum()), 2)
+        kpis["bess_imbalance_hedge_value_eur"] = round(
+            float(cost_pv.sum() - cost.sum()), 2,
+        )
+
     # Identical scope to the pipeline's headline Year-1 KPIs: the same
     # post-solve unavailability derate is applied here so the foresight
     # gap compares derated-vs-derated (the factor cancels in the ratio).

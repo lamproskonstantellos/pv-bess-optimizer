@@ -142,6 +142,8 @@ def test_simulation_sheet_keys():
         "uncertainty_sigma_dam", "uncertainty_sigma_pv",
         "uncertainty_sigma_load",
         "uncertainty_diagnostics_enabled",
+        "imbalance_enabled", "imbalance_pricing",
+        "imbalance_price_mult_short", "imbalance_price_mult_long",
         "plot_daily_scope", "plot_monthly_scope", "plot_yearly_scope",
     }
     assert set(SIMULATION_SHEET_DEFAULTS) == expected
