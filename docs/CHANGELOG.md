@@ -46,6 +46,10 @@
 
 ### Fixed
 
+- `docs/economics_design.md` carried two equations tagged E9 (the
+  availability grid-import correction reused the yearly-cashflow
+  stream tag): the import correction is renumbered E8a and the
+  implementation map now covers E8a and E13b-E13d.
 - A boolean typed into a numeric workbook field is now rejected with a
   clear error naming the sheet and key instead of silently coercing
   (`float(TRUE) == 1.0`) — e.g. `unavailability_pct = TRUE` silently

@@ -132,6 +132,11 @@ Headline financial KPIs returned by
   CAPEX when ``bess_replacement_year > 0``
 * ``total_opex_eur_lifecycle``
 * ``total_revenue_eur_lifecycle``
+* ``total_aggregator_fee_eur_lifecycle`` /
+  ``total_route_to_market_fee_eur_lifecycle`` /
+  ``total_optimizer_fee_eur_lifecycle``: lifecycle totals of the
+  route-to-market fee structures (all ≤ 0; the latter two render in
+  ``SUMMARY.md`` only when the corresponding knob is set)
 * ``project_start_year`` / ``project_end_year``
 * ``bess_calendar_fade_pct_y_final`` / ``bess_cycle_fade_pct_y_final`` /
   ``bess_total_fade_pct_y_final``: year-N BESS capacity-fade split

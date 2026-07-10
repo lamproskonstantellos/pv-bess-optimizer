@@ -49,9 +49,10 @@ __all__ = [
 class DriverSensitivity:
     """One tornado driver's base / low / high state.
 
-    Carries both the absolute driver values (``*_value``) and the
-    resulting metric outcomes (``*_outcome``) so a tornado plot can
-    annotate each bar end with the driver value that produced it.
+    Carries the absolute driver values (``*_value``) so a tornado plot
+    can annotate each bar end with the driver value that produced it;
+    the metric outcomes travel separately in the plot's low/high
+    arrays.
     """
 
     name: str               # e.g. "CAPEX" — the variable identifier
@@ -59,8 +60,6 @@ class DriverSensitivity:
     base_value: float        # base case absolute driver value
     low_value: float         # absolute driver value at the low end
     high_value: float        # absolute driver value at the high end
-    low_outcome: float       # IRR or NPV at the low driver end
-    high_outcome: float      # IRR or NPV at the high driver end
     sensitivity_pct: float   # the +/- magnitude used (e.g. 20.0)
 
 
@@ -644,8 +643,6 @@ def build_driver_sensitivities(
                 base_value=float(by_scen.loc["base", "value"]),  # type: ignore[arg-type]
                 low_value=float(by_scen.loc["low", "value"]),  # type: ignore[arg-type]
                 high_value=float(by_scen.loc["high", "value"]),  # type: ignore[arg-type]
-                low_outcome=float(by_scen.loc["low", metric]),  # type: ignore[arg-type]
-                high_outcome=float(by_scen.loc["high", metric]),  # type: ignore[arg-type]
                 sensitivity_pct=float(sens_pct),
             )
         except (TypeError, ValueError):

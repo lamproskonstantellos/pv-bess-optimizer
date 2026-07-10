@@ -12,7 +12,6 @@ from pvbess_opt.io import (
     PROJECT_SHEET_DEFAULTS,
     PV_SHEET_DEFAULTS,
     SIMULATION_SHEET_DEFAULTS,
-    _flat_dict_from_sheet,
     _parse_bool,
     _parse_kv_sheet,
     detect_timestep_minutes,
@@ -61,12 +60,22 @@ def test_parse_bool_accepts_canonical_tokens():
     assert _parse_bool("", True) is True
 
 
-def test_flat_dict_skips_separator_rows():
-    df = pd.DataFrame({
-        "key": ["# group", "efficiency_charge", "", "bess_power_kw"],
-        "value": [None, 0.95, None, 5000],
-    })
-    flat = _flat_dict_from_sheet(df)
+def test_read_kv_flat_skips_separator_rows(tmp_path):
+    from openpyxl import Workbook
+
+    from pvbess_opt.io import _read_kv_flat
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "bess"
+    ws.append(["key", "value"])
+    ws.append(["# group", None])
+    ws.append(["efficiency_charge", 0.95])
+    ws.append(["", None])
+    ws.append(["bess_power_kw", 5000])
+    path = tmp_path / "kv.xlsx"
+    wb.save(path)
+    flat = _read_kv_flat(path, "bess")
     assert flat == {"efficiency_charge": 0.95, "bess_power_kw": 5000}
 
 

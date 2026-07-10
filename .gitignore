@@ -11,3 +11,9 @@ docs/build/
 dist/
 .venv/
 .DS_Store
+
+# Editor / stray-log hygiene
+*.log
+.vscode/
+.idea/
+*.swp
