@@ -259,6 +259,58 @@ def plot_revenue_stack_yearly(
         imb_cost = op["imbalance_cost_eur"].astype(float).to_numpy()
     else:
         imb_cost = np.zeros_like(load_pv)
+    # Tolling revenue (Eq. E29) — read straight from the cashflow
+    # column.  Under 'zeroed' treatment (Eq. E29a) the BESS-origin
+    # merchant streams are zero in toll years: the column-derived
+    # ratios above absorb that for the DAM/retail stack sums (the
+    # per-component attribution inside a blended ratio is approximate,
+    # as it already is for the pv/bess split), but the per-product
+    # balancing segments are reconstructed analytically below, so they
+    # carry an explicit merchant gate — zero exactly in the years the
+    # toll column is non-zero.
+    if "toll_revenue_eur" in op.columns:
+        toll_arr = op["toll_revenue_eur"].astype(float).to_numpy()
+    else:
+        toll_arr = np.zeros_like(load_pv)
+    # Optimizer floor top-up (Eq. E30) — a >= 0 contract payment read
+    # straight from its cashflow column, exactly like the fees.
+    if "optimizer_floor_topup_eur" in op.columns:
+        floor_topup_arr = (
+            op["optimizer_floor_topup_eur"].astype(float).to_numpy()
+        )
+    else:
+        floor_topup_arr = np.zeros_like(load_pv)
+    # State support and its signed two-way netting (Eqs. E31/E31a).
+    if "state_support_eur" in op.columns:
+        support_arr = op["state_support_eur"].astype(float).to_numpy()
+    else:
+        support_arr = np.zeros_like(load_pv)
+    if "state_support_clawback_eur" in op.columns:
+        support_net_arr = (
+            op["state_support_clawback_eur"].astype(float).to_numpy()
+        )
+    else:
+        support_net_arr = np.zeros_like(load_pv)
+    # Capacity-market payment (Eq. E32).
+    if "capacity_market_revenue_eur" in op.columns:
+        capacity_market_arr = (
+            op["capacity_market_revenue_eur"].astype(float).to_numpy()
+        )
+    else:
+        capacity_market_arr = np.zeros_like(load_pv)
+    # Revenue levy on gross market turnover (Eq. E33), signed <= 0.
+    if "revenue_levy_eur" in op.columns:
+        levy_arr = op["revenue_levy_eur"].astype(float).to_numpy()
+    else:
+        levy_arr = np.zeros_like(load_pv)
+    _toll_treatment = str(
+        (econ or {}).get("bess_toll_merchant_treatment", "zeroed")
+        or "zeroed"
+    ).strip().lower()
+    if _toll_treatment == "zeroed":
+        merchant_gate = np.where(np.abs(toll_arr) > 1e-9, 0.0, 1.0)
+    else:
+        merchant_gate = np.ones_like(toll_arr)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -332,6 +384,17 @@ def plot_revenue_stack_yearly(
             edgecolor="black", linewidth=0.4,
             label="Imbalance cost",
         )
+    if np.any(levy_arr < -1e-9):
+        # Revenue levy (Eq. E33) — its own deduction slot below the
+        # imbalance band.
+        ax.bar(
+            years, levy_arr,
+            bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
+            + gcf_fee + imb_cost,
+            color=financial_color("Revenue levy"),
+            edgecolor="black", linewidth=0.4,
+            label="Revenue levy",
+        )
 
     # PPA contract leg — drawn straight from the cashflow column so the
     # bar carries the exact stream NPV/IRR saw (term cutoff, its own
@@ -343,6 +406,7 @@ def plot_revenue_stack_yearly(
         ppa_arr = op["ppa_revenue_eur"].astype(float).to_numpy()
         ppa_pos = np.clip(ppa_arr, 0.0, None)
         ppa_neg = np.clip(ppa_arr, None, 0.0)
+        ppa_neg_total = ppa_neg
         drew_ppa_label = False
         if np.any(ppa_pos > 1e-9):
             ax.bar(
@@ -356,7 +420,7 @@ def plot_revenue_stack_yearly(
             ax.bar(
                 years, ppa_neg,
                 bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
-                + gcf_fee + imb_cost,
+                + gcf_fee + imb_cost + levy_arr,
                 color=financial_color("PPA revenue"),
                 edgecolor="black", linewidth=0.4,
                 label=None if drew_ppa_label else "PPA revenue",
@@ -381,7 +445,9 @@ def plot_revenue_stack_yearly(
     else:
         bess_factor_arr = np.ones_like(project_years_arr, dtype=float)
     balancing_ratio = pd.Series(
-        bess_factor_arr * np.power(1.0 + bm_infl, project_years_arr - 1),
+        bess_factor_arr
+        * np.power(1.0 + bm_infl, project_years_arr - 1)
+        * merchant_gate,
         index=op.index, dtype=float,
     )
 
@@ -407,6 +473,65 @@ def plot_revenue_stack_yearly(
         )
         bottoms = bottoms + seg
 
+    # Tolling revenue band (Eq. E29) — the contracted stream that
+    # replaces the gated merchant segments in toll years; drawn only
+    # when the column carries value so default figures are unchanged.
+    if np.any(np.abs(toll_arr) > 1e-9):
+        ax.bar(
+            years, np.clip(toll_arr, 0.0, None), bottom=bottoms,
+            color=financial_color("Tolling revenue"),
+            edgecolor="black", linewidth=0.4,
+            label="Tolling revenue",
+        )
+        bottoms = bottoms + np.clip(toll_arr, 0.0, None)
+    if np.any(np.abs(floor_topup_arr) > 1e-9):
+        ax.bar(
+            years, floor_topup_arr, bottom=bottoms,
+            color=financial_color("Optimizer floor top-up"),
+            edgecolor="black", linewidth=0.4,
+            label="Optimizer floor top-up",
+        )
+        bottoms = bottoms + floor_topup_arr
+    if np.any(np.abs(support_arr) > 1e-9):
+        ax.bar(
+            years, support_arr, bottom=bottoms,
+            color=financial_color("State support"),
+            edgecolor="black", linewidth=0.4,
+            label="State support",
+        )
+        bottoms = bottoms + support_arr
+    if np.any(np.abs(capacity_market_arr) > 1e-9):
+        ax.bar(
+            years, capacity_market_arr, bottom=bottoms,
+            color=financial_color("Capacity-market revenue"),
+            edgecolor="black", linewidth=0.4,
+            label="Capacity-market revenue",
+        )
+        bottoms = bottoms + capacity_market_arr
+    if np.any(np.abs(support_net_arr) > 1e-9):
+        # Signed netting (Eq. E31a): compensation years stack with the
+        # revenue components, clawback years below the fee stack (and
+        # below any negative CfD PPA leg) — element-wise side
+        # assignment, one band.
+        if "ppa_revenue_eur" in op.columns:
+            _ppa_neg_part = ppa_neg_total
+        else:
+            _ppa_neg_part = np.zeros_like(load_pv)
+        _neg_stack_base = (
+            cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
+            + gcf_fee + imb_cost + levy_arr + _ppa_neg_part
+        )
+        ax.bar(
+            years, support_net_arr,
+            bottom=np.where(
+                support_net_arr >= 0.0, bottoms, _neg_stack_base,
+            ),
+            color=financial_color("State-support netting"),
+            edgecolor="black", linewidth=0.4,
+            label="State-support netting",
+        )
+        bottoms = bottoms + np.clip(support_net_arr, 0.0, None)
+
     net = (op["revenue_eur"].astype(float)).to_numpy()
     if "balancing_revenue_eur" in op.columns:
         net = net + op["balancing_revenue_eur"].astype(float).to_numpy()
@@ -415,6 +540,10 @@ def plot_revenue_stack_yearly(
     # structural fees enter the yearly net the same way (their columns are
     # not folded into revenue_eur), so the line steps down by them too.
     net = net + bal_agg_fee + rtm_fee + opt_fee + gcf_fee + imb_cost
+    net = (
+        net + toll_arr + floor_topup_arr + support_arr + support_net_arr
+        + capacity_market_arr + levy_arr
+    )
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The

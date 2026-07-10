@@ -36,6 +36,16 @@ battery, not of the market regime, so it is available in
 self-consumption and merchant alike; leave `balancing_enabled = FALSE`
 on the `balancing` sheet wherever the asset does not offer the service.
 
+On top of the market regimes, the economics layer models the Greek
+contracted-revenue and fiscal landscape (all opt-in, neutral
+mechanisms): a BESS tolling agreement with merchant zeroing, an
+optimizer floor + share-above-floor structure, RRF-style state
+support with a two-way clawback against realised market revenue, a
+capacity-market payment with duration derating, a levy on gross
+market turnover (the Greek 3 % RES levy pattern), and a depreciation
++ corporate tax engine with loss carry-forward that reports post-tax
+NPV / IRR / equity IRR alongside the pre-tax baseline.
+
 Three asset configurations are supported in both regimes: `hybrid`
 (PV + BESS), `pv_only`, and `bess_only`.
 

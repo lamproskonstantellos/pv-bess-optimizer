@@ -266,6 +266,91 @@ Sheet ``economics``
   ``balancing_aggregator_fee_eur`` column; the default 0 keeps results
   bit-identical and the column all-zero.  Range-validated ``[0, 100]``,
   like ``aggregator_fee_pct_revenue``.  Excluded from LCOE/LCOS.
+* ``bess_toll_eur_per_mw_year`` (default 0, off): BESS tolling
+  agreement — a fixed annual payment per MW of BESS power for dispatch
+  rights over a phase window (``bess_toll_year_from`` /
+  ``bess_toll_year_to``, inclusive; ``year_to = 0`` = end of life).
+  Availability-scaled, contractually indexed
+  (``bess_toll_indexation_pct``), with **no** capacity-fade scaling
+  (the payment is on the power block).  Under the default
+  ``bess_toll_merchant_treatment = zeroed`` every BESS-origin merchant
+  stream (BESS DAM margin, balancing legs and their BSP fee, the BESS
+  route-to-market fee share, the optimizer share, the charging-side
+  grid fee) is zeroed in toll years — the toller keeps them;
+  ``retained`` stacks the toll on top instead (warns:
+  double-monetises the same MW).  Surfaces as a ``toll_revenue_eur``
+  cashflow column (flat 1/12 monthly); excluded from LCOE/LCOS; not
+  scaled by the Revenue tornado driver.  See Eqs. E29/E29a in
+  ``docs/economics_design.md``.
+* ``state_support_eur_per_mw_year`` (default 0, off) /
+  ``state_support_year_from`` / ``state_support_year_to`` (defaults
+  1 / 0 = end of life) /
+  ``state_support_clawback_threshold_eur_per_mw_year`` (default 0) /
+  ``state_support_clawback_share_pct`` (default 0 %) /
+  ``state_support_indexation_pct`` (default 0): fixed annual state
+  support per MW of BESS power with a TWO-WAY netting against realised
+  market revenue (Eqs. E31/E31a) — the RRF-style settlement of Greek
+  storage-support auctions (Tameio Anakampsis / TAA reference; the
+  mechanism is neutral).  Realised market revenue (the E25a base, plus
+  capacity-market revenue when present) above the threshold is clawed
+  back, below it is compensated, both at the share; no floor — a net
+  repayment year is flagged in the run log.  Surfaces as
+  ``state_support_eur`` (flat 1/12 monthly) and the signed
+  ``state_support_clawback_eur`` (month-12 ex-post booking).  Excluded
+  from LCOE/LCOS; the gross support is not scaled by the Revenue
+  tornado driver while the netting is recomputed against the un-scaled
+  threshold (revenue-stabilising).
+* ``revenue_levy_pct`` (default 0, off): levy on gross MARKET
+  turnover (Eq. E33) - wholesale DAM export revenue gross of the
+  aggregator fee, balancing capacity + activation revenue and the PPA
+  contract leg; self-consumption savings, the contracted streams
+  (toll / state support / capacity market) and the imbalance
+  settlement are excluded by construction, and negative turnover
+  never yields a rebate (clamp).  The 3 % special RES turnover levy
+  applied in Greece is the reference example.  Surfaces as a signed
+  ``revenue_levy_eur`` column inside ``net_cashflow_eur``
+  (revenue-share monthly weights); excluded from LCOE/LCOS; SCALES
+  with the Revenue tornado driver (a price-proportional base).
+* ``capacity_market_eur_per_mw_year`` (default 0, off) /
+  ``capacity_market_derating_pct`` (default 100 %) /
+  ``capacity_market_year_from`` / ``capacity_market_year_to``
+  (defaults 1 / 0 = end of life) / ``capacity_market_indexation_pct``
+  (default 0): capacity-market payment on the DERATED power block
+  (Eq. E32).  Enter the auction's published storage class factor as
+  the derating (EU mechanisms derate storage by duration vs the
+  stress-event window); availability-scaled, no capacity-fade scaling.
+  Counts as realised market revenue for the state-support netting
+  (Eq. E31a).  Surfaces as ``capacity_market_revenue_eur`` (flat 1/12
+  monthly); excluded from LCOE/LCOS; not scaled by the Revenue
+  tornado driver (administered price).
+* ``optimizer_floor_enabled`` (default FALSE) /
+  ``optimizer_floor_eur_per_kw_year`` (default 0) /
+  ``optimizer_term_year_from`` / ``optimizer_term_year_to`` (defaults
+  1 / 0 = whole life) / ``optimizer_margin_basis`` (default ``dam``):
+  the floor+share optimizer structure (Eqs. E30/E30a).  With the
+  switch on, ``optimizer_revenue_share_pct`` applies to the margin
+  ABOVE the guaranteed floor (availability-scaled EUR/kW/yr on the
+  power block) and shortfalls are topped up through the
+  ``optimizer_floor_topup_eur`` column (booked in month 12 — annual
+  ex-post settlement).  ``dam_plus_balancing`` widens the margin base
+  to include balancing net of the BSP fee.  FALSE keeps the plain
+  share bit-identical.  Excluded from LCOE/LCOS; the Revenue tornado
+  recomputes the fee/top-up pair exactly at the floor kink.
+* ``corporate_tax_rate_pct`` (default 0, pre-tax only) /
+  ``depreciation_years_pv`` / ``depreciation_years_bess`` /
+  ``depreciation_years_site`` (defaults 20 / 10 / 20) /
+  ``tax_loss_carryforward_years`` (default 0 = unlimited): the
+  depreciation + corporate tax layer (Eqs. E34-E38).  Taxable income
+  = EBITDA - straight-line depreciation - debt interest, with FIFO
+  loss carry-forward (a positive window expires aged vintages; e.g. 5
+  in Greece); a BESS replacement starts its own tranche the year
+  after the month-12 booking; tranches truncate at the horizon.  Tax
+  is never positive (losses only carry forward).  Appends the
+  post-tax column family (``net_cashflow_post_tax_eur``, discounted
+  and cumulative variants, month-12 monthly booking) while the
+  pre-tax columns and KPIs remain the published baseline; at rate 0
+  everything passes through bit-identically.  Reference: 22 %
+  corporate rate in Greece (2024).
 * ``sensitivity_enabled`` / ``sensitivity_capex_delta_pct`` /
   ``sensitivity_opex_delta_pct`` /
   ``sensitivity_revenue_delta_pct`` /

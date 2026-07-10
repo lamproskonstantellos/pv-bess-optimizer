@@ -524,10 +524,106 @@ def build_yearly_cashflow(
     optimizer_share_frac = max(0.0, min(1.0, float(
         econ.get("optimizer_revenue_share_pct", 0.0) or 0.0
     ) / 100.0))
+    # Optimizer floor + share-above-floor (Eqs. E30/E30a): with the
+    # floor enabled the share applies to the margin ABOVE the
+    # guaranteed floor and shortfalls are topped up; disabled (default)
+    # the plain E13d share applies unchanged.  A shared term window
+    # (default whole life) gates BOTH share and floor.  The floor is
+    # gated by the explicit enable switch — a floor VALUE of zero with
+    # the switch on still guarantees a non-negative margin — so a zero
+    # floor value alone never silently converts losses into top-ups.
+    optimizer_floor_enabled = bool(
+        econ.get("optimizer_floor_enabled", False)
+    )
+    optimizer_floor_rate = max(0.0, float(
+        econ.get("optimizer_floor_eur_per_kw_year", 0.0) or 0.0
+    ))
+    _raw_opt_from = econ.get("optimizer_term_year_from", 1)
+    opt_term_year_from = int(1 if _raw_opt_from is None else _raw_opt_from)
+    _raw_opt_to = econ.get("optimizer_term_year_to", 0)
+    opt_term_year_to = int(0 if _raw_opt_to is None else _raw_opt_to)
+    optimizer_margin_basis = str(
+        econ.get("optimizer_margin_basis", "dam") or "dam"
+    ).strip().lower()
     # Year-1 exported MWh by origin (availability-derated upstream, like the
     # EUR bases).  Older KPI dicts without the split charge no RTM fee.
     pv_export_mwh_1 = float(year1_kpis.get("pv_export_mwh", 0.0) or 0.0)
     bess_export_mwh_1 = float(year1_kpis.get("bess_export_mwh", 0.0) or 0.0)
+
+    # BESS tolling agreement (Eqs. E29/E29a): a fixed EUR/MW/yr payment
+    # for dispatch rights over a phase window (Eq. E25).  The toll is a
+    # NEW stream (not derived from the derated Year-1 KPIs), so the
+    # availability factor applies here — once, per the E8 single-derate
+    # principle — and there is deliberately no bess_factor fade (the
+    # payment is on the contracted power block, not delivered energy).
+    toll_rate = max(0.0, float(
+        econ.get("bess_toll_eur_per_mw_year", 0.0) or 0.0
+    ))
+    _raw_toll_from = econ.get("bess_toll_year_from", 1)
+    toll_year_from = int(1 if _raw_toll_from is None else _raw_toll_from)
+    _raw_toll_to = econ.get("bess_toll_year_to", 0)
+    toll_year_to = int(0 if _raw_toll_to is None else _raw_toll_to)
+    toll_treatment = str(
+        econ.get("bess_toll_merchant_treatment", "zeroed") or "zeroed"
+    ).strip().lower()
+    toll_infl = float(
+        econ.get("bess_toll_indexation_pct", 0.0) or 0.0
+    ) / 100.0
+    # One availability factor for every contracted stream that is NOT
+    # derived from the already-derated Year-1 KPIs (toll, optimizer
+    # floor, ...) — applied once per the E8 single-derate principle.
+    contract_avail = availability_factor(
+        float(econ.get("unavailability_pct", 0.0) or 0.0)
+    )
+    # Guaranteed floor level (Eq. E30): EUR/kW/yr on the power block,
+    # availability-scaled, flat nominal (no capacity-fade scaling and
+    # no indexation — the floor is a contractual level).
+    optimizer_floor_level = optimizer_floor_rate * bess_kw * contract_avail
+    # State support with two-way clawback (Eqs. E31/E31a): a fixed
+    # EUR/MW/yr support (availability-scaled, no fade) netted two-way
+    # against realised market revenue relative to an indexed threshold.
+    ss_rate = max(0.0, float(
+        econ.get("state_support_eur_per_mw_year", 0.0) or 0.0
+    ))
+    _raw_ss_from = econ.get("state_support_year_from", 1)
+    ss_year_from = int(1 if _raw_ss_from is None else _raw_ss_from)
+    _raw_ss_to = econ.get("state_support_year_to", 0)
+    ss_year_to = int(0 if _raw_ss_to is None else _raw_ss_to)
+    ss_threshold = max(0.0, float(econ.get(
+        "state_support_clawback_threshold_eur_per_mw_year", 0.0,
+    ) or 0.0))
+    ss_share_frac = max(0.0, min(1.0, float(econ.get(
+        "state_support_clawback_share_pct", 0.0,
+    ) or 0.0) / 100.0))
+    ss_infl = float(
+        econ.get("state_support_indexation_pct", 0.0) or 0.0
+    ) / 100.0
+    _ss_repayment_years: list[int] = []
+    # Capacity-market payment (Eq. E32): paid on the DERATED power
+    # block over a contract window, availability-scaled, no fade; the
+    # revenue counts toward the E31a netting base.
+    cm_rate = max(0.0, float(
+        econ.get("capacity_market_eur_per_mw_year", 0.0) or 0.0
+    ))
+    cm_derating_frac = max(0.0, min(1.0, float(
+        econ.get("capacity_market_derating_pct", 100.0) or 0.0
+    ) / 100.0))
+    _raw_cm_from = econ.get("capacity_market_year_from", 1)
+    cm_year_from = int(1 if _raw_cm_from is None else _raw_cm_from)
+    _raw_cm_to = econ.get("capacity_market_year_to", 0)
+    cm_year_to = int(0 if _raw_cm_to is None else _raw_cm_to)
+    cm_infl = float(
+        econ.get("capacity_market_indexation_pct", 0.0) or 0.0
+    ) / 100.0
+    # Revenue levy on gross market turnover (Eq. E33): DAM export
+    # revenue gross of the aggregator fee, both balancing legs gross of
+    # the BSP fee, and the PPA contract leg — a turnover levy charges
+    # gross sales (fees never compound).  Retail/self-consumption
+    # savings, the contracted streams (E29-E32) and the imbalance
+    # settlement are excluded by construction.
+    revenue_levy_frac = max(0.0, min(1.0, float(
+        econ.get("revenue_levy_pct", 0.0) or 0.0
+    ) / 100.0))
 
     # Split the Year-1 revenue base into retail (load-coverage)
     # and DAM (wholesale export) streams.  Retail revenue is indexed by
@@ -613,6 +709,20 @@ def build_yearly_cashflow(
         rev1_retail_bess = 0.0
         rev1_dam_pv = 0.0
         rev1_dam_bess = 0.0
+
+    # A tolled grid-scale battery has no retail leg, so the self-
+    # consumption BESS stream (profit_load_from_bess_eur) is
+    # deliberately NOT zeroed by the toll (Eq. E29a) — flag the
+    # combination instead of silently mis-modelling it.
+    if toll_rate > 0.0 and abs(rev1_retail_bess) > 1e-9:
+        logger.warning(
+            "A BESS toll is active while the battery also serves retail "
+            "load (profit_load_from_bess_eur = %.2f EUR): the retail "
+            "stream is NOT zeroed in toll years (Eq. E29a). A tolled "
+            "grid-scale battery normally has no retail leg — check the "
+            "configuration.",
+            rev1_retail_bess,
+        )
 
     opex_pv_1 = float(econ["opex_pv_eur_per_kwp"]) * pv_kwp
     opex_bess_1 = float(econ["opex_bess_eur_per_kw"]) * bess_kw
@@ -749,16 +859,60 @@ def build_yearly_cashflow(
             balancing_aggregator_fee_y = 0.0
             route_to_market_fee_y = 0.0
             optimizer_fee_y = 0.0
+            optimizer_floor_topup_y = 0.0
             grid_charging_fee_y = 0.0
             imbalance_cost_y = 0.0
             ppa_y = 0.0
             bess_market_rev_y = 0.0
+            toll_revenue_y = 0.0
+            state_support_y = 0.0
+            state_support_clawback_y = 0.0
+            capacity_market_rev_y = 0.0
+            revenue_levy_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
             else:
                 pv_factor = (1.0 - pv_deg_y1) * (1.0 - pv_deg_annual) ** (y - 2)
             bess_factor = bess_factors[y - 1]
+            # Toll revenue (Eq. E29): availability-conditioned payment
+            # on the contracted power block, indexed contractually,
+            # gated by the phase window (Eq. E25).  No bess_factor fade.
+            toll_in_phase = toll_rate > 0.0 and _contract_phase(
+                y, toll_year_from, toll_year_to, n_years,
+            )
+            if toll_in_phase:
+                toll_revenue_y = (
+                    toll_rate * (bess_kw / 1000.0) * contract_avail
+                    * (1.0 + toll_infl) ** (y - 1)
+                )
+            else:
+                toll_revenue_y = 0.0
+            # Merchant zeroing (Eq. E29a): in toll years under 'zeroed'
+            # treatment the toller holds dispatch rights, so every
+            # BESS-origin merchant base is substituted with zero FOR
+            # THE YEAR — the Year-1 bases themselves are never mutated,
+            # so the Year-1 revenue-split reconciliation stays intact
+            # and non-toll years reuse the exact original floats
+            # (bit-identity when the toll is off).  The charging-side
+            # grid fee follows the grid-charging cost it accompanies
+            # (both are dispatch costs the toller bears); PV-origin
+            # streams, the retail/self-consumption stream (warned
+            # above) and the PV-forecast-error-driven imbalance cost
+            # are untouched.
+            _toll_zeroed = toll_in_phase and toll_treatment == "zeroed"
+            if _toll_zeroed:
+                _rev1_dam_bess_y = 0.0
+                _bm_cap_y1_y = 0.0
+                _bm_act_y1_y = 0.0
+                _bess_export_mwh_1_y = 0.0
+                _grid_charging_fee_1_y = 0.0
+            else:
+                _rev1_dam_bess_y = rev1_dam_bess
+                _bm_cap_y1_y = bm_cap_y1
+                _bm_act_y1_y = bm_act_y1
+                _bess_export_mwh_1_y = bess_export_mwh_1
+                _grid_charging_fee_1_y = grid_charging_fee_1
             # Degrade PV-origin revenue on pv_factor and BESS-origin
             # revenue on bess_factor, mirroring build_lifetime_dispatch's
             # per-year factor loop so the
@@ -768,7 +922,7 @@ def build_yearly_cashflow(
                 rev1_retail_pv * pv_factor + rev1_retail_bess * bess_factor
             ) * g_retail[y - 1]
             revenue_dam_y = (
-                rev1_dam_pv * pv_factor + rev1_dam_bess * bess_factor
+                rev1_dam_pv * pv_factor + _rev1_dam_bess_y * bess_factor
             ) * g_dam[y - 1]
             # PPA stream: in-term contract leg, or the post-term
             # physical reversion of the covered volume to the DAM
@@ -811,10 +965,10 @@ def build_yearly_cashflow(
                 capex_y = 0.0
             devex_y = 0.0
             balancing_capacity_y = (
-                bm_cap_y1 * bess_factor * g_bm_cap[y - 1]
+                _bm_cap_y1_y * bess_factor * g_bm_cap[y - 1]
             )
             balancing_activation_y = (
-                bm_act_y1 * bess_factor * g_bm_act[y - 1]
+                _bm_act_y1_y * bess_factor * g_bm_act[y - 1]
             )
             # Optional route-to-market (BSP) fee on GROSS balancing revenue.
             # A non-negative deduction, clamped at a zero-gross floor exactly
@@ -849,7 +1003,7 @@ def build_yearly_cashflow(
                         * pv_factor,
                         0.0,
                     )
-                    + bess_export_mwh_1 * bess_factor
+                    + _bess_export_mwh_1_y * bess_factor
                 )
             else:
                 _ppa_exempt_share = (
@@ -857,23 +1011,56 @@ def build_yearly_cashflow(
                 )
                 route_to_market_fee_y = -route_to_market_fee_rate * (
                     pv_export_mwh_1 * pv_factor * (1.0 - _ppa_exempt_share)
-                    + bess_export_mwh_1 * bess_factor
+                    + _bess_export_mwh_1_y * bess_factor
                 )
-            # Optimizer revenue share (Eq. E13d): a percentage of the POSITIVE
-            # BESS wholesale trading margin (export minus grid charging,
-            # already netted in rev1_dam_bess).  Clamped at zero — an
-            # optimizer never invoices a share of a trading loss (the exact
-            # regime of a self-consumption battery that grid-charges more
-            # than it exports).
-            # The trailing +0.0 normalises the -0.0 produced when the
-            # clamp binds (share x 0), keeping the column a clean zero.
-            optimizer_fee_y = -optimizer_share_frac * max(
-                rev1_dam_bess * bess_factor * g_dam[y - 1],
-                0.0,
-            ) + 0.0
+            # Optimizer revenue share (Eq. E13d) / floor+share
+            # (Eqs. E30/E30a), gated by the shared term window (default
+            # whole life, preserving the historical all-years share).
+            # Plain share: a percentage of the POSITIVE BESS wholesale
+            # trading margin (export minus grid charging, already
+            # netted in rev1_dam_bess), clamped at zero — an optimizer
+            # never invoices a share of a trading loss.  Floor+share:
+            # the share applies to the margin ABOVE the guaranteed
+            # floor, and any shortfall below the floor is topped up by
+            # the optimizer (a separate >= 0 column so the fee column
+            # keeps its <= 0 sign contract).  The trailing +0.0
+            # normalises the -0.0 produced when a clamp binds.
+            _opt_in_term = _contract_phase(
+                y, opt_term_year_from, opt_term_year_to, n_years,
+            )
+            if not _opt_in_term:
+                optimizer_fee_y = 0.0
+                optimizer_floor_topup_y = 0.0
+            elif optimizer_floor_enabled:
+                # Margin basis (Eq. E30a): the E13d DAM margin, or the
+                # full E25a base when the optimizer also manages the
+                # ancillary revenue (share after the BSP fee — fees
+                # never compound).
+                if optimizer_margin_basis == "dam_plus_balancing":
+                    _opt_margin = (
+                        _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                        + balancing_capacity_y + balancing_activation_y
+                        + balancing_aggregator_fee_y
+                    )
+                else:
+                    _opt_margin = (
+                        _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                    )
+                optimizer_fee_y = -optimizer_share_frac * max(
+                    _opt_margin - optimizer_floor_level, 0.0,
+                ) + 0.0
+                optimizer_floor_topup_y = max(
+                    optimizer_floor_level - _opt_margin, 0.0,
+                ) + 0.0
+            else:
+                optimizer_fee_y = -optimizer_share_frac * max(
+                    _rev1_dam_bess_y * bess_factor * g_dam[y - 1],
+                    0.0,
+                ) + 0.0
+                optimizer_floor_topup_y = 0.0
             # Charging-side grid fee (Eq. E27): flat regulated rate on a
             # charged volume that fades on the BESS capacity curve.
-            grid_charging_fee_y = -grid_charging_fee_1 * bess_factor
+            grid_charging_fee_y = -_grid_charging_fee_1_y * bess_factor
             # Imbalance settlement (Eq. E28): PV-error-driven volume on
             # the PV curve, prices on the DAM escalation series.
             imbalance_cost_y = (
@@ -887,10 +1074,70 @@ def build_yearly_cashflow(
             # is NOT summed into net_cashflow_eur.  Availability-derated
             # by construction (every input already carries A per E8).
             bess_market_rev_y = (
-                rev1_dam_bess * bess_factor * g_dam[y - 1]
+                _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
                 + balancing_capacity_y + balancing_activation_y
                 + balancing_aggregator_fee_y
             )
+            # Capacity-market payment (Eq. E32) — computed BEFORE the
+            # state-support netting because the capacity revenue counts
+            # as realised market revenue in its base (Eq. E31a).
+            _cm_in_phase = cm_rate > 0.0 and _contract_phase(
+                y, cm_year_from, cm_year_to, n_years,
+            )
+            if _cm_in_phase:
+                capacity_market_rev_y = (
+                    cm_rate * (bess_kw / 1000.0) * cm_derating_frac
+                    * contract_avail * (1.0 + cm_infl) ** (y - 1)
+                )
+            else:
+                capacity_market_rev_y = 0.0
+            # State support (Eq. E31) and the two-way netting
+            # (Eq. E31a): the gross support is availability-conditioned
+            # on the power block (no fade), and the netting settles the
+            # realised market revenue (the E25a base plus the
+            # capacity-market revenue) against the indexed threshold —
+            # clawback above it, compensation below it, both at the
+            # same share.  No floor is applied: a year whose netted
+            # support turns negative is a net repayment (collected and
+            # flagged once after the loop).
+            _ss_in_phase = ss_rate > 0.0 and _contract_phase(
+                y, ss_year_from, ss_year_to, n_years,
+            )
+            if _ss_in_phase:
+                _ss_g = (1.0 + ss_infl) ** (y - 1)
+                state_support_y = (
+                    ss_rate * (bess_kw / 1000.0) * contract_avail * _ss_g
+                )
+                if ss_share_frac > 0.0:
+                    _ss_theta_y = (
+                        ss_threshold * (bess_kw / 1000.0) * _ss_g
+                    )
+                    state_support_clawback_y = -ss_share_frac * (
+                        bess_market_rev_y + capacity_market_rev_y
+                        - _ss_theta_y
+                    ) + 0.0
+                else:
+                    state_support_clawback_y = 0.0
+                if state_support_y + state_support_clawback_y < 0.0:
+                    _ss_repayment_years.append(int(y))
+            else:
+                state_support_y = 0.0
+                state_support_clawback_y = 0.0
+            # Revenue levy (Eq. E33): lambda x max(0, gross market
+            # turnover).  revenue_dam_y is the pre-aggregator-fee DAM
+            # stream (the E29a toll gating and the post-term PPA
+            # reversion are already inside it), the balancing legs are
+            # gross of the BSP fee, and ppa_y is the invoiced contract
+            # leg.  Clamped: negative turnover (e.g. a deeply negative
+            # CfD difference leg) never yields a rebate.
+            if revenue_levy_frac > 0.0:
+                revenue_levy_y = -revenue_levy_frac * max(
+                    revenue_dam_y + balancing_capacity_y
+                    + balancing_activation_y + ppa_y,
+                    0.0,
+                ) + 0.0
+            else:
+                revenue_levy_y = 0.0
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -917,7 +1164,12 @@ def build_yearly_cashflow(
         net_cf = (
             revenue_net_y + balancing_revenue_y + balancing_aggregator_fee_y
             + route_to_market_fee_y + optimizer_fee_y
+            + optimizer_floor_topup_y
             + grid_charging_fee_y + imbalance_cost_y
+            + toll_revenue_y
+            + state_support_y + state_support_clawback_y
+            + capacity_market_rev_y
+            + revenue_levy_y
             + ppa_y + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -933,6 +1185,7 @@ def build_yearly_cashflow(
                 "aggregator_fee_eur": float(aggregator_fee_y),
                 "route_to_market_fee_eur": float(route_to_market_fee_y),
                 "optimizer_fee_eur": float(optimizer_fee_y),
+                "optimizer_floor_topup_eur": float(optimizer_floor_topup_y),
                 "grid_charging_fee_eur": float(grid_charging_fee_y),
                 "imbalance_cost_eur": float(imbalance_cost_y),
                 "balancing_capacity_revenue_eur": float(balancing_capacity_y),
@@ -940,6 +1193,15 @@ def build_yearly_cashflow(
                 "balancing_revenue_eur": float(balancing_revenue_y),
                 "balancing_aggregator_fee_eur": float(balancing_aggregator_fee_y),
                 "bess_market_revenue_eur": float(bess_market_rev_y),
+                "toll_revenue_eur": float(toll_revenue_y),
+                "state_support_eur": float(state_support_y),
+                "state_support_clawback_eur": float(
+                    state_support_clawback_y
+                ),
+                "capacity_market_revenue_eur": float(
+                    capacity_market_rev_y
+                ),
+                "revenue_levy_eur": float(revenue_levy_y),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -950,9 +1212,226 @@ def build_yearly_cashflow(
             }
         )
 
+    if _ss_repayment_years:
+        logger.warning(
+            "[state support] The two-way netting turns the combined "
+            "support negative (a net repayment) in project year(s) %s "
+            "— realised market revenue exceeded the threshold by more "
+            "than the support level; no floor is applied by design "
+            "(Eq. E31a).",
+            _ss_repayment_years,
+        )
+
     df = pd.DataFrame(rows)
     df["cumulative_cf_eur"] = df["net_cashflow_eur"].cumsum()
     df["cumulative_dcf_eur"] = df["discounted_cf_eur"].cumsum()
+    # Tax + depreciation layer (Eqs. E34-E38), applied LAST so the
+    # frame always carries the post-tax column family; a zero rate
+    # appends exact zeros / value-identical pass-through columns.
+    return apply_tax_layer(df, econ, capacities)
+
+
+# ---------------------------------------------------------------------------
+# Tax + depreciation layer (Eqs. E34-E38)
+# ---------------------------------------------------------------------------
+
+
+# The columns apply_tax_layer appends.  The sensitivity scaled-frame
+# helpers DROP them from perturbed frames: taxes are nonlinear (the
+# TB clamp and the loss carry-forward), so scaled copies would be
+# silently stale — the pre-tax tornado never reads them, and the
+# post-tax metrics come from full rebuilds only.
+TAX_LAYER_COLUMNS: tuple[str, ...] = (
+    "depreciation_eur",
+    "debt_interest_eur",
+    "taxable_income_eur",
+    "tax_loss_carryforward_eur",
+    "corporate_tax_eur",
+    "net_cashflow_post_tax_eur",
+    "discounted_cf_post_tax_eur",
+    "cumulative_cf_post_tax_eur",
+    "cumulative_dcf_post_tax_eur",
+)
+
+
+def apply_tax_layer(
+    yearly_cf: pd.DataFrame,
+    econ: dict[str, Any],
+    capacities: dict[str, float],
+) -> pd.DataFrame:
+    """Append the post-tax column family to the yearly cashflow.
+
+    A pure post-processing layer over the pre-tax frame (Eqs.
+    E34-E38): per-asset straight-line depreciation (PV, BESS incl. the
+    replacement tranche, site lump sums), taxable income = EBITDA -
+    depreciation - debt interest (the E20 schedule), loss carry-forward
+    (unlimited by default, optional FIFO expiry window), and corporate
+    tax at ``corporate_tax_rate_pct``.  The pre-tax columns are NEVER
+    touched — ``net_cashflow_eur`` keeps its E15 definition and the
+    published pre-tax KPIs stay the baseline.  With a zero rate the
+    tax columns are exact zeros and the post-tax family is a
+    value-identical copy of the pre-tax family (no depreciation
+    schedule is computed — noise-free).
+
+    Convention (documented, deliberate): deducting debt interest (the
+    levered tax shield) while discounting the post-tax PROJECT
+    cashflow at the single WACC mixes capital-structure effects into
+    project NPV; the definition collapses to unlevered when
+    ``gearing_pct = 0``.  Depreciation tranches truncate at the
+    horizon (no terminal book-value write-off); ``TAX_y <= 0`` always
+    (losses only carry forward, never rebate).
+    """
+    df = yearly_cf
+    tau = max(0.0, min(1.0, float(
+        econ.get("corporate_tax_rate_pct", 0.0) or 0.0
+    ) / 100.0))
+    if tau <= 0.0:
+        df["depreciation_eur"] = 0.0
+        df["debt_interest_eur"] = 0.0
+        df["taxable_income_eur"] = 0.0
+        df["tax_loss_carryforward_eur"] = 0.0
+        df["corporate_tax_eur"] = 0.0
+        df["net_cashflow_post_tax_eur"] = df["net_cashflow_eur"]
+        df["discounted_cf_post_tax_eur"] = df["discounted_cf_eur"]
+        df["cumulative_cf_post_tax_eur"] = df["cumulative_cf_eur"]
+        df["cumulative_dcf_post_tax_eur"] = df["cumulative_dcf_eur"]
+        return df
+
+    n_years = int(df["project_year"].max())
+    pv_kwp = float(capacities.get("pv_kwp", 0.0) or 0.0)
+    bess_kw = float(capacities.get("bess_kw", 0.0) or 0.0)
+    bess_kwh = float(capacities.get("bess_kwh", 0.0) or 0.0)
+
+    def _life(key: str, default: int) -> int:
+        raw = econ.get(key, default)
+        return max(0, int(default if raw is None else raw))
+
+    # Straight-line tranches (Eq. E34): (base, first year, life).
+    # All Year-1 starts except the replacement tranche, which enters
+    # service the year AFTER its month-12 booking (Eq. E4 convention).
+    bess_capex = float(econ.get("capex_bess_eur_per_kwh", 0.0) or 0.0) \
+        * bess_kwh
+    tranches: list[tuple[float, int, int]] = [
+        (
+            (float(econ.get("capex_pv_eur_per_kw", 0.0) or 0.0)
+             + float(econ.get("devex_pv_eur_per_kw", 0.0) or 0.0))
+            * pv_kwp,
+            1,
+            _life("depreciation_years_pv", 20),
+        ),
+        (
+            bess_capex
+            + float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0)
+            * bess_kw,
+            1,
+            _life("depreciation_years_bess", 10),
+        ),
+        (
+            float(econ.get("site_capex_eur", 0.0) or 0.0)
+            + float(econ.get("site_devex_eur", 0.0) or 0.0),
+            1,
+            _life("depreciation_years_site", 20),
+        ),
+    ]
+    repl_year = effective_bess_replacement_year(econ)
+    repl_pct = float(econ.get("bess_replacement_cost_pct", 0.0) or 0.0)
+    if repl_year > 0 and repl_pct > 0.0:
+        tranches.append((
+            bess_capex * repl_pct / 100.0,
+            repl_year + 1,
+            _life("depreciation_years_bess", 10),
+        ))
+
+    # Debt interest (the E20 schedule on gearing x |CF_0|; zero when
+    # all-equity or beyond the tenor).
+    gearing, rate, tenor, repayment = _financing_params(econ)
+    net_cf_arr = df["net_cashflow_eur"].to_numpy(dtype=float)
+    interest_by_year: dict[int, float] = {}
+    if gearing > 0.0 and net_cf_arr.size >= 1 and net_cf_arr[0] < 0.0:
+        for row in _amortization_schedule(
+            gearing * (-float(net_cf_arr[0])), rate, tenor, repayment,
+        ):
+            interest_by_year[int(row["year"])] = float(row["interest_eur"])
+
+    carryforward_window = _life("tax_loss_carryforward_years", 0)
+    _years_list = df["project_year"].astype(int).to_list()
+    _net_list = df["net_cashflow_eur"].astype(float).to_list()
+    _capex_list = df["capex_eur"].astype(float).to_list()
+    _devex_list = df["devex_eur"].astype(float).to_list()
+    dep_col: list[float] = []
+    int_col: list[float] = []
+    ti_col: list[float] = []
+    loss_col: list[float] = []
+    tax_col: list[float] = []
+    # Loss vintages as [year_arisen, remaining_eur], consumed FIFO
+    # (Eq. E36); with a positive window W a vintage expires once
+    # y - year_arisen > W.
+    vintages: list[list[float]] = []
+    for i, y in enumerate(_years_list):
+        if y == 0:
+            dep_col.append(0.0)
+            int_col.append(0.0)
+            ti_col.append(0.0)
+            loss_col.append(0.0)
+            tax_col.append(0.0)
+            continue
+        dep_y = 0.0
+        for base, y0, life in tranches:
+            if life > 0 and base > 0.0 and y0 <= y <= min(
+                n_years, y0 + life - 1,
+            ):
+                dep_y += base / life
+        int_y = interest_by_year.get(int(y), 0.0)
+        # EBITDA (Eq. E35): the operating net before investment events
+        # — revenue net of every fee and the levy, plus balancing, PPA
+        # and OPEX; the levy is therefore deductible by construction.
+        ebitda_y = _net_list[i] - _capex_list[i] - _devex_list[i]
+        ti_y = ebitda_y - dep_y - int_y
+        if carryforward_window > 0:
+            vintages = [
+                v for v in vintages
+                if (y - v[0]) <= carryforward_window
+            ]
+        if ti_y > 0.0:
+            remaining = ti_y
+            for v in vintages:
+                used = min(v[1], remaining)
+                v[1] -= used
+                remaining -= used
+                if remaining <= 0.0:
+                    break
+            vintages = [v for v in vintages if v[1] > 1e-12]
+            tb_y = remaining
+        else:
+            if ti_y < 0.0:
+                vintages.append([float(y), -ti_y])
+            tb_y = 0.0
+        dep_col.append(dep_y)
+        int_col.append(int_y)
+        ti_col.append(ti_y)
+        loss_col.append(sum(v[1] for v in vintages))
+        tax_col.append(-tau * tb_y + 0.0)
+
+    df["depreciation_eur"] = dep_col
+    df["debt_interest_eur"] = int_col
+    df["taxable_income_eur"] = ti_col
+    df["tax_loss_carryforward_eur"] = loss_col
+    df["corporate_tax_eur"] = tax_col
+    # Post-tax family (Eq. E38): same discount rate (single-WACC
+    # convention, documented above).
+    df["net_cashflow_post_tax_eur"] = (
+        df["net_cashflow_eur"] + df["corporate_tax_eur"]
+    )
+    df["discounted_cf_post_tax_eur"] = (
+        df["net_cashflow_post_tax_eur"]
+        * df["discount_factor"].astype(float)
+    )
+    df["cumulative_cf_post_tax_eur"] = (
+        df["net_cashflow_post_tax_eur"].cumsum()
+    )
+    df["cumulative_dcf_post_tax_eur"] = (
+        df["discounted_cf_post_tax_eur"].cumsum()
+    )
     return df
 
 
@@ -1013,6 +1492,9 @@ def derive_monthly_cashflow(
       ``revenue_eur`` share so each month carries its proportional
       slice of the fee that has already been deducted from
       ``revenue_eur`` (informational; NOT re-added to the net).
+    * ``toll_revenue_eur`` — flat ``1/12`` allocation of the yearly
+      toll payment (Eq. E29; a level contractual stream, so the flat
+      split is exact).  Part of ``net_cashflow_eur`` here.
     * ``opex_eur`` — Year-1 ``opex`` split evenly across months, scaled
       by the year's opex inflation factor.
     * ``capex_eur`` / ``devex_eur`` — the year's investment events
@@ -1199,6 +1681,13 @@ def derive_monthly_cashflow(
     has_opt_col = "optimizer_fee_eur" in yearly_cf.columns
     has_gcf_col = "grid_charging_fee_eur" in yearly_cf.columns
     has_imb_col = "imbalance_cost_eur" in yearly_cf.columns
+    has_toll_col = "toll_revenue_eur" in yearly_cf.columns
+    has_topup_col = "optimizer_floor_topup_eur" in yearly_cf.columns
+    has_ss_col = "state_support_eur" in yearly_cf.columns
+    has_ss_cb_col = "state_support_clawback_eur" in yearly_cf.columns
+    has_cm_col = "capacity_market_revenue_eur" in yearly_cf.columns
+    has_levy_col = "revenue_levy_eur" in yearly_cf.columns
+    has_tax_col = "corporate_tax_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
@@ -1239,6 +1728,34 @@ def derive_monthly_cashflow(
         imb_y = (
             float(yearly_indexed.loc[y, "imbalance_cost_eur"])
             if has_imb_col else 0.0
+        )
+        toll_y = (
+            float(yearly_indexed.loc[y, "toll_revenue_eur"])
+            if has_toll_col else 0.0
+        )
+        topup_y = (
+            float(yearly_indexed.loc[y, "optimizer_floor_topup_eur"])
+            if has_topup_col else 0.0
+        )
+        ss_y = (
+            float(yearly_indexed.loc[y, "state_support_eur"])
+            if has_ss_col else 0.0
+        )
+        ss_cb_y = (
+            float(yearly_indexed.loc[y, "state_support_clawback_eur"])
+            if has_ss_cb_col else 0.0
+        )
+        cm_y = (
+            float(yearly_indexed.loc[y, "capacity_market_revenue_eur"])
+            if has_cm_col else 0.0
+        )
+        levy_y = (
+            float(yearly_indexed.loc[y, "revenue_levy_eur"])
+            if has_levy_col else 0.0
+        )
+        tax_y = (
+            float(yearly_indexed.loc[y, "corporate_tax_eur"])
+            if has_tax_col else 0.0
         )
         ppa_y = (
             float(yearly_indexed.loc[y, "ppa_revenue_eur"])
@@ -1300,6 +1817,35 @@ def derive_monthly_cashflow(
                 imb_m = float(monthly_pv_mwh_y1.loc[m]) / pv_y1_total * imb_y
             else:
                 imb_m = imb_y / 12.0
+            # Toll revenue (Eq. E29) is a level contractual payment, so
+            # a flat 1/12 allocation is exact (shares sum to one and
+            # the monthly sum reconciles the yearly column).
+            toll_m = toll_y / 12.0
+            # The optimizer floor top-up (Eq. E30) settles ex post
+            # against the year's realised margin, so it books in
+            # month 12 — the replacement-CAPEX convention, keeping the
+            # monthly and yearly DCFs in exact agreement on the event.
+            topup_m = topup_y if m == 12 else 0.0
+            # State support (Eq. E31) is a level payment (flat 1/12);
+            # its two-way netting (Eq. E31a) settles ex post against
+            # the year's realised revenue, so it books in month 12.
+            ss_m = ss_y / 12.0
+            ss_cb_m = ss_cb_y if m == 12 else 0.0
+            # The capacity payment (Eq. E32) is a level contractual
+            # stream: flat 1/12 is exact.
+            cm_m = cm_y / 12.0
+            # The revenue levy (Eq. E33) rides the monthly
+            # revenue-share weights (the same market-turnover-shape
+            # approximation as the structural fees; shares sum to one,
+            # so the yearly reconciliation is exact).
+            levy_m = float(fee_share.loc[m]) * levy_y
+            # Corporate tax (Eq. E37) settles annually, so it books in
+            # month 12 — the December factor equals the yearly
+            # 1/(1+r)^y factor (Eq. E4), keeping the monthly and yearly
+            # post-tax DCFs in exact agreement.  Depreciation, taxable
+            # income and the carry-forward stay yearly-only (annual
+            # accounting concepts, no monthly counterpart).
+            tax_m = tax_y if m == 12 else 0.0
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
@@ -1310,7 +1856,12 @@ def derive_monthly_cashflow(
             # aggregator fee (fee_m is informational on the monthly frame).
             net_m = (
                 rev_m + balancing_m + bal_fee_m + rtm_fee_m + opt_fee_m
+                + topup_m
                 + gcf_fee_m + imb_m
+                + toll_m
+                + ss_m + ss_cb_m
+                + cm_m
+                + levy_m
                 + ppa_m + opex_m + capex_m + devex_m
             )
             # End-of-month discounting: month m of year y lands at
@@ -1319,6 +1870,7 @@ def derive_monthly_cashflow(
             # discount less — the months of year y occur DURING year y.
             t_years = float(y) - 1.0 + m / 12.0
             disc_factor = 1.0 / (1.0 + discount_rate) ** t_years
+            net_post_tax_m = net_m + tax_m
             rows.append(
                 {
                     "project_year": int(y),
@@ -1331,8 +1883,14 @@ def derive_monthly_cashflow(
                     "balancing_aggregator_fee_eur": float(bal_fee_m),
                     "route_to_market_fee_eur": float(rtm_fee_m),
                     "optimizer_fee_eur": float(opt_fee_m),
+                    "optimizer_floor_topup_eur": float(topup_m),
                     "grid_charging_fee_eur": float(gcf_fee_m),
                     "imbalance_cost_eur": float(imb_m),
+                    "toll_revenue_eur": float(toll_m),
+                    "state_support_eur": float(ss_m),
+                    "state_support_clawback_eur": float(ss_cb_m),
+                    "capacity_market_revenue_eur": float(cm_m),
+                    "revenue_levy_eur": float(levy_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -1340,6 +1898,11 @@ def derive_monthly_cashflow(
                     "devex_eur": float(devex_m),
                     "net_cashflow_eur": float(net_m),
                     "discounted_cf_eur": float(net_m * disc_factor),
+                    "corporate_tax_eur": float(tax_m),
+                    "net_cashflow_post_tax_eur": float(net_post_tax_m),
+                    "discounted_cf_post_tax_eur": float(
+                        net_post_tax_m * disc_factor
+                    ),
                 }
             )
 
@@ -1350,10 +1913,17 @@ def derive_monthly_cashflow(
         "period_type", "pv_production_mwh", "revenue_eur",
         "balancing_revenue_eur", "balancing_aggregator_fee_eur",
         "route_to_market_fee_eur", "optimizer_fee_eur",
+        "optimizer_floor_topup_eur",
         "grid_charging_fee_eur", "imbalance_cost_eur",
+        "toll_revenue_eur",
+        "state_support_eur", "state_support_clawback_eur",
+        "capacity_market_revenue_eur",
+        "revenue_levy_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
+        "corporate_tax_eur",
+        "net_cashflow_post_tax_eur", "discounted_cf_post_tax_eur",
     ]
     if monthly_cf.empty:
         quarterly_cf = pd.DataFrame(columns=monthly_columns)
@@ -1369,10 +1939,18 @@ def derive_monthly_cashflow(
                     "pv_production_mwh", "revenue_eur",
                     "balancing_revenue_eur", "balancing_aggregator_fee_eur",
                     "route_to_market_fee_eur", "optimizer_fee_eur",
+                    "optimizer_floor_topup_eur",
                     "grid_charging_fee_eur", "imbalance_cost_eur",
+                    "toll_revenue_eur",
+                    "state_support_eur", "state_support_clawback_eur",
+                    "capacity_market_revenue_eur",
+                    "revenue_levy_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
+                    "corporate_tax_eur",
+                    "net_cashflow_post_tax_eur",
+                    "discounted_cf_post_tax_eur",
                 ]
             ].sum()
         )
@@ -1537,6 +2115,74 @@ def compute_financial_kpis(
         float(df.loc[after_y0_mask, "imbalance_cost_eur"].sum())
         if "imbalance_cost_eur" in df.columns else 0.0
     )
+    total_toll_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "toll_revenue_eur"].sum())
+        if "toll_revenue_eur" in df.columns else 0.0
+    )
+    total_optimizer_floor_topup_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "optimizer_floor_topup_eur"].sum())
+        if "optimizer_floor_topup_eur" in df.columns else 0.0
+    )
+    total_state_support_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "state_support_eur"].sum())
+        if "state_support_eur" in df.columns else 0.0
+    )
+    total_state_support_clawback_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "state_support_clawback_eur"].sum())
+        if "state_support_clawback_eur" in df.columns else 0.0
+    )
+    total_capacity_market_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "capacity_market_revenue_eur"].sum())
+        if "capacity_market_revenue_eur" in df.columns else 0.0
+    )
+    total_revenue_levy_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "revenue_levy_eur"].sum())
+        if "revenue_levy_eur" in df.columns else 0.0
+    )
+
+    # ---- Post-tax KPIs (Eq. E39) -------------------------------------------
+    # Reported ALONGSIDE (never replacing) the pre-tax baseline, and
+    # NaN whenever the tax layer is off (the equity_irr all-equity
+    # precedent: n/a = not modelled) so the SUMMARY digest self-skips
+    # the rows and zero-default outputs stay noise-free.  min_dscr
+    # deliberately stays pre-tax (a CFADS-based post-tax DSCR is a
+    # stated non-goal).
+    _tax_rate_pct = float(
+        econ.get("corporate_tax_rate_pct", 0.0) or 0.0
+    )
+    npv_post_tax = float("nan")
+    irr_post_tax_pct = float("nan")
+    equity_irr_post_tax_pct = float("nan")
+    payback_post_tax = float("nan")
+    discounted_payback_post_tax = float("nan")
+    total_corporate_tax_eur_lifecycle = float("nan")
+    total_depreciation_eur_lifecycle = float("nan")
+    if _tax_rate_pct > 0.0 and "net_cashflow_post_tax_eur" in df.columns:
+        npv_post_tax = float(df["discounted_cf_post_tax_eur"].sum())
+        cf_pt_array = df["net_cashflow_post_tax_eur"].to_numpy(dtype=float)
+        _irr_pt = calculate_irr(cf_pt_array)
+        irr_post_tax_pct = (
+            float("nan") if np.isnan(_irr_pt) else _irr_pt * 100.0
+        )
+        # Post-tax equity flows (Eq. E39): the E20 schedule applied to
+        # the post-tax project cashflow; NaN when all-equity.
+        equity_irr_post_tax_pct, _ = _leverage_kpis(cf_pt_array, econ)
+        payback_post_tax = _payback_year(
+            project_years,
+            df["cumulative_cf_post_tax_eur"].to_numpy(dtype=float),
+            cf_pt_array,
+        )
+        discounted_payback_post_tax = _payback_year(
+            project_years,
+            df["cumulative_dcf_post_tax_eur"].to_numpy(dtype=float),
+            df["discounted_cf_post_tax_eur"].to_numpy(dtype=float),
+        )
+        total_corporate_tax_eur_lifecycle = float(
+            df.loc[after_y0_mask, "corporate_tax_eur"].sum()
+        )
+        total_depreciation_eur_lifecycle = float(
+            df.loc[after_y0_mask, "depreciation_eur"].sum()
+        )
     total_balancing_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
         if "balancing_revenue_eur" in df.columns else 0.0
@@ -1861,6 +2507,65 @@ def compute_financial_kpis(
         "total_optimizer_fee_eur_lifecycle": float(round(
             total_optimizer_fee_eur_lifecycle, 2,
         )),
+        # Contracted BESS revenue (Eq. E29); 0 when no toll is set and
+        # the SUMMARY renders it only when non-zero.
+        "total_toll_revenue_eur_lifecycle": float(round(
+            total_toll_revenue_eur_lifecycle, 2,
+        )),
+        # Optimizer floor guarantee (Eq. E30); >= 0, SUMMARY-optional.
+        "total_optimizer_floor_topup_eur_lifecycle": float(round(
+            total_optimizer_floor_topup_eur_lifecycle, 2,
+        )),
+        # State support and its two-way netting (Eqs. E31/E31a);
+        # SUMMARY-optional, the netting total is signed.
+        "total_state_support_eur_lifecycle": float(round(
+            total_state_support_eur_lifecycle, 2,
+        )),
+        "total_state_support_clawback_eur_lifecycle": float(round(
+            total_state_support_clawback_eur_lifecycle, 2,
+        )),
+        # Capacity-market payment (Eq. E32); SUMMARY-optional.
+        "total_capacity_market_revenue_eur_lifecycle": float(round(
+            total_capacity_market_revenue_eur_lifecycle, 2,
+        )),
+        # Revenue levy on gross market turnover (Eq. E33); <= 0,
+        # SUMMARY-optional.
+        "total_revenue_levy_eur_lifecycle": float(round(
+            total_revenue_levy_eur_lifecycle, 2,
+        )),
+        # Post-tax KPI family (Eq. E39) — additive to the pre-tax
+        # baseline; all NaN while corporate_tax_rate_pct = 0.
+        "npv_post_tax_eur": (
+            float("nan") if np.isnan(npv_post_tax)
+            else float(round(npv_post_tax, 2))
+        ),
+        "irr_post_tax_pct": (
+            float("nan") if np.isnan(irr_post_tax_pct)
+            else float(round(irr_post_tax_pct, 4))
+        ),
+        "equity_irr_post_tax_pct": (
+            float("nan") if np.isnan(equity_irr_post_tax_pct)
+            else float(round(equity_irr_post_tax_pct, 4))
+        ),
+        "simple_payback_post_tax_years": (
+            float("nan") if np.isnan(payback_post_tax)
+            else float(round(payback_post_tax, 4))
+        ),
+        "discounted_payback_post_tax_years": (
+            float("nan") if np.isnan(discounted_payback_post_tax)
+            else float(round(discounted_payback_post_tax, 4))
+        ),
+        "total_corporate_tax_eur_lifecycle": (
+            float("nan") if np.isnan(total_corporate_tax_eur_lifecycle)
+            else float(round(total_corporate_tax_eur_lifecycle, 2))
+        ),
+        "total_depreciation_eur_lifecycle": (
+            float("nan") if np.isnan(total_depreciation_eur_lifecycle)
+            else float(round(total_depreciation_eur_lifecycle, 2))
+        ),
+        # Echo (the gearing_pct precedent) so downstream consumers can
+        # gate on the configured rate without re-reading econ.
+        "corporate_tax_rate_pct": float(round(_tax_rate_pct, 4)),
         "lifetime_bm_revenue_total_eur": float(round(
             total_balancing_revenue_eur_lifecycle, 2,
         )),
@@ -1939,6 +2644,26 @@ def compute_financial_kpis(
             "payback metrics; NOT folded into LCOE/LCOS — Lazard "
             "convention).",
             site_capex, site_devex,
+        )
+
+    # ---- Contracted-revenue audit -----------------------------------------
+    # One INFO line in the run log when any contracted structure is
+    # active (matching the LCOE/LCOS audit's noise discipline: silent
+    # in the all-merchant default).
+    _contract_totals = (
+        total_toll_revenue_eur_lifecycle,
+        total_optimizer_floor_topup_eur_lifecycle,
+        total_state_support_eur_lifecycle,
+        total_state_support_clawback_eur_lifecycle,
+        total_capacity_market_revenue_eur_lifecycle,
+    )
+    if any(abs(v) > 1e-9 for v in _contract_totals):
+        logger.info(
+            "[contracted revenue] toll = %.2f, floor top-up = %.2f, "
+            "support = %.2f, netting = %.2f, capacity = %.2f "
+            "(lifetime EUR; all excluded from LCOE/LCOS and folded "
+            "into net_cashflow_eur).",
+            *_contract_totals,
         )
     return out
 

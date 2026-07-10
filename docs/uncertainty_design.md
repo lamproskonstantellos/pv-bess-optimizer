@@ -216,6 +216,21 @@ KPIs (`sensitivity.run_sensitivity_analysis`):
 | DiscountRate | `sensitivity_discount_rate_delta_pp` (absolute pp) | rebuilds discounting at $\rho \pm \delta$; NPV-only by construction: IRR/payback are rate-independent (`_rebuild_with_discount_rate`) |
 | PpaPrice | `sensitivity_ppa_price_delta_pct` | active only when the contract is on, the strike > 0 and the Year-1 strike-leg value is nonzero; rescales the strike-leg base by ±δ (physical: contract leg; CfD: leg + covered DAM value, the strike part), rebuilds the FULL yearly cashflow from the rescaled KPI bases so term/reversion/escalation stay exact |
 
+Contracted-revenue interaction (Eqs. E29-E32, no new U-tags —
+behaviour, not a new equation): fixed contracted streams
+(`toll_revenue_eur`, `state_support_eur`,
+`capacity_market_revenue_eur`) do **not** scale with the Revenue
+driver — the driver perturbs market prices, which those payments are
+contractually insulated from — while the piecewise contract terms are
+recomputed exactly instead of constant-scaled: the optimizer
+floor+share pair from the scaled margin base against the un-scaled
+floor (`_scale_revenue`'s optional `econ` parameter), and the
+state-support netting from the scaled market base against the
+un-scaled threshold.  Tornado bars are therefore asymmetric around
+contract kinks (the E30 floor) and **shrink as the contracted share of
+revenue rises** — the two-way netting is revenue-stabilising, fully
+absorbing the market component at a 100 % netting share.
+
 NPV tornado shows all active drivers; the IRR tornado drops
 DiscountRate (`variables_for_irr_sensitivity`).  Output: an 11-column
 tidy frame written to the `sensitivity_analysis` sheet with columns

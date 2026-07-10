@@ -224,11 +224,59 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     # share (merchant / floor+share structures).
     "route_to_market_fee_eur_per_mwh": 0.0,
     "optimizer_revenue_share_pct": 0.0,
+    # Optimizer floor + share-above-floor structure (Eqs. E30/E30a):
+    # with the floor enabled, the share applies to the margin ABOVE the
+    # guaranteed floor and shortfalls are topped up.  Default-off so the
+    # plain E13d share (and existing results) stay bit-identical.
+    "optimizer_floor_enabled": False,
+    "optimizer_floor_eur_per_kw_year": 0.0,
+    "optimizer_term_year_from": 1,
+    "optimizer_term_year_to": 0,
+    "optimizer_margin_basis": "dam",
     # Optional, separate route-to-market (BSP / balancing-aggregator) fee on
     # GROSS balancing revenue.  Default 0.0 so existing results are
     # bit-identical; balancing carries no energy-aggregator fee but may carry
     # this one (Gridcog-style per-stream route-to-market cost).
     "balancing_aggregator_fee_pct_revenue": 0.0,
+    # BESS tolling agreement (Eqs. E29/E29a): fixed EUR/MW/yr for dispatch
+    # rights over a phase window (Eq. E25).  Default-off (rate 0) so
+    # existing results stay bit-identical.
+    "bess_toll_eur_per_mw_year": 0.0,
+    "bess_toll_year_from": 1,
+    "bess_toll_year_to": 0,
+    "bess_toll_merchant_treatment": "zeroed",
+    "bess_toll_indexation_pct": 0.0,
+    # State support with two-way clawback (Eqs. E31/E31a): a fixed
+    # EUR/MW/yr support netted two-way against realised market revenue
+    # relative to a threshold (RRF-style storage support; the Greek
+    # Tameio Anakampsis / TAA auctions are the reference mechanism).
+    # Default-off (rate 0) so existing results stay bit-identical.
+    "state_support_eur_per_mw_year": 0.0,
+    "state_support_year_from": 1,
+    "state_support_year_to": 0,
+    "state_support_clawback_threshold_eur_per_mw_year": 0.0,
+    "state_support_clawback_share_pct": 0.0,
+    "state_support_indexation_pct": 0.0,
+    # Capacity-market payment with derating factor (Eq. E32): paid on
+    # the derated power block over a contract window; counts as
+    # realised market revenue for the E31a netting.  Default-off.
+    "capacity_market_eur_per_mw_year": 0.0,
+    "capacity_market_derating_pct": 100.0,
+    "capacity_market_year_from": 1,
+    "capacity_market_year_to": 0,
+    "capacity_market_indexation_pct": 0.0,
+    # Revenue levy on gross market turnover (Eq. E33), e.g. the 3 %
+    # special RES turnover levy applied in Greece.  Default-off.
+    "revenue_levy_pct": 0.0,
+    # Depreciation + corporate tax layer (Eqs. E34-E38): post-tax
+    # cashflow columns appended by economics.apply_tax_layer.  The
+    # rate default of 0 keeps every existing result bit-identical
+    # (the depreciation lives are inert while the rate is 0).
+    "corporate_tax_rate_pct": 0.0,
+    "depreciation_years_pv": 20,
+    "depreciation_years_bess": 10,
+    "depreciation_years_site": 20,
+    "tax_loss_carryforward_years": 0,
     "benchmark_lcoe_low_eur_per_mwh": BENCHMARK_LCOE_LOW_EUR_PER_MWH,
     "benchmark_lcoe_high_eur_per_mwh": BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     "benchmark_lcos_low_eur_per_mwh": BENCHMARK_LCOS_LOW_EUR_PER_MWH,
@@ -400,6 +448,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "imbalance_enabled",
     "balancing_enabled",
     "ppa_enabled",
+    "optimizer_floor_enabled",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -413,6 +462,18 @@ _INT_KEYS: frozenset[str] = frozenset({
     "bm_mc_scenarios",
     "bm_random_seed",
     "ppa_term_years",
+    "bess_toll_year_from",
+    "bess_toll_year_to",
+    "optimizer_term_year_from",
+    "optimizer_term_year_to",
+    "state_support_year_from",
+    "state_support_year_to",
+    "capacity_market_year_from",
+    "capacity_market_year_to",
+    "depreciation_years_pv",
+    "depreciation_years_bess",
+    "depreciation_years_site",
+    "tax_loss_carryforward_years",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -426,6 +487,8 @@ _STR_KEYS: frozenset[str] = frozenset({
     "ppa_settlement",
     "ppa_negative_price_rule",
     "imbalance_pricing",
+    "bess_toll_merchant_treatment",
+    "optimizer_margin_basis",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -441,6 +504,8 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "ppa_settlement": frozenset({"physical", "cfd"}),
     "ppa_negative_price_rule": frozenset({"none", "suspend"}),
     "imbalance_pricing": frozenset({"single", "dual"}),
+    "bess_toll_merchant_treatment": frozenset({"zeroed", "retained"}),
+    "optimizer_margin_basis": frozenset({"dam", "dam_plus_balancing"}),
 }
 
 
@@ -676,6 +741,35 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "revenue (the BSP fee below covers balancing). 0 = off (default). "
      "Surfaces as a signed optimizer_fee_eur cashflow column. Excluded "
      "from LCOE/LCOS."),
+    ("optimizer_floor_enabled", False, "bool",
+     "Enable the floor+share optimizer structure (Eq. E30): the "
+     "optimizer guarantees optimizer_floor_eur_per_kw_year and "
+     "optimizer_revenue_share_pct applies to the margin ABOVE the "
+     "floor (not the whole positive margin). FALSE (default) = plain "
+     "share, exactly the E13d behaviour. Note a floor of 0 with this "
+     "enabled still guarantees a non-negative margin (losses are "
+     "topped up)."),
+    ("optimizer_floor_eur_per_kw_year", 0.0, "EUR/kW/yr",
+     "Guaranteed annual floor per kW of BESS power under the "
+     "floor+share structure (a standard BESS-optimizer contract form). "
+     "Availability-scaled (x A); flat nominal, no capacity-fade "
+     "scaling. Ignored unless optimizer_floor_enabled. Surfaces as an "
+     "optimizer_floor_topup_eur column (>= 0). Excluded from "
+     "LCOE/LCOS."),
+    ("optimizer_term_year_from", 1, "year",
+     "First project year of the optimizer contract (share and floor), "
+     "inclusive. Default 1 preserves the whole-life share behaviour."),
+    ("optimizer_term_year_to", 0, "year",
+     "Last project year of the optimizer contract (inclusive); 0 = end "
+     "of life (default, preserving the whole-life behaviour). After "
+     "the term neither share nor floor applies."),
+    ("optimizer_margin_basis", "dam", "dam | dam_plus_balancing",
+     "Margin base for share and floor: 'dam' (default; the BESS DAM "
+     "trading margin, the E13d base) or 'dam_plus_balancing' (adds "
+     "balancing net of the BSP fee, i.e. the full E25a base - "
+     "optimizers routinely manage ancillary revenue too). The share "
+     "applies AFTER the BSP fee; fees never compound. Default keeps "
+     "results bit-identical."),
     ("balancing_aggregator_fee_pct_revenue", 0.0, "%",
      "Optional, separate route-to-market (BSP / balancing-aggregator) fee on "
      "GROSS balancing revenue (capacity + activation). Default 0 = fee-free, "
@@ -684,6 +778,123 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "assets, ~5-20 %); per-stream route-to-market cost, Gridcog convention. "
      "Surfaces as a signed balancing_aggregator_fee_eur cashflow column. "
      "Never applies to DAM / retail / PPA revenue."),
+    ("bess_toll_eur_per_mw_year", 0.0, "EUR/MW/yr",
+     "Tolling agreement: fixed annual payment per MW of BESS power for "
+     "dispatch rights. 0 = off (default, bit-identical). Applied x "
+     "availability factor; no capacity-fade scaling (payment is on the "
+     "power block, not delivered energy). Surfaces as a toll_revenue_eur "
+     "cashflow column. Excluded from LCOE/LCOS."),
+    ("bess_toll_year_from", 1, "year",
+     "First project year of the toll window (inclusive). Must be >= 1."),
+    ("bess_toll_year_to", 0, "year",
+     "Last project year of the toll window (inclusive). 0 = through end "
+     "of project life. Must be 0 or >= bess_toll_year_from. E.g. toll "
+     "years 1-5 then merchant: from=1, to=5."),
+    ("bess_toll_merchant_treatment", "zeroed", "zeroed | retained",
+     "'zeroed' (default): in toll years the BESS-origin merchant streams "
+     "(BESS DAM margin incl. grid-charging cost and the charging-side "
+     "grid fee, balancing capacity+activation, BSP fee, BESS "
+     "route-to-market fee share, optimizer fee) are zeroed - the toller "
+     "keeps them. 'retained': the toll stacks on top of retained "
+     "merchant streams (warns: double-monetises the same MW; use only "
+     "for capacity-overlay contracts)."),
+    ("bess_toll_indexation_pct", 0.0, "%/yr",
+     "Annual escalation of the toll rate ((1+i)^(y-1) convention, "
+     "Eq. E2). Default 0 = flat nominal."),
+    ("state_support_eur_per_mw_year", 0.0, "EUR/MW/yr",
+     "Fixed annual state support per MW of BESS power (RRF-style "
+     "storage support; the Tameio Anakampsis / TAA auctions are the "
+     "Greek reference - a neutral mechanism applicable to any "
+     "fixed-support scheme). 0 = off (default). Availability-scaled "
+     "(x A); no capacity-fade scaling. Surfaces as state_support_eur. "
+     "Excluded from LCOE/LCOS."),
+    ("state_support_year_from", 1, "year",
+     "First project year of the support window (inclusive)."),
+    ("state_support_year_to", 0, "year",
+     "Last project year of the support window (inclusive); 0 = end of "
+     "life. Typical schemes run 10 years."),
+    ("state_support_clawback_threshold_eur_per_mw_year", 0.0,
+     "EUR/MW/yr",
+     "Reference market-revenue level theta for the two-way netting: "
+     "realised BESS market revenue per MW above theta is clawed back, "
+     "below theta is compensated, both at "
+     "state_support_clawback_share_pct. Inactive while the share is "
+     "0."),
+    ("state_support_clawback_share_pct", 0.0, "%",
+     "Share of the (market revenue - threshold) difference netted "
+     "against the support, both directions (two-way). 0 (default) = "
+     "pure fixed support, no netting; 100 = full two-way settlement. "
+     "The netted support can turn a year's combined support negative "
+     "(a net repayment) - no floor is applied; the run log flags any "
+     "such year."),
+    ("state_support_indexation_pct", 0.0, "%/yr",
+     "Annual escalation of the support level AND the threshold "
+     "((1+i)^(y-1), Eq. E2). Default 0 = flat nominal."),
+    ("capacity_market_eur_per_mw_year", 0.0, "EUR/MW/yr",
+     "Capacity-market payment per DERATED MW per year. 0 = off "
+     "(default). Paid on bess_power_kw x capacity_market_derating_pct, "
+     "availability-scaled; no capacity-fade scaling. Counts as "
+     "realised market revenue for the state-support netting "
+     "(Eq. E31a). Surfaces as capacity_market_revenue_eur. Excluded "
+     "from LCOE/LCOS."),
+    ("capacity_market_derating_pct", 100.0, "%",
+     "Derating factor applied to BESS power for the capacity payment "
+     "(EU mechanisms derate storage by duration vs the stress-event "
+     "window; enter the auction's published class factor, e.g. "
+     "~40-95 % depending on duration). 100 = underated nameplate. In "
+     "[0, 100]. The payment is on the DERATED MW (convention stated "
+     "to avoid double-derating)."),
+    ("capacity_market_year_from", 1, "year",
+     "First project year of the capacity contract (inclusive)."),
+    ("capacity_market_year_to", 0, "year",
+     "Last project year (inclusive); 0 = end of life. Multi-year "
+     "new-build contracts are typically 10-17 years."),
+    ("capacity_market_indexation_pct", 0.0, "%/yr",
+     "Annual escalation of the clearing price ((1+i)^(y-1), Eq. E2); "
+     "many mechanisms CPI-index - default 0 = flat nominal."),
+    ("revenue_levy_pct", 0.0, "%",
+     "Levy on gross market turnover: wholesale DAM export revenue "
+     "(gross, before the aggregator fee - levies charge turnover, not "
+     "net-of-fee revenue), balancing capacity + activation revenue, "
+     "and the PPA contract leg. Self-consumption savings are excluded "
+     "(avoided cost, not invoiced turnover), as are the contracted "
+     "streams (toll / state support / capacity market) and the "
+     "imbalance settlement. Example: the 3 % special RES turnover levy "
+     "applied in Greece. Charged before income tax and deductible from "
+     "taxable income by construction. 0 = off (default; results "
+     "bit-identical). Surfaces as a signed revenue_levy_eur cashflow "
+     "column inside net_cashflow_eur (clamped: negative turnover never "
+     "yields a rebate). Excluded from LCOE/LCOS. Validated in "
+     "[0, 100]."),
+    ("corporate_tax_rate_pct", 0.0, "%",
+     "Corporate income tax rate applied to taxable income = EBITDA - "
+     "straight-line depreciation - debt interest, with loss "
+     "carry-forward (Eqs. E34-E38). 0 = pre-tax only (default): the "
+     "post-tax cashflow columns pass through equal to pre-tax and the "
+     "post-tax KPIs report n/a, so existing results are bit-identical. "
+     "Reference: 22 % corporate rate in Greece (2024). Validated in "
+     "[0, 100]."),
+    ("depreciation_years_pv", 20, "years",
+     "Straight-line tax depreciation life of the PV block (CAPEX + "
+     "DEVEX per kW x kWp), first claimed in operating Year 1. Inert "
+     "while corporate_tax_rate_pct = 0. 0 = no depreciation claimed "
+     "for this asset class. Unclaimed depreciation beyond the project "
+     "horizon is lost (no terminal-value write-off)."),
+    ("depreciation_years_bess", 10, "years",
+     "Straight-line life of the BESS block (energy-basis CAPEX + "
+     "power-basis DEVEX), from Year 1. A scheduled/auto replacement "
+     "starts its OWN straight-line tranche (base = replacement CAPEX) "
+     "the year AFTER it is charged - consistent with the month-12 "
+     "booking convention (Eq. E4). Inert while "
+     "corporate_tax_rate_pct = 0."),
+    ("depreciation_years_site", 20, "years",
+     "Straight-line life of the site-wide lump sums (site_capex_eur + "
+     "site_devex_eur), from Year 1. Inert while "
+     "corporate_tax_rate_pct = 0."),
+    ("tax_loss_carryforward_years", 0, "years",
+     "Loss carry-forward window: 0 = unlimited (default). A positive N "
+     "expires unused losses N years after the year they arose (FIFO), "
+     "e.g. 5 in Greece. Inert while corporate_tax_rate_pct = 0."),
     ("benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
@@ -2337,6 +2548,117 @@ def validate_pv_location_fields(pv: dict[str, Any]) -> None:
             )
 
 
+def _phase_windows_overlap(
+    a: tuple[int, int], b: tuple[int, int], n_years: int,
+) -> bool:
+    """True when two E25 phase windows share at least one project year.
+
+    ``year_to == 0`` resolves to ``n_years`` (end of life) before the
+    inclusive-interval intersection test.
+    """
+    a_to = n_years if a[1] == 0 else a[1]
+    b_to = n_years if b[1] == 0 else b[1]
+    return a[0] <= b_to and b[0] <= a_to
+
+
+# Contract stacking-warning matrix: every warning about STACKING two
+# contracted-revenue structures (or mis-stacking one against the
+# merchant streams) lives in this one reviewable table —
+# (rule id, fire predicate over the parsed contract context, message,
+# lazy %-args).  Predicates are pure functions of the context dict
+# assembled in validate_workbook_params; windows compare via
+# _phase_windows_overlap so phase-disjoint configurations stay silent.
+# The messages are the exact strings the per-feature warnings used
+# (caplog-locked by the feature test files).  Hard validation errors
+# (ranges, enums, window rules) deliberately stay inline — this table
+# is warnings-only (stacking is flagged, never blocked).
+_CONTRACT_STACKING_RULES: tuple[tuple[str, Any, str, Any], ...] = (
+    ("toll_no_op",
+     lambda c: c["toll_rate"] > 0.0 and c["bess_kw"] <= 0.0,
+     "bess_toll_eur_per_mw_year is set (%.4g EUR/MW/yr) but "
+     "bess_power_kw is 0: the toll stream is a no-op.",
+     lambda c: (c["toll_rate"],)),
+    ("toll_retained",
+     lambda c: c["toll_rate"] > 0.0 and c["toll_treatment"] == "retained",
+     "bess_toll_merchant_treatment = 'retained': the toll "
+     "stacks on top of retained merchant streams, "
+     "double-monetising the same MW. Use only for "
+     "capacity-overlay contracts.",
+     lambda _c: ()),
+    ("toll_x_optimizer_share",
+     lambda c: (
+         c["toll_rate"] > 0.0 and c["opt_share_pct"] > 0.0
+         and _phase_windows_overlap(
+             c["toll_window"], c["opt_term_window"], c["n_years"],
+         )
+     ),
+     "The toll window overlaps an active optimizer revenue "
+     "share (optimizer_revenue_share_pct = %.4g %%): under "
+     "'zeroed' treatment the optimizer share is gated to zero "
+     "in toll years; the two structures double-charge the "
+     "same wholesale stream otherwise.",
+     lambda c: (c["opt_share_pct"],)),
+    ("toll_x_optimizer_floor",
+     lambda c: (
+         c["floor_enabled"] and c["toll_rate"] > 0.0
+         and c["toll_treatment"] == "zeroed"
+         and _phase_windows_overlap(
+             c["toll_window"], c["opt_term_window"], c["n_years"],
+         )
+     ),
+     "optimizer_floor_enabled while a 'zeroed' BESS toll "
+     "window overlaps the optimizer term: the toll zeroes "
+     "the margin in overlap years, forcing a full floor "
+     "top-up every year — double-charging the "
+     "counterparties.",
+     lambda _c: ()),
+    ("toll_x_state_support",
+     lambda c: (
+         c["ss_rate"] > 0.0 and c["toll_rate"] > 0.0
+         and c["toll_treatment"] == "zeroed"
+         and _phase_windows_overlap(
+             c["toll_window"], c["ss_window"], c["n_years"],
+         )
+     ),
+     "A state-support window overlaps a 'zeroed' BESS toll "
+     "window: realised market revenue is zero in toll "
+     "years, so the two-way netting tops the support up to "
+     "the threshold every overlap year — cumulating two "
+     "capacity payments for the same MW.",
+     lambda _c: ()),
+    ("capacity_x_state_support",
+     lambda c: (
+         c["cm_rate"] > 0.0 and c["ss_rate"] > 0.0
+         and _phase_windows_overlap(
+             c["cm_window"], c["ss_window"], c["n_years"],
+         )
+     ),
+     "A capacity-market window overlaps a state-support "
+     "window: support-cumulation rules typically "
+     "restrict stacking the two schemes on the same MW "
+     "(the capacity revenue does count toward the "
+     "support's netting base, Eq. E31a).",
+     lambda _c: ()),
+    ("capacity_x_toll",
+     lambda c: (
+         c["cm_rate"] > 0.0 and c["toll_rate"] > 0.0
+         and c["toll_treatment"] == "zeroed"
+         and _phase_windows_overlap(
+             c["cm_window"], c["toll_window"], c["n_years"],
+         )
+     ),
+     "A capacity-market window overlaps a 'zeroed' BESS "
+     "toll window: the toller usually holds the "
+     "capacity obligation too — check which party "
+     "collects the capacity payment.",
+     lambda _c: ()),
+    # Reserved: a support-scheme (sliding FiP / two-way CfD) x
+    # state_support cumulation rule lands here once those keys ship;
+    # keep it adjacent to capacity_x_state_support (same cumulation
+    # rationale).
+)
+
+
 def validate_workbook_params(
     typed: dict[str, Any], *, dt_minutes: int | None = None,
 ) -> None:
@@ -2431,7 +2753,9 @@ def validate_workbook_params(
     # share this range.
     for fee_key in ("aggregator_fee_pct_revenue",
                     "balancing_aggregator_fee_pct_revenue",
-                    "optimizer_revenue_share_pct"):
+                    "optimizer_revenue_share_pct",
+                    "state_support_clawback_share_pct",
+                    "revenue_levy_pct"):
         if fee_key not in economics:
             continue
         fee_val = float(economics.get(fee_key, 0.0) or 0.0)
@@ -2443,6 +2767,25 @@ def validate_workbook_params(
     # The per-MWh route-to-market fee is a non-negative charge on exported
     # energy (a negative value would be a rebate, never a fee).
     _require_non_negative(economics, "route_to_market_fee_eur_per_mwh")
+
+    # Tax + depreciation layer (Eqs. E34-E38): the rate lives in
+    # [0, 100]; the straight-line lives and the carry-forward window
+    # are non-negative year counts (all inert while the rate is 0).
+    _tax_rate = float(
+        economics.get("corporate_tax_rate_pct", 0.0) or 0.0
+    )
+    if not (0.0 <= _tax_rate <= 100.0):
+        raise ValueError(
+            f"'corporate_tax_rate_pct' must be in [0, 100]; got "
+            f"{_tax_rate!r}."
+        )
+    for key in (
+        "depreciation_years_pv",
+        "depreciation_years_bess",
+        "depreciation_years_site",
+        "tax_loss_carryforward_years",
+    ):
+        _require_non_negative(economics, key)
 
     # The legacy percentage-of-gross fee and the optimizer share both charge
     # the battery's wholesale stream: stacking them double-charges it.  Warn
@@ -2461,6 +2804,110 @@ def validate_workbook_params(
             "structure, or set the percentages knowingly.",
             _agg_pct, _opt_pct,
         )
+
+    # Contract phase windows (Eq. E25): year_from >= 1 (integer);
+    # year_to == 0 means end-of-life, otherwise year_to >= year_from.
+    def _validate_phase_window(prefix: str) -> tuple[int, int]:
+        # A blank cell (None) falls back to the default; an explicit 0
+        # must NOT be swallowed by a falsy-`or`, it is rejected below.
+        raw_from = economics.get(f"{prefix}_year_from", 1)
+        y_from = int(1 if raw_from is None else raw_from)
+        raw_to = economics.get(f"{prefix}_year_to", 0)
+        y_to = int(0 if raw_to is None else raw_to)
+        if y_from < 1:
+            raise ValueError(
+                f"'{prefix}_year_from' must be >= 1; got {y_from!r}."
+            )
+        if y_to != 0 and y_to < y_from:
+            raise ValueError(
+                f"'{prefix}_year_to' must be 0 (end of life) or >= "
+                f"'{prefix}_year_from' ({y_from!r}); got {y_to!r}."
+            )
+        return y_from, y_to
+
+    # BESS tolling agreement (Eqs. E29/E29a): non-negative rate and
+    # indexation over a valid phase window.
+    _require_non_negative(economics, "bess_toll_eur_per_mw_year")
+    _require_non_negative(economics, "bess_toll_indexation_pct")
+    _toll_window = _validate_phase_window("bess_toll")
+    _toll_treatment = str(
+        economics.get("bess_toll_merchant_treatment", "zeroed") or "zeroed"
+    ).strip().lower()
+    if _toll_treatment not in ("zeroed", "retained"):
+        raise ValueError(
+            "'bess_toll_merchant_treatment' must be 'zeroed' or "
+            f"'retained'; got {_toll_treatment!r}."
+        )
+    _toll_rate = float(
+        economics.get("bess_toll_eur_per_mw_year", 0.0) or 0.0
+    )
+
+    # Optimizer floor + share-above-floor (Eqs. E30/E30a): non-negative
+    # floor over a valid term window; the margin basis is enum-checked.
+    _require_non_negative(economics, "optimizer_floor_eur_per_kw_year")
+    _opt_term_window = _validate_phase_window("optimizer_term")
+    _margin_basis = str(
+        economics.get("optimizer_margin_basis", "dam") or "dam"
+    ).strip().lower()
+    if _margin_basis not in ("dam", "dam_plus_balancing"):
+        raise ValueError(
+            "'optimizer_margin_basis' must be 'dam' or "
+            f"'dam_plus_balancing'; got {_margin_basis!r}."
+        )
+    _floor_enabled = bool(economics.get("optimizer_floor_enabled", False))
+
+    # State support with two-way clawback (Eqs. E31/E31a): non-negative
+    # levels over a valid support window; the netting share shares the
+    # fee [0, 100] range check above.
+    _require_non_negative(economics, "state_support_eur_per_mw_year")
+    _require_non_negative(
+        economics, "state_support_clawback_threshold_eur_per_mw_year",
+    )
+    _require_non_negative(economics, "state_support_indexation_pct")
+    _ss_window = _validate_phase_window("state_support")
+    _ss_rate = float(
+        economics.get("state_support_eur_per_mw_year", 0.0) or 0.0
+    )
+
+    # Capacity-market payment (Eq. E32): non-negative rate/indexation,
+    # derating in [0, 100], valid contract window.
+    _require_non_negative(economics, "capacity_market_eur_per_mw_year")
+    _require_non_negative(economics, "capacity_market_indexation_pct")
+    _cm_derating = float(
+        economics.get("capacity_market_derating_pct", 100.0) or 0.0
+    )
+    if not (0.0 <= _cm_derating <= 100.0):
+        raise ValueError(
+            "'capacity_market_derating_pct' must be in [0, 100]; got "
+            f"{_cm_derating!r}."
+        )
+    _cm_window = _validate_phase_window("capacity_market")
+    _cm_rate = float(
+        economics.get("capacity_market_eur_per_mw_year", 0.0) or 0.0
+    )
+
+    # Contract stacking warnings — one data-driven pass over
+    # _CONTRACT_STACKING_RULES (never blocking; deliberate contract
+    # overlays stay possible).  Every predicate reads this context.
+    _contract_ctx: dict[str, Any] = {
+        "n_years": int(project.get("project_lifecycle_years", 20) or 20),
+        "bess_kw": float(bess.get("bess_power_kw", 0.0) or 0.0),
+        "toll_rate": _toll_rate,
+        "toll_treatment": _toll_treatment,
+        "toll_window": _toll_window,
+        "opt_share_pct": _opt_pct,
+        "opt_term_window": _opt_term_window,
+        "floor_enabled": _floor_enabled,
+        "ss_rate": _ss_rate,
+        "ss_window": _ss_window,
+        "cm_rate": _cm_rate,
+        "cm_window": _cm_window,
+    }
+    for _rule_id, _rule_fires, _rule_msg, _rule_args in (
+        _CONTRACT_STACKING_RULES
+    ):
+        if _rule_fires(_contract_ctx):
+            logger.warning(_rule_msg, *_rule_args(_contract_ctx))
 
     # Grid-emissions accounting (24/7-CFE): a non-negative intensity and a
     # decline in [0, 100] %/yr.  A decline above 100 % makes the
@@ -3082,6 +3529,24 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
      "Lifetime grid-charging fee [EUR]"),
     ("total_imbalance_cost_eur_lifecycle",
      "Lifetime imbalance cost [EUR]"),
+    ("total_toll_revenue_eur_lifecycle", "Lifetime tolling revenue [EUR]"),
+    ("total_optimizer_floor_topup_eur_lifecycle",
+     "Lifetime optimizer floor top-up [EUR]"),
+    ("total_state_support_eur_lifecycle", "Lifetime state support [EUR]"),
+    ("total_state_support_clawback_eur_lifecycle",
+     "Lifetime state-support netting [EUR]"),
+    ("total_capacity_market_revenue_eur_lifecycle",
+     "Lifetime capacity-market revenue [EUR]"),
+    ("total_revenue_levy_eur_lifecycle", "Lifetime revenue levy [EUR]"),
+    # Post-tax family (Eq. E39): NaN while the tax layer is off, so the
+    # non-zero/NaN-skipping renderer keeps zero-default digests
+    # noise-free ('n/a' = tax not modelled, never a duplicate of the
+    # pre-tax baseline).
+    ("npv_post_tax_eur", "NPV post-tax [EUR]"),
+    ("irr_post_tax_pct", "IRR post-tax [%]"),
+    ("equity_irr_post_tax_pct", "Equity IRR post-tax [%]"),
+    ("total_corporate_tax_eur_lifecycle",
+     "Lifetime corporate tax [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the

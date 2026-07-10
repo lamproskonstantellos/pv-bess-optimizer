@@ -293,6 +293,26 @@ FINANCIAL_COLORS: dict[str, str] = {
     "grid_charging_fee":   "#F06292",  # Material pink 300
     # Imbalance settlement cost (Eqs. U6-U9 / E28).
     "imbalance_cost":      "#4E342E",  # Material brown 800
+    # Contracted BESS revenue: tolling agreement (Eqs. E29/E29a) — a
+    # teal one shade darker than the balancing roll-up so the two
+    # BESS-side revenue bands stay distinguishable when stacked.
+    "toll_revenue":        "#00695C",  # Material teal 800
+    # Optimizer floor guarantee payment (Eq. E30) — the darkest teal of
+    # the contracted family, adjacent to the optimizer fee it settles
+    # against.
+    "optimizer_floor_topup": "#004D40",  # Material teal 900
+    # State support and its two-way netting (Eqs. E31/E31a) — an amber
+    # support band (state-origin, distinct from every market stream)
+    # and a purple signed netting band (clawback below zero,
+    # compensation above).
+    "state_support":          "#FF8F00",  # Material amber 800
+    "state_support_clawback": "#6A1B9A",  # Material purple 800
+    # Capacity-market payment (Eq. E32) — deep orange, the
+    # administered-price counterpart of the amber support band.
+    "capacity_market_revenue": "#D84315",  # Material deep orange 800
+    # Revenue levy on gross market turnover (Eq. E33) — a free shade of
+    # the pink deduction family.
+    "revenue_levy":            "#EC407A",  # Material pink 400
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -406,11 +426,17 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Export from PV",
     "Export from BESS",
     "PPA revenue",
+    "Tolling revenue",
+    "State support",
+    "State-support netting",
+    "Capacity-market revenue",
     "Grid-charging cost",
     "Energy aggregator fee",
     "Balancing aggregator fee",
     "Route-to-market fee",
+    "Optimizer floor top-up",
     "Optimizer fee",
+    "Revenue levy",
     "Grid-charging fee",
     "Imbalance cost",
     # Balancing-product subcomponents (FCR / aFRR / mFRR)
@@ -448,11 +474,17 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Export from PV":                   "export_from_pv",
     "Export from BESS":                 "export_from_bess",
     "PPA revenue":                      "ppa_revenue",
+    "Tolling revenue":                  "toll_revenue",
+    "State support":                    "state_support",
+    "State-support netting":            "state_support_clawback",
+    "Capacity-market revenue":          "capacity_market_revenue",
     "Grid-charging cost":               "grid_charge_cost",
     "Energy aggregator fee":            "aggregator_fee",
     "Balancing aggregator fee":         "balancing_aggregator_fee",
     "Route-to-market fee":              "route_to_market_fee",
+    "Optimizer floor top-up":           "optimizer_floor_topup",
     "Optimizer fee":                    "optimizer_fee",
+    "Revenue levy":                     "revenue_levy",
     "Grid-charging fee":                "grid_charging_fee",
     "Imbalance cost":                   "imbalance_cost",
     "FCR":                              "bm_fcr",
@@ -484,6 +516,10 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Export from PV",
     "Export from BESS",
     "PPA revenue",
+    "Tolling revenue",
+    "State support",
+    "State-support netting",
+    "Capacity-market revenue",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.
@@ -500,7 +536,9 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Energy aggregator fee",
     "Balancing aggregator fee",
     "Route-to-market fee",
+    "Optimizer floor top-up",
     "Optimizer fee",
+    "Revenue levy",
     "Grid-charging fee",
     "Imbalance cost",
 )

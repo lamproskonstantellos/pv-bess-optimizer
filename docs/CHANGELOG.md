@@ -126,6 +126,164 @@ Production release.
   pair a one-cell scenario change; a latched warning flags a wedge
   that can never bind because grid charging is disallowed.
 
+### Added (BESS tolling agreement)
+
+- `bess_toll_eur_per_mw_year` + window / treatment / indexation keys
+  on the economics sheet (default 0, bit-identical when off): a fixed
+  EUR/MW/yr payment for BESS dispatch rights over a phase window
+  (Eqs. E29/E29a).  Availability-conditioned, contractually indexed,
+  no capacity-fade scaling (power-block basis).  Under the default
+  `zeroed` merchant treatment every BESS-origin merchant stream (BESS
+  DAM margin, both balancing legs and their BSP fee, the BESS
+  route-to-market fee share, the optimizer share and the charging-side
+  grid fee) is gated to zero in toll years — the toller keeps them;
+  `retained` stacks the toll on top (warned).  Surfaces as a
+  `toll_revenue_eur` cashflow column with exact flat-1/12 monthly
+  allocation, a lifetime KPI + conditional SUMMARY row, a "Tolling
+  revenue" figure band (teal, drawn only when non-zero), and is
+  excluded from LCOE/LCOS and from Revenue-driver scaling (fixed
+  contractual payment).  Stacking warnings: no-op toll (no BESS),
+  `retained` double-monetisation, toll + optimizer-share overlap.
+
+### Added (optimizer floor + share above floor)
+
+- `optimizer_floor_enabled` + floor level / term window / margin-basis
+  keys on the economics sheet (default off, bit-identical — the plain
+  `optimizer_revenue_share_pct` becomes the E13d special case): the
+  floor+share BESS-optimizer contract (Eqs. E30/E30a).  The optimizer
+  guarantees an availability-scaled EUR/kW/yr floor and takes the
+  share of the margin ABOVE it; shortfalls surface as a separate
+  `optimizer_floor_topup_eur` column (>= 0, month-12 ex-post booking)
+  so the fee column keeps its <= 0 sign contract.  The margin base is
+  the E13d DAM margin or, under `dam_plus_balancing`, the full E25a
+  base (share applies after the BSP fee — fees never compound).
+  `sensitivity._scale_revenue` gains an optional econ parameter that
+  recomputes the piecewise fee/top-up pair from the scaled margin base
+  against the un-scaled floor, making the Revenue tornado exact at the
+  floor kink (the None-default legacy path is unchanged and remains
+  exact for the plain share).  Lifetime KPI + conditional SUMMARY row,
+  'Optimizer floor top-up' band (teal 900), LCOE/LCOS invariant; a
+  'zeroed' toll window overlapping the optimizer term warns (full
+  floor top-up every overlap year).
+
+### Added (state support with two-way clawback)
+
+- `state_support_eur_per_mw_year` + window / threshold / share /
+  indexation keys on the economics sheet (default 0, bit-identical
+  when off): RRF-style fixed storage support with the TWO-WAY netting
+  used by Greek storage-support auctions (Tameio Anakampsis / TAA
+  reference; neutral mechanism) — Eqs. E31/E31a.  Availability-scaled
+  support on the power block; the netting settles realised market
+  revenue (the E25a base, plus capacity-market revenue when present)
+  against an indexed threshold, both directions at the same share, no
+  floor (net-repayment years are flagged once in the run log).  Two
+  cashflow columns: `state_support_eur` (flat 1/12 monthly) and the
+  signed `state_support_clawback_eur` (month-12 ex-post booking), both
+  in the net, with SUMMARY-optional lifetime totals, 'State support' /
+  'State-support netting' figure bands (amber / purple, the netting
+  band element-wise signed), LCOE/LCOS invariance and an
+  exactly-recomputed Revenue-tornado netting (scaled base vs un-scaled
+  threshold - revenue-stabilising).  Stacking warning: support window
+  overlapping a 'zeroed' toll (the netting tops up to the threshold
+  every overlap year - two capacity payments for the same MW).
+
+### Added (capacity-market payment)
+
+- `capacity_market_eur_per_mw_year` + derating / window / indexation
+  keys on the economics sheet (default 0, bit-identical when off): a
+  capacity payment on the DERATED power block (Eq. E32) - the
+  derating factor is the auction's published storage class factor
+  (duration-based eligibility), the payment lands on derated MW by
+  stated convention, availability-scaled with no capacity-fade
+  scaling.  Counts toward the state-support netting base (Eq. E31a),
+  computed before the clawback in the year loop (order locked by
+  test) while the E25a base stays capacity-free.  Flat-1/12 monthly
+  allocation, lifetime KPI + conditional SUMMARY row,
+  'Capacity-market revenue' band (deep orange 800), LCOE/LCOS
+  invariant, NOT scaled by the Revenue tornado driver (administered
+  price).  Stacking warnings: overlap with a state-support window
+  (cumulation) and with a 'zeroed' toll (the toller usually holds the
+  capacity obligation).
+
+### Changed (contract stacking-warning matrix + run-log audit)
+
+- The per-feature contract stacking warnings (toll no-op / 'retained'
+  double-monetisation / toll x optimizer share / toll x floor /
+  toll x state support / capacity x support / capacity x toll) now
+  live in one data-driven `io._CONTRACT_STACKING_RULES` table
+  evaluated in a single validation pass over the parsed phase windows
+  (`io._phase_windows_overlap`) - exact message strings preserved, and
+  phase-disjoint configurations are locked silent by a parametrised
+  matrix test (the toll x optimizer-share rule now honours the
+  optimizer term window instead of firing whole-life).  A matrix row
+  is reserved for the Phase-5 support-scheme x state-support
+  cumulation rule.  `compute_financial_kpis` emits one
+  `[contracted revenue]` INFO audit line (five lifetime totals) when
+  any contracted structure is active; the design doc gains the
+  per-structure conventions table and the stacking-interaction table,
+  and the uncertainty design documents the contracted-revenue tornado
+  damping (fixed streams unscaled; piecewise terms recomputed at
+  their kinks).
+
+### Added (revenue levy on gross market turnover)
+
+- `revenue_levy_pct` on the economics sheet (default 0, bit-identical
+  when off; validated in [0, 100]): a percentage levy on gross MARKET
+  turnover (Eq. E33) - DAM export revenue gross of the aggregator
+  fee, both balancing legs gross of the BSP fee, and the PPA contract
+  leg (fees never compound; a turnover levy charges gross sales).
+  The 3 % special RES turnover levy applied in Greece is the
+  reference.  Retail/self-consumption savings, the contracted streams
+  (E29-E32) and the imbalance settlement are excluded by
+  construction; a negative total turnover (e.g. a deeply negative CfD
+  difference leg) never yields a rebate (clamp).  Signed
+  `revenue_levy_eur` column inside net_cashflow_eur (E15 amended),
+  revenue-share monthly weights with exact yearly reconciliation,
+  lifetime KPI + conditional SUMMARY row, 'Revenue levy' band (pink
+  400) in all cashflow/revenue stacks, LCOE/LCOS invariance, and the
+  Revenue tornado driver scales it exactly (uniform-scaling base
+  preserves the clamp).  Being inside EBITDA it is automatically
+  deductible from taxable income once the tax layer lands.
+
+### Added (depreciation + corporate tax engine)
+
+- `corporate_tax_rate_pct` + three straight-line lives +
+  `tax_loss_carryforward_years` on the economics sheet (default rate
+  0, bit-identical: every tax column is an exact zero and the
+  post-tax family passes through value-identical to pre-tax): the
+  pure post-processing tax layer `economics.apply_tax_layer`
+  (Eqs. E34-E38), called at the end of build_yearly_cashflow so the
+  frame always carries the columns.  Per-asset straight-line
+  depreciation (PV, BESS incl. a replacement tranche in service the
+  year AFTER its month-12 booking, site lump sums; N=0 = no claim;
+  horizon truncation, no terminal write-off), taxable income =
+  EBITDA - depreciation - E20 debt interest (the levy is deductible
+  by construction), FIFO loss carry-forward (unlimited default,
+  optional expiry window), TAX_y <= 0 always.  Post-tax columns
+  discount at the single WACC (documented convention).  Monthly:
+  month-12 tax booking with exact post-tax reconciliation.
+  Sensitivity: perturbed frames DROP all tax-layer columns (nonlinear
+  - stale-value guard); the pre-tax tornado is byte-identical with
+  the layer on or off.  No default figures change (the post-tax net
+  is a separate column family).  Locked by hand-computed schedules,
+  a FIFO-expiry worked example and an independent levered reference.
+
+### Added (post-tax financial KPIs)
+
+- `npv_post_tax_eur` / `irr_post_tax_pct` / `equity_irr_post_tax_pct`
+  (post-tax equity flows via the E20 schedule) + the post-tax payback
+  pair + `total_corporate_tax_eur_lifecycle` /
+  `total_depreciation_eur_lifecycle` and a `corporate_tax_rate_pct`
+  echo (Eq. E39), reported ALONGSIDE the pre-tax baseline - the
+  pre-tax KPI keys and values are untouched in every configuration
+  (regression-locked).  Every post-tax KPI is NaN while the rate is 0
+  (the all-equity equity_irr precedent: 'n/a' = tax not modelled), so
+  the SUMMARY optional-row renderer self-skips the four new rows and
+  zero-default digests stay byte-identical.  min_dscr deliberately
+  stays pre-tax (a CFADS-based post-tax DSCR is a stated non-goal).
+  Users-guide section 'Tax, depreciation and the revenue levy' and a
+  README feature paragraph for the Greek contracted + fiscal layer.
+
 ### Added (imbalance settlement exposure)
 
 - `imbalance_enabled` on the simulation sheet (default FALSE,

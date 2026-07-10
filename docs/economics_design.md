@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E28a (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E39 (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -58,6 +58,27 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `route_to_market_fee_eur_per_mwh` | 0.0 | $\phi_{\mathrm{rtm}}$ (representation fee per exported MWh; opt-in) |
 | economics | `optimizer_revenue_share_pct` | 0.0 | $\varphi_{\mathrm{opt}}$ (BESS optimizer share of the positive trading margin; opt-in) |
 | economics | `balancing_aggregator_fee_pct_revenue` | 0.0 | $\varphi_{\mathrm{bm}}$ (optional BSP / route-to-market fee on gross balancing revenue; default off) |
+| economics | `bess_toll_eur_per_mw_year` | 0.0 | $\tau$ (tolling rate per MW of BESS power; default off) |
+| economics | `bess_toll_year_from`, `bess_toll_year_to` | 1, 0 | toll phase window (E25; 0 = end of life) |
+| economics | `bess_toll_merchant_treatment` | zeroed | E29a merchant gating (`zeroed` \| `retained`) |
+| economics | `bess_toll_indexation_pct` | 0.0 | $i_\tau$ (contractual toll escalation) |
+| economics | `optimizer_floor_enabled` | FALSE | E30 floor+share switch (FALSE = plain E13d share) |
+| economics | `optimizer_floor_eur_per_kw_year` | 0.0 | $F$ (guaranteed floor per kW of BESS power) |
+| economics | `optimizer_term_year_from`, `optimizer_term_year_to` | 1, 0 | optimizer term window (E25; default whole life) |
+| economics | `optimizer_margin_basis` | dam | E30a margin base (`dam` \| `dam_plus_balancing`) |
+| economics | `state_support_eur_per_mw_year` | 0.0 | $\sigma$ (fixed support per MW; RRF-style, Tameio Anakampsis / TAA reference) |
+| economics | `state_support_year_from`, `state_support_year_to` | 1, 0 | support window (E25; 0 = end of life) |
+| economics | `state_support_clawback_threshold_eur_per_mw_year` | 0.0 | $\theta$ (two-way netting reference level per MW) |
+| economics | `state_support_clawback_share_pct` | 0.0 | $c$ (share of the difference netted, both directions) |
+| economics | `state_support_indexation_pct` | 0.0 | $i_s$ (escalates support AND threshold) |
+| economics | `capacity_market_eur_per_mw_year` | 0.0 | $\kappa$ (capacity payment per derated MW) |
+| economics | `capacity_market_derating_pct` | 100.0 | $\delta$ (duration-based derating class factor) |
+| economics | `capacity_market_year_from`, `capacity_market_year_to` | 1, 0 | capacity-contract window (E25) |
+| economics | `capacity_market_indexation_pct` | 0.0 | $i_{cm}$ (clearing-price escalation) |
+| economics | `revenue_levy_pct` | 0.0 | $\lambda$ (levy on gross market turnover, E33) |
+| economics | `corporate_tax_rate_pct` | 0.0 | $\tau$ (income tax on E36 taxable income; 0 = pre-tax only) |
+| economics | `depreciation_years_pv`, `depreciation_years_bess`, `depreciation_years_site` | 20, 10, 20 | $N_a$ (straight-line lives per asset class; inert at $\tau = 0$) |
+| economics | `tax_loss_carryforward_years` | 0 | $W$ (FIFO loss expiry window; 0 = unlimited) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
 | economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
 | economics | `gearing_pct`, `debt_interest_rate_pct`, `debt_tenor_years`, `debt_repayment` | 0, 5.0, 15, annuity | debt layer |
@@ -433,7 +454,12 @@ OPEX, replacement CAPEX, and the net cashflow:
 $$O_y = -\left(o^{PV}\,\mathrm{kWp} + o^{B} P^{B}\right)(1+i_{\mathrm{opex}})^{y-1}, \qquad
 C_y = \begin{cases} c^{B} E^{\mathrm{cap}} \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
 
-$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + F^{\mathrm{chg}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
+$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + F^{\mathrm{chg}}_y + L_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
+
+($L_y$ = the E33 revenue levy; every later signed stream column —
+imbalance $I_y$ (E28), toll (E29), floor top-up (E30), support and
+netting (E31/E31a), capacity payment (E32) — joins the same row-wise
+sum, as each section states)
 
 with $V_y$ the DEVEX column (Year 0 only) and Year 0 carrying
 $\mathrm{CF}_0 = \mathrm{CAPEX}_0 + \mathrm{DEVEX}_0$.  Discounted:
@@ -532,6 +558,380 @@ explicitly) and has no monthly counterpart — it is the single netting
 base the contracted structures will read, and the Revenue tornado
 driver scales it (price-proportional) so piecewise contract terms can
 be recomputed exactly from a scaled base.
+
+### BESS tolling agreement (Eqs. E29/E29a)
+
+A tolling agreement pays the owner a fixed annual rate per MW of BESS
+power for the right to dispatch the battery — the fixed-payment end of
+the contracted-revenue spectrum.  Five `economics` keys, all
+default-off (`bess_toll_eur_per_mw_year = 0` ⇒ bit-identical):
+`bess_toll_eur_per_mw_year` ($\tau$), `bess_toll_year_from` /
+`bess_toll_year_to` (the E25 window), `bess_toll_merchant_treatment`
+(`zeroed` | `retained`) and `bess_toll_indexation_pct` ($i_\tau$).
+
+$$R^{\mathrm{toll}}_y = \tau \cdot \frac{P^{B}}{1000} \cdot A \cdot
+(1+i_\tau)^{\,y-1} \cdot \chi_y\!\left(y_f^{\mathrm{toll}},
+y_t^{\mathrm{toll}}\right) \tag{E29}$$
+
+The availability factor $A$ (E8) applies **here, once** — the toll is
+a new stream, not derived from the already-derated Year-1 KPIs
+(availability-conditioned capacity payments are the market norm) — and
+there is deliberately **no** $f^{B}$ fade: the payment is on the
+contracted power block, not on delivered energy.  Surfaces as the
+`toll_revenue_eur` column (monthly: exact flat $1/12$ — a level
+contractual payment), folds into `net_cashflow_eur`, is **excluded
+from LCOE/LCOS** (revenue-agnostic convention) and does **not** scale
+with the Revenue tornado driver (fixed contractual EUR/MW; the driver
+perturbs market prices the toll is insulated from).
+
+Merchant zeroing (default treatment `zeroed`):
+
+$$\chi_y = 1:\quad R^{\mathrm{DAM,B}} \to 0,\;
+R^{\mathrm{bm,cap}}_y, R^{\mathrm{bm,act}}_y, F^{\mathrm{bm}}_y \to 0,\;
+E^{\mathrm{exp,B}} \to 0 \text{ in } F^{\mathrm{rtm}},\;
+F^{\mathrm{opt}}_y \to 0,\;
+F^{\mathrm{gcf}}_y \to 0 \tag{E29a}$$
+
+— in toll years the toller holds dispatch rights, so every BESS-origin
+merchant stream is gated to zero for that year: the $R^{\mathrm{DAM,B}}$
+contribution to E10 (which nets the grid-charging energy cost), both
+E11 balancing legs and their BSP fee (E13b), the BESS-export term of
+the route-to-market fee (E13c), the optimizer share (E13d) **and the
+charging-side grid fee (E27)** — the wedge follows the grid-charging
+cost it accompanies, both being dispatch costs the toller bears (an
+extension of the workstream design, which predates E26/E27).  The
+gating substitutes the Year-1 bases per year inside the projection
+loop and never mutates them, so the Year-1 revenue-split
+reconciliation guard is untouched and `bess_market_revenue_eur` (E25a)
+reflects the zeroing (it reports *realised* market revenue: zero in
+toll years).  Deliberately **not** zeroed: PV-origin streams, the PPA
+leg, self-consumption savings (a warning fires when
+`profit_load_from_bess_eur` is non-zero alongside a toll — a tolled
+grid-scale battery has no retail leg) and the PV-forecast-error-driven
+imbalance cost (E28).  Under `retained` no gating occurs — the toll
+stacks on top of the full merchant streams (a capacity-overlay
+contract; a warning flags the double-monetisation).
+
+Stacking warnings (validation-time, never blocking): toll rate set
+with `bess_power_kw = 0` (no-op), treatment `retained`
+(double-monetises the MW), and toll + `optimizer_revenue_share_pct`
+both active (under `zeroed` the share is gated in toll years; the two
+double-charge the same wholesale stream otherwise).
+
+### Optimizer floor + share above floor (Eqs. E30/E30a)
+
+The plain optimizer revenue share (E13d) is the $\varphi$-share special
+case of the floor+share structure BESS optimizers commonly offer: the
+optimizer guarantees an annual floor and takes its share of the margin
+**above** the floor; shortfalls are topped up.  Gated by the explicit
+`optimizer_floor_enabled` switch (default FALSE ⇒ E13d bit-identically)
+so a floor *value* of zero never silently converts trading losses into
+top-ups — note that a floor of 0 with the switch ON still guarantees a
+non-negative margin.  A shared term window
+(`optimizer_term_year_from/to`, default whole life) gates both share
+and floor; outside the term the year is merchant.
+
+$$\mathrm{Floor}_y = F \cdot P^{B} \cdot A, \qquad
+F^{\mathrm{opt}}_y = -\varphi_{\mathrm{opt}}
+\max\!\left(M_y - \mathrm{Floor}_y,\, 0\right), \qquad
+T^{\mathrm{opt}}_y = +\max\!\left(\mathrm{Floor}_y - M_y,\, 0\right)
+\tag{E30}$$
+
+within the term window $\chi_y$ (both zero outside); $F$ in EUR/kW/yr
+on the power block, availability-scaled ($\times A$, the E29
+convention — a new stream, derated once), flat nominal (no fade, no
+indexation).  The owner's realised optimizer-managed margin is
+$M_y + F^{\mathrm{opt}}_y + T^{\mathrm{opt}}_y =
+\max\!\left(\mathrm{Floor}_y,\, \mathrm{Floor}_y +
+(1-\varphi_{\mathrm{opt}})(M_y - \mathrm{Floor}_y)\right)$ — never
+below the floor.  The top-up is a separate `optimizer_floor_topup_eur`
+column ($\ge 0$) so `optimizer_fee_eur` keeps its $\le 0$ sign
+contract (plot stacking and fee-inference helpers rely on it).
+
+Margin basis (Eq. E30a):
+
+$$M_y = \begin{cases}
+R^{\mathrm{DAM,B}}_1\, f^{B}_y\, g^{\mathrm{dam}}_y &
+\texttt{dam} \text{ (default; the E13d base)}\\[2pt]
+\text{E25a base (DAM margin + balancing net of the BSP fee)} &
+\texttt{dam\_plus\_balancing}
+\end{cases} \tag{E30a}$$
+
+Under `dam_plus_balancing` the share applies **after** the BSP fee —
+fees never compound on other fees (house rule).  Monthly: the top-up
+books in **month 12** (annual ex-post settlement, the
+replacement-CAPEX convention, so monthly and yearly DCFs agree on the
+event); the fee keeps its revenue-share weights.  Sensitivity: the
+fee/top-up pair is piecewise in the margin, so the Revenue driver
+recomputes both from the scaled E25a base against the **un-scaled**
+contractual floor (`_scale_revenue` gains an optional `econ`
+parameter; the `None`-default legacy path is exact for the plain share
+because $\max(fM,0) = f\max(M,0)$ for $f>0$).  The tornado is
+therefore exact at the $M_y = \mathrm{Floor}_y$ kink, and contracted
+floors visibly damp the Revenue bars.  Excluded from LCOE/LCOS.
+Stacking: a `zeroed` toll window overlapping the optimizer term warns
+— the toll zeroes the margin, forcing a full floor top-up every
+overlap year.
+
+### State support with two-way clawback (Eqs. E31/E31a)
+
+A fixed annual support per MW of BESS power over a support window,
+with a TWO-WAY netting against realised market revenue relative to a
+threshold — the settlement form used by storage-support auctions
+funded through the Recovery and Resilience Facility (the Greek Tameio
+Anakampsis kai Anthektikotitas / TAA auctions are the reference; the
+mechanism here is neutral and jurisdiction-agnostic).  Six `economics`
+keys, all default-off (`state_support_eur_per_mw_year = 0` ⇒
+bit-identical).
+
+$$S_y = \sigma \cdot \frac{P^{B}}{1000} \cdot A \cdot
+(1+i_s)^{\,y-1} \cdot \chi_y\!\left(y_f^{s}, y_t^{s}\right) \tag{E31}$$
+
+— availability-conditioned on the power block (the E29 convention), no
+$f^{B}$ fade (support is per installed MW).  The two-way netting:
+
+$$\mathrm{CB}_y = -c\,\left(M^{\mathrm{mkt}}_y - \theta_y\right)\chi_y,
+\qquad \theta_y = \theta \cdot \frac{P^{B}}{1000}\,(1+i_s)^{\,y-1},
+\qquad c = \frac{\texttt{share\_pct}}{100} \tag{E31a}$$
+
+with $M^{\mathrm{mkt}}_y$ the realised market revenue: the E25a base
+(plus the capacity-market revenue E32 when present — market-facing
+capacity income counts as realised revenue for the netting).
+$\mathrm{CB}_y < 0$ (clawback) when realised market revenue exceeds
+the threshold, $\mathrm{CB}_y > 0$ (compensation) when it falls short;
+$S_y + \mathrm{CB}_y$ may turn negative — a **net repayment year**, no
+floor is applied by design, and the run log flags the affected years
+once.  PPA, self-consumption savings and toll revenue are excluded
+from the netting base by construction (they are not market revenue);
+under a `zeroed` toll the base is zero, so the netting tops up to
+$\theta_y$ every overlap year — the warned two-capacity-payments
+stacking case.
+
+Columns: `state_support_eur` ($\ge 0$, flat $1/12$ monthly — a level
+payment) and the signed `state_support_clawback_eur` (month-12 booking
+— annual ex-post settlement).  Both fold into `net_cashflow_eur`, are
+excluded from LCOE/LCOS, and carry SUMMARY-optional lifetime totals.
+Sensitivity: the gross support does NOT scale with the Revenue driver
+(fixed EUR/MW); the netting is recomputed (linear, exact) from the
+scaled market base against the UN-scaled threshold — the netting is
+revenue-stabilising, so Revenue-tornado bars narrow as the share
+rises, reaching full stabilisation of the market component at
+$c = 1$.  The clawback reads the deterministic analytic projection;
+per-seed Monte Carlo netting is out of scope (stated limitation).
+
+### Capacity-market payment with derating factor (Eq. E32)
+
+The simplest contracted structure: an annual payment on the DERATED
+power block over a contract window.  Five `economics` keys,
+default-off (`capacity_market_eur_per_mw_year = 0` ⇒ bit-identical).
+
+$$R^{\mathrm{cm}}_y = \kappa \cdot \frac{P^{B}}{1000} \cdot \delta
+\cdot A \cdot (1+i_{cm})^{\,y-1} \cdot
+\chi_y\!\left(y_f^{\mathrm{cm}}, y_t^{\mathrm{cm}}\right),
+\qquad \delta = \frac{\texttt{derating\_pct}}{100} \tag{E32}$$
+
+The derating factor is a plain user input (EU capacity mechanisms
+derate storage by duration relative to the stress-event window — enter
+the auction's published class factor); the model deliberately does NOT
+derive it from `bess_kwh / bess_kw`.  Convention (stated to avoid
+double-derating): the payment is **on the derated MW**.  No $f^{B}$
+fade (the obligation is on derated nameplate); availability applies
+(availability-tested payments).  Worked example:
+$\kappa = 50{,}000$, $\delta = 40\,\%$, $P^{B} = 1$ MW, $A = 0.99$
+⇒ 19,800 EUR in Year 1.
+
+`capacity_market_revenue_eur` folds into `net_cashflow_eur` (flat
+$1/12$ monthly — a level payment) and **counts toward the E31a netting
+base**, computed before $\mathrm{CB}_y$ in the year loop (order locked
+by test); the E25a base itself stays capacity-free (the payment is not
+wholesale trading margin).  NOT scaled by the Revenue driver
+(administered capacity price, the route-to-market precedent) — it
+joins the netting recompute at its un-scaled value.  Excluded from
+LCOE/LCOS.  Stacking warnings: overlap with a state-support window
+(cumulation rules typically restrict stacking) and with a `zeroed`
+toll (the toller usually holds the capacity obligation too).
+
+### Contracted-layer conventions and stacking-interaction matrix
+
+Per-structure conventions (one row per contracted stream):
+
+| Structure | Column(s) | Availability $A$ | $f^{B}$ fade | Monthly booking | Revenue-driver scaling | Netting/share base |
+|---|---|---|---|---|---|---|
+| Tolling (E29/E29a) | `toll_revenue_eur` | yes (payment conditioned) | no (power block) | flat 1/12 | no (fixed contractual) | — (gates the merchant streams instead) |
+| Optimizer floor+share (E30/E30a) | `optimizer_fee_eur` ($\le 0$), `optimizer_floor_topup_eur` ($\ge 0$) | yes (floor level) | no | fee: revenue-share weights; top-up: month 12 | piecewise recompute (scaled margin vs un-scaled floor) | E13d DAM margin or E25a base |
+| State support (E31/E31a) | `state_support_eur` ($\ge 0$), `state_support_clawback_eur` (signed) | yes (support level; threshold NOT derated) | no | support: flat 1/12; netting: month 12 | support: no; netting: exact recompute vs un-scaled threshold | E25a base + E32 revenue |
+| Capacity market (E32) | `capacity_market_revenue_eur` | yes (availability-tested) | no (derated nameplate) | flat 1/12 | no (administered price) | joins the E31a base |
+
+All five columns fold into `net_cashflow_eur`, carry SUMMARY-optional
+lifetime totals, and are **excluded from LCOE and LCOS** (the metrics
+stay revenue-agnostic energy-cost figures; test-locked per structure).
+When any structure is active, `compute_financial_kpis` emits one
+`[contracted revenue]` INFO line in the run log with the five lifetime
+totals (the LCOE/LCOS audit's noise discipline: silent in the
+all-merchant default).
+
+Stacking warnings live in one data-driven table
+(`io._CONTRACT_STACKING_RULES`) — a validation-time pass evaluates
+every rule against the parsed contract windows
+(`io._phase_windows_overlap`; phase-disjoint configurations never
+warn, locked by the parametrised matrix test).  Warned combinations
+and why:
+
+| Rule | Fires when | Why |
+|---|---|---|
+| `toll_no_op` | toll rate set, `bess_power_kw = 0` | the stream is a no-op |
+| `toll_retained` | toll active with treatment `retained` | toll + full merchant streams double-monetise the same MW |
+| `toll_x_optimizer_share` | toll and optimizer share active, windows overlap | under `zeroed` the share is gated in toll years; otherwise the two double-charge the same wholesale stream |
+| `toll_x_optimizer_floor` | floor enabled, `zeroed` toll overlaps the optimizer term | the toll zeroes the margin — a full floor top-up every overlap year (double-charging the counterparties) |
+| `toll_x_state_support` | support window overlaps a `zeroed` toll | the netting base is zero, so the netting tops up to $\theta_y$ every overlap year — two capacity payments for the same MW |
+| `capacity_x_state_support` | capacity and support windows overlap | support-cumulation rules typically restrict stacking (the capacity revenue does count toward the E31a base) |
+| `capacity_x_toll` | capacity window overlaps a `zeroed` toll | the toller usually holds the capacity obligation too |
+
+A matrix row is reserved for the Phase-5 sliding-FiP / two-way-CfD
+support scheme × state-support cumulation warning (activated when
+those keys land).
+
+### Revenue levy on gross market turnover (Eq. E33)
+
+A configurable percentage levy on gross **market** turnover — the
+mechanism of the 3 % special RES turnover levy applied in Greece,
+expressed neutrally.  One `economics` key, `revenue_levy_pct`
+(default 0 ⇒ bit-identical, validated in $[0, 100]$).
+
+$$L_y = -\lambda \, \max\!\left(0,\;
+R^{\mathrm{DAM,gross}}_y + R^{\mathrm{bm,cap}}_y +
+R^{\mathrm{bm,act}}_y + R^{\mathrm{PPA}}_y\right), \qquad
+\lambda = \frac{\texttt{revenue\_levy\_pct}}{100}, \qquad L_0 = 0
+\tag{E33}$$
+
+Base conventions: $R^{\mathrm{DAM,gross}}_y$ is the DAM stream
+**before** the E13 aggregator fee and the balancing legs are gross of
+the BSP fee — a turnover levy charges gross sales, and fees never
+compound; the PPA contract leg is invoiced turnover (a CfD difference
+leg can be negative and reduce the base — the clamp stops a negative
+total turnover from ever producing a rebate); the post-term physical
+PPA reversion joins the base through the DAM stream automatically.
+Excluded by construction: the retail/self-consumption stream (avoided
+cost, not invoiced turnover — the route-to-market "sold energy only"
+precedent), the contracted streams E29–E32 (not market turnover; the
+E29a toll gating already removes the tolled merchant legs from the
+base) and the imbalance settlement.  The levy sits inside EBITDA, so
+it is automatically deductible from taxable income once the tax layer
+(E34–E38) lands.
+
+Column `revenue_levy_eur` ($\le 0$) folds into `net_cashflow_eur`
+(E15); monthly it rides the revenue-share weights (the structural-fee
+approximation of the market-turnover shape; shares sum to one so the
+yearly reconciliation is exact).  Sensitivity: the base is a
+uniform-scaling sum of price-driven streams and $f > 0$ preserves the
+clamp ($\max(f\,b, 0) = f\max(b, 0)$), so the levy **scales with the
+Revenue driver** exactly (constant scale); the net recompute folds
+it.  Excluded from LCOE/LCOS; lifetime total renders in SUMMARY.md
+only when set.  Note the levy changes PRE-tax headline KPIs when set —
+deliberate: it is an operating cost, not an income tax.
+
+### Tax and depreciation layer (Eqs. E34-E38; pre-tax when the rate is 0)
+
+`economics.apply_tax_layer(yearly_cf, econ, capacities)` is a pure
+post-processing layer called at the end of `build_yearly_cashflow`, so
+the frame always carries the post-tax column family.  The pre-tax
+columns are **never touched** — `net_cashflow_eur` keeps its E15
+definition and the published pre-tax KPIs remain the baseline.  With
+`corporate_tax_rate_pct = 0` (default) every tax column is an exact
+zero and the post-tax family passes through value-identical to the
+pre-tax family (no schedule is computed — noise-free bit-identity).
+
+Straight-line depreciation over asset classes
+$a \in \{\mathrm{PV}, \mathrm{BESS}, \mathrm{site},
+\mathrm{BESS\text{-}replacement}\}$:
+
+$$\mathrm{DEP}_y = \sum_a \frac{\mathrm{base}_a}{N_a}\,
+\mathbf{1}\!\left[\, y_{a0} \le y \le \min\!\left(Y,\,
+y_{a0} + N_a - 1\right) \right] \tag{E34}$$
+
+with $\mathrm{base}_{PV} = (c^{PV} + v^{PV})\,\mathrm{kWp}$,
+$\mathrm{base}_B = c^{B} E^{\mathrm{cap}} + v^{B} P^{B}$,
+$\mathrm{base}_{site} = \mathrm{site\_capex} + \mathrm{site\_devex}$
+(all $y_{a0} = 1$), and the replacement tranche
+$\mathrm{base}_r = c^{B} E^{\mathrm{cap}}\, p_r / 100$ in service from
+$y_{r0} = y_r + 1$ (the asset enters service after its month-12
+booking, Eq. E4) over $N_{\mathrm{BESS}}$ years.  $N_a = 0$ ⇒ no
+claim; tranches truncate at the horizon $Y$ (unclaimed depreciation is
+lost — no terminal write-off).
+
+$$\mathrm{EBITDA}_y = \mathrm{CF}_y - C_y - V_y \;\; (y \ge 1),
+\qquad \mathrm{EBITDA}_0 = 0 \tag{E35}$$
+
+— the operating net before investment events: revenue net of every
+E13-family fee and the E33 levy (the levy is therefore deductible by
+construction), plus balancing, PPA, the contracted streams and OPEX.
+
+$$\mathrm{TI}_y = \mathrm{EBITDA}_y - \mathrm{DEP}_y - \mathrm{INT}_y,
+\qquad \mathrm{TB}_y = \max\!\left(0,\, \mathrm{TI}_y -
+L_{y-1}\right) \tag{E36}$$
+
+with $\mathrm{INT}_y$ the E20 schedule interest on
+$\text{gearing} \times |\mathrm{CF}_0|$ (zero when all-equity or
+beyond the tenor) and $L_y$ the loss pool: losses accumulate as
+vintages, profits absorb them FIFO, and with
+`tax_loss_carryforward_years` $= W > 0$ a vintage expires $W$ years
+after it arose ($W = 0$ = unlimited, the default).
+
+$$\mathrm{TAX}_y = -\tau\, \mathrm{TB}_y \;\le\; 0 \tag{E37}$$
+
+(no negative-tax rebates; losses only carry forward).
+
+$$\mathrm{CF}^{pt}_y = \mathrm{CF}_y + \mathrm{TAX}_y, \qquad
+\mathrm{DCF}^{pt}_y = \mathrm{CF}^{pt}_y \cdot D_y \tag{E38}$$
+
+— the same discount rate E3 (single-WACC convention: the levered
+interest shield mixes capital-structure effects into project NPV,
+collapsing to unlevered at zero gearing; documented in Assumptions &
+limitations).  Appended columns: `depreciation_eur`,
+`debt_interest_eur`, `taxable_income_eur`,
+`tax_loss_carryforward_eur` (the balance carried OUT of the year),
+`corporate_tax_eur` ($\le 0$) and the post-tax family
+`net_cashflow_post_tax_eur` / `discounted_cf_post_tax_eur` /
+`cumulative_cf_post_tax_eur` / `cumulative_dcf_post_tax_eur`.
+Monthly: `corporate_tax_eur` books in **month 12** (annual
+settlement; December's E4 factor equals the yearly E3 factor, so the
+monthly and yearly post-tax DCFs agree exactly); depreciation,
+taxable income and the carry-forward stay yearly-only (annual
+accounting concepts).  Sensitivity: the scaled-frame helpers **drop**
+every tax-layer column from perturbed frames — taxes are nonlinear
+(the TB clamp and the carry-forward), so scaled copies would be
+silently stale; the pre-tax tornado is unaffected and stays the
+published baseline.  No default figures change (the post-tax net is a
+separate column family, so every existing stack keeps its
+segment-sum == net-line identity).  Worked example: 4/2/8-year lives
+over an 8-year horizon put the early years into loss (carry-forward
+builds), the loss pool absorbs FIFO once depreciation runs out, and
+tax turns on in the late years — locked to hand-computed cents in
+`tests/test_tax_depreciation.py`, alongside an independent levered
+reference case.
+
+Post-tax KPIs (Eq. E39) surface the layer as headline metrics
+**alongside** (never replacing) the pre-tax baseline:
+
+$$\mathrm{CF}^{eq,pt}_0 = \mathrm{CF}^{pt}_0 + B, \qquad
+\mathrm{CF}^{eq,pt}_y = \mathrm{CF}^{pt}_y - s_y \;\;
+(1 \le y \le T_d), \qquad
+\mathrm{equity\ IRR}^{pt} = \mathrm{IRR}\!\left(
+\mathrm{CF}^{eq,pt}\right) \tag{E39}$$
+
+with $B$, $s_y$ from the E20 schedule.  `compute_financial_kpis`
+emits `npv_post_tax_eur` (sum of the discounted post-tax column),
+`irr_post_tax_pct`, `equity_irr_post_tax_pct`,
+`simple_payback_post_tax_years` /
+`discounted_payback_post_tax_years` (the E19 interpolation on the
+post-tax cumulatives), `total_corporate_tax_eur_lifecycle` ($\le 0$),
+`total_depreciation_eur_lifecycle` and a `corporate_tax_rate_pct`
+echo (the `gearing_pct` precedent).  Every post-tax KPI reports
+**NaN while the rate is 0** (the all-equity `equity_irr_pct`
+precedent: n/a = not modelled — never a duplicate of the pre-tax
+value), so the SUMMARY optional-row renderer self-skips them and
+zero-default digests stay byte-identical.  `min_dscr` deliberately
+stays pre-tax (a CFADS-based post-tax DSCR is a stated non-goal).
 
 ### Financial KPIs
 
@@ -679,6 +1079,13 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E26) | `build_model` grid-charge wedge; `kpis.add_economic_columns` fee column |
 | (E27) | `build_yearly_cashflow` grid_charging_fee_eur column + monthly allocation |
 | (E28)-(E28a) | `build_yearly_cashflow` imbalance_cost_eur column + PV-shape monthly allocation |
+| (E29)-(E29a) | `build_yearly_cashflow` toll_revenue_eur column + per-year merchant gating |
+| (E30)-(E30a) | `build_yearly_cashflow` optimizer fee/top-up pair; `sensitivity._scale_revenue` econ-threaded kink recompute |
+| (E31)-(E31a) | `build_yearly_cashflow` state_support_eur / state_support_clawback_eur pair + repayment-year flag |
+| (E32) | `build_yearly_cashflow` capacity_market_revenue_eur column (computed before the E31a netting) |
+| (E33) | `build_yearly_cashflow` revenue_levy_eur clamp + fee-share monthly allocation |
+| (E34)-(E38) | `economics.apply_tax_layer` (straight-line tranches, EBITDA, FIFO carry-forward, tax clamp, post-tax family) |
+| (E39) | `compute_financial_kpis` post-tax KPI block (NaN-gated on the rate) |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests
@@ -736,7 +1143,16 @@ $396.29\,u^2 + 400\,u - 1000 = 0$).
   fee schedules.
 * Debt sizes on gearing × Year-0 outlay only (no DSCR-sculpted
   sizing); interest during construction is not modelled.
-* No tax, depreciation, or working-capital layers.
+* The tax layer (Eqs. E34-E38) models straight-line depreciation,
+  interest deductibility and FIFO loss carry-forward only — no
+  deferred tax, no VAT, no working capital, no interest during
+  construction, no terminal book-value write-off (a replacement
+  tranche truncates at the horizon, understating the shield of a late
+  replacement), and the post-tax project cashflow discounts at the
+  single WACC (the levered interest shield mixes capital-structure
+  effects into project NPV; collapses to unlevered at
+  ``gearing_pct = 0``).  The clawback and tax layers read the
+  deterministic analytic projection, not per-seed Monte Carlo paths.
 * LCOE/LCOS exclude site-wide lump sums and all revenue, because they
   are comparability metrics, not project-cost accounting.
 
