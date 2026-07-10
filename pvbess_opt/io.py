@@ -141,6 +141,11 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "p_grid_export_max_kw": 5000.0,
     "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
+    # Regulated charging-side wedge (EUR/MWh) on grid-charged BESS
+    # energy, entering the MILP objective AND the cashflow (Eq. E26).
+    "grid_charging_fee_eur_per_mwh": 0.0,
+    # Storage network-charge exemption regime: TRUE zeroes the wedge.
+    "grid_charging_fee_exempt": False,
     "grid_cap_includes_load": False,
     "unavailability_pct": 1.0,
     "site_capex_eur": 0.0,
@@ -376,6 +381,7 @@ for _sheet_name, _sheet_defaults in _SHEET_DEFAULTS.items():
 _BOOL_KEYS: frozenset[str] = frozenset({
     "show_titles",
     "allow_bess_grid_charging",
+    "grid_charging_fee_exempt",
     "grid_cap_includes_load",
     "terminal_soc_equal",
     "sensitivity_enabled",
@@ -455,6 +461,20 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Retail tariff used in self_consumption mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",
      "If TRUE the BESS may charge from the grid in periods with pv_kwh ~ 0."),
+    ("grid_charging_fee_eur_per_mwh", 0.0, "EUR/MWh",
+     "Regulated charging-side wedge on grid-charged BESS energy: "
+     "network use-of-system charges plus levies applied to storage "
+     "charging where not exempt. Enters the MILP objective as a buy-"
+     "price adder on grid-to-BESS energy (thin arbitrage spreads flip "
+     "correctly) AND the cashflow as its own expense line (Eq. E26). "
+     "Typical European range 10-30 EUR/MWh; 0 = no wedge. Inert unless "
+     "the dispatch actually grid-charges (allow_bess_grid_charging)."),
+    ("grid_charging_fee_exempt", False, "bool",
+     "Storage network-charge exemption regime switch. TRUE = the "
+     "project qualifies for a storage charging exemption and the wedge "
+     "above is ignored (effective fee 0 in the objective AND the "
+     "cashflow); FALSE = the wedge applies. Keeps the exempt / "
+     "non-exempt scenario pair a one-cell switch."),
     ("grid_cap_includes_load", False, "bool",
      "Sets what the per-step grid-injection cap limits (self_consumption mode "
      "only). FALSE (default) = PHYSICAL / co-located self-consumption: the load "
@@ -2348,7 +2368,13 @@ def validate_workbook_params(
         "bess_replacement_year",
     ):
         _require_non_negative(bess, key)
-    for key in ("site_capex_eur", "site_devex_eur"):
+    for key in (
+        "site_capex_eur",
+        "site_devex_eur",
+        # A negative wedge would be a charging subsidy paid by the
+        # network — not a fee; reject it like every other cost key.
+        "grid_charging_fee_eur_per_mwh",
+    ):
         _require_non_negative(project, key)
 
     gearing = float(economics.get("gearing_pct", 0.0) or 0.0)
@@ -2775,6 +2801,14 @@ def _typed_to_flat(
         "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
         "mode": str(project["mode"]),
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
+        # Charging-side wedge (Eq. E26): consumed by the MILP objective
+        # (build_model) and the per-step fee column (add_economic_columns).
+        "grid_charging_fee_eur_per_mwh": float(
+            project.get("grid_charging_fee_eur_per_mwh", 0.0) or 0.0
+        ),
+        "grid_charging_fee_exempt": bool(
+            project.get("grid_charging_fee_exempt", False)
+        ),
         "grid_cap_includes_load": bool(project["grid_cap_includes_load"]),
         "unavailability_pct": float(project["unavailability_pct"]),
         "site_capex_eur": float(project.get("site_capex_eur", 0.0) or 0.0),

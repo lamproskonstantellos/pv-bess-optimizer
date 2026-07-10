@@ -351,6 +351,20 @@ def add_economic_columns(
     res["expense_charge_bess_grid_eur"] = (
         res["bess_charge_grid_kwh"].fillna(0.0) / 1000.0 * dam_series
     )
+    # Charging-side grid fee (Eq. E26): the regulated wedge actually
+    # paid on grid-charged energy.  Written only when the wedge is
+    # non-zero (PPA-column conditional pattern) so fee-free dispatch
+    # frames stay bit-identical.  NOT bundled into the BESS-DAM stream
+    # (unlike expense_charge_bess_grid_eur) — it is its own signed line.
+    _grid_fee_wedge = (
+        0.0 if bool(params.get("grid_charging_fee_exempt", False))
+        else float(params.get("grid_charging_fee_eur_per_mwh", 0.0) or 0.0)
+    )
+    if _grid_fee_wedge > 0.0:
+        res["expense_grid_charging_fee_eur"] = (
+            res["bess_charge_grid_kwh"].fillna(0.0) / 1000.0
+            * _grid_fee_wedge
+        )
 
     ppa_cfg = resolve_ppa_config(params.get("ppa"))
     if ppa_cfg.active:
@@ -412,6 +426,7 @@ ECONOMIC_COLUMNS: tuple[str, ...] = (
     "profit_export_from_pv_eur",
     "profit_export_from_bess_eur",
     "expense_charge_bess_grid_eur",
+    "expense_grid_charging_fee_eur",
     "revenue_pv_ppa_eur",
     "ppa_covered_dam_value_eur",
 )
@@ -579,10 +594,18 @@ def compute_kpis(
         float(res["ppa_covered_dam_value_eur"].sum())
         if "ppa_covered_dam_value_eur" in res.columns else 0.0
     )
+    # Charging-side grid fee (Eq. E26): subtracted from profit_total so
+    # the KPI stays algebraically consistent with the MILP objective,
+    # which prices grid-charged energy at DAM + wedge.
+    expense_grid_charging_fee = (
+        float(res["expense_grid_charging_fee_eur"].sum())
+        if "expense_grid_charging_fee_eur" in res.columns else 0.0
+    )
     profit_total = (
         profit_load_pv + profit_load_bess + profit_export_pv + profit_export_bess
         - expense_charge_grid
         + revenue_ppa
+        - expense_grid_charging_fee
     )
 
     initial_soc_pct = params["initial_soc_frac"] * 100.0
@@ -643,6 +666,9 @@ def compute_kpis(
         # the dict shape stays stable for downstream consumers).
         "revenue_pv_ppa_eur": round(revenue_ppa, 2),
         "ppa_covered_dam_value_eur": round(ppa_covered_dam_value, 2),
+        # Charging-side grid fee actually paid (Eq. E26; 0.0 when the
+        # wedge is off — always emitted so the dict shape stays stable).
+        "expense_grid_charging_fee_eur": round(expense_grid_charging_fee, 2),
         "profit_total_eur": round(profit_total, 2),
     }
 
@@ -922,6 +948,13 @@ def _compute_balancing_kpis(
         + float(res.get("profit_export_from_pv_eur", pd.Series(0.0)).sum())
         + float(res.get("profit_export_from_bess_eur", pd.Series(0.0)).sum())
         - float(res.get("expense_charge_bess_grid_eur", pd.Series(0.0)).sum())
+        # The charging-side wedge (Eq. E26) nets against the same
+        # stream its energy cost does.
+        - float(
+            res.get(
+                "expense_grid_charging_fee_eur", pd.Series(0.0),
+            ).sum()
+        )
     )
     # The construction is safe today because balancing revenue does NOT
     # enter ``profit_*_eur`` (those columns are driven by DAM / retail

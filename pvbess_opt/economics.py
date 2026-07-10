@@ -550,8 +550,12 @@ def build_yearly_cashflow(
         # rounding.
         if "profit_total_eur" in year1_kpis:
             profit_total = float(year1_kpis["profit_total_eur"] or 0.0)
+            # profit_total also nets the charging-side grid fee
+            # (Eq. E26), which is NOT part of the revenue streams.
             split_total = revenue_1_gross + float(
                 year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0
+            ) - float(
+                year1_kpis.get("expense_grid_charging_fee_eur", 0.0) or 0.0
             )
             if abs(profit_total - split_total) > max(
                 1.0, abs(profit_total) * 1e-6,

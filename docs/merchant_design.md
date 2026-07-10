@@ -91,7 +91,13 @@ flag has no effect.
 
 ### Objective
 
-$$\max \;\; \Pi = \sum_t \left(p^{\mathrm{eff}}_t\, x^{pg}_t + \pi^{\mathrm{DAM}}_t\, x^{bg}_t - \pi^{\mathrm{DAM}}_t\, x^{gb}_t\right)/1000 \;-\; C^{\mathrm{wear}} \;+\; R^{\mathrm{bm}} \;-\; \varepsilon \sum_t x^{pc}_t \tag{M3}$$
+$$\max \;\; \Pi = \sum_t \left(p^{\mathrm{eff}}_t\, x^{pg}_t + \pi^{\mathrm{DAM}}_t\, x^{bg}_t - (\pi^{\mathrm{DAM}}_t + w^{\mathrm{eff}})\, x^{gb}_t\right)/1000 \;-\; C^{\mathrm{wear}} \;+\; R^{\mathrm{bm}} \;-\; \varepsilon \sum_t x^{pc}_t \tag{M3}$$
+
+The charging-side wedge $w^{\mathrm{eff}}$ (Eq. E26,
+`docs/economics_design.md`; 0 by default) raises the effective buy
+price of grid-charged energy: BESS-only merchant arbitrage then
+requires spread x RTE > wedge, which is exactly how regulated network
+charges erode thin spreads in practice.
 
 identical to the self-consumption objective (S1) minus the
 avoided-cost term $\Pi^{\mathrm{ret}}$ ($\equiv 0$: no load flows).

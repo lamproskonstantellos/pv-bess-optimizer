@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E25a (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E26 (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U5 |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -440,6 +440,27 @@ $\mathrm{CF}_0 = \mathrm{CAPEX}_0 + \mathrm{DEVEX}_0$.  Discounted:
 $\mathrm{DCF}_y = \mathrm{CF}_y \cdot D_y$; cumulative columns
 accumulate both.
 
+### Charging-side grid fee (Eq. E26)
+
+Grid-charged BESS energy pays regulated network charges and levies on
+top of the DAM price where storage is not exempt.  The effective wedge
+
+$$w^{\mathrm{eff}} = \phi_{\mathrm{chg}} \cdot \left(1 - \mathbf{1}[\mathrm{exempt}]\right),
+\qquad C^{\mathrm{chg}} = \sum_t \left(\pi^{\mathrm{DAM}}_t + w^{\mathrm{eff}}\right) x^{gb}_t / 1000 \tag{E26}$$
+
+($\phi_{\mathrm{chg}}$ = `grid_charging_fee_eur_per_mwh` >= 0 on the
+project sheet; `grid_charging_fee_exempt` = TRUE zeroes it) enters the
+**MILP objective**, not just the cashflow: charging-side fees of
+10-30 EUR/MWh erase a large share of arbitrage margin, and thin
+spreads flip sign with the wedge — dispatch decided on the energy-only
+price would grid-charge at a real-world loss.  The wedge actually paid
+surfaces per step as `expense_grid_charging_fee_eur` (written only
+when non-zero), is subtracted from `profit_total_eur` (keeping the KPI
+algebraically consistent with the objective), is availability-derated
+with the charging throughput it is proportional to, and is **not**
+bundled into the BESS-DAM stream (`pvbess_opt/conventions.md`) so the
+E13d/E25a bases stay market-only.
+
 ### Contracted BESS revenue layer (foundations)
 
 Two primitives every contracted BESS structure (tolling, optimizer
@@ -616,6 +637,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E24a) | `economics._opex_escalation_series` (cashflow OPEX row + LCOE/LCOS OPEX numerators) |
 | (E25) | `economics._contract_phase` |
 | (E25a) | `build_yearly_cashflow` bess_market_revenue_eur column |
+| (E26) | `build_model` grid-charge wedge; `kpis.add_economic_columns` fee column |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

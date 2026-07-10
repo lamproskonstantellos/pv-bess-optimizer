@@ -70,6 +70,11 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     # refines.  Absent unless the clause is on (missing keys are
     # skipped).
     "ppa_fee_exempt_export_mwh",
+    # Charging-side grid fee (Eq. E26): DERATE — proportional to the
+    # grid-charged throughput (bess_charge_grid_mwh), which scales with
+    # availability like every dispatch-energy key; during downtime the
+    # BESS neither charges nor pays the wedge.
+    "expense_grid_charging_fee_eur",
     # ``system_total_import_mwh`` is scaled by ``factor`` here like the rest,
     # then corrected in ``apply_unavailability_derate`` to add the downtime
     # load the grid must cover (it RISES with unavailability, unlike the

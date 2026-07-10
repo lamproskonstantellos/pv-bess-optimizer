@@ -4,6 +4,15 @@ This file is the single source of truth for the conventions that have to
 stay in lockstep across multiple modules.  Keep it short, keep it accurate,
 and cross-reference it from the call sites it governs.
 
+## `expense_grid_charging_fee_eur` is NOT bundled (its own line)
+
+Unlike the energy cost above, the charging-side grid fee (Eq. E26) is
+**not** folded into the BESS-DAM stream: it is a regulated charge, not
+a market price, so it surfaces as its own signed expense line and
+`profit_total = retail + dam + ppa - charging fee`.  Bundling it would
+contaminate `rev1_dam_bess` (the E13d optimizer base and the E25a
+netting base) with a non-market cost.
+
 ## `expense_charge_bess_grid_eur` belongs to the BESS-DAM stream
 
 `expense_charge_bess_grid_eur` is the DAM-priced expense of charging the

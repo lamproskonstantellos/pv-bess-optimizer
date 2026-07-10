@@ -70,6 +70,14 @@ High-level run configuration:
 * ``retail_tariff_eur_per_mwh``: retail tariff used in self_consumption mode.
 * ``allow_bess_grid_charging``: TRUE → BESS may charge from grid in
   PV-zero periods.
+* ``grid_charging_fee_eur_per_mwh`` / ``grid_charging_fee_exempt``:
+  regulated charging-side wedge on grid-charged BESS energy (network
+  charges + levies; typical European range 10–30 EUR/MWh).  Enters the
+  MILP objective as a buy-price adder — thin arbitrage spreads flip
+  correctly — and the cashflow as its own expense line (equation E26).
+  The exemption switch zeroes it (exempt regimes), keeping the
+  exempt / non-exempt scenario pair a one-cell change.  Inert unless
+  the dispatch actually grid-charges.
 * ``grid_cap_includes_load`` (default FALSE): sets what the per-step
   grid-injection cap limits.  **FALSE** (default) models *physical /
   co-located* self-consumption: the load sits behind the plant meter and
