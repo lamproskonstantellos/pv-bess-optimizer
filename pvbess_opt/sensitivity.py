@@ -161,6 +161,11 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("optimizer_fee_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
+    # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
+    # component: it is the informational netting base for the
+    # contracted BESS structures, composed of streams already summed
+    # above (mirrors the monthly frame's aggregator_fee_eur, which is
+    # informational there for the same reason).
     df["net_cashflow_eur"] = sum(df[c].astype(float) for c in components)
     df["discounted_cf_eur"] = (
         df["net_cashflow_eur"] * df["discount_factor"].astype(float)
@@ -274,6 +279,10 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
         "balancing_aggregator_fee_eur",
         "optimizer_fee_eur",
         "ppa_revenue_eur",
+        # Informational netting base of the contracted BESS structures
+        # (Eq. E25a): price-proportional, so it scales with the driver;
+        # it is NOT part of net_cashflow_eur (see _recompute_net).
+        "bess_market_revenue_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)

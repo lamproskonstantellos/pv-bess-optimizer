@@ -75,6 +75,19 @@ Production release.
   column / `[deck]` tick suffix only when a deck is used (deck-free
   batches stay bit-identical).
 
+### Added (contracted-BESS foundations)
+
+- Two shared primitives for the upcoming contracted BESS revenue
+  structures, result-neutral by construction: the contract phase-window
+  indicator `economics._contract_phase` (Eq. E25; `year_to = 0` means
+  end-of-life, Year 0 is never in a phase) and the informational yearly
+  column `bess_market_revenue_eur` (Eq. E25a) — the battery's UNclamped
+  wholesale trading margin plus balancing revenue net of the BSP fee,
+  riding the DAM escalation series.  The column is the single netting
+  base tolling / floor+share / clawback structures will read; it is not
+  summed into `net_cashflow_eur`, has no monthly counterpart, and the
+  Revenue tornado driver scales it price-proportionally.
+
 ### Changed (aggregator fee template default)
 
 - The `aggregator_fee_pct_revenue` template default drops from 10 % to

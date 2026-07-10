@@ -335,6 +335,24 @@ def _escalation_series(
     return [s * m for s, m in zip(scalar, values, strict=True)]
 
 
+def _contract_phase(
+    y: int, year_from: int, year_to: int, n_years: int,
+) -> bool:
+    """Contract phase-window indicator chi_y (Eq. E25).
+
+    True when operating year ``y`` lies in ``[year_from, year_to]``
+    inclusive; ``year_to = 0`` means end-of-life (``n_years``),
+    generalising the ``y <= ppa_term`` in-term gating the PPA stream
+    already uses.  Year 0 (construction) is never inside any phase.
+    Callers validate ``year_from >= 1`` and effective
+    ``year_to >= year_from`` at load; this helper is pure.
+    """
+    if y < 1:
+        return False
+    effective_to = n_years if int(year_to) == 0 else int(year_to)
+    return int(year_from) <= int(y) <= effective_to
+
+
 def _opex_escalation_series(
     leg: str,
     inflation_frac: float,
@@ -696,6 +714,7 @@ def build_yearly_cashflow(
             route_to_market_fee_y = 0.0
             optimizer_fee_y = 0.0
             ppa_y = 0.0
+            bess_market_rev_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -796,6 +815,18 @@ def build_yearly_cashflow(
                 rev1_dam_bess * bess_factor * g_dam[y - 1],
                 0.0,
             ) + 0.0
+            # BESS market-revenue base (Eq. E25a): the battery's
+            # wholesale trading margin (the E13d base, UNclamped) plus
+            # balancing revenue net of the BSP fee.  Informational only
+            # — the single netting base the contracted structures
+            # (tolling / floor+share / state-support clawback) read; it
+            # is NOT summed into net_cashflow_eur.  Availability-derated
+            # by construction (every input already carries A per E8).
+            bess_market_rev_y = (
+                rev1_dam_bess * bess_factor * g_dam[y - 1]
+                + balancing_capacity_y + balancing_activation_y
+                + balancing_aggregator_fee_y
+            )
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -841,6 +872,7 @@ def build_yearly_cashflow(
                 "balancing_activation_revenue_eur": float(balancing_activation_y),
                 "balancing_revenue_eur": float(balancing_revenue_y),
                 "balancing_aggregator_fee_eur": float(balancing_aggregator_fee_y),
+                "bess_market_revenue_eur": float(bess_market_rev_y),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -872,6 +904,12 @@ def derive_monthly_cashflow(
     Requires ``compute_kpis`` to have been called first so the per-step
     EUR columns are present on ``res``; raises otherwise rather than
     silently defaulting revenue to zero.
+
+    The informational ``bess_market_revenue_eur`` yearly column
+    (Eq. E25a) deliberately has NO monthly counterpart: it is a netting
+    base composed of streams that already reconcile individually, not a
+    cash flow of its own, so the monthly/yearly reconciliation contract
+    covers it implicitly through its components.
 
     Output frame columns
     --------------------

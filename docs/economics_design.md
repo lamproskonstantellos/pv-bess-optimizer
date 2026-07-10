@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E24a (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E25a (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U5 |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P5 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -440,6 +440,39 @@ $\mathrm{CF}_0 = \mathrm{CAPEX}_0 + \mathrm{DEVEX}_0$.  Discounted:
 $\mathrm{DCF}_y = \mathrm{CF}_y \cdot D_y$; cumulative columns
 accumulate both.
 
+### Contracted BESS revenue layer (foundations)
+
+Two primitives every contracted BESS structure (tolling, optimizer
+floor + share, state support with clawback, capacity market) will
+read; both land ahead of the structures themselves and change no
+result.
+
+Phase-window indicator (`economics._contract_phase`):
+
+$$\chi_y(y_f, y_t) = \mathbf{1}\left[\, y_f \le y \le y_t' \,\right],
+\qquad y_t' = \begin{cases} Y & y_t = 0\\ y_t & \text{else} \end{cases} \tag{E25}$$
+
+with $y_f \ge 1$; Year 0 is never inside any phase.  This generalises
+the `y <= ppa_term` in-term gating the PPA stream already uses.
+
+BESS market-revenue base (informational `bess_market_revenue_eur`
+column):
+
+$$M_y = R^{\mathrm{DAM,B}}_1\, f^{B}_y\, g^{\mathrm{dam}}_y
++ R^{\mathrm{bm,cap}}_y + R^{\mathrm{bm,act}}_y + F^{\mathrm{bm}}_y \tag{E25a}$$
+
+— the battery's wholesale trading margin (the E13d base, **unclamped**:
+a loss year stays negative) plus balancing revenue net of the BSP fee,
+riding the DAM escalation series $g^{\mathrm{dam}}_y$ (E24).  It
+excludes self-consumption savings, the PPA stream and every contracted
+stream, and is availability-derated by construction (all inputs carry
+$A$ per E8).  The column is **informational**: it is NOT summed into
+`net_cashflow_eur` (the sensitivity `_recompute_net` excludes it
+explicitly) and has no monthly counterpart — it is the single netting
+base the contracted structures will read, and the Revenue tornado
+driver scales it (price-proportional) so piecewise contract terms can
+be recomputed exactly from a scaled base.
+
 ### Financial KPIs
 
 $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$
@@ -581,6 +614,8 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E21)-(E23) | `compute_financial_kpis` LCOE/LCOS block |
 | (E24) | `economics._escalation_series` (all six escalation sites in `build_yearly_cashflow`) |
 | (E24a) | `economics._opex_escalation_series` (cashflow OPEX row + LCOE/LCOS OPEX numerators) |
+| (E25) | `economics._contract_phase` |
+| (E25a) | `build_yearly_cashflow` bess_market_revenue_eur column |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests
