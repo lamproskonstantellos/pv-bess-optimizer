@@ -379,19 +379,57 @@ is bit-identical to the unlevered case:
 * ``debt_interest_rate_pct`` (default 5): fixed annual rate on the
   drawn debt.
 * ``debt_tenor_years`` (default 15): amortisation horizon in years.
-* ``debt_repayment`` ∈ ``annuity | linear`` (default ``annuity``):
-  ``annuity`` levels the total debt service; ``linear`` levels the
-  principal repayment.  Both fully amortise the loan to a zero closing
-  balance by the end of the tenor.
+* ``debt_repayment`` ∈ ``annuity | linear | sculpted`` (default
+  ``annuity``): ``annuity`` levels the total debt service; ``linear``
+  levels the principal repayment; ``sculpted`` shapes the debt
+  service proportionally to the yearly cashflow so the coverage ratio
+  is level across the tenor instead of binding in one year (the
+  profile lenders use for irregular cashflows).  All three fully
+  amortise the loan to a zero closing balance by the end of the
+  tenor.
 
-When ``gearing_pct > 0`` the run reports two leverage KPIs alongside
-the project metrics, ``equity_irr_pct`` (IRR on the equity cashflow
-after debt service) and ``min_dscr`` (the minimum debt-service
-coverage ratio over the tenor), and writes a styled ``debt_schedule``
+When ``gearing_pct > 0`` the run reports three leverage KPIs
+alongside the project metrics — ``equity_irr_pct`` (IRR on the equity
+cashflow after debt service), ``min_dscr`` and ``avg_dscr`` (the
+minimum / average debt-service coverage ratio over the tenor) — and
+writes a styled ``debt_schedule``
 sheet (year, opening / closing balance, interest, principal, debt
 service, equity cashflow, DSCR).  The unlevered metrics
 (``npv_eur``, project ``irr_pct``, LCOE, LCOS, …) are computed from
 the pre-financing cashflow and are unchanged by gearing.
+
+Target-DSCR debt sizing
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Instead of fixing the debt through ``gearing_pct``, the debt amount
+can be **sized to a lender covenant**.  Three ``economics`` keys,
+inert at their defaults:
+
+* ``debt_sizing_mode`` ∈ ``manual | target_dscr`` (default
+  ``manual``): ``manual`` keeps the ``gearing_pct`` convention
+  unchanged.  ``target_dscr`` solves the maximum debt that holds the
+  target coverage on the sizing case in closed form per repayment
+  profile, caps it at the Year-0 outlay, and reports **gearing as an
+  output** (``gearing_sized_pct``); ``gearing_pct`` is then an input
+  echo only and the run warns when it is non-zero.
+* ``target_dscr`` (default 1.30, must be >= 1.0): the minimum
+  (``annuity`` / ``linear``) or level (``sculpted``) debt service
+  coverage ratio the sized debt must hold.
+* ``debt_sizing_case`` ∈ ``base | p90 | low_price`` (default
+  ``base``): the cashflow case the debt is sized against.  ``base``
+  is the run's own yearly cashflow; ``p90`` and ``low_price`` are
+  reserved for the production-P90 and Low-price-deck lender cases and
+  are rejected with guidance until those cases are available.
+
+The sized run reports ``debt_capacity_eur`` (uncapped),
+``sized_debt_eur``, ``gearing_sized_pct``, ``dscr_target_met`` and
+the binding DSCR year, renders a "Debt sizing" block in
+``SUMMARY.md``, and freezes the sized debt for every downstream
+consumer (sensitivity and uncertainty replays never re-size — debt is
+committed at financial close).  If the target cannot be held (a
+loss-making year inside the tenor under a level-service profile), the
+debt capacity is zero and the run completes all-equity with a neutral
+message — never an error.
 
 In a YAML / JSON config the same settings can be supplied as a
 ``financing:`` block whose keys are expressed as fractions / years and

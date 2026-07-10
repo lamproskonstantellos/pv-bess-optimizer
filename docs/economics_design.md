@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E40a (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E43 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -997,6 +997,71 @@ clamp residual sweeps into the final year's principal so the balance
 amortises to ~0 exactly.  Under sculpting `min_dscr` $=$ `avg_dscr`
 by construction.
 
+### Target-DSCR debt sizing (Eqs. E41-E43; `debt_sizing_mode`)
+
+`debt_sizing_mode = target_dscr` inverts the amortization schedule:
+instead of deriving DSCR from a user-chosen gearing, the maximum
+debt $B^{*}$ that holds `target_dscr` ($\mathrm{DSCR}_t \ge 1$) on
+the sizing-case CFADS is solved in closed form per repayment profile
+(`economics.size_debt`), and **gearing becomes an output**.  The
+annuity's level service binds at the minimum-CFADS tenor year:
+
+$$B^{*}_{\mathrm{ann}} = \frac{\min_{1\le y\le T_d} \mathrm{CFADS}_y}
+{\mathrm{DSCR}_t}\cdot\frac{1-(1+r_d)^{-T_d}}{r_d}
+\quad (r_d>0; \; T_d\,\min_y \mathrm{CFADS}_y/\mathrm{DSCR}_t
+\text{ at } r_d=0) \tag{E41}$$
+
+Linear service $s_y = B/T_d + r_d B (T_d-y+1)/T_d$ is linear in $B$,
+so every tenor year yields an upper bound and $B^{*}$ is their
+minimum; sculpted sizing is the E40a inverse (coverage is level at
+the target in every positive-CFADS year by construction):
+
+$$B^{*}_{\mathrm{lin}} = \min_{1\le y\le T_d}
+\frac{\mathrm{CFADS}_y}{\mathrm{DSCR}_t\left(\tfrac{1}{T_d}
++ r_d\,\tfrac{T_d-y+1}{T_d}\right)}; \qquad
+B^{*}_{\mathrm{sculpt}} = \frac{\sum_{y=1}^{T_d}
+\max(\mathrm{CFADS}_y,0)\,(1+r_d)^{-y}}{\mathrm{DSCR}_t} \tag{E42}$$
+
+Debt can only fund the Year-0 outlay, so the committed amount caps
+there and the sized gearing follows:
+
+$$D = \min\!\left(B^{*}, |\mathrm{CF}_0|\right); \qquad
+\texttt{gearing\_sized\_pct} = 100\,D/|\mathrm{CF}_0|; \qquad
+\texttt{debt\_capacity\_eur} = B^{*} \tag{E43}$$
+
+(the capacity is reported uncapped so the user sees when the outlay,
+not the DSCR, binds).  Equity cashflow and the leverage KPIs then
+follow E20 with debt $= D$.  Conventions, all deliberate:
+
+* **Non-circular by construction** — `net_cashflow_eur` contains no
+  financing lines and no fee is debt-funded, so sizing on the base
+  cashflow needs no iteration.
+* **Frozen debt** — `economics.resolve_debt_sizing` runs exactly
+  once per run (pipeline, right after the base cashflow) and stashes
+  the result under internal underscore keys; sensitivity and
+  uncertainty replays consume the frozen amount and never re-size
+  per perturbation (debt is committed at financial close).  The
+  corporate-tax layer re-applies afterwards so its E20 interest
+  deduction runs on the sized debt.
+* **Infeasible target is not an error** — a non-positive CFADS year
+  inside the tenor gives the level-service profiles capacity 0
+  (`dscr_target_met = False`); the run completes all-equity with a
+  neutral SUMMARY line.  A replacement-year CAPEX dip inside the
+  tenor therefore craters annuity/linear capacity — correct under
+  the stated CFADS convention; prefer `sculpted` for
+  replacement-bearing projects.
+* **`gearing_pct` is an input echo only** in this mode (a UserWarning
+  says so when it is non-zero); `gearing_input_pct` re-echoes it next
+  to `gearing_sized_pct` in the KPI dict and SUMMARY block.
+* **LCOE / LCOS are untouched** — financing costs remain excluded
+  (E21/E22 never read financing lines; sizing introduces no new cost
+  line), and `net_cashflow_eur` does not change, so every default
+  figure is bit-identical.
+* `debt_sizing_case` fixes the CFADS the debt is sized against;
+  `base` (the run's own cashflow) is implemented, while `p90` and
+  `low_price` are reserved enum values rejected with guidance until
+  the matching lender cases land.
+
 ### LCOE and LCOS (Lazard-style, revenue-agnostic)
 
 Both metrics are **per-asset cost ÷ discounted delivered energy**;
@@ -1113,6 +1178,8 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E34)-(E38) | `economics.apply_tax_layer` (straight-line tranches, EBITDA, FIFO carry-forward, tax clamp, post-tax family) |
 | (E39) | `compute_financial_kpis` post-tax KPI block (NaN-gated on the rate) |
 | (E40)-(E40a) | `economics._amortization_schedule` sculpted branch + implied-DSCR closed form |
+| (E41)-(E42) | `economics.size_debt` closed-form debt capacity per repayment profile |
+| (E43) | `economics.size_debt` outlay cap + `resolve_debt_sizing` frozen-debt resolution; sizing KPI family in `compute_financial_kpis` |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

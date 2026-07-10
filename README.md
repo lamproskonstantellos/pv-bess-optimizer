@@ -201,7 +201,10 @@ positive BESS trading margin; both default 0),
 LCOE / LCOS benchmark-band overrides, the five
 sensitivity-tornado deltas (CAPEX / OPEX / revenue / discount-rate /
 PPA-price), the debt layer (`gearing_pct`, `debt_interest_rate_pct`,
-`debt_tenor_years`, `debt_repayment`), and grid-emissions intensity
+`debt_tenor_years`, `debt_repayment` incl. a DSCR-level `sculpted`
+profile, plus target-DSCR debt sizing via `debt_sizing_mode` /
+`target_dscr` — debt sized to a lender covenant with gearing reported
+as an output), and grid-emissions intensity
 for the optional 24/7-CFE accounting. Per-asset CAPEX / DEVEX / OPEX
 live on the `pv` and `bess` sheets; the site-wide lump sums on
 `project`.

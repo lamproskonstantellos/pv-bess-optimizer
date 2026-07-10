@@ -36,12 +36,14 @@ from pvbess_opt.availability import apply_unavailability_derate, availability_fa
 from pvbess_opt.balancing import resolve_balancing_config
 from pvbess_opt.degradation import build_degradation_report
 from pvbess_opt.economics import (
+    apply_tax_layer,
     build_debt_schedule,
     build_yearly_cashflow,
     compute_financial_kpis,
     derive_asset_capacities,
     derive_monthly_cashflow,
     read_economic_params,
+    resolve_debt_sizing,
 )
 from pvbess_opt.emissions import build_emissions_report
 from pvbess_opt.io import (
@@ -644,6 +646,17 @@ def _build_financials(
             repl_year, econ.get("bess_eol_soh_pct", 80.0), repl_second,
         )
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
+    # Target-DSCR debt sizing (Eqs. E41-E43) resolves exactly ONCE per
+    # run, on the base cashflow: the sized debt is frozen into econ
+    # (internal underscore keys) so every downstream consumer — KPIs,
+    # debt schedule, tax layer, sensitivity, uncertainty — sees the
+    # amount committed at financial close, never a re-sized one.
+    if resolve_debt_sizing(yearly_cf, econ) is not None:
+        # The corporate-tax layer deducts the E20 interest, which now
+        # runs on the sized debt; re-applying it (idempotent — every
+        # tax column is recomputed from the untouched pre-tax frame)
+        # refreshes the post-tax family.
+        yearly_cf = apply_tax_layer(yearly_cf, econ, capacities)
     monthly_cf, quarterly_cf = derive_monthly_cashflow(res, yearly_cf, econ)
     lifetime_df = build_lifetime_dispatch(
         res, econ, capacities,

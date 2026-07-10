@@ -293,6 +293,11 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "debt_interest_rate_pct": 5.0,
     "debt_tenor_years": 15,
     "debt_repayment": "annuity",
+    # Target-DSCR debt sizing (Eqs. E41-E43): manual keeps the
+    # gearing_pct convention, so the defaults are bit-identical.
+    "debt_sizing_mode": "manual",
+    "target_dscr": 1.30,
+    "debt_sizing_case": "base",
     # Grid emissions / 24/7 CFE accounting (off by default: intensity 0).
     "grid_co2_intensity_kg_per_mwh": 0.0,
     "grid_co2_annual_decline_pct": 0.0,
@@ -483,6 +488,8 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_yearly_scope",
     "pv_source",
     "debt_repayment",
+    "debt_sizing_mode",
+    "debt_sizing_case",
     "ppa_structure",
     "ppa_settlement",
     "ppa_negative_price_rule",
@@ -498,6 +505,11 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
     "pv_source": frozenset({"auto", "file", "pvgis"}),
     "debt_repayment": frozenset({"annuity", "linear", "sculpted"}),
+    "debt_sizing_mode": frozenset({"manual", "target_dscr"}),
+    # 'p90' and 'low_price' parse (the key surface is stable) but
+    # validation rejects them with guidance until the matching lender
+    # cases are implemented; only 'base' is accepted today.
+    "debt_sizing_case": frozenset({"base", "p90", "low_price"}),
     # 'baseload' parses (so old workbooks load) but validation rejects
     # it with guidance while only pay_as_produced is implemented.
     "ppa_structure": frozenset({"pay_as_produced", "baseload"}),
@@ -934,6 +946,21 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "principal) or sculpted (debt service proportional to the yearly "
      "cashflow at a level DSCR, Eqs. E40/E40a - the profile lenders "
      "use so coverage does not bind in a single year)."),
+    ("debt_sizing_mode", "manual", "manual | target_dscr",
+     "How the debt amount is set. manual (default): debt = gearing_pct "
+     "x Year-0 investment, unchanged behaviour. target_dscr: debt is "
+     "sized to hold target_dscr on the sizing case (Eqs. E41-E43); "
+     "gearing_pct is then an input echo only and the sized gearing is "
+     "reported as an output."),
+    ("target_dscr", 1.30, "-",
+     "Minimum (annuity/linear) or level (sculpted) debt service "
+     "coverage ratio the sized debt must hold on the sizing case. "
+     "Used only when debt_sizing_mode = target_dscr; must be >= 1.0."),
+    ("debt_sizing_case", "base", "base | p90 | low_price",
+     "Cashflow case the debt is sized against. base = the run's own "
+     "yearly cashflow. p90 and low_price are reserved for the "
+     "production-P90 and Low-price-deck lender cases and are rejected "
+     "with guidance until those cases are available."),
     ("grid_co2_intensity_kg_per_mwh", 0.0, "kg/MWh",
      "Grid carbon intensity for emissions / 24/7 CFE accounting "
      "(0 = off, the default; an optional grid_co2_kg_per_mwh time-series "
@@ -2747,6 +2774,43 @@ def validate_workbook_params(
             f"'gearing_pct' must be in [0, 100]; got {gearing!r}."
         )
 
+    # Target-DSCR debt sizing (Eqs. E41-E43): the keys are inert in
+    # manual mode; in target_dscr mode the target must be a real
+    # lender covenant (>= 1) and a repayment tenor must exist.
+    sizing_mode = str(
+        economics.get("debt_sizing_mode", "manual") or "manual"
+    ).strip().lower()
+    if sizing_mode == "target_dscr":
+        raw_target = economics.get("target_dscr")
+        target_dscr = 1.30 if raw_target is None else float(raw_target)
+        if target_dscr < 1.0:
+            raise ValueError(
+                "'target_dscr' must be >= 1.0 (a debt service coverage "
+                f"covenant); got {target_dscr!r}."
+            )
+        raw_tenor = economics.get("debt_tenor_years")
+        tenor = 15 if raw_tenor is None else int(raw_tenor)
+        if tenor < 1:
+            raise ValueError(
+                "debt_sizing_mode='target_dscr' requires "
+                f"'debt_tenor_years' >= 1; got {tenor!r}."
+            )
+        sizing_case = str(
+            economics.get("debt_sizing_case", "base") or "base"
+        ).strip().lower()
+        if sizing_case == "p90":
+            raise ValueError(
+                "debt_sizing_case='p90' is reserved for the "
+                "production-P90 lender case, which is not available "
+                "yet; set debt_sizing_case='base'."
+            )
+        if sizing_case == "low_price":
+            raise ValueError(
+                "debt_sizing_case='low_price' is reserved for sizing "
+                "against a named Low price deck, which is not "
+                "available yet; set debt_sizing_case='base'."
+            )
+
     # Revenue-fee percentages are a fraction of gross revenue, so they live
     # in [0, 100].  An out-of-range value (e.g. 150 meaning a mistyped
     # "1.50 %") is rejected rather than silently clamped — the same loud
@@ -3487,6 +3551,11 @@ def write_assumptions_summary(
     lines.append("[economic]")
     if econ:
         for key in sorted(econ):
+            # Internal underscore keys (e.g. the frozen sized debt) are
+            # derived state, not assumptions — the visible keys that
+            # produced them are already in the snapshot.
+            if key.startswith("_"):
+                continue
             lines.append(f"  {key} = {econ[key]!r}")
     out_path.write_text("\n".join(lines) + "\n")
     return out_path
@@ -3559,6 +3628,19 @@ _SUMMARY_LEVERAGE_KEYS: tuple[tuple[str, str], ...] = (
     ("equity_irr_pct", "Equity IRR [%]"),
     ("min_dscr", "Minimum DSCR over tenor [-]"),
     ("avg_dscr", "Average DSCR over tenor [-]"),
+)
+
+# Target-DSCR debt sizing block (Eqs. E41-E43): the whole family is
+# NaN in manual mode, so the section self-skips; within the section
+# each row renders only when finite (binding year is n/a under the
+# level-coverage sculpted profile).
+_SUMMARY_DEBT_SIZING_KEYS: tuple[tuple[str, str], ...] = (
+    ("target_dscr", "Target DSCR [-]"),
+    ("debt_capacity_eur", "Debt capacity, uncapped [EUR]"),
+    ("sized_debt_eur", "Sized debt [EUR]"),
+    ("gearing_sized_pct", "Sized gearing [%]"),
+    ("gearing_input_pct", "Gearing input, echo [%]"),
+    ("binding_dscr_year", "Binding DSCR year"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the
@@ -3665,6 +3747,36 @@ def write_summary_md(
             ):
                 lines.append(f"| {label} | {_summary_fmt(value)} |")
         lines.append("")
+
+        # Debt sizing block (Eqs. E41-E43): dscr_target_met is finite
+        # only when target-DSCR sizing resolved, so manual-mode digests
+        # stay byte-identical.
+        met = financial_kpis.get("dscr_target_met")
+        if isinstance(met, (int, float)) and np.isfinite(float(met)):
+            lines.append("## Debt sizing (target DSCR)")
+            lines.append("")
+            lines.append("| Metric | Value |")
+            lines.append("| --- | ---: |")
+            for key, label in _SUMMARY_DEBT_SIZING_KEYS:
+                value = financial_kpis.get(key)
+                if isinstance(value, (int, float)) and np.isfinite(
+                    float(value)
+                ):
+                    lines.append(
+                        f"| {label} | {_summary_fmt(value)} |"
+                    )
+            lines.append(
+                "| DSCR target met | "
+                f"{'yes' if float(met) > 0.0 else 'no'} |"
+            )
+            lines.append("")
+            if float(met) <= 0.0:
+                lines.append(
+                    "Target DSCR not achievable on the sizing case; "
+                    "debt capacity is zero and the run completes "
+                    "all-equity."
+                )
+                lines.append("")
 
     if kpis_year1.get("mc_n_seeds"):
         lines.append("## Rolling-horizon foresight")

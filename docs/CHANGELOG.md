@@ -284,6 +284,45 @@ Production release.
   bit-identity contract (feature-OFF runs are unchanged).  SUMMARY.md
   gains a finite-gated leverage block (equity IRR, min/avg DSCR).
 
+### Added (target-DSCR debt sizing)
+
+- `debt_sizing_mode = target_dscr` (Eqs. E41-E43; default `manual` =
+  unchanged gearing_pct convention, bit-identical): the debt amount
+  is SIZED to hold `target_dscr` (default 1.30, validated >= 1.0) on
+  the sizing-case CFADS, in closed form per repayment profile - the
+  exact inverse of the amortization schedule, so replaying the sized
+  debt reproduces the target to machine precision (annuity/linear
+  bind at the minimum-CFADS year; sculpted holds the target level in
+  every positive-CFADS year).  Capacity caps at the Year-0 outlay and
+  gearing becomes an OUTPUT: new KPI family `debt_capacity_eur` /
+  `sized_debt_eur` / `gearing_sized_pct` / `gearing_input_pct` /
+  `target_dscr` / `dscr_target_met` / `binding_dscr_year` (all NaN in
+  manual mode) plus a SUMMARY.md "Debt sizing" block.  Sizing
+  resolves ONCE per run and the sized debt is FROZEN (debt is
+  committed at financial close): sensitivity and uncertainty replays
+  consume the committed amount, never a per-perturbation re-size; the
+  corporate-tax layer re-applies so its interest deduction runs on
+  the sized debt.  An unachievable target (a loss-making year inside
+  the tenor under a level-service profile) completes the run
+  all-equity with a neutral message, never an error; a non-zero
+  `gearing_pct` in sizing mode warns that it is an input echo only.
+  `debt_sizing_case` fixes the CFADS case (`base` implemented; `p90`
+  / `low_price` reserved and rejected with guidance).  LCOE/LCOS and
+  every default figure are untouched (financing stays excluded and
+  `net_cashflow_eur` does not change).
+
+### Fixed (debt-layer follow-ups)
+
+- The corporate-tax layer's debt-interest schedule now threads the
+  yearly CFADS vector, so `debt_repayment = sculpted` combined with
+  `corporate_tax_rate_pct > 0` and `gearing_pct > 0` computes the
+  sculpted interest deduction instead of raising ("sculpted repayment
+  requires the yearly cashflow").
+- The run snapshot's `[economic]` section skips internal
+  underscore-prefixed keys (derived state such as the frozen sized
+  debt); the visible keys that produced them are already in the
+  snapshot.
+
 ### Added (post-tax financial KPIs)
 
 - `npv_post_tax_eur` / `irr_post_tax_pct` / `equity_irr_post_tax_pct`

@@ -63,6 +63,8 @@ References for default values
 from __future__ import annotations
 
 import logging
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -83,12 +85,15 @@ from .lifetime import bess_capacity_factors, effective_bess_replacement_year
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "DebtSizing",
     "build_yearly_cashflow",
     "calculate_irr",
     "compute_financial_kpis",
     "derive_asset_capacities",
     "derive_monthly_cashflow",
     "read_economic_params",
+    "resolve_debt_sizing",
+    "size_debt",
 ]
 
 
@@ -164,6 +169,23 @@ def _financing_params(econ: dict[str, Any]) -> tuple[float, float, int, str]:
     tenor = int(econ.get("debt_tenor_years", _DEFAULT_DEBT_TENOR_YEARS) or 0)
     repayment = str(econ.get("debt_repayment", "annuity") or "annuity").strip().lower()
     return gearing, rate, tenor, repayment
+
+
+def _resolved_debt_eur(econ: dict[str, Any], initial_investment: float) -> float:
+    """The debt amount at financial close (Eq. E43).
+
+    When target-DSCR sizing has resolved (``resolve_debt_sizing``
+    stashed the internal ``_sized_debt_eur`` key), that FROZEN amount
+    wins — debt is committed once, so sensitivity / uncertainty
+    replays downstream must never re-size it per perturbation.
+    Otherwise the manual convention applies: ``gearing_pct`` x the
+    Year-0 outlay.
+    """
+    sized = econ.get("_sized_debt_eur")
+    if sized is not None:
+        return max(0.0, float(sized))
+    gearing = float(econ.get("gearing_pct", 0.0) or 0.0) / 100.0
+    return gearing * float(initial_investment)
 
 
 def _amortization_schedule(
@@ -272,20 +294,23 @@ def _leverage_kpis(
 ) -> tuple[float, float, float]:
     """Return ``(equity_irr_pct, min_dscr, avg_dscr)``; NaNs when all-equity.
 
-    Debt funds ``gearing`` of the Year-0 investment; equity cashflow is the
-    project cashflow net of debt service over the tenor.  DSCR is the
-    operating cashflow over the debt service per year; under the
-    ``sculpted`` profile min and avg coincide by construction
-    (Eq. E40).
+    Debt is the resolved amount at financial close (Eq. E43): the
+    frozen sized debt in target-DSCR mode, else ``gearing`` x the
+    Year-0 investment.  Equity cashflow is the project cashflow net of
+    debt service over the tenor.  DSCR is the operating cashflow over
+    the debt service per year; under the ``sculpted`` profile min and
+    avg coincide by construction (Eq. E40).
     """
-    gearing, rate, tenor, repayment = _financing_params(econ)
+    _gearing, rate, tenor, repayment = _financing_params(econ)
     net_cf = np.asarray(net_cashflow_eur, dtype=float)
-    if gearing <= 0.0 or net_cf.size < 2:
+    if net_cf.size < 2:
         return float("nan"), float("nan"), float("nan")
     initial_investment = -float(net_cf[0])
     if initial_investment <= 0.0:
         return float("nan"), float("nan"), float("nan")
-    debt = gearing * initial_investment
+    debt = _resolved_debt_eur(econ, initial_investment)
+    if debt <= 0.0:
+        return float("nan"), float("nan"), float("nan")
     schedule = _amortization_schedule(
         debt, rate, tenor, repayment,
         cfads=_cfads_for_schedule(net_cf, tenor, repayment),
@@ -315,14 +340,17 @@ def build_debt_schedule(
     yearly_cf: pd.DataFrame, econ: dict[str, Any],
 ) -> pd.DataFrame | None:
     """Per-year debt schedule + equity cashflow + DSCR; None when all-equity."""
-    gearing, rate, tenor, repayment = _financing_params(econ)
-    if gearing <= 0.0 or "net_cashflow_eur" not in yearly_cf.columns:
+    _gearing, rate, tenor, repayment = _financing_params(econ)
+    if "net_cashflow_eur" not in yearly_cf.columns:
         return None
     net_cf = yearly_cf["net_cashflow_eur"].to_numpy(dtype=float)
     if net_cf.size < 2 or net_cf[0] >= 0.0:
         return None
+    debt = _resolved_debt_eur(econ, -float(net_cf[0]))
+    if debt <= 0.0:
+        return None
     schedule = _amortization_schedule(
-        gearing * (-float(net_cf[0])), rate, tenor, repayment,
+        debt, rate, tenor, repayment,
         cfads=_cfads_for_schedule(net_cf, tenor, repayment),
     )
     if not schedule:
@@ -343,6 +371,174 @@ def build_debt_schedule(
             "dscr": round(op_cf / svc, 4) if svc > 0.0 else float("nan"),
         })
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Target-DSCR debt sizing (Eqs. E41-E43)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DebtSizing:
+    """Result of :func:`size_debt` (Eqs. E41-E43).
+
+    ``debt_capacity_eur`` is the uncapped maximum sustainable debt B*
+    on the sizing-case CFADS; ``sized_debt_eur`` caps it at the Year-0
+    outlay (debt can only fund the investment).  ``binding_year`` is
+    the tenor year whose DSCR bound binds (0 when none binds — the
+    sculpted profile holds the target in EVERY positive-CFADS year).
+    ``dscr_target_met`` is False when the target cannot be held at any
+    positive debt (a non-positive CFADS year inside the tenor for the
+    level-service profiles) — the run then completes all-equity.
+    """
+
+    debt_capacity_eur: float
+    sized_debt_eur: float
+    gearing_sized_pct: float
+    binding_year: int
+    dscr_target_met: bool
+
+
+def size_debt(
+    cfads: Any, econ: dict[str, Any], initial_investment_eur: float,
+) -> DebtSizing:
+    """Maximum debt that holds ``target_dscr`` on the CFADS vector.
+
+    Closed forms per repayment profile — the inverse of
+    :func:`_amortization_schedule`, so replaying the sized debt
+    through the schedule reproduces the target exactly:
+
+    * annuity (Eq. E41): level service binds at the minimum-CFADS
+      tenor year, so B* = (min_y CFADS_y / DSCR_t) x annuity factor.
+    * linear (Eq. E42): service s_y = B/T + r*B*(T-y+1)/T is linear in
+      B, so every year gives an upper bound; B* is their minimum.
+    * sculpted (Eq. E42): the E40a inverse — B* = PV of
+      max(CFADS_y, 0) at the debt rate over DSCR_t; coverage is level
+      at the target in every positive-CFADS year by construction.
+
+    ``cfads`` is the operating net cashflow for years 1.. (the
+    ``net_cashflow_eur`` convention of Eq. E40: replacement CAPEX
+    included); it is truncated / zero-padded to the tenor.  Eq. E43
+    then caps the capacity at the Year-0 outlay and reports gearing as
+    an OUTPUT: ``D = min(B*, |CF_0|)``, ``gearing = 100 x D / |CF_0|``.
+    """
+    _gearing, rate, tenor, repayment = _financing_params(econ)
+    raw_target = econ.get("target_dscr")
+    target = 1.30 if raw_target is None else float(raw_target)
+    investment = max(0.0, float(initial_investment_eur))
+    cf = [float(c) for c in list(cfads)[:tenor]]
+    while len(cf) < tenor:
+        cf.append(0.0)
+
+    def _result(capacity: float, binding: int, met: bool) -> DebtSizing:
+        capacity = max(0.0, capacity)
+        sized = min(capacity, investment)
+        gearing_out = 100.0 * sized / investment if investment > 0.0 else 0.0
+        return DebtSizing(
+            debt_capacity_eur=capacity,
+            sized_debt_eur=sized,
+            gearing_sized_pct=gearing_out,
+            binding_year=binding,
+            dscr_target_met=met,
+        )
+
+    if tenor <= 0 or target <= 0.0:
+        return _result(0.0, 0, False)
+    if repayment == "sculpted":
+        # Eq. E42 (sculpted): PV of the positive CFADS part over the
+        # target — coverage equals the target in every positive year.
+        capacity = sum(
+            max(c, 0.0) * (1.0 + rate) ** (-y)
+            for y, c in enumerate(cf, start=1)
+        ) / target
+        return _result(capacity, 0, capacity > 0.0)
+    if repayment == "linear":
+        # Eq. E42 (linear): per-year bound; a non-positive CFADS year
+        # inside the tenor caps the capacity at 0 (level principal
+        # cannot pause).
+        bounds = [
+            c / (target * (1.0 / tenor + rate * (tenor - y + 1.0) / tenor))
+            for y, c in enumerate(cf, start=1)
+        ]
+        binding = int(min(range(tenor), key=lambda i: bounds[i])) + 1
+        capacity = bounds[binding - 1]
+        return _result(capacity, binding, capacity > 0.0)
+    # Eq. E41 (annuity): the level service binds at the minimum-CFADS
+    # year; r = 0 degenerates to straight division across the tenor.
+    binding = int(min(range(tenor), key=lambda i: cf[i])) + 1
+    min_cfads = cf[binding - 1]
+    if min_cfads <= 0.0:
+        return _result(0.0, binding, False)
+    annuity_factor = (
+        (1.0 - (1.0 + rate) ** (-tenor)) / rate if rate > 0.0 else float(tenor)
+    )
+    capacity = (min_cfads / target) * annuity_factor
+    return _result(capacity, binding, capacity > 0.0)
+
+
+def resolve_debt_sizing(
+    yearly_cf: pd.DataFrame, econ: dict[str, Any],
+) -> DebtSizing | None:
+    """Resolve target-DSCR debt sizing ONCE for a run (Eqs. E41-E43).
+
+    Returns None in manual mode (``debt_sizing_mode`` absent or
+    ``manual``) without touching ``econ``.  In ``target_dscr`` mode it
+    sizes the debt on the sizing-case CFADS and stashes the FROZEN
+    result into ``econ`` under internal underscore keys
+    (``_sized_debt_eur`` et al. — hidden from the run snapshot), which
+    :func:`_leverage_kpis`, :func:`build_debt_schedule` and
+    :func:`apply_tax_layer` then consume instead of
+    ``gearing_pct`` x investment.  Debt is committed at financial
+    close: sensitivity / uncertainty replays downstream reuse the
+    frozen amount and never re-size per perturbation.
+
+    An infeasible target (capacity 0) is NOT an error: the run
+    completes all-equity with ``dscr_target_met = False`` and a
+    neutral log line; the SUMMARY digest carries the same message.
+    """
+    mode = str(
+        econ.get("debt_sizing_mode", "manual") or "manual"
+    ).strip().lower()
+    if mode != "target_dscr":
+        return None
+    net_cf = yearly_cf["net_cashflow_eur"].to_numpy(dtype=float)
+    investment = -float(net_cf[0]) if net_cf.size >= 1 else 0.0
+    sizing = size_debt(net_cf[1:], econ, investment)
+    econ["_sized_debt_eur"] = float(sizing.sized_debt_eur)
+    econ["_debt_capacity_eur"] = float(sizing.debt_capacity_eur)
+    econ["_gearing_sized_pct"] = float(sizing.gearing_sized_pct)
+    econ["_binding_dscr_year"] = int(sizing.binding_year)
+    econ["_dscr_target_met"] = bool(sizing.dscr_target_met)
+    gearing_input = float(econ.get("gearing_pct", 0.0) or 0.0)
+    if gearing_input > 0.0:
+        # Never silently override a user input: the workbook gearing is
+        # an echo only while sizing is on, and the run says so loudly.
+        warnings.warn(
+            f"debt_sizing_mode='target_dscr': gearing_pct={gearing_input:g} % "
+            "is an input echo only (debt is sized to the target DSCR); "
+            f"the sized gearing is {sizing.gearing_sized_pct:.2f} %.",
+            UserWarning,
+            stacklevel=2,
+        )
+    if sizing.dscr_target_met:
+        logger.info(
+            "[debt sizing] target DSCR %.4g on the base case: capacity "
+            "%.2f EUR, sized debt %.2f EUR (gearing %.2f %%), binding "
+            "year %s.",
+            1.30 if econ.get("target_dscr") is None
+            else float(econ["target_dscr"]),
+            sizing.debt_capacity_eur, sizing.sized_debt_eur,
+            sizing.gearing_sized_pct,
+            sizing.binding_year if sizing.binding_year > 0 else "n/a "
+            "(level coverage)",
+        )
+    else:
+        logger.warning(
+            "[debt sizing] Target DSCR not achievable on the sizing "
+            "case; debt capacity is zero and the run completes "
+            "all-equity."
+        )
+    return sizing
 
 
 def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
@@ -1415,16 +1611,21 @@ def apply_tax_layer(
             _life("depreciation_years_bess", 10),
         ))
 
-    # Debt interest (the E20 schedule on gearing x |CF_0|; zero when
-    # all-equity or beyond the tenor).
-    gearing, rate, tenor, repayment = _financing_params(econ)
+    # Debt interest (the E20 schedule on the resolved debt — the frozen
+    # sized amount in target-DSCR mode, else gearing x |CF_0|; zero
+    # when all-equity or beyond the tenor).  The sculpted profile needs
+    # the CFADS vector to shape its service (Eq. E40).
+    _gearing, rate, tenor, repayment = _financing_params(econ)
     net_cf_arr = df["net_cashflow_eur"].to_numpy(dtype=float)
     interest_by_year: dict[int, float] = {}
-    if gearing > 0.0 and net_cf_arr.size >= 1 and net_cf_arr[0] < 0.0:
-        for row in _amortization_schedule(
-            gearing * (-float(net_cf_arr[0])), rate, tenor, repayment,
-        ):
-            interest_by_year[int(row["year"])] = float(row["interest_eur"])
+    if net_cf_arr.size >= 1 and net_cf_arr[0] < 0.0:
+        debt = _resolved_debt_eur(econ, -float(net_cf_arr[0]))
+        if debt > 0.0:
+            for row in _amortization_schedule(
+                debt, rate, tenor, repayment,
+                cfads=_cfads_for_schedule(net_cf_arr, tenor, repayment),
+            ):
+                interest_by_year[int(row["year"])] = float(row["interest_eur"])
 
     carryforward_window = _life("tax_loss_carryforward_years", 0)
     _years_list = df["project_year"].astype(int).to_list()
@@ -2122,6 +2323,37 @@ def compute_financial_kpis(
     gearing_pct_val = float(econ.get("gearing_pct", 0.0) or 0.0)
     equity_irr_pct, min_dscr, avg_dscr = _leverage_kpis(cf_array, econ)
 
+    # Target-DSCR sizing family (Eqs. E41-E43): read the FROZEN result
+    # resolve_debt_sizing stashed into econ — never re-size here, so a
+    # sensitivity-perturbed frame reports the same committed debt as
+    # the base run.  All NaN in manual mode (the post-tax NaN-gating
+    # precedent: 'n/a' = sizing not modelled) so the SUMMARY block
+    # self-skips.
+    if econ.get("_sized_debt_eur") is not None:
+        debt_capacity_eur = float(
+            econ.get("_debt_capacity_eur", float("nan"))
+        )
+        sized_debt_eur = float(econ["_sized_debt_eur"])
+        gearing_sized_pct = float(
+            econ.get("_gearing_sized_pct", float("nan"))
+        )
+        _raw_target = econ.get("target_dscr")
+        target_dscr_val = 1.30 if _raw_target is None else float(_raw_target)
+        dscr_target_met_val = (
+            1.0 if bool(econ.get("_dscr_target_met")) else 0.0
+        )
+        _binding = int(econ.get("_binding_dscr_year", 0) or 0)
+        binding_dscr_year = float(_binding) if _binding > 0 else float("nan")
+        gearing_input_pct = gearing_pct_val
+    else:
+        debt_capacity_eur = float("nan")
+        sized_debt_eur = float("nan")
+        gearing_sized_pct = float("nan")
+        target_dscr_val = float("nan")
+        dscr_target_met_val = float("nan")
+        binding_dscr_year = float("nan")
+        gearing_input_pct = float("nan")
+
     after_y0_cf = df.loc[after_y0_mask, "net_cashflow_eur"]
     # ROI = sum of operating net cashflow (Years 1..N, replacement CAPEX
     # included via the net) over the initial investment |Year-0 CAPEX +
@@ -2562,6 +2794,33 @@ def compute_financial_kpis(
         "avg_dscr": (
             float("nan") if np.isnan(avg_dscr) else float(round(avg_dscr, 4))
         ),
+        # Target-DSCR sizing outputs (Eqs. E41-E43); the whole family
+        # is NaN in manual mode.  gearing_pct above stays the raw input
+        # echo in every mode; gearing_sized_pct is the OUTPUT (Eq. E43)
+        # and gearing_input_pct re-echoes the input alongside it so the
+        # SUMMARY block can show both without re-reading econ.
+        "debt_capacity_eur": (
+            float("nan") if np.isnan(debt_capacity_eur)
+            else float(round(debt_capacity_eur, 2))
+        ),
+        "sized_debt_eur": (
+            float("nan") if np.isnan(sized_debt_eur)
+            else float(round(sized_debt_eur, 2))
+        ),
+        "gearing_sized_pct": (
+            float("nan") if np.isnan(gearing_sized_pct)
+            else float(round(gearing_sized_pct, 4))
+        ),
+        "gearing_input_pct": (
+            float("nan") if np.isnan(gearing_input_pct)
+            else float(round(gearing_input_pct, 4))
+        ),
+        "target_dscr": (
+            float("nan") if np.isnan(target_dscr_val)
+            else float(round(target_dscr_val, 4))
+        ),
+        "dscr_target_met": dscr_target_met_val,
+        "binding_dscr_year": binding_dscr_year,
         "initial_investment_eur": float(round(initial_investment_eur, 2)),
         "total_capex_eur": float(round(total_capex_eur, 2)),
         "total_devex_eur": float(round(total_devex_eur, 2)),

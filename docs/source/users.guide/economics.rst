@@ -180,6 +180,17 @@ Headline financial KPIs returned by
   the tenor (Eqs. E40/E40a), so min and avg coincide - recommended
   for projects with a mid-life BESS replacement, whose CFADS dip
   would otherwise bind an annuity schedule in a single year.
+* ``debt_capacity_eur`` / ``sized_debt_eur`` / ``gearing_sized_pct``
+  / ``gearing_input_pct`` / ``target_dscr`` / ``dscr_target_met`` /
+  ``binding_dscr_year``: the target-DSCR sizing family
+  (Eqs. E41-E43), reported only when ``debt_sizing_mode =
+  target_dscr`` (NaN otherwise).  The capacity is the uncapped
+  maximum sustainable debt; the sized debt caps it at the Year-0
+  outlay and gearing is an output.  The sized debt is FROZEN for the
+  run: the sensitivity tornado and the uncertainty pipeline replay
+  the committed amount, never a per-perturbation re-size.
+  ``dscr_target_met`` reports 1/0; an unachievable target completes
+  the run all-equity (capacity 0) rather than erroring.
 * ``npv_post_tax_eur`` / ``irr_post_tax_pct`` /
   ``equity_irr_post_tax_pct`` / ``simple_payback_post_tax_years`` /
   ``discounted_payback_post_tax_years`` /
