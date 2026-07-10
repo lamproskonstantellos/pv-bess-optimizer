@@ -126,15 +126,15 @@ def test_missing_sheet_falls_back_to_default(tmp_path, caplog):
     typed = _minimal_typed(np.full(24, 73.0, dtype=float))
     dst = tmp_path / "wb_dropped.xlsx"
     write_workbook(typed, dst)
-    # Drop the max_injection_profile sheet.
-    with pd.ExcelFile(dst) as xls:
-        keep = {
-            name: pd.read_excel(dst, sheet_name=name)
-            for name in xls.sheet_names if name != "max_injection_profile"
-        }
-    with pd.ExcelWriter(dst, engine="openpyxl") as writer:
-        for name, df in keep.items():
-            df.to_excel(writer, sheet_name=name, index=False)
+    # Drop the max_injection_profile sheet with openpyxl — cell types stay
+    # faithful.  (A pandas read->write round trip can coerce numeric 0/1
+    # cells into genuine boolean cells, which the boolean-in-numeric-field
+    # guard rightly rejects.)
+    from openpyxl import load_workbook
+
+    wb = load_workbook(dst)
+    del wb["max_injection_profile"]
+    wb.save(dst)
     with caplog.at_level("INFO", logger="pvbess_opt.io"):
         out = read_workbook(dst)
     assert np.allclose(np.asarray(out["max_injection_profile"]), 100.0)

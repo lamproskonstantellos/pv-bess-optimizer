@@ -115,6 +115,15 @@ def build_emissions_report(
     the degradation report's convention); only the grid carbon intensity is
     scaled, declining by ``grid_ci_annual_decline_pct`` per year to model a
     decarbonising grid.  Energy figures are MWh, emissions are tonnes CO2e.
+
+    Scope: the report reads the RAW solved dispatch frame — the
+    availability derate is deliberately NOT applied here.  24/7 CFE
+    accounting is time-coincident, and folding an annual-average outage
+    fraction into per-step flows would require assuming WHEN the plant is
+    down; the headline energy KPIs carry the derate instead
+    (:func:`pvbess_opt.availability.apply_unavailability_derate`), so this
+    report's ``grid_import_mwh`` intentionally differs from the derated
+    ``system_total_import_mwh`` KPI.
     """
     ci = grid_ci_series(res, grid_ci_kg_per_mwh)
 

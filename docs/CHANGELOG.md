@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.0 (unreleased)
+
+### Changed
+
+- The `aggregator_fee_pct_revenue` template default drops from 10 % to
+  0 % (fee-free; opt-in).  Real-world route-to-market charges are
+  typically a few EUR/MWh of sold energy (Greek ΦοΣΕ representation,
+  German Direktvermarktung) or a share of market revenue only — a flat
+  10 % of ALL revenue (including self-consumption savings) sits far
+  above European market practice, so the template no longer pre-fills
+  it.  Existing workbooks keep whatever value they carry (the polish
+  script preserves values by key); the shipped `inputs/input.xlsx` case
+  study is updated to 0.
+
+### Fixed
+
+- A boolean typed into a numeric workbook field is now rejected with a
+  clear error naming the sheet and key instead of silently coercing
+  (`float(TRUE) == 1.0`) — e.g. `unavailability_pct = TRUE` silently
+  became a 1 % availability derate.  To make the guard reliable, the
+  workbook kv sheets are now read with openpyxl-faithful cell types
+  (`_read_kv_flat`) instead of `pd.read_excel`, which could mis-surface
+  a genuinely numeric 0/1 cell as a Python boolean in a mixed-type value
+  column and would have tripped the guard on legitimate zeros.  The
+  YAML/JSON config path applies the same guard on its faithful native
+  types.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.
