@@ -497,7 +497,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
     "pv_source": frozenset({"auto", "file", "pvgis"}),
-    "debt_repayment": frozenset({"annuity", "linear"}),
+    "debt_repayment": frozenset({"annuity", "linear", "sculpted"}),
     # 'baseload' parses (so old workbooks load) but validation rejects
     # it with guidance while only pay_as_produced is implemented.
     "ppa_structure": frozenset({"pay_as_produced", "baseload"}),
@@ -929,9 +929,11 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Annual debt interest rate (used only when gearing_pct > 0)."),
     ("debt_tenor_years", 15, "years",
      "Debt repayment tenor in years (used only when gearing_pct > 0)."),
-    ("debt_repayment", "annuity", "annuity | linear",
-     "Repayment profile: annuity (level debt service) or linear "
-     "(level principal)."),
+    ("debt_repayment", "annuity", "annuity | linear | sculpted",
+     "Repayment profile: annuity (level debt service), linear (level "
+     "principal) or sculpted (debt service proportional to the yearly "
+     "cashflow at a level DSCR, Eqs. E40/E40a - the profile lenders "
+     "use so coverage does not bind in a single year)."),
     ("grid_co2_intensity_kg_per_mwh", 0.0, "kg/MWh",
      "Grid carbon intensity for emissions / 24/7 CFE accounting "
      "(0 = off, the default; an optional grid_co2_kg_per_mwh time-series "
@@ -3549,6 +3551,16 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
      "Lifetime corporate tax [EUR]"),
 )
 
+# Leverage ratios: rendered only when FINITE — a DSCR of ~1.x is a
+# ratio, so the non-zero gate of the optional-financial table above
+# would render meaningless rows for all-equity runs (NaN) and hide
+# nothing otherwise.
+_SUMMARY_LEVERAGE_KEYS: tuple[tuple[str, str], ...] = (
+    ("equity_irr_pct", "Equity IRR [%]"),
+    ("min_dscr", "Minimum DSCR over tenor [-]"),
+    ("avg_dscr", "Average DSCR over tenor [-]"),
+)
+
 # Rolling-horizon / benchmark digest: rendered only when the
 # rolling-horizon Monte Carlo ran (``mc_n_seeds`` present).  The
 # benchmark gaps are the two DISTINCT numbers a publication needs --
@@ -3643,6 +3655,14 @@ def write_summary_md(
         for key, label in _SUMMARY_OPTIONAL_FINANCIAL_KEYS:
             value = financial_kpis.get(key)
             if isinstance(value, (int, float)) and abs(float(value)) > 1e-9:
+                lines.append(f"| {label} | {_summary_fmt(value)} |")
+        # Leverage ratios render when FINITE (all-equity runs carry
+        # NaNs and stay noise-free).
+        for key, label in _SUMMARY_LEVERAGE_KEYS:
+            value = financial_kpis.get(key)
+            if isinstance(value, (int, float)) and np.isfinite(
+                float(value)
+            ):
                 lines.append(f"| {label} | {_summary_fmt(value)} |")
         lines.append("")
 

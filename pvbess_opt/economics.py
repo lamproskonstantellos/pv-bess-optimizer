@@ -168,16 +168,66 @@ def _financing_params(econ: dict[str, Any]) -> tuple[float, float, int, str]:
 
 def _amortization_schedule(
     debt: float, rate: float, tenor: int, repayment: str,
+    cfads: list[float] | None = None,
 ) -> list[dict[str, float]]:
     """Per-year (interest, principal, debt_service, balance) for years 1..tenor.
 
-    ``annuity`` keeps debt service level; ``linear`` keeps principal level.
-    The balance amortises to ~0 at ``tenor`` for both profiles.
+    ``annuity`` keeps debt service level; ``linear`` keeps principal
+    level; ``sculpted`` keeps debt service proportional to CFADS at the
+    constant implied DSCR (Eqs. E40/E40a) — the profile lenders use so
+    the coverage ratio is level across the tenor instead of binding in
+    one year.  ``sculpted`` requires ``cfads``: the per-year operating
+    net cashflow (``net_cashflow_eur`` years 1..tenor — replacement
+    CAPEX included, the same numerator convention as the per-year DSCR
+    in :func:`build_debt_schedule`).  The balance amortises to ~0 at
+    ``tenor`` for every profile (sculpted sweeps any clamp residual
+    into the final year's principal).
     """
     rows: list[dict[str, float]] = []
     debt = float(debt)
     tenor = int(tenor)
     if debt <= 0.0 or tenor <= 0:
+        return rows
+    if repayment == "sculpted":
+        if cfads is None:
+            raise ValueError(
+                "sculpted repayment requires the yearly cashflow: pass "
+                "cfads (net_cashflow_eur for operating years 1..tenor) "
+                "to _amortization_schedule."
+            )
+        # Eq. E40: service tracks the POSITIVE part of CFADS at the
+        # implied constant DSCR; a CFADS <= 0 year pays nothing (the
+        # unpaid interest is not capitalised in this simple model) and
+        # later years absorb it.
+        cf = [max(float(c), 0.0) for c in list(cfads)[:tenor]]
+        while len(cf) < tenor:
+            cf.append(0.0)
+        # Eq. E40a: the PV of debt service at the debt rate equals the
+        # outstanding principal, so for a GIVEN debt the implied level
+        # DSCR is PV(max(CFADS,0)) / debt.
+        pv_cfads = sum(
+            c * (1.0 + rate) ** (-y) for y, c in enumerate(cf, start=1)
+        )
+        dscr_impl = pv_cfads / debt if debt > 0.0 else float("nan")
+        balance = debt
+        for year in range(1, tenor + 1):
+            interest = balance * rate
+            svc = cf[year - 1] / dscr_impl if dscr_impl > 0.0 else 0.0
+            principal = max(0.0, svc - interest)
+            if year == tenor and dscr_impl > 0.0:
+                # Final-year cent sweep: the principal clamp above can
+                # leave a residual; retiring the remaining balance
+                # exactly keeps sum(principal) == debt.
+                principal = balance
+                svc = principal + interest
+            balance = max(0.0, balance - principal)
+            rows.append({
+                "year": float(year),
+                "interest_eur": interest,
+                "principal_eur": principal,
+                "debt_service_eur": svc,
+                "debt_balance_eur": balance,
+            })
         return rows
     service = (
         debt * rate / (1.0 - (1.0 + rate) ** (-tenor)) if rate > 0.0
@@ -203,26 +253,45 @@ def _amortization_schedule(
     return rows
 
 
+def _cfads_for_schedule(
+    net_cf: np.ndarray, tenor: int, repayment: str,
+) -> list[float] | None:
+    """The CFADS vector a sculpted schedule needs (None otherwise).
+
+    Operating years 1..tenor of ``net_cashflow_eur`` — replacement
+    CAPEX included, the same numerator convention as the per-year DSCR
+    column (Eq. E40).
+    """
+    if repayment != "sculpted":
+        return None
+    return [float(v) for v in net_cf[1:tenor + 1]]
+
+
 def _leverage_kpis(
     net_cashflow_eur: np.ndarray, econ: dict[str, Any],
-) -> tuple[float, float]:
-    """Return ``(equity_irr_pct, min_dscr)``; ``(nan, nan)`` when all-equity.
+) -> tuple[float, float, float]:
+    """Return ``(equity_irr_pct, min_dscr, avg_dscr)``; NaNs when all-equity.
 
     Debt funds ``gearing`` of the Year-0 investment; equity cashflow is the
     project cashflow net of debt service over the tenor.  DSCR is the
-    operating cashflow over the debt service per year.
+    operating cashflow over the debt service per year; under the
+    ``sculpted`` profile min and avg coincide by construction
+    (Eq. E40).
     """
     gearing, rate, tenor, repayment = _financing_params(econ)
     net_cf = np.asarray(net_cashflow_eur, dtype=float)
     if gearing <= 0.0 or net_cf.size < 2:
-        return float("nan"), float("nan")
+        return float("nan"), float("nan"), float("nan")
     initial_investment = -float(net_cf[0])
     if initial_investment <= 0.0:
-        return float("nan"), float("nan")
+        return float("nan"), float("nan"), float("nan")
     debt = gearing * initial_investment
-    schedule = _amortization_schedule(debt, rate, tenor, repayment)
+    schedule = _amortization_schedule(
+        debt, rate, tenor, repayment,
+        cfads=_cfads_for_schedule(net_cf, tenor, repayment),
+    )
     if not schedule:
-        return float("nan"), float("nan")
+        return float("nan"), float("nan"), float("nan")
     equity_cf = net_cf.copy()
     equity_cf[0] = net_cf[0] + debt
     dscrs: list[float] = []
@@ -236,7 +305,10 @@ def _leverage_kpis(
     eq_irr = calculate_irr(equity_cf)
     equity_irr_pct = float("nan") if np.isnan(eq_irr) else eq_irr * 100.0
     min_dscr = float(min(dscrs)) if dscrs else float("nan")
-    return equity_irr_pct, min_dscr
+    avg_dscr = (
+        float(sum(dscrs) / len(dscrs)) if dscrs else float("nan")
+    )
+    return equity_irr_pct, min_dscr, avg_dscr
 
 
 def build_debt_schedule(
@@ -251,6 +323,7 @@ def build_debt_schedule(
         return None
     schedule = _amortization_schedule(
         gearing * (-float(net_cf[0])), rate, tenor, repayment,
+        cfads=_cfads_for_schedule(net_cf, tenor, repayment),
     )
     if not schedule:
         return None
@@ -2047,7 +2120,7 @@ def compute_financial_kpis(
     irr = calculate_irr(cf_array)
     irr_pct = float("nan") if np.isnan(irr) else irr * 100.0
     gearing_pct_val = float(econ.get("gearing_pct", 0.0) or 0.0)
-    equity_irr_pct, min_dscr = _leverage_kpis(cf_array, econ)
+    equity_irr_pct, min_dscr, avg_dscr = _leverage_kpis(cf_array, econ)
 
     after_y0_cf = df.loc[after_y0_mask, "net_cashflow_eur"]
     # ROI = sum of operating net cashflow (Years 1..N, replacement CAPEX
@@ -2166,7 +2239,7 @@ def compute_financial_kpis(
         )
         # Post-tax equity flows (Eq. E39): the E20 schedule applied to
         # the post-tax project cashflow; NaN when all-equity.
-        equity_irr_post_tax_pct, _ = _leverage_kpis(cf_pt_array, econ)
+        equity_irr_post_tax_pct, _, _ = _leverage_kpis(cf_pt_array, econ)
         payback_post_tax = _payback_year(
             project_years,
             df["cumulative_cf_post_tax_eur"].to_numpy(dtype=float),
@@ -2483,6 +2556,11 @@ def compute_financial_kpis(
         ),
         "min_dscr": (
             float("nan") if np.isnan(min_dscr) else float(round(min_dscr, 4))
+        ),
+        # Average DSCR over the tenor (Eq. E40 companion): under the
+        # sculpted profile min and avg coincide by construction.
+        "avg_dscr": (
+            float("nan") if np.isnan(avg_dscr) else float(round(avg_dscr, 4))
         ),
         "initial_investment_eur": float(round(initial_investment_eur, 2)),
         "total_capex_eur": float(round(total_capex_eur, 2)),

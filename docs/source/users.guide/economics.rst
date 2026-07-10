@@ -174,6 +174,12 @@ Headline financial KPIs returned by
   ``total_optimizer_fee_eur_lifecycle``: lifecycle totals of the
   route-to-market fee structures (all ≤ 0; the latter two render in
   ``SUMMARY.md`` only when the corresponding knob is set)
+* ``equity_irr_pct`` / ``min_dscr`` / ``avg_dscr``: leverage KPIs
+  (NaN for all-equity runs; rendered in ``SUMMARY.md`` only when
+  finite).  ``debt_repayment = sculpted`` keeps the DSCR level across
+  the tenor (Eqs. E40/E40a), so min and avg coincide - recommended
+  for projects with a mid-life BESS replacement, whose CFADS dip
+  would otherwise bind an annuity schedule in a single year.
 * ``npv_post_tax_eur`` / ``irr_post_tax_pct`` /
   ``equity_irr_post_tax_pct`` / ``simple_payback_post_tax_years`` /
   ``discounted_payback_post_tax_years`` /

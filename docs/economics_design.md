@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E39 (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E40a (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -966,10 +966,36 @@ $$\mathrm{annuity}: \; s = B\,\frac{r_d}{1-(1+r_d)^{-T_d}}; \qquad
 
 Equity cashflow: $\mathrm{CF}^{eq}_0 = \mathrm{CF}_0 + B$;
 $\mathrm{CF}^{eq}_y = \mathrm{CF}_y - s_y$ for $y \le T_d$.  KPIs:
-`equity_irr_pct` = IRR of $\mathrm{CF}^{eq}$ and
-`min_dscr` $= \min_y \mathrm{CF}_y / s_y$
+`equity_irr_pct` = IRR of $\mathrm{CF}^{eq}$,
+`min_dscr` $= \min_y \mathrm{CF}_y / s_y$ and
+`avg_dscr` $= \mathrm{mean}_y\, \mathrm{CF}_y / s_y$ over
+positive-service tenor years
 (`economics._leverage_kpis`; full table via
-`economics.build_debt_schedule`).
+`economics.build_debt_schedule`).  The three render in SUMMARY.md
+only when finite (all-equity runs carry NaNs).
+
+Sculpted repayment (`debt_repayment = sculpted`, Eqs. E40/E40a) —
+the lender profile in which debt service tracks CFADS at a constant
+DSCR instead of binding in one year:
+
+$$s_y = \frac{\max(\mathrm{CFADS}_y, 0)}{\mathrm{DSCR}_s}, \qquad
+P_y = \max\!\left(0,\, s_y - r_d B_{y-1}\right), \qquad
+B_y = B_{y-1} - P_y \tag{E40}$$
+
+with $\mathrm{CFADS}_y =$ `net_cashflow_eur`$[y]$ (operating net,
+replacement CAPEX included — the same numerator convention as the
+per-year DSCR column).  For a GIVEN debt $B$ (manual mode) the
+implied constant DSCR follows from the identity that the PV of debt
+service at the debt rate equals the outstanding principal:
+
+$$\mathrm{DSCR}_s = \frac{\sum_{y=1}^{T_d}
+\max(\mathrm{CFADS}_y, 0)\,(1+r_d)^{-y}}{B} \tag{E40a}$$
+
+A $\mathrm{CFADS}_y \le 0$ year pays nothing (unpaid interest is not
+capitalised in this simple model) and later years absorb it; any
+clamp residual sweeps into the final year's principal so the balance
+amortises to ~0 exactly.  Under sculpting `min_dscr` $=$ `avg_dscr`
+by construction.
 
 ### LCOE and LCOS (Lazard-style, revenue-agnostic)
 
@@ -1086,6 +1112,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E33) | `build_yearly_cashflow` revenue_levy_eur clamp + fee-share monthly allocation |
 | (E34)-(E38) | `economics.apply_tax_layer` (straight-line tranches, EBITDA, FIFO carry-forward, tax clamp, post-tax family) |
 | (E39) | `compute_financial_kpis` post-tax KPI block (NaN-gated on the rate) |
+| (E40)-(E40a) | `economics._amortization_schedule` sculpted branch + implied-DSCR closed form |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

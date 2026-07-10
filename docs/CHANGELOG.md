@@ -268,6 +268,22 @@ Production release.
   is a separate column family).  Locked by hand-computed schedules,
   a FIFO-expiry worked example and an independent levered reference.
 
+### Added (sculpted debt repayment + average DSCR)
+
+- `debt_repayment` gains the `sculpted` profile (Eqs. E40/E40a): debt
+  service tracks CFADS at the constant implied DSCR - the lender
+  profile in which coverage is level across the tenor instead of
+  binding in one year.  CFADS = net_cashflow_eur (replacement CAPEX
+  included, the per-year-DSCR numerator convention); a CFADS <= 0
+  year pays nothing (interest not capitalised) and later years absorb
+  it; any clamp residual sweeps into the final year's principal so
+  the balance amortises to ~0 exactly.  `_leverage_kpis` now returns
+  `avg_dscr` alongside `min_dscr` (equal under sculpting by
+  construction) and levered runs gain the `avg_dscr` KPI - the only
+  key addition for already-levered runs, called out here per the
+  bit-identity contract (feature-OFF runs are unchanged).  SUMMARY.md
+  gains a finite-gated leverage block (equity IRR, min/avg DSCR).
+
 ### Added (post-tax financial KPIs)
 
 - `npv_post_tax_eur` / `irr_post_tax_pct` / `equity_irr_post_tax_pct`
