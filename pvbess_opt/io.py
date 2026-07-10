@@ -302,6 +302,7 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     # inert at their defaults (factor 100 = no haircut).
     "production_p90_factor_pct": 100.0,
     "lender_cases_enabled": False,
+    "debt_sizing_deck": "low",
     # DSCR-profile figure: rendered only when a debt layer is active,
     # so the TRUE default emits no file for all-equity runs.
     "plot_dscr_profile": True,
@@ -969,8 +970,14 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Cashflow case the debt is sized against. base = the run's own "
      "yearly cashflow. p90 = the production-P90 case (Eq. E44; set "
      "production_p90_factor_pct < 100 or the case degenerates to "
-     "base). low_price is reserved for the Low-price-deck lender case "
-     "and is rejected with guidance until it is available."),
+     "base). low_price = the yearly cashflow of the price deck named "
+     "by debt_sizing_deck, re-dispatched with that deck's prices "
+     "(needs <column>__<deck> variant columns on the timeseries "
+     "sheet; roughly doubles the run's solve time)."),
+    ("debt_sizing_deck", "low", "deck name",
+     "Price deck the low_price sizing case re-dispatches with (the "
+     "<column>__<deck> suffix on the timeseries sheet, matched "
+     "lowercase). Used only when debt_sizing_case = low_price."),
     ("production_p90_factor_pct", 100.0, "%",
      "P90-to-P50 annual production ratio in percent (e.g. 92 = the "
      "P90 year delivers 92 % of the modelled energy). 100 = disabled "
@@ -1857,6 +1864,15 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         # Free-form PVGIS strings: a blank cell resolves to the default
         # (None); a non-blank cell is taken verbatim (stripped).
         return _parse_pv_path(raw, default)
+    if key == "debt_sizing_deck":
+        # Free-form deck name (matched lowercase against the
+        # <column>__<deck> variant suffixes); a blank cell keeps the
+        # default.  Deck existence is checked by the validator, not
+        # the parser.
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+            return default
+        token = str(raw).strip().lower()
+        return token if token else default
     if key == "bess_replacement_year":
         return _parse_bess_replacement_year(raw, default)
     # A boolean in a numeric field is always an input mistake, and Python
@@ -2836,11 +2852,29 @@ def validate_workbook_params(
                     "below 100 for a real P90 haircut."
                 )
         if sizing_case == "low_price":
-            raise ValueError(
-                "debt_sizing_case='low_price' is reserved for sizing "
-                "against a named Low price deck, which is not "
-                "available yet; set debt_sizing_case='base'."
-            )
+            raw_deck = economics.get("debt_sizing_deck")
+            deck = str("low" if raw_deck is None else raw_deck)
+            deck = deck.strip().lower()
+            if not deck:
+                raise ValueError(
+                    "debt_sizing_case='low_price' requires "
+                    "'debt_sizing_deck' to name a price deck."
+                )
+            ts = typed.get("ts")
+            if ts is not None and hasattr(ts, "columns"):
+                suffix = f"__{deck}"
+                if not any(str(c).endswith(suffix) for c in ts.columns):
+                    available = sorted({
+                        str(c).split("__", 1)[1]
+                        for c in ts.columns if "__" in str(c)
+                    })
+                    raise ValueError(
+                        "debt_sizing_case='low_price' needs "
+                        f"'<column>__{deck}' variant columns on the "
+                        "timeseries sheet (debt_sizing_deck="
+                        f"{deck!r}); decks available: "
+                        f"{available or 'none'}."
+                    )
 
     # P90 production factor (Eq. E44): a ratio of annual energies in
     # percent — 0 is meaningless (no production at all is not a

@@ -199,7 +199,9 @@ Headline financial KPIs returned by
   PV-linked streams and re-evaluates coverage on the same committed
   debt.  ``debt_sizing_case = p90`` sizes the debt against that
   haircut CFADS, so the base year then shows a coverage cushion
-  above the target.
+  above the target.  With ``debt_sizing_case = low_price`` the table
+  gains a ``low_price`` row from the deck re-dispatch that sized the
+  debt (the table alone never triggers a solve).
 * ``npv_post_tax_eur`` / ``irr_post_tax_pct`` /
   ``equity_irr_post_tax_pct`` / ``simple_payback_post_tax_years`` /
   ``discounted_payback_post_tax_years`` /

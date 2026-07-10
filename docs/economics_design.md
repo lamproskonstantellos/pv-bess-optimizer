@@ -1057,11 +1057,19 @@ follow E20 with debt $= D$.  Conventions, all deliberate:
   (E21/E22 never read financing lines; sizing introduces no new cost
   line), and `net_cashflow_eur` does not change, so every default
   figure is bit-identical.
-* `debt_sizing_case` fixes the CFADS the debt is sized against;
-  `base` (the run's own cashflow) and `p90` (the E44 production
-  haircut; a warning flags the degenerate factor-100 case) are
-  implemented, while `low_price` is a reserved enum value rejected
-  with guidance until the price-deck lender case lands.
+* `debt_sizing_case` fixes the CFADS the debt is sized against:
+  `base` (the run's own cashflow), `p90` (the E44 production
+  haircut; a warning flags the degenerate factor-100 case) or
+  `low_price` — the yearly cashflow of the price deck named by
+  `debt_sizing_deck` (default `low`), re-dispatched with that deck's
+  prices through the multi-deck scenario machinery
+  (`pipeline._low_price_sizing_cashflow`; `<column>__<deck>` variant
+  columns required on the timeseries, checked by the validator, and
+  the run's solve time roughly doubles).  E41-E44 apply verbatim to
+  the deck CFADS — unlike the P90 haircut this is a genuine
+  re-dispatch, so BESS arbitrage adapts to the deck's spreads.  The
+  deck run forces its own sizing / lender / sensitivity extras off,
+  so the recursion terminates after one level.
 
 ### P90 production lender case (Eq. E44; `production_p90_factor_pct`)
 
@@ -1109,7 +1117,11 @@ through the scenario engine is recorded as future work.
 min/avg DSCR, equity IRR (E20 on the case CFADS with the run's
 resolved — frozen — debt), case NPV and E41/E42 debt capacity at the
 configured `target_dscr`; written to a `lender_cases` results sheet
-and a SUMMARY block, both absent by default.  LCOE / LCOS are
+and a SUMMARY block, both absent by default.  A `low_price` row
+joins them when `debt_sizing_case = low_price` already re-dispatched
+the deck (the same frame serves both surfaces — the table alone
+never triggers a solve; being a price case it keeps full production,
+so its factor column reads 100).  LCOE / LCOS are
 deliberately excluded from the table: they are Lazard cost figures,
 and scaling the energy denominator without the cost numerator would
 misstate them.  `debt_sizing_case = p90` sizes the debt (E41-E43) on

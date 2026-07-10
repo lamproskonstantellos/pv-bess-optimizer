@@ -127,29 +127,42 @@ def apply_production_case(
 
 def build_lender_cases(
     yearly_cf: pd.DataFrame, econ: dict[str, Any],
+    *,
+    low_price_cf: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """The lender case table (Eq. E44): per-case leverage KPIs.
 
     Rows ``base`` (the run's own cashflow, factor 100 %) and ``p90``
     (the ``production_p90_factor_pct`` haircut; identical to base when
-    the factor is 100).  Columns: ``min_dscr`` / ``avg_dscr`` /
-    ``equity_irr_pct`` (from the E20 schedule on the case CFADS — the
-    debt amount is the run's resolved one, frozen under target-DSCR
-    sizing, so the cases answer "same committed debt, worse year"),
-    ``npv_eur`` (case discounted net) and ``debt_capacity_eur`` (the
-    E41/E42 capacity the case CFADS could carry at the configured
-    ``target_dscr``).  LCOE / LCOS are deliberately EXCLUDED: they are
-    Lazard cost figures, and scaling the energy denominator without
-    the cost numerator would misstate them.
+    the factor is 100), plus ``low_price`` when the deck cashflow is
+    supplied (the pipeline passes it only when
+    ``debt_sizing_case = 'low_price'`` already re-dispatched the deck
+    — the table alone never triggers a solve; the price case keeps
+    the full production, so its factor column reads 100).  Columns:
+    ``min_dscr`` / ``avg_dscr`` / ``equity_irr_pct`` (from the E20
+    schedule on the case CFADS — the debt amount is the run's
+    resolved one, frozen under target-DSCR sizing, so the cases
+    answer "same committed debt, worse year"), ``npv_eur`` (case
+    discounted net) and ``debt_capacity_eur`` (the E41/E42 capacity
+    the case CFADS could carry at the configured ``target_dscr``).
+    LCOE / LCOS are deliberately EXCLUDED: they are Lazard cost
+    figures, and scaling the energy denominator without the cost
+    numerator would misstate them.
     """
     raw_f = econ.get("production_p90_factor_pct")
     factor_pct = 100.0 if raw_f is None else float(raw_f)
+    cases: list[tuple[str, float, pd.DataFrame]] = [
+        ("base", 100.0, yearly_cf),
+        (
+            "p90", factor_pct,
+            yearly_cf if factor_pct == 100.0
+            else apply_production_case(yearly_cf, factor_pct / 100.0),
+        ),
+    ]
+    if low_price_cf is not None and not low_price_cf.empty:
+        cases.append(("low_price", 100.0, low_price_cf))
     rows: list[dict[str, Any]] = []
-    for case, f_pct in (("base", 100.0), ("p90", factor_pct)):
-        f = f_pct / 100.0
-        frame = yearly_cf if f == 1.0 else apply_production_case(
-            yearly_cf, f,
-        )
+    for case, f_pct, frame in cases:
         net = frame["net_cashflow_eur"].to_numpy(dtype=float)
         equity_irr_pct, min_dscr, avg_dscr = _leverage_kpis(net, econ)
         npv = float(frame["discounted_cf_eur"].sum())

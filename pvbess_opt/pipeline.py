@@ -624,14 +624,81 @@ def _generate_financial_plots(
 # ---------------------------------------------------------------------------
 
 
+def _low_price_sizing_cashflow(
+    excel_path: Path,
+    econ: dict[str, Any],
+    solver_opts: dict[str, Any] | None,
+) -> pd.DataFrame:
+    """Yearly cashflow of the named Low price deck (the E41-E43 sizing
+    case behind ``debt_sizing_case = 'low_price'``).
+
+    Re-dispatches the year with the deck's prices through the
+    scenario machinery (``<column>__<deck>`` variant columns resolved
+    onto the canonical names, then a fresh MILP solve) and projects
+    the deck cashflow with the run's own economics — E41-E44 then
+    apply verbatim to the deck CFADS.  The deck run forces its own
+    sizing / lender / sensitivity extras OFF, so the recursion into
+    :func:`_build_financials` terminates after one level.  Roughly
+    doubles the run's solve time; the workbook note says so.
+    """
+    from pvbess_opt.io import read_workbook, write_workbook
+    from pvbess_opt.scenarios import _apply_scenario_overrides
+
+    raw_deck = econ.get("debt_sizing_deck")
+    deck = str("low" if raw_deck is None else raw_deck).strip().lower()
+    typed = read_workbook(excel_path)
+    typed = _apply_scenario_overrides(typed, {
+        "name": "debt-sizing-low-price-case",
+        "price_deck": deck,
+        "economics": {
+            "debt_sizing_mode": "manual",
+            "lender_cases_enabled": False,
+            "sensitivity_enabled": False,
+        },
+        "simulation": {"uncertainty_enabled": False},
+    })
+    tmp = Path(tempfile.mkdtemp(prefix="pvbess_lowprice_"))
+    deck_xlsx = tmp / "low_price_case.xlsx"
+    write_workbook(typed, deck_xlsx)
+    deck_params, deck_ts = read_inputs(deck_xlsx)
+    logger.info(
+        "[debt sizing] low_price case: re-dispatching the year with "
+        "price deck %r.",
+        deck,
+    )
+    res, _solver, _res_full = run_scenario(
+        deck_params, deck_ts, return_unrounded=True,
+        **(solver_opts or {}),
+    )
+    deck_kpis = compute_kpis(res, deck_params, verify_balance=False)
+    deck_kpis = apply_unavailability_derate(
+        deck_kpis,
+        float(deck_params.get("unavailability_pct", 0.0) or 0.0),
+    )
+    bundle = _build_financials(
+        deck_xlsx, deck_params, deck_ts, deck_kpis, res,
+        solver_opts=solver_opts,
+    )
+    deck_cf = bundle["yearly_cf"]
+    assert isinstance(deck_cf, pd.DataFrame)
+    return deck_cf
+
+
 def _build_financials(
     excel_path: Path,
     params: dict[str, Any],
     ts: pd.DataFrame,
     kpis: dict[str, Any],
     res: pd.DataFrame,
+    *,
+    solver_opts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Run the multi-year cash-flow + sensitivity + lifetime pipeline."""
+    """Run the multi-year cash-flow + sensitivity + lifetime pipeline.
+
+    ``solver_opts`` (run_scenario keyword form) is consumed only by
+    the ``debt_sizing_case = 'low_price'`` deck re-dispatch; None
+    falls back to the solver defaults.
+    """
     econ = read_economic_params(excel_path)
 
     site_capex_eur = float(econ.get("site_capex_eur", 0.0) or 0.0)
@@ -688,13 +755,26 @@ def _build_financials(
     # production-haircut CFADS (Eq. E44) while the run's own cashflow
     # stays the base case.
     sizing_frame = yearly_cf
-    if str(
+    low_price_cf: pd.DataFrame | None = None
+    sizing_case = str(
         econ.get("debt_sizing_case", "base") or "base"
-    ).strip().lower() == "p90":
+    ).strip().lower()
+    sizing_mode_on = str(
+        econ.get("debt_sizing_mode", "manual") or "manual"
+    ).strip().lower() == "target_dscr"
+    if sizing_case == "p90":
         raw_p90 = econ.get("production_p90_factor_pct")
         sizing_frame = apply_production_case(
             yearly_cf, (100.0 if raw_p90 is None else float(raw_p90)) / 100.0,
         )
+    elif sizing_case == "low_price" and sizing_mode_on:
+        # One full re-dispatch with the named deck's prices; the frame
+        # doubles as the sizing case here and as the lender table's
+        # low_price row below (no second solve).
+        low_price_cf = _low_price_sizing_cashflow(
+            excel_path, econ, solver_opts,
+        )
+        sizing_frame = low_price_cf
     if resolve_debt_sizing(sizing_frame, econ) is not None:
         # The corporate-tax layer deducts the E20 interest, which now
         # runs on the sized debt; re-applying it (idempotent — every
@@ -738,10 +818,14 @@ def _build_financials(
         sensitivity_df = None
 
     # Lender case table (Eq. E44), after sizing so the per-case
-    # leverage KPIs run on the frozen committed debt.
+    # leverage KPIs run on the frozen committed debt.  The low_price
+    # row joins only when the deck cashflow is already in hand (sizing
+    # case low_price) — the table alone never triggers a re-dispatch.
     lender_cases_df: pd.DataFrame | None = None
     if bool(econ.get("lender_cases_enabled", False)):
-        lender_cases_df = build_lender_cases(yearly_cf, econ)
+        lender_cases_df = build_lender_cases(
+            yearly_cf, econ, low_price_cf=low_price_cf,
+        )
 
     return {
         "econ": econ,
@@ -1508,6 +1592,12 @@ def _run_one(
 
         bundle = _build_financials(
             Path(config.excel), params, ts, kpis, res,
+            solver_opts={
+                "solver_name": config.solver,
+                "mip_gap": config.mip_gap,
+                "time_limit_seconds": config.time_limit,
+                "tee": config.tee,
+            },
         )
         econ = bundle["econ"]
 

@@ -451,13 +451,15 @@ def test_validation_rejects_zero_tenor_in_sizing_mode():
         validate_workbook_params(typed, dt_minutes=60)
 
 
-def test_validation_rejects_reserved_sizing_case():
-    # 'p90' is live (tests/test_lender_cases.py); 'low_price' stays a
-    # reserved enum value until the price-deck lender case lands.
+def test_validation_low_price_defers_deck_check_without_ts():
+    # All three sizing cases are live.  With no timeseries frame in
+    # the typed dict the low_price deck-column check defers to the
+    # pipeline's fail-fast deck resolution;
+    # tests/test_low_price_sizing.py covers the ts-present paths
+    # (accept with variants, reject with guidance without).
     typed = _typed_with_econ(debt_sizing_mode="target_dscr",
                              debt_sizing_case="low_price")
-    with pytest.raises(ValueError, match="not available"):
-        validate_workbook_params(typed, dt_minutes=60)
+    validate_workbook_params(typed, dt_minutes=60)
 
 
 def test_validation_sizing_keys_inert_in_manual_mode():

@@ -419,9 +419,16 @@ inert at their defaults:
   ``base``): the cashflow case the debt is sized against.  ``base``
   is the run's own yearly cashflow; ``p90`` sizes against the
   production-P90 haircut below (a warning flags the degenerate
-  combination with a factor of 100); ``low_price`` is reserved for
-  the Low-price-deck lender case and is rejected with guidance until
-  it is available.
+  combination with a factor of 100); ``low_price`` re-dispatches the
+  year with the price deck named by ``debt_sizing_deck`` and sizes
+  on that deck's cashflow — a genuine re-solve through the
+  multi-deck scenario machinery, so BESS arbitrage adapts to the
+  deck's spreads and the run's solve time roughly doubles.
+* ``debt_sizing_deck`` (default ``low``): the price deck the
+  ``low_price`` case re-dispatches with — the ``<column>__<deck>``
+  variant-column suffix on the ``timeseries`` sheet, matched
+  lowercase.  Validation requires matching variant columns and lists
+  the decks actually available.
 
 The sized run reports ``debt_capacity_eur`` (uncapped),
 ``sized_debt_eur``, ``gearing_sized_pct``, ``dscr_target_met`` and

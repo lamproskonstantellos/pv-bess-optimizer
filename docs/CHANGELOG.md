@@ -337,6 +337,25 @@ Production release.
   against the haircut CFADS while the run's own cashflow stays the
   base case (a warning flags the degenerate factor-100 combination).
 
+### Added (low-price-deck debt sizing case)
+
+- `debt_sizing_case = low_price` activates (it previously parsed but
+  was rejected with guidance): the target-DSCR debt is sized on the
+  yearly cashflow of the price deck named by the new
+  `debt_sizing_deck` key (default `low`), obtained by re-dispatching
+  the year with that deck's prices through the multi-deck scenario
+  machinery - a genuine re-solve (BESS arbitrage adapts to the
+  deck's spreads), unlike the cashflow-level P90 haircut; the run's
+  solve time roughly doubles and the workbook note says so.  E41-E44
+  apply verbatim to the deck CFADS; the deck run forces its own
+  sizing / lender / sensitivity extras off so the resolution
+  terminates after one level.  Validation requires matching
+  `<column>__<deck>` variant columns on the timeseries sheet and
+  lists the decks actually available.  The lender case table gains a
+  `low_price` row when the sizing case already re-dispatched the
+  deck - the same frame serves both surfaces, and the table alone
+  never triggers a solve.
+
 ### Added (DSCR-profile figure)
 
 - `dscr_profile.pdf` in the financial-plot family: per-year debt
