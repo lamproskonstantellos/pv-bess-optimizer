@@ -206,7 +206,12 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "opex_inflation_pct": 1.0,
     "retail_inflation_pct": 0.0,
     "dam_inflation_pct": 0.0,
-    "aggregator_fee_pct_revenue": 10.0,
+    # Default 0.0 (fee-free): market representation fees are opt-in.  Real
+    # aggregator/route-to-market charges are typically EUR/MWh of sold energy
+    # or a share of the market revenue only — a flat 10 % of ALL revenue
+    # (the old template default) sits far above European market practice, so
+    # the template no longer pre-fills it.
+    "aggregator_fee_pct_revenue": 0.0,
     # Optional, separate route-to-market (BSP / balancing-aggregator) fee on
     # GROSS balancing revenue.  Default 0.0 so existing results are
     # bit-identical; balancing carries no energy-aggregator fee but may carry
@@ -596,10 +601,13 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "since DAM prices are driven by gas/CO2/RES penetration, not CPI. "
      "Industry tools (Lazard, Aurora, Gridcog) use exogenous price "
      "curves, not flat inflation."),
-    ("aggregator_fee_pct_revenue", 10.0, "%",
+    ("aggregator_fee_pct_revenue", 0.0, "%",
      "Energy-aggregator fee on gross DAM + retail revenue (Gridcog "
      "convention; see public Gridcog cost / pricing docs). Does NOT apply "
-     "to balancing or PPA revenue."),
+     "to balancing or PPA revenue. Default 0 = fee-free (opt-in): real "
+     "route-to-market charges are typically EUR/MWh of sold energy or a "
+     "share of market revenue only, well below a flat percentage of ALL "
+     "revenue."),
     ("balancing_aggregator_fee_pct_revenue", 0.0, "%",
      "Optional, separate route-to-market (BSP / balancing-aggregator) fee on "
      "GROSS balancing revenue (capacity + activation). Default 0 = fee-free, "
@@ -1224,6 +1232,18 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         return _parse_pv_path(raw, default)
     if key == "bess_replacement_year":
         return _parse_bess_replacement_year(raw, default)
+    # A boolean in a numeric field is always an input mistake, and Python
+    # would coerce it silently (float(True) == 1.0, int(True) == 1), changing
+    # results without a trace — e.g. ``unavailability_pct = TRUE`` becoming a
+    # 1 % derate.  Reject loudly, naming the key, matching the fee-range
+    # contract in ``validate_workbook_params``.  numpy bools included: a
+    # pandas-read TRUE cell may arrive as ``np.bool_``, which is NOT a
+    # ``bool`` subclass.
+    if isinstance(raw, (bool, np.bool_)):
+        raise ValueError(
+            f"{key!r} expects a number, got boolean {bool(raw)!r}; "
+            "write a numeric value instead (e.g. 1 for 1 %)."
+        )
     if key in _INT_KEYS:
         coerced = _coerce(raw, int, default)
         if coerced is _COERCE_FAILED:
@@ -1371,6 +1391,18 @@ def _parse_kv_sheet(
     out = dict(defaults)
     for key, raw in flat.items():
         if key in defaults:
+            # Boolean in a numeric field: raise here (the sheet name is in
+            # scope for a precise message) rather than letting the guard in
+            # ``_parse_value`` fire without it.  The workbook reader feeds
+            # this parser openpyxl-faithful cell types (``_read_kv_flat``),
+            # so a bool here is a genuine TRUE/FALSE cell, never a pandas
+            # inference artifact.
+            if key not in _BOOL_KEYS and isinstance(raw, (bool, np.bool_)):
+                raise ValueError(
+                    f"Sheet {sheet_name!r}: {key!r} expects a number, got "
+                    f"boolean {bool(raw)!r}; write a numeric value instead "
+                    "(e.g. 1 for 1 %)."
+                )
             if key == "p_grid_export_max_kw":
                 out[key] = _parse_grid_export_max(raw, defaults[key])
             else:
@@ -2084,6 +2116,45 @@ def _apply_balancing_timeseries_fallback(
     return out
 
 
+def _read_kv_flat(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
+    """Read a (key, value, ...) sheet to ``{key: value}`` with faithful types.
+
+    openpyxl reports each cell's stored type exactly as the file holds it,
+    whereas ``pd.read_excel`` can mis-surface a genuinely NUMERIC 0/1 cell
+    as a Python bool when it infers the mixed-type value column — which
+    would make the boolean-in-numeric-field guard in ``_parse_kv_sheet``
+    fire on legitimate zeros.  Semantics mirror ``_flat_dict_from_sheet``:
+    requires the ``key`` / ``value`` header pair, skips blank and ``#``
+    separator keys.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(xlsx_path, read_only=True)
+    try:
+        ws = wb[sheet_name]
+        rows = ws.iter_rows(max_col=2, values_only=True)
+        header = next(rows, None)
+        if (
+            header is None
+            or len(header) < 2
+            or str(header[0]).strip() != "key"
+            or str(header[1]).strip() != "value"
+        ):
+            return {}
+        out: dict[str, Any] = {}
+        for row in rows:
+            raw_key = row[0] if row else None
+            if not isinstance(raw_key, str):
+                continue
+            key = raw_key.strip()
+            if not key or key.startswith("#"):
+                continue
+            out[key] = row[1] if len(row) > 1 else None
+        return out
+    finally:
+        wb.close()
+
+
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the input workbook and return the typed nested dict."""
     xlsx_path = Path(xlsx_path)
@@ -2098,9 +2169,7 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
 
     typed: dict[str, Any] = {}
     for sheet_name in ("project", "pv", "bess", "economics", "simulation"):
-        flat = _flat_dict_from_sheet(
-            pd.read_excel(xlsx_path, sheet_name=sheet_name),
-        )
+        flat = _read_kv_flat(xlsx_path, sheet_name)
         if sheet_name == "bess":
             reject_legacy_bess_capex_key(
                 flat, source=f"Workbook {xlsx_path!s} (bess sheet)",
@@ -2122,9 +2191,7 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     # the defaults declared above so ``balancing_enabled`` resolves to
     # False and the rest of the loader behaves exactly as before.
     if "balancing" in sheets:
-        balancing_flat = _flat_dict_from_sheet(
-            pd.read_excel(xlsx_path, sheet_name="balancing"),
-        )
+        balancing_flat = _read_kv_flat(xlsx_path, "balancing")
         typed["balancing"] = _parse_kv_sheet("balancing", balancing_flat)
     else:
         typed["balancing"] = dict(BALANCING_SHEET_DEFAULTS)
@@ -2132,9 +2199,7 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     # Optional ``ppa`` sheet — same master-switch pattern: absent means
     # the contract is disabled and the run is bit-identical to before.
     if "ppa" in sheets:
-        ppa_flat = _flat_dict_from_sheet(
-            pd.read_excel(xlsx_path, sheet_name="ppa"),
-        )
+        ppa_flat = _read_kv_flat(xlsx_path, "ppa")
         typed["ppa"] = _parse_kv_sheet("ppa", ppa_flat)
     else:
         typed["ppa"] = dict(PPA_SHEET_DEFAULTS)

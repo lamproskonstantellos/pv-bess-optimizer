@@ -222,10 +222,13 @@ Sheet ``economics``
 * ``retail_inflation_pct`` / ``dam_inflation_pct``: separate annual
   escalation rates for the retail-indexed revenue stream (load / PPA)
   and the DAM-indexed export stream.
-* ``aggregator_fee_pct_revenue`` (default 10 %, Gridcog
-  convention): energy-aggregator fee on gross DAM + retail revenue
-  post-solve.  Surfaces as a signed ``aggregator_fee_eur`` column on
-  ``cashflow_yearly``.  Does **not** apply to balancing or PPA revenue.
+* ``aggregator_fee_pct_revenue`` (default 0 %, fee-free — opt-in;
+  Gridcog convention): energy-aggregator fee on gross DAM + retail
+  revenue post-solve.  Surfaces as a signed ``aggregator_fee_eur``
+  column on ``cashflow_yearly``.  Does **not** apply to balancing or
+  PPA revenue.  Real-world route-to-market charges are typically a few
+  EUR/MWh of *sold* energy or a share of *market* revenue only, so the
+  template no longer pre-fills a flat percentage of all revenue.
 * ``balancing_aggregator_fee_pct_revenue`` (default 0 %): optional,
   separate route-to-market (BSP / balancing-aggregator) fee on **gross**
   balancing revenue (capacity + activation), for assets that participate

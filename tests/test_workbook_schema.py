@@ -276,15 +276,15 @@ def test_max_injection_profile_missing_logs_info(tmp_path, caplog):
     typed = _build_minimal_typed()
     dst = tmp_path / "no_max_inj.xlsx"
     write_workbook(typed, dst)
-    # Re-open and drop the max_injection_profile sheet.
-    with pd.ExcelFile(dst) as xls:
-        keep = {
-            name: pd.read_excel(dst, sheet_name=name)
-            for name in xls.sheet_names if name != "max_injection_profile"
-        }
-    with pd.ExcelWriter(dst, engine="openpyxl") as writer:
-        for name, df in keep.items():
-            df.to_excel(writer, sheet_name=name, index=False)
+    # Re-open and drop the max_injection_profile sheet with openpyxl —
+    # cell types stay faithful.  (A pandas read->write round trip can
+    # coerce numeric 0/1 cells into genuine boolean cells, which the
+    # boolean-in-numeric-field guard rightly rejects.)
+    from openpyxl import load_workbook
+
+    wb = load_workbook(dst)
+    del wb["max_injection_profile"]
+    wb.save(dst)
     with caplog.at_level("INFO", logger="pvbess_opt.io"):
         out = read_workbook(dst)
     # No-curtailment default (100 %) applied.

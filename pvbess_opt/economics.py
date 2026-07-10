@@ -348,6 +348,14 @@ def build_yearly_cashflow(
     Year 0 (CAPEX paid the year before COD) lands at calendar
     ``project_start_year - 1``; Years 1..N at
     ``project_start_year .. project_start_year + N - 1``.
+
+    ``econ`` contract: a FLAT mapping as produced by
+    :func:`read_economic_params`, which merges every workbook sheet into
+    one dict — the PPA knobs are read as ``econ['ppa_enabled']``,
+    ``econ['ppa_settlement']``, ``econ['ppa_term_years']`` and
+    ``econ['ppa_inflation_pct']``, NOT as a nested ``econ['ppa']`` block
+    (that nested shape belongs to the dispatch-side
+    :func:`pvbess_opt.ppa.resolve_ppa_config` consumers).
     """
     raw_n_years = econ.get(
         "project_lifecycle_years",
