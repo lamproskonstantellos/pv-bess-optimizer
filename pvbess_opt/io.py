@@ -265,6 +265,9 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "capacity_market_year_from": 1,
     "capacity_market_year_to": 0,
     "capacity_market_indexation_pct": 0.0,
+    # Revenue levy on gross market turnover (Eq. E33), e.g. the 3 %
+    # special RES turnover levy applied in Greece.  Default-off.
+    "revenue_levy_pct": 0.0,
     "benchmark_lcoe_low_eur_per_mwh": BENCHMARK_LCOE_LOW_EUR_PER_MWH,
     "benchmark_lcoe_high_eur_per_mwh": BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     "benchmark_lcos_low_eur_per_mwh": BENCHMARK_LCOS_LOW_EUR_PER_MWH,
@@ -836,6 +839,20 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("capacity_market_indexation_pct", 0.0, "%/yr",
      "Annual escalation of the clearing price ((1+i)^(y-1), Eq. E2); "
      "many mechanisms CPI-index - default 0 = flat nominal."),
+    ("revenue_levy_pct", 0.0, "%",
+     "Levy on gross market turnover: wholesale DAM export revenue "
+     "(gross, before the aggregator fee - levies charge turnover, not "
+     "net-of-fee revenue), balancing capacity + activation revenue, "
+     "and the PPA contract leg. Self-consumption savings are excluded "
+     "(avoided cost, not invoiced turnover), as are the contracted "
+     "streams (toll / state support / capacity market) and the "
+     "imbalance settlement. Example: the 3 % special RES turnover levy "
+     "applied in Greece. Charged before income tax and deductible from "
+     "taxable income by construction. 0 = off (default; results "
+     "bit-identical). Surfaces as a signed revenue_levy_eur cashflow "
+     "column inside net_cashflow_eur (clamped: negative turnover never "
+     "yields a rebate). Excluded from LCOE/LCOS. Validated in "
+     "[0, 100]."),
     ("benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
@@ -2695,7 +2712,8 @@ def validate_workbook_params(
     for fee_key in ("aggregator_fee_pct_revenue",
                     "balancing_aggregator_fee_pct_revenue",
                     "optimizer_revenue_share_pct",
-                    "state_support_clawback_share_pct"):
+                    "state_support_clawback_share_pct",
+                    "revenue_levy_pct"):
         if fee_key not in economics:
             continue
         fee_val = float(economics.get(fee_key, 0.0) or 0.0)
@@ -3458,6 +3476,7 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
      "Lifetime state-support netting [EUR]"),
     ("total_capacity_market_revenue_eur_lifecycle",
      "Lifetime capacity-market revenue [EUR]"),
+    ("total_revenue_levy_eur_lifecycle", "Lifetime revenue levy [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the

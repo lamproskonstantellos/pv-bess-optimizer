@@ -178,6 +178,8 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("state_support_clawback_eur")
     if "capacity_market_revenue_eur" in df.columns:
         components.append("capacity_market_revenue_eur")
+    if "revenue_levy_eur" in df.columns:
+        components.append("revenue_levy_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -311,6 +313,11 @@ def _scale_revenue(
         # price-proportional, so it scales with the Revenue driver
         # (same rationale as the balancing columns).
         "imbalance_cost_eur",
+        # Revenue levy (Eq. E33): its base is a uniform-scaling sum of
+        # price-driven market streams and factor > 0 preserves the
+        # zero-turnover clamp (max(f*base, 0) == f*max(base, 0)), so
+        # the constant scale is exact.
+        "revenue_levy_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)

@@ -100,6 +100,7 @@ def test_economics_sheet_keys():
         "capacity_market_eur_per_mw_year", "capacity_market_derating_pct",
         "capacity_market_year_from", "capacity_market_year_to",
         "capacity_market_indexation_pct",
+        "revenue_levy_pct",
         "benchmark_lcoe_low_eur_per_mwh",
         "benchmark_lcoe_high_eur_per_mwh",
         "benchmark_lcos_low_eur_per_mwh",

@@ -298,6 +298,11 @@ def plot_revenue_stack_yearly(
         )
     else:
         capacity_market_arr = np.zeros_like(load_pv)
+    # Revenue levy on gross market turnover (Eq. E33), signed <= 0.
+    if "revenue_levy_eur" in op.columns:
+        levy_arr = op["revenue_levy_eur"].astype(float).to_numpy()
+    else:
+        levy_arr = np.zeros_like(load_pv)
     _toll_treatment = str(
         (econ or {}).get("bess_toll_merchant_treatment", "zeroed")
         or "zeroed"
@@ -379,6 +384,17 @@ def plot_revenue_stack_yearly(
             edgecolor="black", linewidth=0.4,
             label="Imbalance cost",
         )
+    if np.any(levy_arr < -1e-9):
+        # Revenue levy (Eq. E33) — its own deduction slot below the
+        # imbalance band.
+        ax.bar(
+            years, levy_arr,
+            bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
+            + gcf_fee + imb_cost,
+            color=financial_color("Revenue levy"),
+            edgecolor="black", linewidth=0.4,
+            label="Revenue levy",
+        )
 
     # PPA contract leg — drawn straight from the cashflow column so the
     # bar carries the exact stream NPV/IRR saw (term cutoff, its own
@@ -404,7 +420,7 @@ def plot_revenue_stack_yearly(
             ax.bar(
                 years, ppa_neg,
                 bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
-                + gcf_fee + imb_cost,
+                + gcf_fee + imb_cost + levy_arr,
                 color=financial_color("PPA revenue"),
                 edgecolor="black", linewidth=0.4,
                 label=None if drew_ppa_label else "PPA revenue",
@@ -503,7 +519,7 @@ def plot_revenue_stack_yearly(
             _ppa_neg_part = np.zeros_like(load_pv)
         _neg_stack_base = (
             cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
-            + gcf_fee + imb_cost + _ppa_neg_part
+            + gcf_fee + imb_cost + levy_arr + _ppa_neg_part
         )
         ax.bar(
             years, support_net_arr,
@@ -526,7 +542,7 @@ def plot_revenue_stack_yearly(
     net = net + bal_agg_fee + rtm_fee + opt_fee + gcf_fee + imb_cost
     net = (
         net + toll_arr + floor_topup_arr + support_arr + support_net_arr
-        + capacity_market_arr
+        + capacity_market_arr + levy_arr
     )
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()

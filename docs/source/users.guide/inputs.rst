@@ -300,6 +300,17 @@ Sheet ``economics``
   from LCOE/LCOS; the gross support is not scaled by the Revenue
   tornado driver while the netting is recomputed against the un-scaled
   threshold (revenue-stabilising).
+* ``revenue_levy_pct`` (default 0, off): levy on gross MARKET
+  turnover (Eq. E33) - wholesale DAM export revenue gross of the
+  aggregator fee, balancing capacity + activation revenue and the PPA
+  contract leg; self-consumption savings, the contracted streams
+  (toll / state support / capacity market) and the imbalance
+  settlement are excluded by construction, and negative turnover
+  never yields a rebate (clamp).  The 3 % special RES turnover levy
+  applied in Greece is the reference example.  Surfaces as a signed
+  ``revenue_levy_eur`` column inside ``net_cashflow_eur``
+  (revenue-share monthly weights); excluded from LCOE/LCOS; SCALES
+  with the Revenue tornado driver (a price-proportional base).
 * ``capacity_market_eur_per_mw_year`` (default 0, off) /
   ``capacity_market_derating_pct`` (default 100 %) /
   ``capacity_market_year_from`` / ``capacity_market_year_to``

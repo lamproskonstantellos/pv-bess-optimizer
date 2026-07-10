@@ -310,6 +310,9 @@ FINANCIAL_COLORS: dict[str, str] = {
     # Capacity-market payment (Eq. E32) — deep orange, the
     # administered-price counterpart of the amber support band.
     "capacity_market_revenue": "#D84315",  # Material deep orange 800
+    # Revenue levy on gross market turnover (Eq. E33) — a free shade of
+    # the pink deduction family.
+    "revenue_levy":            "#EC407A",  # Material pink 400
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -433,6 +436,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Route-to-market fee",
     "Optimizer floor top-up",
     "Optimizer fee",
+    "Revenue levy",
     "Grid-charging fee",
     "Imbalance cost",
     # Balancing-product subcomponents (FCR / aFRR / mFRR)
@@ -480,6 +484,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Route-to-market fee":              "route_to_market_fee",
     "Optimizer floor top-up":           "optimizer_floor_topup",
     "Optimizer fee":                    "optimizer_fee",
+    "Revenue levy":                     "revenue_levy",
     "Grid-charging fee":                "grid_charging_fee",
     "Imbalance cost":                   "imbalance_cost",
     "FCR":                              "bm_fcr",
@@ -533,6 +538,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Route-to-market fee",
     "Optimizer floor top-up",
     "Optimizer fee",
+    "Revenue levy",
     "Grid-charging fee",
     "Imbalance cost",
 )

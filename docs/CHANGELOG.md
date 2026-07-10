@@ -225,6 +225,26 @@ Production release.
   damping (fixed streams unscaled; piecewise terms recomputed at
   their kinks).
 
+### Added (revenue levy on gross market turnover)
+
+- `revenue_levy_pct` on the economics sheet (default 0, bit-identical
+  when off; validated in [0, 100]): a percentage levy on gross MARKET
+  turnover (Eq. E33) - DAM export revenue gross of the aggregator
+  fee, both balancing legs gross of the BSP fee, and the PPA contract
+  leg (fees never compound; a turnover levy charges gross sales).
+  The 3 % special RES turnover levy applied in Greece is the
+  reference.  Retail/self-consumption savings, the contracted streams
+  (E29-E32) and the imbalance settlement are excluded by
+  construction; a negative total turnover (e.g. a deeply negative CfD
+  difference leg) never yields a rebate (clamp).  Signed
+  `revenue_levy_eur` column inside net_cashflow_eur (E15 amended),
+  revenue-share monthly weights with exact yearly reconciliation,
+  lifetime KPI + conditional SUMMARY row, 'Revenue levy' band (pink
+  400) in all cashflow/revenue stacks, LCOE/LCOS invariance, and the
+  Revenue tornado driver scales it exactly (uniform-scaling base
+  preserves the clamp).  Being inside EBITDA it is automatically
+  deductible from taxable income once the tax layer lands.
+
 ### Added (imbalance settlement exposure)
 
 - `imbalance_enabled` on the simulation sheet (default FALSE,

@@ -615,6 +615,15 @@ def build_yearly_cashflow(
     cm_infl = float(
         econ.get("capacity_market_indexation_pct", 0.0) or 0.0
     ) / 100.0
+    # Revenue levy on gross market turnover (Eq. E33): DAM export
+    # revenue gross of the aggregator fee, both balancing legs gross of
+    # the BSP fee, and the PPA contract leg — a turnover levy charges
+    # gross sales (fees never compound).  Retail/self-consumption
+    # savings, the contracted streams (E29-E32) and the imbalance
+    # settlement are excluded by construction.
+    revenue_levy_frac = max(0.0, min(1.0, float(
+        econ.get("revenue_levy_pct", 0.0) or 0.0
+    ) / 100.0))
 
     # Split the Year-1 revenue base into retail (load-coverage)
     # and DAM (wholesale export) streams.  Retail revenue is indexed by
@@ -859,6 +868,7 @@ def build_yearly_cashflow(
             state_support_y = 0.0
             state_support_clawback_y = 0.0
             capacity_market_rev_y = 0.0
+            revenue_levy_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -1113,6 +1123,21 @@ def build_yearly_cashflow(
             else:
                 state_support_y = 0.0
                 state_support_clawback_y = 0.0
+            # Revenue levy (Eq. E33): lambda x max(0, gross market
+            # turnover).  revenue_dam_y is the pre-aggregator-fee DAM
+            # stream (the E29a toll gating and the post-term PPA
+            # reversion are already inside it), the balancing legs are
+            # gross of the BSP fee, and ppa_y is the invoiced contract
+            # leg.  Clamped: negative turnover (e.g. a deeply negative
+            # CfD difference leg) never yields a rebate.
+            if revenue_levy_frac > 0.0:
+                revenue_levy_y = -revenue_levy_frac * max(
+                    revenue_dam_y + balancing_capacity_y
+                    + balancing_activation_y + ppa_y,
+                    0.0,
+                ) + 0.0
+            else:
+                revenue_levy_y = 0.0
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -1144,6 +1169,7 @@ def build_yearly_cashflow(
             + toll_revenue_y
             + state_support_y + state_support_clawback_y
             + capacity_market_rev_y
+            + revenue_levy_y
             + ppa_y + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -1175,6 +1201,7 @@ def build_yearly_cashflow(
                 "capacity_market_revenue_eur": float(
                     capacity_market_rev_y
                 ),
+                "revenue_levy_eur": float(revenue_levy_y),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -1452,6 +1479,7 @@ def derive_monthly_cashflow(
     has_ss_col = "state_support_eur" in yearly_cf.columns
     has_ss_cb_col = "state_support_clawback_eur" in yearly_cf.columns
     has_cm_col = "capacity_market_revenue_eur" in yearly_cf.columns
+    has_levy_col = "revenue_levy_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
@@ -1512,6 +1540,10 @@ def derive_monthly_cashflow(
         cm_y = (
             float(yearly_indexed.loc[y, "capacity_market_revenue_eur"])
             if has_cm_col else 0.0
+        )
+        levy_y = (
+            float(yearly_indexed.loc[y, "revenue_levy_eur"])
+            if has_levy_col else 0.0
         )
         ppa_y = (
             float(yearly_indexed.loc[y, "ppa_revenue_eur"])
@@ -1590,6 +1622,11 @@ def derive_monthly_cashflow(
             # The capacity payment (Eq. E32) is a level contractual
             # stream: flat 1/12 is exact.
             cm_m = cm_y / 12.0
+            # The revenue levy (Eq. E33) rides the monthly
+            # revenue-share weights (the same market-turnover-shape
+            # approximation as the structural fees; shares sum to one,
+            # so the yearly reconciliation is exact).
+            levy_m = float(fee_share.loc[m]) * levy_y
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
@@ -1605,6 +1642,7 @@ def derive_monthly_cashflow(
                 + toll_m
                 + ss_m + ss_cb_m
                 + cm_m
+                + levy_m
                 + ppa_m + opex_m + capex_m + devex_m
             )
             # End-of-month discounting: month m of year y lands at
@@ -1632,6 +1670,7 @@ def derive_monthly_cashflow(
                     "state_support_eur": float(ss_m),
                     "state_support_clawback_eur": float(ss_cb_m),
                     "capacity_market_revenue_eur": float(cm_m),
+                    "revenue_levy_eur": float(levy_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -1654,6 +1693,7 @@ def derive_monthly_cashflow(
         "toll_revenue_eur",
         "state_support_eur", "state_support_clawback_eur",
         "capacity_market_revenue_eur",
+        "revenue_levy_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
@@ -1677,6 +1717,7 @@ def derive_monthly_cashflow(
                     "toll_revenue_eur",
                     "state_support_eur", "state_support_clawback_eur",
                     "capacity_market_revenue_eur",
+                    "revenue_levy_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
@@ -1863,6 +1904,10 @@ def compute_financial_kpis(
     total_capacity_market_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "capacity_market_revenue_eur"].sum())
         if "capacity_market_revenue_eur" in df.columns else 0.0
+    )
+    total_revenue_levy_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "revenue_levy_eur"].sum())
+        if "revenue_levy_eur" in df.columns else 0.0
     )
     total_balancing_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
@@ -2208,6 +2253,11 @@ def compute_financial_kpis(
         # Capacity-market payment (Eq. E32); SUMMARY-optional.
         "total_capacity_market_revenue_eur_lifecycle": float(round(
             total_capacity_market_revenue_eur_lifecycle, 2,
+        )),
+        # Revenue levy on gross market turnover (Eq. E33); <= 0,
+        # SUMMARY-optional.
+        "total_revenue_levy_eur_lifecycle": float(round(
+            total_revenue_levy_eur_lifecycle, 2,
         )),
         "lifetime_bm_revenue_total_eur": float(round(
             total_balancing_revenue_eur_lifecycle, 2,

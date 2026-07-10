@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E32 (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E33 (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -75,6 +75,7 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `capacity_market_derating_pct` | 100.0 | $\delta$ (duration-based derating class factor) |
 | economics | `capacity_market_year_from`, `capacity_market_year_to` | 1, 0 | capacity-contract window (E25) |
 | economics | `capacity_market_indexation_pct` | 0.0 | $i_{cm}$ (clearing-price escalation) |
+| economics | `revenue_levy_pct` | 0.0 | $\lambda$ (levy on gross market turnover, E33) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
 | economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
 | economics | `gearing_pct`, `debt_interest_rate_pct`, `debt_tenor_years`, `debt_repayment` | 0, 5.0, 15, annuity | debt layer |
@@ -450,7 +451,12 @@ OPEX, replacement CAPEX, and the net cashflow:
 $$O_y = -\left(o^{PV}\,\mathrm{kWp} + o^{B} P^{B}\right)(1+i_{\mathrm{opex}})^{y-1}, \qquad
 C_y = \begin{cases} c^{B} E^{\mathrm{cap}} \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
 
-$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + F^{\mathrm{chg}}_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
+$$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + F^{\mathrm{chg}}_y + L_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
+
+($L_y$ = the E33 revenue levy; every later signed stream column —
+imbalance $I_y$ (E28), toll (E29), floor top-up (E30), support and
+netting (E31/E31a), capacity payment (E32) — joins the same row-wise
+sum, as each section states)
 
 with $V_y$ the DEVEX column (Year 0 only) and Year 0 carrying
 $\mathrm{CF}_0 = \mathrm{CAPEX}_0 + \mathrm{DEVEX}_0$.  Discounted:
@@ -782,6 +788,45 @@ A matrix row is reserved for the Phase-5 sliding-FiP / two-way-CfD
 support scheme × state-support cumulation warning (activated when
 those keys land).
 
+### Revenue levy on gross market turnover (Eq. E33)
+
+A configurable percentage levy on gross **market** turnover — the
+mechanism of the 3 % special RES turnover levy applied in Greece,
+expressed neutrally.  One `economics` key, `revenue_levy_pct`
+(default 0 ⇒ bit-identical, validated in $[0, 100]$).
+
+$$L_y = -\lambda \, \max\!\left(0,\;
+R^{\mathrm{DAM,gross}}_y + R^{\mathrm{bm,cap}}_y +
+R^{\mathrm{bm,act}}_y + R^{\mathrm{PPA}}_y\right), \qquad
+\lambda = \frac{\texttt{revenue\_levy\_pct}}{100}, \qquad L_0 = 0
+\tag{E33}$$
+
+Base conventions: $R^{\mathrm{DAM,gross}}_y$ is the DAM stream
+**before** the E13 aggregator fee and the balancing legs are gross of
+the BSP fee — a turnover levy charges gross sales, and fees never
+compound; the PPA contract leg is invoiced turnover (a CfD difference
+leg can be negative and reduce the base — the clamp stops a negative
+total turnover from ever producing a rebate); the post-term physical
+PPA reversion joins the base through the DAM stream automatically.
+Excluded by construction: the retail/self-consumption stream (avoided
+cost, not invoiced turnover — the route-to-market "sold energy only"
+precedent), the contracted streams E29–E32 (not market turnover; the
+E29a toll gating already removes the tolled merchant legs from the
+base) and the imbalance settlement.  The levy sits inside EBITDA, so
+it is automatically deductible from taxable income once the tax layer
+(E34–E38) lands.
+
+Column `revenue_levy_eur` ($\le 0$) folds into `net_cashflow_eur`
+(E15); monthly it rides the revenue-share weights (the structural-fee
+approximation of the market-turnover shape; shares sum to one so the
+yearly reconciliation is exact).  Sensitivity: the base is a
+uniform-scaling sum of price-driven streams and $f > 0$ preserves the
+clamp ($\max(f\,b, 0) = f\max(b, 0)$), so the levy **scales with the
+Revenue driver** exactly (constant scale); the net recompute folds
+it.  Excluded from LCOE/LCOS; lifetime total renders in SUMMARY.md
+only when set.  Note the levy changes PRE-tax headline KPIs when set —
+deliberate: it is an operating cost, not an income tax.
+
 ### Financial KPIs
 
 $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$
@@ -932,6 +977,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E30)-(E30a) | `build_yearly_cashflow` optimizer fee/top-up pair; `sensitivity._scale_revenue` econ-threaded kink recompute |
 | (E31)-(E31a) | `build_yearly_cashflow` state_support_eur / state_support_clawback_eur pair + repayment-year flag |
 | (E32) | `build_yearly_cashflow` capacity_market_revenue_eur column (computed before the E31a netting) |
+| (E33) | `build_yearly_cashflow` revenue_levy_eur clamp + fee-share monthly allocation |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests
