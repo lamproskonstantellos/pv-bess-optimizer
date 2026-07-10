@@ -301,6 +301,12 @@ FINANCIAL_COLORS: dict[str, str] = {
     # the contracted family, adjacent to the optimizer fee it settles
     # against.
     "optimizer_floor_topup": "#004D40",  # Material teal 900
+    # State support and its two-way netting (Eqs. E31/E31a) — an amber
+    # support band (state-origin, distinct from every market stream)
+    # and a purple signed netting band (clawback below zero,
+    # compensation above).
+    "state_support":          "#FF8F00",  # Material amber 800
+    "state_support_clawback": "#6A1B9A",  # Material purple 800
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -415,6 +421,8 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Export from BESS",
     "PPA revenue",
     "Tolling revenue",
+    "State support",
+    "State-support netting",
     "Grid-charging cost",
     "Energy aggregator fee",
     "Balancing aggregator fee",
@@ -459,6 +467,8 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Export from BESS":                 "export_from_bess",
     "PPA revenue":                      "ppa_revenue",
     "Tolling revenue":                  "toll_revenue",
+    "State support":                    "state_support",
+    "State-support netting":            "state_support_clawback",
     "Grid-charging cost":               "grid_charge_cost",
     "Energy aggregator fee":            "aggregator_fee",
     "Balancing aggregator fee":         "balancing_aggregator_fee",
@@ -497,6 +507,8 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Export from BESS",
     "PPA revenue",
     "Tolling revenue",
+    "State support",
+    "State-support netting",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.

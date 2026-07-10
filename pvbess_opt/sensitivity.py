@@ -172,6 +172,10 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("toll_revenue_eur")
     if "optimizer_floor_topup_eur" in df.columns:
         components.append("optimizer_floor_topup_eur")
+    if "state_support_eur" in df.columns:
+        components.append("state_support_eur")
+    if "state_support_clawback_eur" in df.columns:
+        components.append("state_support_clawback_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -374,6 +378,58 @@ def _scale_revenue(
         df["optimizer_fee_eur"] = fee
         if "optimizer_floor_topup_eur" in df.columns:
             df["optimizer_floor_topup_eur"] = topup
+
+    # State support (Eqs. E31/E31a): the gross support does NOT scale
+    # (fixed EUR/MW), and the two-way netting is recomputed from the
+    # SCALED market-revenue base against the UN-scaled indexed
+    # threshold — the netting is revenue-stabilising, so the Revenue
+    # tornado bars visibly narrow as the share rises (documented in
+    # docs/uncertainty_design.md).  Linear (no clamp), so the recompute
+    # is exact.
+    if (
+        econ is not None
+        and "state_support_clawback_eur" in df.columns
+        and "bess_market_revenue_eur" in df.columns
+    ):
+        ss_share = max(0.0, min(1.0, float(econ.get(
+            "state_support_clawback_share_pct", 0.0,
+        ) or 0.0) / 100.0))
+        ss_rate = max(0.0, float(
+            econ.get("state_support_eur_per_mw_year", 0.0) or 0.0
+        ))
+        if ss_share > 0.0 and ss_rate > 0.0:
+            ss_theta = max(0.0, float(econ.get(
+                "state_support_clawback_threshold_eur_per_mw_year", 0.0,
+            ) or 0.0))
+            ss_bess_kw = max(0.0, float(
+                econ.get("bess_power_kw", 0.0) or 0.0
+            ))
+            ss_infl = float(
+                econ.get("state_support_indexation_pct", 0.0) or 0.0
+            ) / 100.0
+            raw_ss_from = econ.get("state_support_year_from", 1)
+            ss_from = int(1 if raw_ss_from is None else raw_ss_from)
+            raw_ss_to = econ.get("state_support_year_to", 0)
+            ss_to = int(0 if raw_ss_to is None else raw_ss_to)
+            years_ss = df["project_year"].astype(int)
+            n_years_ss = int(years_ss.max())
+            in_window = years_ss.map(
+                lambda y: y >= 1 and _contract_phase(
+                    y, ss_from, ss_to, n_years_ss,
+                )
+            )
+            base = df["bess_market_revenue_eur"].astype(float)
+            if "capacity_market_revenue_eur" in df.columns:
+                base = base + df["capacity_market_revenue_eur"].astype(
+                    float,
+                )
+            theta_y = (
+                ss_theta * (ss_bess_kw / 1000.0)
+                * (1.0 + ss_infl) ** (years_ss - 1)
+            )
+            df["state_support_clawback_eur"] = (
+                -ss_share * (base - theta_y) + 0.0
+            ).where(in_window, 0.0)
 
     # Step 2 — scale the gross and rederive the fee with the SAME frac and the
     # SAME non-negative-gross clamp the base build applies (economics.py:

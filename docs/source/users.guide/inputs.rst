@@ -282,6 +282,24 @@ Sheet ``economics``
   cashflow column (flat 1/12 monthly); excluded from LCOE/LCOS; not
   scaled by the Revenue tornado driver.  See Eqs. E29/E29a in
   ``docs/economics_design.md``.
+* ``state_support_eur_per_mw_year`` (default 0, off) /
+  ``state_support_year_from`` / ``state_support_year_to`` (defaults
+  1 / 0 = end of life) /
+  ``state_support_clawback_threshold_eur_per_mw_year`` (default 0) /
+  ``state_support_clawback_share_pct`` (default 0 %) /
+  ``state_support_indexation_pct`` (default 0): fixed annual state
+  support per MW of BESS power with a TWO-WAY netting against realised
+  market revenue (Eqs. E31/E31a) — the RRF-style settlement of Greek
+  storage-support auctions (Tameio Anakampsis / TAA reference; the
+  mechanism is neutral).  Realised market revenue (the E25a base, plus
+  capacity-market revenue when present) above the threshold is clawed
+  back, below it is compensated, both at the share; no floor — a net
+  repayment year is flagged in the run log.  Surfaces as
+  ``state_support_eur`` (flat 1/12 monthly) and the signed
+  ``state_support_clawback_eur`` (month-12 ex-post booking).  Excluded
+  from LCOE/LCOS; the gross support is not scaled by the Revenue
+  tornado driver while the netting is recomputed against the un-scaled
+  threshold (revenue-stabilising).
 * ``optimizer_floor_enabled`` (default FALSE) /
   ``optimizer_floor_eur_per_kw_year`` (default 0) /
   ``optimizer_term_year_from`` / ``optimizer_term_year_to`` (defaults

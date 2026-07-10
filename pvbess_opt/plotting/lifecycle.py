@@ -280,6 +280,17 @@ def plot_revenue_stack_yearly(
         )
     else:
         floor_topup_arr = np.zeros_like(load_pv)
+    # State support and its signed two-way netting (Eqs. E31/E31a).
+    if "state_support_eur" in op.columns:
+        support_arr = op["state_support_eur"].astype(float).to_numpy()
+    else:
+        support_arr = np.zeros_like(load_pv)
+    if "state_support_clawback_eur" in op.columns:
+        support_net_arr = (
+            op["state_support_clawback_eur"].astype(float).to_numpy()
+        )
+    else:
+        support_net_arr = np.zeros_like(load_pv)
     _toll_treatment = str(
         (econ or {}).get("bess_toll_merchant_treatment", "zeroed")
         or "zeroed"
@@ -372,6 +383,7 @@ def plot_revenue_stack_yearly(
         ppa_arr = op["ppa_revenue_eur"].astype(float).to_numpy()
         ppa_pos = np.clip(ppa_arr, 0.0, None)
         ppa_neg = np.clip(ppa_arr, None, 0.0)
+        ppa_neg_total = ppa_neg
         drew_ppa_label = False
         if np.any(ppa_pos > 1e-9):
             ax.bar(
@@ -457,6 +469,37 @@ def plot_revenue_stack_yearly(
             label="Optimizer floor top-up",
         )
         bottoms = bottoms + floor_topup_arr
+    if np.any(np.abs(support_arr) > 1e-9):
+        ax.bar(
+            years, support_arr, bottom=bottoms,
+            color=financial_color("State support"),
+            edgecolor="black", linewidth=0.4,
+            label="State support",
+        )
+        bottoms = bottoms + support_arr
+    if np.any(np.abs(support_net_arr) > 1e-9):
+        # Signed netting (Eq. E31a): compensation years stack with the
+        # revenue components, clawback years below the fee stack (and
+        # below any negative CfD PPA leg) — element-wise side
+        # assignment, one band.
+        if "ppa_revenue_eur" in op.columns:
+            _ppa_neg_part = ppa_neg_total
+        else:
+            _ppa_neg_part = np.zeros_like(load_pv)
+        _neg_stack_base = (
+            cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
+            + gcf_fee + imb_cost + _ppa_neg_part
+        )
+        ax.bar(
+            years, support_net_arr,
+            bottom=np.where(
+                support_net_arr >= 0.0, bottoms, _neg_stack_base,
+            ),
+            color=financial_color("State-support netting"),
+            edgecolor="black", linewidth=0.4,
+            label="State-support netting",
+        )
+        bottoms = bottoms + np.clip(support_net_arr, 0.0, None)
 
     net = (op["revenue_eur"].astype(float)).to_numpy()
     if "balancing_revenue_eur" in op.columns:
@@ -466,7 +509,7 @@ def plot_revenue_stack_yearly(
     # structural fees enter the yearly net the same way (their columns are
     # not folded into revenue_eur), so the line steps down by them too.
     net = net + bal_agg_fee + rtm_fee + opt_fee + gcf_fee + imb_cost
-    net = net + toll_arr + floor_topup_arr
+    net = net + toll_arr + floor_topup_arr + support_arr + support_net_arr
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The

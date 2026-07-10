@@ -213,10 +213,11 @@ def plot_cumulative_cashflow(
 def _optional_revenue_streams(
     yearly_cf: pd.DataFrame,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-           np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+           np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+           np.ndarray]:
     """Return the (balancing, balancing-fee, ppa, rtm-fee, optimizer-fee,
-    grid-charging-fee, imbalance-cost, toll-revenue, floor-top-up)
-    yearly columns.
+    grid-charging-fee, imbalance-cost, toll-revenue, floor-top-up,
+    state-support, state-support-netting) yearly columns.
 
     Missing or all-zero columns come back as zero arrays so callers can
     stack them unconditionally; all-zero streams draw nothing.
@@ -228,6 +229,7 @@ def _optional_revenue_streams(
         "ppa_revenue_eur", "route_to_market_fee_eur", "optimizer_fee_eur",
         "grid_charging_fee_eur", "imbalance_cost_eur",
         "toll_revenue_eur", "optimizer_floor_topup_eur",
+        "state_support_eur", "state_support_clawback_eur",
     ):
         if col in yearly_cf.columns:
             out.append(yearly_cf[col].to_numpy(dtype=float))
@@ -235,7 +237,7 @@ def _optional_revenue_streams(
             out.append(np.zeros(n, dtype=float))
     return (
         out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
-        out[8],
+        out[8], out[9], out[10],
     )
 
 
@@ -256,6 +258,8 @@ def _stack_cashflow_bars(
     imb_cost: np.ndarray | None = None,
     toll: np.ndarray | None = None,
     floor_topup: np.ndarray | None = None,
+    support: np.ndarray | None = None,
+    support_net: np.ndarray | None = None,
 ) -> None:
     """Draw the shared cashflow bar stack (yearly bars / NPV waterfall).
 
@@ -290,6 +294,11 @@ def _stack_cashflow_bars(
                edgecolor="black", linewidth=0.4,
                label="Optimizer floor top-up")
         pos_bottom = pos_bottom + np.clip(floor_topup, 0.0, None)
+    if support is not None and np.any(np.abs(support) > 1e-9):
+        ax.bar(years, support, width=width, bottom=pos_bottom,
+               color=financial_color("State support"),
+               edgecolor="black", linewidth=0.4, label="State support")
+        pos_bottom = pos_bottom + np.clip(support, 0.0, None)
     ax.bar(years, opex, width=width, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
     # Stack EVERY negative segment: the balancing fee below OPEX, DEVEX
@@ -333,6 +342,17 @@ def _stack_cashflow_bars(
                edgecolor="black", linewidth=0.4,
                label="Imbalance cost")
         neg_bottom = neg_bottom + imb_cost
+    if support_net is not None and np.any(np.abs(support_net) > 1e-9):
+        # The two-way netting (Eq. E31a) is signed per year: clawback
+        # years stack on the deduction side, compensation years on the
+        # revenue side — one band, element-wise bottoms.
+        ax.bar(years, support_net, width=width,
+               bottom=np.where(support_net >= 0.0, pos_bottom, neg_bottom),
+               color=financial_color("State-support netting"),
+               edgecolor="black", linewidth=0.4,
+               label="State-support netting")
+        pos_bottom = pos_bottom + np.clip(support_net, 0.0, None)
+        neg_bottom = neg_bottom + np.clip(support_net, None, 0.0)
     ax.bar(years, devex, width=width, bottom=neg_bottom,
            color=financial_color("DEVEX"),
            edgecolor="black", linewidth=0.4, label="DEVEX")
@@ -356,7 +376,9 @@ def plot_yearly_cashflow_bars(
     years = _calendar_axis(yearly_cf)
     revenue = yearly_cf["revenue_eur"].to_numpy(dtype=float)
     (balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost,
-     toll, floor_topup) = _optional_revenue_streams(yearly_cf)
+     toll, floor_topup, support, support_net) = (
+        _optional_revenue_streams(yearly_cf)
+    )
     opex = yearly_cf["opex_eur"].to_numpy(dtype=float)  # negative
     if "devex_eur" in yearly_cf.columns:
         devex = yearly_cf["devex_eur"].to_numpy(dtype=float)  # negative
@@ -371,6 +393,7 @@ def plot_yearly_cashflow_bars(
     _stack_cashflow_bars(
         ax, years, width, revenue, balancing, ppa, opex, devex, capex,
         bal_fee, rtm_fee, opt_fee, gcf_fee, imb_cost, toll, floor_topup,
+        support, support_net,
     )
     ax.plot(years, net, color=financial_color("Net cash-flow"), linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
@@ -417,7 +440,9 @@ def plot_npv_waterfall(
     disc_factor = yearly_cf["discount_factor"].astype(float).to_numpy()
     revenue_disc = yearly_cf["revenue_eur"].astype(float).to_numpy() * disc_factor
     (balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost,
-     toll, floor_topup) = _optional_revenue_streams(yearly_cf)
+     toll, floor_topup, support, support_net) = (
+        _optional_revenue_streams(yearly_cf)
+    )
     balancing_disc = balancing * disc_factor
     bal_fee_disc = bal_fee * disc_factor
     ppa_disc = ppa * disc_factor
@@ -427,6 +452,8 @@ def plot_npv_waterfall(
     imb_cost_disc = imb_cost * disc_factor
     toll_disc = toll * disc_factor
     floor_topup_disc = floor_topup * disc_factor
+    support_disc = support * disc_factor
+    support_net_disc = support_net * disc_factor
     opex_disc = yearly_cf["opex_eur"].astype(float).to_numpy() * disc_factor
     if "devex_eur" in yearly_cf.columns:
         devex_disc = (
@@ -448,7 +475,7 @@ def plot_npv_waterfall(
         ax, years, width, revenue_disc, balancing_disc, ppa_disc,
         opex_disc, devex_disc, capex_disc, bal_fee_disc,
         rtm_fee_disc, opt_fee_disc, gcf_fee_disc, imb_cost_disc,
-        toll_disc, floor_topup_disc,
+        toll_disc, floor_topup_disc, support_disc, support_net_disc,
     )
 
     ax.plot(
@@ -622,6 +649,16 @@ def plot_monthly_cashflow_year1(
         )
     else:
         floor_topup = np.zeros_like(revenue)
+    if "state_support_eur" in sub.columns:
+        support = sub["state_support_eur"].astype(float).to_numpy()
+    else:
+        support = np.zeros_like(revenue)
+    if "state_support_clawback_eur" in sub.columns:
+        support_net = (
+            sub["state_support_clawback_eur"].astype(float).to_numpy()
+        )
+    else:
+        support_net = np.zeros_like(revenue)
     if "devex_eur" in sub.columns:
         devex = sub["devex_eur"].astype(float).to_numpy()
     else:
@@ -658,6 +695,11 @@ def plot_monthly_cashflow_year1(
                edgecolor="black", linewidth=0.4,
                label="Optimizer floor top-up")
         pos_bottom = pos_bottom + np.clip(floor_topup, 0.0, None)
+    if np.any(np.abs(support) > 1e-9):
+        ax.bar(months, support, bottom=pos_bottom,
+               color=financial_color("State support"),
+               edgecolor="black", linewidth=0.4, label="State support")
+        pos_bottom = pos_bottom + np.clip(support, 0.0, None)
     ax.bar(months, opex, color=financial_color("OPEX"),
            edgecolor="black", linewidth=0.4, label="OPEX")
     neg_bottom = opex.copy()
@@ -696,6 +738,18 @@ def plot_monthly_cashflow_year1(
                edgecolor="black", linewidth=0.4,
                label="Imbalance cost")
         neg_bottom = neg_bottom + imb_cost
+    if np.any(np.abs(support_net) > 1e-9):
+        # Signed netting (Eq. E31a): element-wise side assignment, one
+        # band (the month-12 booking makes it a single-month bar).
+        ax.bar(months, support_net,
+               bottom=np.where(
+                   support_net >= 0.0, pos_bottom, neg_bottom,
+               ),
+               color=financial_color("State-support netting"),
+               edgecolor="black", linewidth=0.4,
+               label="State-support netting")
+        pos_bottom = pos_bottom + np.clip(support_net, 0.0, None)
+        neg_bottom = neg_bottom + np.clip(support_net, None, 0.0)
     if np.any(np.abs(devex) > 1e-9):
         ax.bar(months, devex, bottom=neg_bottom,
                color=financial_color("DEVEX"),

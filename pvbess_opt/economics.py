@@ -579,6 +579,26 @@ def build_yearly_cashflow(
     # availability-scaled, flat nominal (no capacity-fade scaling and
     # no indexation — the floor is a contractual level).
     optimizer_floor_level = optimizer_floor_rate * bess_kw * contract_avail
+    # State support with two-way clawback (Eqs. E31/E31a): a fixed
+    # EUR/MW/yr support (availability-scaled, no fade) netted two-way
+    # against realised market revenue relative to an indexed threshold.
+    ss_rate = max(0.0, float(
+        econ.get("state_support_eur_per_mw_year", 0.0) or 0.0
+    ))
+    _raw_ss_from = econ.get("state_support_year_from", 1)
+    ss_year_from = int(1 if _raw_ss_from is None else _raw_ss_from)
+    _raw_ss_to = econ.get("state_support_year_to", 0)
+    ss_year_to = int(0 if _raw_ss_to is None else _raw_ss_to)
+    ss_threshold = max(0.0, float(econ.get(
+        "state_support_clawback_threshold_eur_per_mw_year", 0.0,
+    ) or 0.0))
+    ss_share_frac = max(0.0, min(1.0, float(econ.get(
+        "state_support_clawback_share_pct", 0.0,
+    ) or 0.0) / 100.0))
+    ss_infl = float(
+        econ.get("state_support_indexation_pct", 0.0) or 0.0
+    ) / 100.0
+    _ss_repayment_years: list[int] = []
 
     # Split the Year-1 revenue base into retail (load-coverage)
     # and DAM (wholesale export) streams.  Retail revenue is indexed by
@@ -820,6 +840,8 @@ def build_yearly_cashflow(
             ppa_y = 0.0
             bess_market_rev_y = 0.0
             toll_revenue_y = 0.0
+            state_support_y = 0.0
+            state_support_clawback_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -1029,6 +1051,36 @@ def build_yearly_cashflow(
                 + balancing_capacity_y + balancing_activation_y
                 + balancing_aggregator_fee_y
             )
+            # State support (Eq. E31) and the two-way netting
+            # (Eq. E31a): the gross support is availability-conditioned
+            # on the power block (no fade), and the netting settles the
+            # realised market revenue (the E25a base) against the
+            # indexed threshold — clawback above it, compensation below
+            # it, both at the same share.  No floor is applied: a year
+            # whose netted support turns negative is a net repayment
+            # (collected and flagged once after the loop).
+            _ss_in_phase = ss_rate > 0.0 and _contract_phase(
+                y, ss_year_from, ss_year_to, n_years,
+            )
+            if _ss_in_phase:
+                _ss_g = (1.0 + ss_infl) ** (y - 1)
+                state_support_y = (
+                    ss_rate * (bess_kw / 1000.0) * contract_avail * _ss_g
+                )
+                if ss_share_frac > 0.0:
+                    _ss_theta_y = (
+                        ss_threshold * (bess_kw / 1000.0) * _ss_g
+                    )
+                    state_support_clawback_y = -ss_share_frac * (
+                        bess_market_rev_y - _ss_theta_y
+                    ) + 0.0
+                else:
+                    state_support_clawback_y = 0.0
+                if state_support_y + state_support_clawback_y < 0.0:
+                    _ss_repayment_years.append(int(y))
+            else:
+                state_support_y = 0.0
+                state_support_clawback_y = 0.0
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -1058,6 +1110,7 @@ def build_yearly_cashflow(
             + optimizer_floor_topup_y
             + grid_charging_fee_y + imbalance_cost_y
             + toll_revenue_y
+            + state_support_y + state_support_clawback_y
             + ppa_y + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -1082,6 +1135,10 @@ def build_yearly_cashflow(
                 "balancing_aggregator_fee_eur": float(balancing_aggregator_fee_y),
                 "bess_market_revenue_eur": float(bess_market_rev_y),
                 "toll_revenue_eur": float(toll_revenue_y),
+                "state_support_eur": float(state_support_y),
+                "state_support_clawback_eur": float(
+                    state_support_clawback_y
+                ),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -1090,6 +1147,16 @@ def build_yearly_cashflow(
                 "discount_factor": float(discount_factor),
                 "discounted_cf_eur": float(net_cf * discount_factor),
             }
+        )
+
+    if _ss_repayment_years:
+        logger.warning(
+            "[state support] The two-way netting turns the combined "
+            "support negative (a net repayment) in project year(s) %s "
+            "— realised market revenue exceeded the threshold by more "
+            "than the support level; no floor is applied by design "
+            "(Eq. E31a).",
+            _ss_repayment_years,
         )
 
     df = pd.DataFrame(rows)
@@ -1346,6 +1413,8 @@ def derive_monthly_cashflow(
     has_imb_col = "imbalance_cost_eur" in yearly_cf.columns
     has_toll_col = "toll_revenue_eur" in yearly_cf.columns
     has_topup_col = "optimizer_floor_topup_eur" in yearly_cf.columns
+    has_ss_col = "state_support_eur" in yearly_cf.columns
+    has_ss_cb_col = "state_support_clawback_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
@@ -1394,6 +1463,14 @@ def derive_monthly_cashflow(
         topup_y = (
             float(yearly_indexed.loc[y, "optimizer_floor_topup_eur"])
             if has_topup_col else 0.0
+        )
+        ss_y = (
+            float(yearly_indexed.loc[y, "state_support_eur"])
+            if has_ss_col else 0.0
+        )
+        ss_cb_y = (
+            float(yearly_indexed.loc[y, "state_support_clawback_eur"])
+            if has_ss_cb_col else 0.0
         )
         ppa_y = (
             float(yearly_indexed.loc[y, "ppa_revenue_eur"])
@@ -1464,6 +1541,11 @@ def derive_monthly_cashflow(
             # month 12 — the replacement-CAPEX convention, keeping the
             # monthly and yearly DCFs in exact agreement on the event.
             topup_m = topup_y if m == 12 else 0.0
+            # State support (Eq. E31) is a level payment (flat 1/12);
+            # its two-way netting (Eq. E31a) settles ex post against
+            # the year's realised revenue, so it books in month 12.
+            ss_m = ss_y / 12.0
+            ss_cb_m = ss_cb_y if m == 12 else 0.0
             # Investment events (BESS replacement CAPEX, any operating-
             # year DEVEX) book in month 12 so the monthly DCF carries
             # the yearly end-of-year discount factor for them exactly.
@@ -1477,6 +1559,7 @@ def derive_monthly_cashflow(
                 + topup_m
                 + gcf_fee_m + imb_m
                 + toll_m
+                + ss_m + ss_cb_m
                 + ppa_m + opex_m + capex_m + devex_m
             )
             # End-of-month discounting: month m of year y lands at
@@ -1501,6 +1584,8 @@ def derive_monthly_cashflow(
                     "grid_charging_fee_eur": float(gcf_fee_m),
                     "imbalance_cost_eur": float(imb_m),
                     "toll_revenue_eur": float(toll_m),
+                    "state_support_eur": float(ss_m),
+                    "state_support_clawback_eur": float(ss_cb_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -1521,6 +1606,7 @@ def derive_monthly_cashflow(
         "optimizer_floor_topup_eur",
         "grid_charging_fee_eur", "imbalance_cost_eur",
         "toll_revenue_eur",
+        "state_support_eur", "state_support_clawback_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
@@ -1542,6 +1628,7 @@ def derive_monthly_cashflow(
                     "optimizer_floor_topup_eur",
                     "grid_charging_fee_eur", "imbalance_cost_eur",
                     "toll_revenue_eur",
+                    "state_support_eur", "state_support_clawback_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
@@ -1716,6 +1803,14 @@ def compute_financial_kpis(
     total_optimizer_floor_topup_eur_lifecycle = (
         float(df.loc[after_y0_mask, "optimizer_floor_topup_eur"].sum())
         if "optimizer_floor_topup_eur" in df.columns else 0.0
+    )
+    total_state_support_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "state_support_eur"].sum())
+        if "state_support_eur" in df.columns else 0.0
+    )
+    total_state_support_clawback_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "state_support_clawback_eur"].sum())
+        if "state_support_clawback_eur" in df.columns else 0.0
     )
     total_balancing_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "balancing_revenue_eur"].sum())
@@ -2049,6 +2144,14 @@ def compute_financial_kpis(
         # Optimizer floor guarantee (Eq. E30); >= 0, SUMMARY-optional.
         "total_optimizer_floor_topup_eur_lifecycle": float(round(
             total_optimizer_floor_topup_eur_lifecycle, 2,
+        )),
+        # State support and its two-way netting (Eqs. E31/E31a);
+        # SUMMARY-optional, the netting total is signed.
+        "total_state_support_eur_lifecycle": float(round(
+            total_state_support_eur_lifecycle, 2,
+        )),
+        "total_state_support_clawback_eur_lifecycle": float(round(
+            total_state_support_clawback_eur_lifecycle, 2,
         )),
         "lifetime_bm_revenue_total_eur": float(round(
             total_balancing_revenue_eur_lifecycle, 2,

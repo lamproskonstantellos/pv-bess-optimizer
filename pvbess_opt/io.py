@@ -246,6 +246,17 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "bess_toll_year_to": 0,
     "bess_toll_merchant_treatment": "zeroed",
     "bess_toll_indexation_pct": 0.0,
+    # State support with two-way clawback (Eqs. E31/E31a): a fixed
+    # EUR/MW/yr support netted two-way against realised market revenue
+    # relative to a threshold (RRF-style storage support; the Greek
+    # Tameio Anakampsis / TAA auctions are the reference mechanism).
+    # Default-off (rate 0) so existing results stay bit-identical.
+    "state_support_eur_per_mw_year": 0.0,
+    "state_support_year_from": 1,
+    "state_support_year_to": 0,
+    "state_support_clawback_threshold_eur_per_mw_year": 0.0,
+    "state_support_clawback_share_pct": 0.0,
+    "state_support_indexation_pct": 0.0,
     "benchmark_lcoe_low_eur_per_mwh": BENCHMARK_LCOE_LOW_EUR_PER_MWH,
     "benchmark_lcoe_high_eur_per_mwh": BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     "benchmark_lcos_low_eur_per_mwh": BENCHMARK_LCOS_LOW_EUR_PER_MWH,
@@ -435,6 +446,8 @@ _INT_KEYS: frozenset[str] = frozenset({
     "bess_toll_year_to",
     "optimizer_term_year_from",
     "optimizer_term_year_to",
+    "state_support_year_from",
+    "state_support_year_to",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -762,6 +775,35 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("bess_toll_indexation_pct", 0.0, "%/yr",
      "Annual escalation of the toll rate ((1+i)^(y-1) convention, "
      "Eq. E2). Default 0 = flat nominal."),
+    ("state_support_eur_per_mw_year", 0.0, "EUR/MW/yr",
+     "Fixed annual state support per MW of BESS power (RRF-style "
+     "storage support; the Tameio Anakampsis / TAA auctions are the "
+     "Greek reference - a neutral mechanism applicable to any "
+     "fixed-support scheme). 0 = off (default). Availability-scaled "
+     "(x A); no capacity-fade scaling. Surfaces as state_support_eur. "
+     "Excluded from LCOE/LCOS."),
+    ("state_support_year_from", 1, "year",
+     "First project year of the support window (inclusive)."),
+    ("state_support_year_to", 0, "year",
+     "Last project year of the support window (inclusive); 0 = end of "
+     "life. Typical schemes run 10 years."),
+    ("state_support_clawback_threshold_eur_per_mw_year", 0.0,
+     "EUR/MW/yr",
+     "Reference market-revenue level theta for the two-way netting: "
+     "realised BESS market revenue per MW above theta is clawed back, "
+     "below theta is compensated, both at "
+     "state_support_clawback_share_pct. Inactive while the share is "
+     "0."),
+    ("state_support_clawback_share_pct", 0.0, "%",
+     "Share of the (market revenue - threshold) difference netted "
+     "against the support, both directions (two-way). 0 (default) = "
+     "pure fixed support, no netting; 100 = full two-way settlement. "
+     "The netted support can turn a year's combined support negative "
+     "(a net repayment) - no floor is applied; the run log flags any "
+     "such year."),
+    ("state_support_indexation_pct", 0.0, "%/yr",
+     "Annual escalation of the support level AND the threshold "
+     "((1+i)^(y-1), Eq. E2). Default 0 = flat nominal."),
     ("benchmark_lcoe_low_eur_per_mwh", BENCHMARK_LCOE_LOW_EUR_PER_MWH, "EUR/MWh",
      "Lower edge of the Lazard 2024 utility-scale PV LCOE band "
      "(EUR-equivalent at ~1.08 EUR/USD). Overrideable per project."),
@@ -2509,7 +2551,8 @@ def validate_workbook_params(
     # share this range.
     for fee_key in ("aggregator_fee_pct_revenue",
                     "balancing_aggregator_fee_pct_revenue",
-                    "optimizer_revenue_share_pct"):
+                    "optimizer_revenue_share_pct",
+                    "state_support_clawback_share_pct"):
         if fee_key not in economics:
             continue
         fee_val = float(economics.get(fee_key, 0.0) or 0.0)
@@ -2636,6 +2679,33 @@ def validate_workbook_params(
                 "the margin in overlap years, forcing a full floor "
                 "top-up every year — double-charging the "
                 "counterparties.",
+            )
+
+    # State support with two-way clawback (Eqs. E31/E31a): non-negative
+    # levels over a valid support window; the netting share shares the
+    # fee [0, 100] range check above.
+    _require_non_negative(economics, "state_support_eur_per_mw_year")
+    _require_non_negative(
+        economics, "state_support_clawback_threshold_eur_per_mw_year",
+    )
+    _require_non_negative(economics, "state_support_indexation_pct")
+    _ss_window = _validate_phase_window("state_support")
+    _ss_rate = float(
+        economics.get("state_support_eur_per_mw_year", 0.0) or 0.0
+    )
+    if _ss_rate > 0.0 and _toll_rate > 0.0 and _toll_treatment == "zeroed":
+        _n_years_ss = int(project.get("project_lifecycle_years", 20) or 20)
+        _toll_to_ss = (
+            _n_years_ss if _toll_window[1] == 0 else _toll_window[1]
+        )
+        _ss_to = _n_years_ss if _ss_window[1] == 0 else _ss_window[1]
+        if _toll_window[0] <= _ss_to and _ss_window[0] <= _toll_to_ss:
+            logger.warning(
+                "A state-support window overlaps a 'zeroed' BESS toll "
+                "window: realised market revenue is zero in toll "
+                "years, so the two-way netting tops the support up to "
+                "the threshold every overlap year — cumulating two "
+                "capacity payments for the same MW.",
             )
 
     # Grid-emissions accounting (24/7-CFE): a non-negative intensity and a
@@ -3261,6 +3331,9 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_toll_revenue_eur_lifecycle", "Lifetime tolling revenue [EUR]"),
     ("total_optimizer_floor_topup_eur_lifecycle",
      "Lifetime optimizer floor top-up [EUR]"),
+    ("total_state_support_eur_lifecycle", "Lifetime state support [EUR]"),
+    ("total_state_support_clawback_eur_lifecycle",
+     "Lifetime state-support netting [EUR]"),
 )
 
 # Rolling-horizon / benchmark digest: rendered only when the

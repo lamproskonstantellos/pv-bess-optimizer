@@ -166,6 +166,27 @@ Production release.
   'zeroed' toll window overlapping the optimizer term warns (full
   floor top-up every overlap year).
 
+### Added (state support with two-way clawback)
+
+- `state_support_eur_per_mw_year` + window / threshold / share /
+  indexation keys on the economics sheet (default 0, bit-identical
+  when off): RRF-style fixed storage support with the TWO-WAY netting
+  used by Greek storage-support auctions (Tameio Anakampsis / TAA
+  reference; neutral mechanism) — Eqs. E31/E31a.  Availability-scaled
+  support on the power block; the netting settles realised market
+  revenue (the E25a base, plus capacity-market revenue when present)
+  against an indexed threshold, both directions at the same share, no
+  floor (net-repayment years are flagged once in the run log).  Two
+  cashflow columns: `state_support_eur` (flat 1/12 monthly) and the
+  signed `state_support_clawback_eur` (month-12 ex-post booking), both
+  in the net, with SUMMARY-optional lifetime totals, 'State support' /
+  'State-support netting' figure bands (amber / purple, the netting
+  band element-wise signed), LCOE/LCOS invariance and an
+  exactly-recomputed Revenue-tornado netting (scaled base vs un-scaled
+  threshold - revenue-stabilising).  Stacking warning: support window
+  overlapping a 'zeroed' toll (the netting tops up to the threshold
+  every overlap year - two capacity payments for the same MW).
+
 ### Added (imbalance settlement exposure)
 
 - `imbalance_enabled` on the simulation sheet (default FALSE,

@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E30a (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E31a (+ suffixed E8a, E13a-E13d) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -66,6 +66,11 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `optimizer_floor_eur_per_kw_year` | 0.0 | $F$ (guaranteed floor per kW of BESS power) |
 | economics | `optimizer_term_year_from`, `optimizer_term_year_to` | 1, 0 | optimizer term window (E25; default whole life) |
 | economics | `optimizer_margin_basis` | dam | E30a margin base (`dam` \| `dam_plus_balancing`) |
+| economics | `state_support_eur_per_mw_year` | 0.0 | $\sigma$ (fixed support per MW; RRF-style, Tameio Anakampsis / TAA reference) |
+| economics | `state_support_year_from`, `state_support_year_to` | 1, 0 | support window (E25; 0 = end of life) |
+| economics | `state_support_clawback_threshold_eur_per_mw_year` | 0.0 | $\theta$ (two-way netting reference level per MW) |
+| economics | `state_support_clawback_share_pct` | 0.0 | $c$ (share of the difference netted, both directions) |
+| economics | `state_support_indexation_pct` | 0.0 | $i_s$ (escalates support AND threshold) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
 | economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
 | economics | `gearing_pct`, `debt_interest_rate_pct`, `debt_tenor_years`, `debt_repayment` | 0, 5.0, 15, annuity | debt layer |
@@ -655,6 +660,52 @@ Stacking: a `zeroed` toll window overlapping the optimizer term warns
 — the toll zeroes the margin, forcing a full floor top-up every
 overlap year.
 
+### State support with two-way clawback (Eqs. E31/E31a)
+
+A fixed annual support per MW of BESS power over a support window,
+with a TWO-WAY netting against realised market revenue relative to a
+threshold — the settlement form used by storage-support auctions
+funded through the Recovery and Resilience Facility (the Greek Tameio
+Anakampsis kai Anthektikotitas / TAA auctions are the reference; the
+mechanism here is neutral and jurisdiction-agnostic).  Six `economics`
+keys, all default-off (`state_support_eur_per_mw_year = 0` ⇒
+bit-identical).
+
+$$S_y = \sigma \cdot \frac{P^{B}}{1000} \cdot A \cdot
+(1+i_s)^{\,y-1} \cdot \chi_y\!\left(y_f^{s}, y_t^{s}\right) \tag{E31}$$
+
+— availability-conditioned on the power block (the E29 convention), no
+$f^{B}$ fade (support is per installed MW).  The two-way netting:
+
+$$\mathrm{CB}_y = -c\,\left(M^{\mathrm{mkt}}_y - \theta_y\right)\chi_y,
+\qquad \theta_y = \theta \cdot \frac{P^{B}}{1000}\,(1+i_s)^{\,y-1},
+\qquad c = \frac{\texttt{share\_pct}}{100} \tag{E31a}$$
+
+with $M^{\mathrm{mkt}}_y$ the realised market revenue: the E25a base
+(plus the capacity-market revenue E32 when present — market-facing
+capacity income counts as realised revenue for the netting).
+$\mathrm{CB}_y < 0$ (clawback) when realised market revenue exceeds
+the threshold, $\mathrm{CB}_y > 0$ (compensation) when it falls short;
+$S_y + \mathrm{CB}_y$ may turn negative — a **net repayment year**, no
+floor is applied by design, and the run log flags the affected years
+once.  PPA, self-consumption savings and toll revenue are excluded
+from the netting base by construction (they are not market revenue);
+under a `zeroed` toll the base is zero, so the netting tops up to
+$\theta_y$ every overlap year — the warned two-capacity-payments
+stacking case.
+
+Columns: `state_support_eur` ($\ge 0$, flat $1/12$ monthly — a level
+payment) and the signed `state_support_clawback_eur` (month-12 booking
+— annual ex-post settlement).  Both fold into `net_cashflow_eur`, are
+excluded from LCOE/LCOS, and carry SUMMARY-optional lifetime totals.
+Sensitivity: the gross support does NOT scale with the Revenue driver
+(fixed EUR/MW); the netting is recomputed (linear, exact) from the
+scaled market base against the UN-scaled threshold — the netting is
+revenue-stabilising, so Revenue-tornado bars narrow as the share
+rises, reaching full stabilisation of the market component at
+$c = 1$.  The clawback reads the deterministic analytic projection;
+per-seed Monte Carlo netting is out of scope (stated limitation).
+
 ### Financial KPIs
 
 $$\mathrm{NPV} = \sum_{y=0}^{Y} \mathrm{DCF}_y \tag{E16}$$
@@ -803,6 +854,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E28)-(E28a) | `build_yearly_cashflow` imbalance_cost_eur column + PV-shape monthly allocation |
 | (E29)-(E29a) | `build_yearly_cashflow` toll_revenue_eur column + per-year merchant gating |
 | (E30)-(E30a) | `build_yearly_cashflow` optimizer fee/top-up pair; `sensitivity._scale_revenue` econ-threaded kink recompute |
+| (E31)-(E31a) | `build_yearly_cashflow` state_support_eur / state_support_clawback_eur pair + repayment-year flag |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests
