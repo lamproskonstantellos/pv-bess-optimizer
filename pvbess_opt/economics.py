@@ -1060,6 +1060,10 @@ def build_yearly_cashflow(
     # settlement the covered volume's DAM value then rejoins the DAM
     # revenue stream (market revenue: the aggregator fee applies to it).
     ppa_enabled = bool(econ.get("ppa_enabled", False))
+    ppa_structure = (
+        str(econ.get("ppa_structure", "pay_as_produced") or "pay_as_produced")
+        .strip().lower()
+    )
     ppa_settlement = (
         str(econ.get("ppa_settlement", "physical") or "physical")
         .strip().lower()
@@ -1197,19 +1201,32 @@ def build_yearly_cashflow(
             # physical reversion of the covered volume to the DAM
             # stream (where the fee below applies to it).
             if ppa_enabled and y <= ppa_term:
-                strike_leg = (
-                    ppa_strike_value_1 * pv_factor
-                    * (1.0 + ppa_infl) ** (y - 1)
-                )
-                if ppa_settlement == "cfd":
-                    ppa_y = strike_leg - (
-                        ppa_covered_dam_1 * pv_factor * g_dam[y - 1]
+                if ppa_structure == "baseload":
+                    # Baseload stream (Eq. E45): NO PV fade on either
+                    # leg — the contract volume is fixed, not
+                    # PV-degrading — and no post-term reversion
+                    # (cfd-only: nothing was sleeved).
+                    strike_leg = (
+                        ppa_strike_value_1 * (1.0 + ppa_infl) ** (y - 1)
                     )
+                    ppa_y = strike_leg - ppa_covered_dam_1 * g_dam[y - 1]
                 else:
-                    ppa_y = strike_leg
+                    strike_leg = (
+                        ppa_strike_value_1 * pv_factor
+                        * (1.0 + ppa_infl) ** (y - 1)
+                    )
+                    if ppa_settlement == "cfd":
+                        ppa_y = strike_leg - (
+                            ppa_covered_dam_1 * pv_factor * g_dam[y - 1]
+                        )
+                    else:
+                        ppa_y = strike_leg
             else:
                 ppa_y = 0.0
-                if ppa_enabled and ppa_settlement != "cfd":
+                if (
+                    ppa_enabled and ppa_settlement != "cfd"
+                    and ppa_structure != "baseload"
+                ):
                     revenue_dam_y += (
                         ppa_covered_dam_1 * pv_factor * g_dam[y - 1]
                     )

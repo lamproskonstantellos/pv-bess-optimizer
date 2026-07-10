@@ -16,9 +16,9 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E44 (+ suffixed E8a, E13a-E13d, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E45 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
-| P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
+| P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
 | B | (reserved) | balancing product structure | — |
 | I | (reserved) | intraday venue | — |
@@ -310,6 +310,21 @@ where $S_1$ is the Year-1 strike-leg value: `revenue_pv_ppa_eur`
 under physical settlement, `revenue_pv_ppa_eur` +
 `ppa_covered_dam_value_eur` under CfD (reconstructing strike × covered
 from the two-way difference leg).
+
+Baseload structure (`ppa_structure = 'baseload'`; Eqs. P9-P11 in
+`docs/ppa_design.md`): the contract volume is a FIXED band, not a
+PV-degrading share, so the stream drops the fade factor on **both**
+legs and has **no** post-term reversion (cfd-only — nothing was
+sleeved):
+
+$$R^{\mathrm{PPA,bl}}_y = S_1 (1+i_{\mathrm{PPA}})^{y-1}
+- V^{\mathrm{cov}}_1 (1+i_{\mathrm{DAM}})^{y-1}
+\quad (1 \le y \le T^{\mathrm{PPA}};\; 0 \text{ otherwise}) \tag{E45}$$
+
+The same production-decoupled classification holds everywhere the
+pay-as-produced leg rides PV: the availability derate skips the two
+PPA keys for baseload and the lifetime frame excludes them from the
+$f^{PV}$ scaling (each with its own lock test).
 
 The energy-aggregator fee is applied **once**, to the gross DAM +
 retail revenue only, and is clamped so a negative gross never flips
@@ -1248,6 +1263,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E41)-(E42) | `economics.size_debt` closed-form debt capacity per repayment profile |
 | (E43) | `economics.size_debt` outlay cap + `resolve_debt_sizing` frozen-debt resolution; sizing KPI family in `compute_financial_kpis` |
 | (E44) | `lender.apply_production_case` per-column haircut + `lender.build_lender_cases` case table |
+| (E45) | `economics.build_yearly_cashflow` baseload PPA no-fade / no-reversion branch |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

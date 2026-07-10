@@ -14,7 +14,8 @@ Created and developed by **Lampros Konstantellos**. Full manual at
 Mixed-integer linear programming model for co-located PV + BESS dispatch
 at 15-minute resolution (auto-detected cadence), with a multi-year
 project-finance pipeline, stochastic balancing-market participation
-(FCR / aFRR / mFRR), a pay-as-produced PPA contract engine, and
+(FCR / aFRR / mFRR), a PPA contract engine (pay-as-produced and
+baseload structures), and
 rolling-horizon Monte Carlo for uncertainty analysis.
 
 Two regulatory regimes are supported:
@@ -245,11 +246,14 @@ for the design document.
 
 ### `ppa`
 
-Pay-as-produced PPA contract on a share of the PV export, mirroring
-the `balancing` master-switch pattern: `ppa_enabled`, `ppa_structure`
-(`pay_as_produced`; `baseload` reserved), `ppa_settlement`
-(`physical` | `cfd`), `ppa_price_eur_per_mwh`, `ppa_volume_share_pct`,
-`ppa_term_years`, `ppa_inflation_pct`. Ships disabled: until the
+PPA contract engine mirroring the `balancing` master-switch pattern:
+`ppa_enabled`, `ppa_structure` (`pay_as_produced` on a share of the
+PV export, or `baseload` — a contracted flat band settled financially
+against total export, with raw shortfall/excess coverage KPIs),
+`ppa_settlement` (`physical` | `cfd`; baseload is cfd-only),
+`ppa_price_eur_per_mwh`, `ppa_volume_share_pct`, `ppa_term_years`,
+`ppa_inflation_pct`, `ppa_negative_price_rule` (negative-hour
+suspension clause), `ppa_baseload_mw`. Ships disabled: until the
 switch is set, outputs are bit-identical to a build without the PPA
 engine. See [`docs/ppa_design.md`](docs/ppa_design.md) for the design
 note (structures, settlements, dispatch treatment, fee and LCOE

@@ -29,28 +29,34 @@ treatment, fee and LCOE scope) with their rationale.
   metered output keeps the covered volume generating through
   negative-price hours.
 
-The engine implements **pay-as-produced on a share of PV export**,
-with physical or two-way-CfD settlement.  Baseload is designed but
-not implemented (see Assumptions & limitations).
+The engine implements **pay-as-produced on a share of PV export**
+(physical or two-way-CfD settlement) and **baseload** — a contracted
+flat band settled financially against the plant's total export
+(Eqs. P9-P11).
 
 ## Inputs
 
 A dedicated `ppa` sheet mirrors the `balancing` master-switch
-pattern (7 keys; shipped disabled):
+pattern (9 keys; shipped disabled):
 
 | Key | Default | Role |
 |---|---|---|
 | `ppa_enabled` | FALSE | master switch: disabled runs are bit-identical to a build without the feature |
-| `ppa_structure` | `pay_as_produced` | `baseload` parses (old workbooks load) but validation rejects it with guidance |
-| `ppa_settlement` | `physical` | `physical` (sleeved) or `cfd` (two-way) |
+| `ppa_structure` | `pay_as_produced` | `pay_as_produced` (as-generated offtake) or `baseload` (flat band, Eqs. P9-P11) |
+| `ppa_settlement` | `physical` | `physical` (sleeved) or `cfd` (two-way); baseload is cfd-only |
 | `ppa_price_eur_per_mwh` | 65.0 | strike $\pi^{\mathrm{PPA}}$ on the covered volume |
-| `ppa_volume_share_pct` | 100.0 | covered share $s$ of PV **export**, pro-rata per step |
+| `ppa_volume_share_pct` | 100.0 | covered share $s$ of PV **export**, pro-rata per step (pay_as_produced only) |
 | `ppa_term_years` | 10 | operating years 1..$T^{\mathrm{PPA}}$ under contract |
 | `ppa_inflation_pct` | 0.0 | yearly strike indexation $(1+i_{\mathrm{PPA}})^{y-1}$ |
+| `ppa_negative_price_rule` | `none` | negative-DAM-hour suspension clause (Eqs. P6-P8) |
+| `ppa_baseload_mw` | 0.0 | contracted flat band $P_{bl}$ for the baseload structure (> 0 required there) |
 
 Validation (`io._validate_ppa_config`, active only when enabled):
 share in [0, 100]; price non-negative; term ≥ 1; enums checked;
-`baseload` rejected with guidance.  The YAML/JSON config accepts the
+baseload additionally requires `ppa_baseload_mw > 0` and
+`ppa_settlement = 'cfd'` (physical rejected citing the equivalence
+identity below), and warns that a non-100 volume share is ignored
+(the band is absolute).  The YAML/JSON config accepts the
 same section and the scenarios engine accepts `ppa.<key>` dotted
 targets (`tests/test_input_surface_parity.py`).
 
@@ -148,6 +154,67 @@ E13c exemption uses it instead of the share-based approximation
 each solve's own price slice, so rolling-horizon windows recompute it
 per window.
 
+### Baseload structure (Eqs. P9-P11)
+
+`ppa_structure = 'baseload'` settles a contracted flat band of
+$P_{bl}$ = `ppa_baseload_mw` against the plant's **total export**
+(PV + BESS — firming is the point of the product).  Per in-term step,
+with $Q_t = P_{bl} \cdot \Delta t_h \cdot 1000$ kWh (the frame's
+actual step length — resampled / 15-minute data sizes the band
+correctly) and the P6 mask $m_t$ when the suspension clause is on:
+
+$$\mathrm{revenue\_pv\_ppa\_eur}_t = (1-m_t)\,\frac{Q_t}{1000}
+\left(\pi^{\mathrm{PPA}} - \pi^{\mathrm{DAM}}_t\right); \qquad
+\mathrm{ppa\_covered\_dam\_value\_eur}_t
+= (1-m_t)\,\frac{Q_t}{1000}\,\pi^{\mathrm{DAM}}_t \tag{P9}$$
+
+with the market columns untouched (all export sells at DAM).  This
+net-leg form IS the buy-shortfall / sell-excess settlement under
+symmetric spot pricing:
+$Q\,\pi^{\mathrm{PPA}} + (\mathrm{delivered} - Q)\,\pi^{\mathrm{DAM}}
+= \mathrm{delivered}\,\pi^{\mathrm{DAM}}
++ Q\,(\pi^{\mathrm{PPA}} - \pi^{\mathrm{DAM}})$ — and the same
+identity is why v1 is **cfd-only**: a physical sleeved variant totals
+identically and would differ only in flow attribution (deferred).
+Physical-coverage diagnostics with
+$\mathrm{delivered}_t = x^{pg}_t + x^{bg}_t$:
+
+$$\mathrm{shortfall}_t = \max(0,\, Q_t - \mathrm{delivered}_t); \qquad
+\mathrm{excess}_t = \max(0,\, \mathrm{delivered}_t - Q_t) \tag{P10}$$
+
+summed into the Year-1 KPIs `ppa_baseload_shortfall_mwh` /
+`ppa_baseload_excess_mwh` — RAW, never availability-derated (shortfall
+RISES with unavailability; the exact correction needs per-step
+recomputation, the `bess_utilization_diagnostics` precedent).
+
+**Dispatch neutrality (the v1 firming decision).**  The leg
+$\sum_t (1-m_t)\, Q_t (\pi^{\mathrm{PPA}} - \pi^{\mathrm{DAM}}_t)/1000$
+contains no decision variables, so appending it to the MILP objective
+is an additive constant — the argmax is unchanged and
+`pv_export_price` stays the DAM alias:
+
+$$\text{baseload:} \quad p^{\mathrm{eff}}_t = \pi^{\mathrm{DAM}}_t
+\;\;\Rightarrow\;\; \text{merchant-optimal dispatch is
+baseload-optimal} \tag{P11}$$
+
+Settlement-only firming is therefore EXACT here, not an
+approximation.  A genuine firming incentive requires asymmetric
+imbalance pricing (a shortfall premium): the v2 sketch adds per-step
+variables $d_t \ge Q_t - (x^{pg}_t + x^{bg}_t)$, $d_t \ge 0$ and an
+objective term $-\lambda^{\mathrm{short}}_t d_t$ — recorded here, not
+built.  Classification consequences, each locked by tests: the
+fixed-volume leg is production-decoupled, so it does **not**
+availability-derate and does **not** ride the PV fade
+(`economics.build_yearly_cashflow` no-fade branch, Eq. E45 in
+`docs/economics_design.md`; `lifetime.build_lifetime_dispatch`
+conditional column membership); there is no post-term reversion
+(cfd — nothing was sleeved); the route-to-market exemption is nil
+(cfd sells the full volume through the aggregator).  In
+self-consumption mode delivered energy is EXPORT only, so a band
+above typical surplus export produces a permanently shortfall-heavy
+(deeply negative-leg) contract — allowed, but read the shortfall KPI
+before trusting the strike leg.
+
 ## Settlement & cashflow equations
 
 The yearly cashflow's `ppa_revenue_eur` column implements Eq. (E12)
@@ -208,19 +275,21 @@ Scope rules (one scope across every consumer, per
 
 | Equation | Implementing symbol |
 |---|---|
-| config resolution | `ppa.PpaConfig`, `ppa.resolve_ppa_config` (`active` = enabled ∧ share>0 ∧ term≥1) |
+| config resolution | `ppa.PpaConfig`, `ppa.resolve_ppa_config` (`active` = enabled ∧ term≥1 ∧ (share>0 \| band>0 per structure)) |
 | (P1)-(P3) | `kpis.add_economic_columns` PPA branch |
 | (P4) | `optimization.build_model` PV-export price (`pv_export_price`) |
 | (P5) | `economics.build_yearly_cashflow` PPA rows (term cutoff + physical post-term reversion) |
 | ninth aggregate | `kpis.compute_kpis` (direct column sum; see `kpis._compute_canonical_revenue_aggregates` docstring) |
-| derate membership | `availability._BASE_DERATED_KEYS` |
-| lifetime scaling | `lifetime._PV_REVENUE_COLUMNS` |
+| derate membership | `availability._BASE_DERATED_KEYS` (+ the baseload production-decoupled skip in `apply_unavailability_derate`) |
+| lifetime scaling | `lifetime._PV_REVENUE_COLUMNS` (+ the baseload no-fade exclusion in `build_lifetime_dispatch`) |
 | monthly allocation | `economics.derive_monthly_cashflow` PPA share block |
 | PpaPrice tornado | `sensitivity.run_sensitivity_analysis` PpaPrice branch |
-| validation | `io._validate_ppa_config`; baseload rejection `io.py` (`_ALLOWED_VALUES['ppa_structure']`) |
+| validation | `io._validate_ppa_config` (baseload: band > 0, cfd-only, share-ignored warning) |
 | plots | PPA bar in the yearly revenue stack + lifecycle stack; `PPA price` tornado driver (`docs/source/users.guide/financial_plots.rst`) |
-
 | negative-price suspension | `ppa.negative_price_mask` + `PpaConfig.suspension_active` (P6); `kpis.add_economic_columns` masked settlement (P7); `optimization.build_model` effective export price (P8); `economics.build_yearly_cashflow` exact fee-exemption base; `availability` derate list (`ppa_fee_exempt_export_mwh`) |
+| (P9)-(P10) | `kpis.add_economic_columns` baseload branch (band settlement + shortfall/excess diagnostics) |
+| (P11) | `PpaConfig.reshapes_dispatch_price` gate in `optimization.build_model` (dispatch-neutral) |
+| (E45) | `economics.build_yearly_cashflow` baseload no-fade / no-reversion branch (`docs/economics_design.md`) |
 
 ## Validation & tests
 
@@ -258,13 +327,15 @@ $\pi^{\mathrm{PPA}} = 65$, $s = 0.8$:
 
 ## Assumptions & limitations
 
-* **Baseload / fixed-volume profiles: designed, not implemented.**  A
-  baseload (shaped) PPA settles a fixed hourly volume against
-  actuals, which needs shortfall pricing (buy deficit at spot, sell
-  excess at spot) and, done honestly, a dispatch incentive to firm
-  the profile with the BESS.  That is a contract-vs-physics feature
-  of its own; the enum reserves `ppa_structure = 'baseload'` as a
-  rejected-with-guidance value.
+* **Baseload firming is settlement-only in v1** (Eqs. P9-P11) — and
+  under symmetric spot settlement this is exact, not an
+  approximation: the fixed-volume leg cannot move the argmax.  A
+  genuine dispatch incentive to firm the band with the BESS requires
+  asymmetric imbalance pricing (shortfall premium / non-spot deficit
+  price) and per-step shortfall variables in the objective; that v2
+  is sketched in the baseload section and deliberately not built.
+  The physical (sleeved) baseload variant is likewise deferred: it
+  totals identically and would differ only in flow attribution.
 * Negative-price suspension clauses are implemented
   (`ppa_negative_price_rule = 'suspend'`, Eqs. P6-P8); deemed-volume /
   production-decoupled CfDs remain follow-ups.

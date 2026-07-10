@@ -118,10 +118,25 @@ def test_ppa_sheet_round_trips_workbook_and_yaml(tmp_path):
         assert loaded["ppa"][key] == value, key
 
 
-def test_enabled_baseload_rejected_with_guidance():
+def test_enabled_baseload_requires_band_and_cfd():
+    # The baseload structure is live (Eqs. P9-P11): a zero band is
+    # rejected, and so is physical settlement (cfd-only in v1 - the
+    # totals are identical under symmetric spot settlement, so only
+    # the deferred flow attribution would differ).
     typed = _typed({"ppa_enabled": True, "ppa_structure": "baseload"})
-    with pytest.raises(ValueError, match="designed but not implemented"):
+    with pytest.raises(ValueError, match="ppa_baseload_mw"):
         validate_workbook_params(typed, dt_minutes=60)
+    typed = _typed({
+        "ppa_enabled": True, "ppa_structure": "baseload",
+        "ppa_baseload_mw": 2.0, "ppa_settlement": "physical",
+    })
+    with pytest.raises(ValueError, match="cfd"):
+        validate_workbook_params(typed, dt_minutes=60)
+    typed = _typed({
+        "ppa_enabled": True, "ppa_structure": "baseload",
+        "ppa_baseload_mw": 2.0, "ppa_settlement": "cfd",
+    })
+    validate_workbook_params(typed, dt_minutes=60)
 
 
 @pytest.mark.parametrize("key,value,match", [

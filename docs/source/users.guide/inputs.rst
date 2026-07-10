@@ -596,14 +596,22 @@ base case under any positive cashflow configuration.
 Sheet ``ppa``
 -------------
 
-Pay-as-produced PPA contract on a share of the PV export
-(design note: ``docs/ppa_design.md``).  Master-switch pattern like the
-``balancing`` sheet: disabled (the shipped default) leaves every
+PPA contract engine (design note: ``docs/ppa_design.md``) —
+pay-as-produced on a share of the PV export, or a baseload band
+settled against the plant's total export.  Master-switch pattern like
+the ``balancing`` sheet: disabled (the shipped default) leaves every
 output bit-identical to a build without the feature.
 
 * ``ppa_enabled``: master switch (default FALSE).
-* ``ppa_structure``: ``pay_as_produced`` (implemented); ``baseload``
-  is reserved for a future shaped profile and rejected with guidance.
+* ``ppa_structure``: ``pay_as_produced`` (as-generated offtake on a
+  share of the PV export) or ``baseload`` — a contracted flat band of
+  ``ppa_baseload_mw`` settles a fixed per-step volume financially
+  against the plant's total export (PV + BESS): shortfall is
+  implicitly bought at spot, excess sold at spot.  Baseload is
+  cfd-only (a physical sleeved variant totals identically under
+  symmetric spot settlement and is deferred) and provably
+  dispatch-neutral: the fixed-volume leg has no decision variables,
+  so merchant-optimal dispatch is already baseload-optimal.
 * ``ppa_settlement``: ``physical`` (sleeved: the covered volume is
   paid the strike and never touches the DAM) or ``cfd`` (full DAM
   exposure plus a two-way strike-minus-DAM leg, negative whenever the
@@ -614,7 +622,17 @@ output bit-identical to a build without the feature.
 * ``ppa_price_eur_per_mwh``: the contract strike.
 * ``ppa_volume_share_pct``: covered share of the PV **export**,
   pro-rata per step (self-consumed PV is settled at retail; BESS
-  export is not covered).
+  export is not covered).  ``pay_as_produced`` only — the baseload
+  band is absolute and a non-100 share is warned as ignored.
+* ``ppa_baseload_mw``: the contracted flat band for the baseload
+  structure (must be > 0 there; ignored for ``pay_as_produced``).
+  The per-step volume honours the timeseries resolution
+  (``MW × dt``).  Two raw diagnostics report physical coverage:
+  ``ppa_baseload_shortfall_mwh`` / ``ppa_baseload_excess_mwh``
+  (never availability-derated).  In ``self_consumption`` mode
+  delivered energy is export only, so a band above typical surplus
+  export produces a permanently shortfall-heavy contract — check the
+  shortfall KPI.
 * ``ppa_term_years``: operating years 1..term under contract; after
   the term the stream ends and, under physical settlement, the covered
   volume's DAM value rejoins the DAM revenue stream (where the

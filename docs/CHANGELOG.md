@@ -337,6 +337,31 @@ Production release.
   against the haircut CFADS while the run's own cashflow stays the
   base case (a warning flags the degenerate factor-100 combination).
 
+### Added (baseload PPA structure)
+
+- `ppa_structure = 'baseload'` goes live (Eqs. P9-P11 + E45; it
+  previously parsed but was rejected with guidance): a contracted
+  flat band of `ppa_baseload_mw` settles a fixed per-step volume
+  financially against the plant's TOTAL export - shortfall
+  implicitly bought at spot, excess sold at spot, which under
+  symmetric settlement is identical to the net leg Q x (strike -
+  DAM) on top of full merchant revenue (the identity is also why v1
+  is cfd-only: a physical sleeved variant totals the same and only
+  the deferred flow attribution would differ).  The per-step volume
+  honours the timeseries resolution (MW x dt).  Dispatch is provably
+  unchanged (P11): the leg carries no decision variables, so
+  merchant-optimal dispatch is already baseload-optimal - a genuine
+  firming incentive needs asymmetric imbalance pricing, sketched as
+  v2 in the design doc and deliberately not built.  Raw
+  shortfall/excess coverage diagnostics (P10) join the Year-1 KPIs.
+  Classification, each with a lock test: the fixed-volume leg
+  neither availability-derates nor rides the PV fade, and the E45
+  yearly stream drops the fade on both legs with no post-term
+  reversion.  Existing PPA columns, theme labels and figures are
+  reused unchanged; zero-band runs are bit-identical.  Validation:
+  band > 0, cfd-only with the equivalence guidance, share-ignored
+  warning.
+
 ### Added (low-price-deck debt sizing case)
 
 - `debt_sizing_case = low_price` activates (it previously parsed but

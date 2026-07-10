@@ -377,10 +377,9 @@ PPA_SHEET_DEFAULTS: dict[str, Any] = {
     # Master switch — when False the engine, KPIs and outputs are
     # bit-identical to a workbook without the sheet.
     "ppa_enabled": False,
-    # Contract structure.  'pay_as_produced' is the implemented
-    # envelope; 'baseload' is reserved (designed in docs/ppa_design.md,
-    # rejected by validation with guidance until shortfall pricing
-    # lands).
+    # Contract structure: 'pay_as_produced' (as-generated offtake on a
+    # share of the PV export) or 'baseload' (a contracted flat band
+    # settled financially against the plant's export — Eqs. P9-P11).
     "ppa_structure": "pay_as_produced",
     # Settlement decomposition: 'physical' (sleeved — the covered
     # volume is paid the strike and never touches the DAM) or 'cfd'
@@ -398,6 +397,9 @@ PPA_SHEET_DEFAULTS: dict[str, Any] = {
     # Negative-DAM-hour clause: 'none' (pay through negative hours) or
     # 'suspend' (contract pauses in DAM < 0 steps — Eqs. P6-P8).
     "ppa_negative_price_rule": "none",
+    # Baseload band (MW) for ppa_structure='baseload'; 0 keeps the
+    # structure inert (must be > 0 when baseload is enabled).
+    "ppa_baseload_mw": 0.0,
 }
 
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
@@ -520,8 +522,6 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     # validation rejects them with guidance until the matching lender
     # cases are implemented; only 'base' is accepted today.
     "debt_sizing_case": frozenset({"base", "p90", "low_price"}),
-    # 'baseload' parses (so old workbooks load) but validation rejects
-    # it with guidance while only pay_as_produced is implemented.
     "ppa_structure": frozenset({"pay_as_produced", "baseload"}),
     "ppa_settlement": frozenset({"physical", "cfd"}),
     "ppa_negative_price_rule": frozenset({"none", "suspend"}),
@@ -1156,10 +1156,12 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "the dispatch, KPIs and outputs are bit-identical to a workbook "
      "without the sheet. See docs/ppa_design.md."),
     ("ppa_structure", "pay_as_produced", "enum",
-     "Contract structure. 'pay_as_produced' (as-generated offtake on a "
-     "share of the PV export) is the implemented envelope; 'baseload' "
-     "is reserved for a future shaped profile and is rejected with "
-     "guidance while unimplemented."),
+     "Contract structure. 'pay_as_produced': as-generated offtake on "
+     "a share of the PV export. 'baseload': a contracted flat band of "
+     "ppa_baseload_mw settles a fixed per-step volume financially "
+     "against the plant's total export (shortfall implicitly bought "
+     "at spot, excess sold at spot; cfd settlement only - Eqs. "
+     "P9-P11); ppa_volume_share_pct does not apply."),
     ("ppa_settlement", "physical", "enum",
      "physical | cfd. physical (sleeved): the covered volume is paid "
      "the strike and never touches the DAM. cfd: all PV export sells "
@@ -1172,7 +1174,9 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("ppa_volume_share_pct", 100.0, "%",
      "Covered share of the PV EXPORT, applied pro-rata per step "
      "(self-consumed PV is settled at retail and is not offtake "
-     "volume; BESS export is not covered)."),
+     "volume; BESS export is not covered). pay_as_produced only - "
+     "the baseload band is absolute and ignores this share (a "
+     "warning flags a non-100 value)."),
     ("ppa_term_years", 10, "years",
      "Operating years 1..term under contract. After the term the "
      "stream ends; under physical settlement the covered volume's DAM "
@@ -1192,6 +1196,13 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "The dispatch then curtails or charges the BESS instead of "
      "exporting covered PV at a loss. Common in European "
      "pay-as-produced offtake terms and premium schemes."),
+    ("ppa_baseload_mw", 0.0, "MW",
+     "Contracted flat delivery band for ppa_structure='baseload': "
+     "every in-term step settles the fixed volume ppa_baseload_mw x "
+     "dt against the plant's total export (PV + BESS); shortfall is "
+     "bought at the DAM price, excess sells at the DAM price "
+     "(financial settlement, Eq. P9). Must be > 0 when the baseload "
+     "structure is enabled; ignored for pay_as_produced."),
 )
 
 
@@ -2475,24 +2486,55 @@ def _validate_balancing_config(
 def _validate_ppa_config(ppa: dict[str, Any]) -> None:
     """Validate the ``ppa`` sheet (skipped when the contract is disabled).
 
-    The structure enum accepts ``baseload`` at parse time so old
-    workbooks load, but an ENABLED baseload contract is rejected here
-    with guidance — the shaped profile is designed (docs/ppa_design.md)
-    and deliberately not implemented yet.
+    The baseload structure (Eqs. P9-P11) is cfd-only in v1: under
+    symmetric spot settlement the physical sleeved variant totals
+    identically (``Q·strike + (delivered − Q)·DAM = delivered·DAM +
+    Q·(strike − DAM)``), so a physical flag would change nothing but
+    the flow attribution — rejected with that guidance until the flow
+    attribution work lands.
     """
     if not bool(ppa.get("ppa_enabled", False)):
         return
 
     structure = str(ppa.get("ppa_structure", "pay_as_produced") or "").lower()
-    if structure == "baseload":
+    if structure not in ("pay_as_produced", "baseload"):
         raise ValueError(
-            "ppa_structure='baseload' is designed but not implemented "
-            "(it needs shortfall-pricing rules — see docs/ppa_design.md). "
-            "Use ppa_structure='pay_as_produced' or disable the contract."
+            "ppa_structure must be 'pay_as_produced' or 'baseload'; "
+            f"got {structure!r}."
         )
-    if structure not in ("pay_as_produced",):
+    if structure == "baseload":
+        baseload_mw = float(ppa.get("ppa_baseload_mw", 0.0) or 0.0)
+        if baseload_mw <= 0.0:
+            raise ValueError(
+                "ppa_structure='baseload' requires 'ppa_baseload_mw' "
+                f"> 0 (the contracted band); got {baseload_mw!r}."
+            )
+        settlement_bl = str(
+            ppa.get("ppa_settlement", "physical") or "physical"
+        ).lower()
+        if settlement_bl != "cfd":
+            raise ValueError(
+                "ppa_structure='baseload' supports ppa_settlement="
+                "'cfd' only: with symmetric spot settlement a "
+                "physical sleeved variant totals identically "
+                "(Q x strike + (delivered - Q) x DAM = delivered x "
+                "DAM + Q x (strike - DAM)), so only the flow "
+                "attribution would differ - that work is deferred. "
+                "Set ppa_settlement='cfd'."
+            )
+        share_bl = float(ppa.get("ppa_volume_share_pct", 100.0) or 0.0)
+        if share_bl != 100.0:
+            logger.warning(
+                "ppa_volume_share_pct=%s is ignored for the baseload "
+                "structure: the band ppa_baseload_mw is an ABSOLUTE "
+                "volume, not a share of export.",
+                share_bl,
+            )
+    baseload_mw_any = float(ppa.get("ppa_baseload_mw", 0.0) or 0.0)
+    if baseload_mw_any < 0.0:
         raise ValueError(
-            f"ppa_structure must be 'pay_as_produced'; got {structure!r}."
+            f"'ppa_baseload_mw' must be non-negative; got "
+            f"{baseload_mw_any!r}."
         )
 
     # Settlement must be a known enum: the KPI engine and the cashflow each

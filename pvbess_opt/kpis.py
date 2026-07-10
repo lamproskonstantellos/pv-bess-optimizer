@@ -367,7 +367,46 @@ def add_economic_columns(
         )
 
     ppa_cfg = resolve_ppa_config(params.get("ppa"))
-    if ppa_cfg.active:
+    if ppa_cfg.active and ppa_cfg.ppa_structure == "baseload":
+        # Baseload financial settlement (Eqs. P9/P10): every in-term
+        # step exchanges the FIXED band volume Q_t at (strike − DAM);
+        # the market columns stay untouched (all export sells at DAM),
+        # which is exactly the buy-shortfall/sell-excess identity
+        # Q·strike + (delivered − Q)·DAM = delivered·DAM +
+        # Q·(strike − DAM).  Q_t honours the frame's actual step
+        # length — a hardcoded 1 h would mis-size the band on 15-min
+        # data.  The P6 suspension mask pauses the leg in negative-DAM
+        # steps when the clause is on.
+        strike = float(ppa_cfg.ppa_price_eur_per_mwh)
+        dt_h = dt_hours_from(params)
+        q_kwh = float(ppa_cfg.ppa_baseload_mw) * dt_h * 1000.0
+        if ppa_cfg.suspension_active:
+            from .ppa import negative_price_mask
+
+            not_suspended = (~negative_price_mask(dam_series)).astype(
+                float,
+            )
+        else:
+            not_suspended = pd.Series(1.0, index=res.index)
+        q_mwh_eff = q_kwh / 1000.0 * not_suspended
+        res["revenue_pv_ppa_eur"] = q_mwh_eff * (strike - dam_series)
+        res["ppa_covered_dam_value_eur"] = q_mwh_eff * dam_series
+        # Physical-coverage diagnostics (Eq. P10) against the plant's
+        # TOTAL export — firming is the point of the product.  Raw
+        # dispatch quantities: deliberately not availability-derated
+        # (the exact correction needs per-step recomputation; the raw
+        # convention matches bess_utilization_diagnostics).
+        delivered_kwh = (
+            res["pv_to_grid_kwh"].fillna(0.0)
+            + res["bess_dis_grid_kwh"].fillna(0.0)
+        )
+        res["ppa_baseload_shortfall_kwh"] = (
+            (q_kwh - delivered_kwh).clip(lower=0.0)
+        )
+        res["ppa_baseload_excess_kwh"] = (
+            (delivered_kwh - q_kwh).clip(lower=0.0)
+        )
+    elif ppa_cfg.active:
         share = ppa_cfg.share_frac
         strike = float(ppa_cfg.ppa_price_eur_per_mwh)
         if ppa_cfg.suspension_active:
@@ -622,6 +661,23 @@ def compute_kpis(
             {"ppa_fee_exempt_export_mwh":
                  round(ppa_fee_exempt_export_mwh, 4)}
             if ppa_fee_exempt_export_mwh is not None else {}
+        ),
+        # Baseload physical-coverage diagnostics (Eq. P10): present
+        # only when the baseload structure wrote its per-step columns
+        # (bit-identity), RAW by convention (never derated — see
+        # availability.py).
+        **(
+            {
+                "ppa_baseload_shortfall_mwh": round(
+                    float(res["ppa_baseload_shortfall_kwh"].sum())
+                    / 1000.0, 4,
+                ),
+                "ppa_baseload_excess_mwh": round(
+                    float(res["ppa_baseload_excess_kwh"].sum())
+                    / 1000.0, 4,
+                ),
+            }
+            if "ppa_baseload_shortfall_kwh" in res.columns else {}
         ),
         "bess_total_charge_mwh": round(total_charge, 4),
         "pv_to_bess_mwh": round(pv_to_bess, 4),
