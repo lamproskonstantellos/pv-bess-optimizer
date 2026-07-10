@@ -206,14 +206,18 @@ def test_repo_input_xlsx_headline_kpis_pinned():
     )
 
     # Baseline (perfect-foresight, MIP gap 0.01, HiGHS, no-curtailment
-    # default).  Pins reflect the v1.0.0 case study: 2-hour energy-basis
+    # default).  Pins reflect the case study: 2-hour energy-basis
     # BESS CAPEX (200 EUR/kWh x 30 MWh), SOH-triggered replacement at
     # 70 %, 0.95 x 0.95 one-way efficiencies and the 10 EUR/MWh wear
-    # shadow price (which trims marginal cycles).
+    # shadow price (which trims marginal cycles).  The dispatch pins are
+    # fee-independent (the aggregator fee is post-solve); the NPV / IRR
+    # pins reflect the fee-free shipped workbook
+    # (aggregator_fee_pct_revenue = 0 since the 10 % template default
+    # was dropped — market fees are opt-in).
     assert abs(float(kpis["pv_generation_mwh"]) - 22_275.0) < 1.0e-2
     assert abs(
         float(kpis["bess_total_discharge_mwh"]) - 6_064.860_285
     ) < 1.0e-2
     assert abs(float(kpis["profit_total_eur"]) - 2_547_952.318) < 1.0
-    assert abs(float(fin_kpis["npv_eur"]) - 2_027_904.81) < 1.0
-    assert abs(float(fin_kpis["irr_pct"]) - 8.8015) < 1.0e-2
+    assert abs(float(fin_kpis["npv_eur"]) - 4_502_654.99) < 1.0
+    assert abs(float(fin_kpis["irr_pct"]) - 10.8895) < 1.0e-2
