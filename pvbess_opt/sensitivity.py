@@ -156,6 +156,10 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("balancing_revenue_eur")
     if "balancing_aggregator_fee_eur" in df.columns:
         components.append("balancing_aggregator_fee_eur")
+    if "route_to_market_fee_eur" in df.columns:
+        components.append("route_to_market_fee_eur")
+    if "optimizer_fee_eur" in df.columns:
+        components.append("optimizer_fee_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     df["net_cashflow_eur"] = sum(df[c].astype(float) for c in components)
@@ -252,12 +256,17 @@ def _scale_revenue(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     # Balancing and PPA revenue streams carry no energy-aggregator fee, so
     # they scale by the driver directly.  The optional balancing-aggregator
     # (BSP) fee is proportional to gross balancing revenue, so it scales by
-    # the same factor and stays in sync with balancing_revenue_eur.
+    # the same factor and stays in sync with balancing_revenue_eur.  The
+    # optimizer revenue share is proportional to the (price-driven) BESS
+    # trading margin, so it scales with the revenue driver too.  The
+    # route-to-market fee does NOT scale: it is EUR/MWh on exported VOLUME,
+    # and the revenue driver perturbs prices, not energy.
     for col in (
         "balancing_capacity_revenue_eur",
         "balancing_activation_revenue_eur",
         "balancing_revenue_eur",
         "balancing_aggregator_fee_eur",
+        "optimizer_fee_eur",
         "ppa_revenue_eur",
     ):
         if col in df.columns:

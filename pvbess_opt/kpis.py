@@ -454,9 +454,12 @@ def compute_kpis(
         bess_to_load + _sum_mwh(res, "bess_dis_grid_kwh")
     )
 
-    total_export = (
-        _sum_mwh(res, "pv_to_grid_kwh") + _sum_mwh(res, "bess_dis_grid_kwh")
-    )
+    # Export split by origin: the route-to-market fee projects each origin on
+    # its own degradation curve (PV export fades on pv_factor, BESS export on
+    # bess_factor), so the cashflow needs the split, not just the total.
+    pv_export = _sum_mwh(res, "pv_to_grid_kwh")
+    bess_export = _sum_mwh(res, "bess_dis_grid_kwh")
+    total_export = pv_export + bess_export
     total_import = (
         _sum_mwh(res, "grid_to_load_kwh") + _sum_mwh(res, "bess_charge_grid_kwh")
     )
@@ -533,6 +536,8 @@ def compute_kpis(
         "e_cap_mwh": round(e_cap_kwh / 1000.0, 4),
         "system_total_import_mwh": round(total_import, 4),
         "system_total_export_mwh": round(total_export, 4),
+        "pv_export_mwh": round(pv_export, 4),
+        "bess_export_mwh": round(bess_export, 4),
         "bess_total_charge_mwh": round(total_charge, 4),
         "pv_to_bess_mwh": round(pv_to_bess, 4),
         "bess_charge_grid_mwh": round(bess_charge_grid, 4),

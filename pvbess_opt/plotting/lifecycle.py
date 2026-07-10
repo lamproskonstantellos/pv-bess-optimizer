@@ -239,6 +239,19 @@ def plot_revenue_stack_yearly(
     else:
         bal_agg_fee = np.zeros_like(load_pv)
 
+    # Structural market-access fees — read straight from their cashflow
+    # columns (signed <= 0), exactly like the BSP fee above.  All-zero when
+    # the knobs are off, so no bar (and no legend entry) is drawn and the
+    # default figure stays bit-identical.
+    if "route_to_market_fee_eur" in op.columns:
+        rtm_fee = op["route_to_market_fee_eur"].astype(float).to_numpy()
+    else:
+        rtm_fee = np.zeros_like(load_pv)
+    if "optimizer_fee_eur" in op.columns:
+        opt_fee = op["optimizer_fee_eur"].astype(float).to_numpy()
+    else:
+        opt_fee = np.zeros_like(load_pv)
+
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
     bottoms = np.zeros_like(load_pv)
@@ -275,6 +288,22 @@ def plot_revenue_stack_yearly(
             edgecolor="black", linewidth=0.4,
             label="Balancing aggregator fee",
         )
+    if np.any(rtm_fee < -1e-9):
+        # Route-to-market fee stacks below the BSP fee — every deduction
+        # keeps its own slot in the negative stack.
+        ax.bar(
+            years, rtm_fee, bottom=cost + agg_fee + bal_agg_fee,
+            color=financial_color("Route-to-market fee"),
+            edgecolor="black", linewidth=0.4,
+            label="Route-to-market fee",
+        )
+    if np.any(opt_fee < -1e-9):
+        ax.bar(
+            years, opt_fee, bottom=cost + agg_fee + bal_agg_fee + rtm_fee,
+            color=financial_color("Optimizer fee"),
+            edgecolor="black", linewidth=0.4,
+            label="Optimizer fee",
+        )
 
     # PPA contract leg — drawn straight from the cashflow column so the
     # bar carries the exact stream NPV/IRR saw (term cutoff, its own
@@ -297,7 +326,8 @@ def plot_revenue_stack_yearly(
             drew_ppa_label = True
         if np.any(ppa_neg < -1e-9):
             ax.bar(
-                years, ppa_neg, bottom=cost + agg_fee + bal_agg_fee,
+                years, ppa_neg,
+                bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee,
                 color=financial_color("PPA revenue"),
                 edgecolor="black", linewidth=0.4,
                 label=None if drew_ppa_label else "PPA revenue",
@@ -352,8 +382,10 @@ def plot_revenue_stack_yearly(
     if "balancing_revenue_eur" in op.columns:
         net = net + op["balancing_revenue_eur"].astype(float).to_numpy()
     # balancing_revenue_eur is gross, so step the net line down by the BSP
-    # fee (bal_agg_fee <= 0) to keep it on top of the drawn stack.
-    net = net + bal_agg_fee
+    # fee (bal_agg_fee <= 0) to keep it on top of the drawn stack.  The two
+    # structural fees enter the yearly net the same way (their columns are
+    # not folded into revenue_eur), so the line steps down by them too.
+    net = net + bal_agg_fee + rtm_fee + opt_fee
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()
     # IEEE-friendly emphasis line: near-black solid markers.  The

@@ -91,6 +91,29 @@ cashflow_yearly['balancing_aggregator_fee_eur']`.  The
 energy-aggregator fee, but may carry this separate, default-off BSP fee;
 both fees are excluded from LCOE/LCOS by the existing convention.
 
+## Fee scope contract (four fees, no compounding)
+
+Four opt-in route-to-market deductions, each with a fixed base; every
+fee applies to GROSS stream values, never to another fee's output
+(fees do not compound), and none enters LCOE/LCOS:
+
+| Fee (economics key) | Base | Exemptions |
+|---|---|---|
+| `aggregator_fee_pct_revenue` (E13) | gross DAM + retail revenue | balancing, PPA |
+| `balancing_aggregator_fee_pct_revenue` (E13b) | gross balancing revenue | everything else |
+| `route_to_market_fee_eur_per_mwh` (E13c) | exported MWh (PV + BESS) | self-consumption, balancing, PPA-covered PV share while a sleeved contract is in term |
+| `optimizer_revenue_share_pct` (E13d) | max(BESS export − grid charging, 0) per year | everything except the battery's wholesale stream |
+
+`aggregator_fee_eur` is folded into `revenue_eur` (net); the other
+three surface as their own signed columns and enter
+`net_cashflow_eur` directly.  Stacking E13 with E13d double-charges
+the battery's wholesale stream — the loader warns.  Post-term physical
+PPA reversion re-joins both the E13 base and the E13c base.  The
+monthly frame allocates E13c/E13d by the same monthly revenue-share
+weights as E13 (exact yearly reconciliation).  In the sensitivity
+tornado the revenue driver scales E13/E13b/E13d (price-proportional)
+but NOT E13c (volume-based).
+
 ## Perfect-foresight benchmark and the MC ensemble share one scope
 
 The rolling-horizon Monte Carlo compares each seed's realised profit

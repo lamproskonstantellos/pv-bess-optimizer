@@ -106,12 +106,18 @@ def plot_bess_revenue_waterfall(
 
     The first bar is the BESS's DAM-arbitrage segment (exports net of
     grid-charging expense, labelled ``DAM``); each subsequent bar is
-    the per-product capacity + activation revenue.  When the fees are
-    on, the battery's exact share of the energy-aggregator fee (a flat
-    percentage of its DAM-stream contribution to the cashflow's fee
-    base, i.e. exports net of grid-charging) and the BSP fee on gross
-    balancing revenue step the total down before the final bar, so
-    ``Total BESS revenue`` is net of both route-to-market fees.
+    the per-product capacity + activation revenue.  When fees are on,
+    the battery's deduction steps land before the final bar: its exact
+    share of the energy-aggregator fee (a flat percentage of its
+    DAM-stream contribution to the cashflow's fee base, i.e. exports
+    net of grid-charging), the BSP fee on gross balancing revenue, the
+    route-to-market fee on its exported MWh, and the optimizer revenue
+    share on its positive trading margin — so ``Total BESS revenue`` is
+    net of every route-to-market deduction the battery carries.  The
+    route-to-market and optimizer steps are EXACT battery attributions
+    (their bases are battery-scoped by definition), unlike the
+    energy-aggregator step, which is a display attribution of a
+    project-level fee.
     """
     out_path = Path(out_path)
     bess_dam = float(year1_kpis.get("revenue_bess_dam_eur", 0.0) or 0.0)
@@ -157,6 +163,25 @@ def plot_bess_revenue_waterfall(
     bm_gross = sum(v for _label, v, _ck in products)
     bal_fee = -bal_fee_frac * max(bm_gross, 0.0)
 
+    # Structural market-access fees — the battery's shares are EXACT here
+    # (no proportional attribution needed): the optimizer revenue share is
+    # defined on the battery's own wholesale trading margin, and the
+    # route-to-market fee on its own exported MWh (``bess_export_mwh``,
+    # availability-derated alongside the EUR streams).
+    rtm_rate = 0.0
+    opt_frac = 0.0
+    if econ is not None:
+        rtm_rate = max(0.0, float(
+            econ.get("route_to_market_fee_eur_per_mwh", 0.0) or 0.0
+        ))
+        opt_frac = max(0.0, min(1.0, float(
+            econ.get("optimizer_revenue_share_pct", 0.0) or 0.0
+        ) / 100.0))
+    rtm_fee = -rtm_rate * float(
+        year1_kpis.get("bess_export_mwh", 0.0) or 0.0
+    )
+    opt_fee = -opt_frac * max(bess_dam_base, 0.0)
+
     # Zero-value steps are noise (a no-balancing run would show five
     # flat EUR-0 product steps): keep only the steps that carry value,
     # exactly like the fee steps below.  The DAM step obeys the same
@@ -177,6 +202,16 @@ def plot_bess_revenue_waterfall(
         steps.append((
             "Balancing aggregator fee", bal_fee,
             financial_color("Balancing aggregator fee"),
+        ))
+    if rtm_fee < -1e-9:
+        steps.append((
+            "Route-to-market fee", rtm_fee,
+            financial_color("Route-to-market fee"),
+        ))
+    if opt_fee < -1e-9:
+        steps.append((
+            "Optimizer fee", opt_fee,
+            financial_color("Optimizer fee"),
         ))
     labels = [s[0] for s in steps] + ["Total BESS revenue"]
     values = [s[1] for s in steps] + [0.0]
@@ -383,10 +418,45 @@ def plot_bess_revenue_by_month(
     )
     energy_fee_arr = -energy_fee_frac * np.maximum(dam_gross_monthly, 0.0)
     bal_fee_arr = -bal_fee_frac * np.maximum(bm_monthly_total, 0.0)
+    # Structural market-access fees, monthly:
+    # * route-to-market — exact per month (rate x the month's exported MWh),
+    #   so the twelve bars sum to the waterfall's annual step;
+    # * optimizer share — the ANNUAL fee (share x max(annual margin, 0))
+    #   allocated over the months in proportion to their positive trading
+    #   margin (clamping per month would over-charge months whose margin is
+    #   negative and break the annual reconciliation).
+    rtm_rate = 0.0
+    opt_frac = 0.0
+    if econ is not None:
+        rtm_rate = max(0.0, float(
+            econ.get("route_to_market_fee_eur_per_mwh", 0.0) or 0.0
+        ))
+        opt_frac = max(0.0, min(1.0, float(
+            econ.get("optimizer_revenue_share_pct", 0.0) or 0.0
+        ) / 100.0))
+    if "bess_dis_grid_kwh" in res_year1.columns:
+        bess_export_monthly_mwh = pd.Series(
+            res_year1["bess_dis_grid_kwh"].astype(float).to_numpy(),
+            index=months.to_numpy(),
+        ).groupby(level=0).sum().reindex(
+            range(1, 13), fill_value=0.0,
+        ).to_numpy() / 1000.0
+    else:
+        bess_export_monthly_mwh = np.zeros(12)
+    rtm_fee_arr = -rtm_rate * bess_export_monthly_mwh
+    margin_monthly = np.asarray(by_month_dam.to_numpy(), dtype=float)
+    pos_margin = np.maximum(margin_monthly, 0.0)
+    annual_opt_fee = -opt_frac * max(float(margin_monthly.sum()), 0.0)
+    if pos_margin.sum() > 1e-9:
+        opt_fee_arr = annual_opt_fee * pos_margin / pos_margin.sum()
+    else:
+        opt_fee_arr = np.full(12, annual_opt_fee / 12.0)
     neg_bottoms = np.zeros(12)
     for label, arr in (
         ("Energy aggregator fee", energy_fee_arr),
         ("Balancing aggregator fee", bal_fee_arr),
+        ("Route-to-market fee", rtm_fee_arr),
+        ("Optimizer fee", opt_fee_arr),
     ):
         if abs(arr).sum() <= 1e-9:
             continue
@@ -411,7 +481,8 @@ def plot_bess_revenue_by_month(
     by_label = dict(zip(labels_drawn, handles, strict=True))
     ordered_labels = [_BESS_DAM_LABEL] + [
         label for _key, label, _colour_key in _BM_PRODUCTS
-    ] + ["Energy aggregator fee", "Balancing aggregator fee"]
+    ] + ["Energy aggregator fee", "Balancing aggregator fee",
+         "Route-to-market fee", "Optimizer fee"]
     ordered = [
         (by_label[lbl], lbl) for lbl in ordered_labels if lbl in by_label
     ]
