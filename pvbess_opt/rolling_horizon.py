@@ -180,10 +180,13 @@ def settle_imbalance(
     """
     d = np.asarray(deviation_mwh, dtype=float)
     if pricing == "single":
-        return (price_short - dam) * (-d)
+        return np.asarray((price_short - dam) * (-d), dtype=float)
     short_vol = np.clip(-d, 0.0, None)
     long_vol = np.clip(d, 0.0, None)
-    return short_vol * (price_short - dam) + long_vol * (dam - price_long)
+    return np.asarray(
+        short_vol * (price_short - dam) + long_vol * (dam - price_long),
+        dtype=float,
+    )
 
 
 def _net_grid_position_kwh(frame: pd.DataFrame) -> np.ndarray:
