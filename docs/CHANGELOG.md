@@ -1,8 +1,10 @@
 # Changelog
 
-## 1.1.0 (unreleased)
+## 1.0.0 (2026-07-06)
 
-### Added
+Production release.
+
+### Added (structural market-access fees)
 
 - Two structural market-access fees, both default-off (results
   bit-identical when unset), modelled on European practice and
@@ -32,7 +34,7 @@
   warns when the legacy `aggregator_fee_pct_revenue` and the optimizer
   share are combined (double-charging the battery's wholesale stream).
 
-### Changed
+### Changed (aggregator fee template default)
 
 - The `aggregator_fee_pct_revenue` template default drops from 10 % to
   0 % (fee-free; opt-in).  Real-world route-to-market charges are
@@ -44,7 +46,7 @@
   script preserves values by key); the shipped `inputs/input.xlsx` case
   study is updated to 0.
 
-### Fixed
+### Fixed (fee-audit follow-ups)
 
 - `docs/economics_design.md` carried two equations tagged E9 (the
   availability grid-import correction reused the yearly-cashflow
@@ -66,10 +68,6 @@
   CAPEX driver already followed (Year-0 outlay).  The perturbation
   itself is unchanged — it scales every year of the stream by the same
   factor — only the EUR endpoint annotations move.
-
-## 1.0.0 (2026-07-06)
-
-Production release.
 
 ### Changed (breaking)
 
