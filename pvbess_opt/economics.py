@@ -836,6 +836,15 @@ def build_yearly_cashflow(
     curtailment_comp_1 = float(
         year1_kpis.get("curtailment_compensation_eur", 0.0) or 0.0
     )
+    # Guarantees of origin (Eq. E54): a flat contracted price on the
+    # eligible renewable injection — the availability- and
+    # curtailment-derated PV grid export (BESS discharge and
+    # self-consumed energy excluded: GOs are issued on metered
+    # renewable injection).  Fee-free (certificates settle outside the
+    # power market) and excluded from LCOE (revenue-agnostic metric).
+    go_price = max(0.0, float(
+        econ.get("go_price_eur_per_mwh", 0.0) or 0.0
+    ))
 
     # BESS tolling agreement (Eqs. E29/E29a): a fixed EUR/MW/yr payment
     # for dispatch rights over a phase window (Eq. E25).  The toll is a
@@ -1171,6 +1180,7 @@ def build_yearly_cashflow(
             capacity_market_rev_y = 0.0
             revenue_levy_y = 0.0
             curtailment_comp_y = 0.0
+            go_revenue_y = 0.0
             augmentation_capex_y = 0.0
         else:
             if y == 1:
@@ -1487,6 +1497,8 @@ def build_yearly_cashflow(
                 )
             else:
                 curtailment_comp_y = 0.0
+            # GO revenue (Eq. E54): flat price, PV-fade volume.
+            go_revenue_y = go_price * pv_export_mwh_1 * pv_factor
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -1520,6 +1532,7 @@ def build_yearly_cashflow(
             + capacity_market_rev_y
             + revenue_levy_y
             + curtailment_comp_y
+            + go_revenue_y
             + ppa_y + opex_y + capex_y + devex_y
             + augmentation_capex_y
         )
@@ -1554,6 +1567,7 @@ def build_yearly_cashflow(
                 ),
                 "revenue_levy_eur": float(revenue_levy_y),
                 "curtailment_compensation_eur": float(curtailment_comp_y),
+                "go_revenue_eur": float(go_revenue_y),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -2067,6 +2081,7 @@ def derive_monthly_cashflow(
     has_cm_col = "capacity_market_revenue_eur" in yearly_cf.columns
     has_levy_col = "revenue_levy_eur" in yearly_cf.columns
     has_curt_col = "curtailment_compensation_eur" in yearly_cf.columns
+    has_go_col = "go_revenue_eur" in yearly_cf.columns
     has_tax_col = "corporate_tax_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
@@ -2137,6 +2152,10 @@ def derive_monthly_cashflow(
         curt_y = (
             float(yearly_indexed.loc[y, "curtailment_compensation_eur"])
             if has_curt_col else 0.0
+        )
+        go_y = (
+            float(yearly_indexed.loc[y, "go_revenue_eur"])
+            if has_go_col else 0.0
         )
         tax_y = (
             float(yearly_indexed.loc[y, "corporate_tax_eur"])
@@ -2233,6 +2252,13 @@ def derive_monthly_cashflow(
             # shares sum to one, so the yearly reconciliation is
             # exact).
             curt_m = float(fee_share.loc[m]) * curt_y
+            # GO revenue (Eq. E54) rides the PV production shape (the
+            # certificates are issued on the PV injection; shares sum
+            # to one, so the yearly reconciliation is exact).
+            if pv_y1_total > 1e-9:
+                go_m = float(monthly_pv_mwh_y1.loc[m]) / pv_y1_total * go_y
+            else:
+                go_m = go_y / 12.0
             # Corporate tax (Eq. E37) settles annually, so it books in
             # month 12 — the December factor equals the yearly
             # 1/(1+r)^y factor (Eq. E4), keeping the monthly and yearly
@@ -2259,6 +2285,7 @@ def derive_monthly_cashflow(
                 + cm_m
                 + levy_m
                 + curt_m
+                + go_m
                 + ppa_m + opex_m + capex_m + devex_m
                 + aug_m
             )
@@ -2290,6 +2317,7 @@ def derive_monthly_cashflow(
                     "capacity_market_revenue_eur": float(cm_m),
                     "revenue_levy_eur": float(levy_m),
                     "curtailment_compensation_eur": float(curt_m),
+                    "go_revenue_eur": float(go_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -2320,6 +2348,7 @@ def derive_monthly_cashflow(
         "capacity_market_revenue_eur",
         "revenue_levy_eur",
         "curtailment_compensation_eur",
+        "go_revenue_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "augmentation_capex_eur",
@@ -2348,6 +2377,7 @@ def derive_monthly_cashflow(
                     "capacity_market_revenue_eur",
                     "revenue_levy_eur",
                     "curtailment_compensation_eur",
+                    "go_revenue_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "augmentation_capex_eur",
@@ -2645,6 +2675,10 @@ def compute_financial_kpis(
     total_augmentation_capex_eur_lifecycle = (
         float(df.loc[after_y0_mask, "augmentation_capex_eur"].sum())
         if "augmentation_capex_eur" in df.columns else 0.0
+    )
+    total_go_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "go_revenue_eur"].sum())
+        if "go_revenue_eur" in df.columns else 0.0
     )
 
     if "calendar_year" in df.columns and (df["project_year"] >= 1).any():
@@ -3037,6 +3071,10 @@ def compute_financial_kpis(
         # Augmentation CAPEX events (Eq. E51); <= 0, SUMMARY-optional.
         "total_augmentation_capex_eur_lifecycle": float(round(
             total_augmentation_capex_eur_lifecycle, 2,
+        )),
+        # GO revenue (Eq. E54); >= 0, SUMMARY-optional.
+        "total_go_revenue_eur_lifecycle": float(round(
+            total_go_revenue_eur_lifecycle, 2,
         )),
         # Post-tax KPI family (Eq. E39) — additive to the pre-tax
         # baseline; all NaN while corporate_tax_rate_pct = 0.

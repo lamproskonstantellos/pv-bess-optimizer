@@ -366,6 +366,11 @@ Sheet ``economics``
   from LCOE/LCOS; the gross support is not scaled by the Revenue
   tornado driver while the netting is recomputed against the un-scaled
   threshold (revenue-stabilising).
+* ``go_price_eur_per_mwh`` (default 0 = off): guarantees-of-origin
+  sale price applied to the PV grid-export volume (the eligible
+  renewable injection; BESS discharge and self-consumed energy
+  excluded).  Flat over the horizon; the eligible MWh fade on the PV
+  degradation curve.  Fee-exempt and excluded from LCOE.
 * ``revenue_levy_pct`` (default 0, off): levy on gross MARKET
   turnover (Eq. E33) - wholesale DAM export revenue gross of the
   aggregator fee, balancing capacity + activation revenue and the PPA
@@ -636,6 +641,14 @@ The 34 keys (defaults in the design doc's Inputs table):
 * ``fcr_required_duration_hours``: FCR sustained-output requirement.
 * ``bm_settlement_minutes``: must equal the timeseries cadence
   (validated; the runtime uses the auto-detected ``dt_minutes``).
+* ``bm_merit_order_enabled`` (default ``FALSE``): enable the
+  merit-order activation-probability curve read from the optional
+  ``bm_merit_order`` sheet (columns ``product``,
+  ``price_eur_per_mwh``, ``activation_probability_pct``; aFRR/mFRR
+  products only, monotone non-increasing in price).  The per-step
+  activation probability is then interpolated at each step's
+  activation price — expensive bids activate less.  ``FALSE`` keeps
+  the scalar ``*_activation_probability_pct`` path, bit-identical.
 * ``bm_block_hours``: reservation block length in hours (default 0 =
   reservations may vary per settlement period, bit-identical).  With
   a positive value (e.g. 4, the common European capacity-auction

@@ -43,6 +43,7 @@ from .balancing import (
     PRODUCTS_WITH_ACTIVATION,
     acceptance_probability,
     activation_probability,
+    activation_probability_curve,
     resolve_balancing_config,
 )
 from .modes import resolve_mode
@@ -85,19 +86,36 @@ def _balancing_soc_drift(
     dt_h = dt_hours_from(params)
     eta_c = float(params.get("efficiency_charge", 1.0) or 1.0)
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
+    # Merit-order curve (Eq. B10): the mirror must reconstruct the
+    # SAME per-step beta the MILP drift used, or the SOC-dynamics
+    # invariant would flag the curve as an energy imbalance.
+    _merit_curve = (
+        raw_cfg.get("bm_merit_order_curve")
+        if getattr(cfg, "bm_merit_order_enabled", False) else None
+    ) or None
+
+    def _beta_arr(product: str) -> np.ndarray | float:
+        act_col = f"{product}_activation_price_eur_per_mwh"
+        if _merit_curve is not None and act_col in res.columns:
+            return activation_probability_curve(
+                cfg, _merit_curve, product,
+                res[act_col].to_numpy(dtype=float),
+            )
+        return activation_probability(cfg, product)
+
     drift = np.zeros(len(res), dtype=float)
     for product in PRODUCTS_DN:
         r = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
         alpha_beta = (
             acceptance_probability(cfg, product)
-            * activation_probability(cfg, product)
+            * _beta_arr(product)
         )
         drift = drift + eta_c * dt_h * alpha_beta * r
     for product in PRODUCTS_UP:
         r = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
         alpha_beta = (
             acceptance_probability(cfg, product)
-            * activation_probability(cfg, product)
+            * _beta_arr(product)
         )
         drift = drift - (dt_h / eta_d) * alpha_beta * r
     return drift
@@ -917,6 +935,13 @@ def _compute_balancing_kpis(
     cfg = resolve_balancing_config(raw_cfg)
     if not cfg.balancing_enabled:
         return out
+    # Merit-order activation curve (Eq. B10): the expected-value KPIs
+    # must consume the SAME per-step beta the MILP objective and SOC
+    # drift used; None keeps the constant-beta arithmetic bit-identical.
+    _merit_curve = (
+        raw_cfg.get("bm_merit_order_curve")
+        if getattr(cfg, "bm_merit_order_enabled", False) else None
+    ) or None
 
     res_columns_have_reservations = all(
         f"bm_reservation_{p}_kw" in res.columns for p in PRODUCTS_ALL
@@ -958,9 +983,19 @@ def _compute_balancing_kpis(
         act_col = f"{product}_activation_price_eur_per_mwh"
         if act_col in res.columns:
             act_price = res[act_col].to_numpy(dtype=float)
-            act_rev = float(
-                (alpha * beta * dt_h / 1000.0) * float((act_price * r_kw).sum())
-            )
+            if _merit_curve is not None:
+                beta_t = activation_probability_curve(
+                    cfg, _merit_curve, product, act_price,
+                )
+                act_rev = float(
+                    (alpha * dt_h / 1000.0)
+                    * float((beta_t * act_price * r_kw).sum())
+                )
+            else:
+                act_rev = float(
+                    (alpha * beta * dt_h / 1000.0)
+                    * float((act_price * r_kw).sum())
+                )
         else:
             act_rev = 0.0
         out[f"bm_{product}_activation_revenue_eur"] = round(act_rev, 2)
@@ -977,16 +1012,34 @@ def _compute_balancing_kpis(
     eta_d = float(params.get("efficiency_discharge", 1.0) or 1.0)
     e_act_up = 0.0
     e_act_dn = 0.0
+    def _merit_beta_t(product: str) -> np.ndarray | None:
+        """Per-step beta from the merit curve, or None (scalar path)."""
+        act_col = f"{product}_activation_price_eur_per_mwh"
+        if _merit_curve is not None and act_col in res.columns:
+            return activation_probability_curve(
+                cfg, _merit_curve, product,
+                res[act_col].to_numpy(dtype=float),
+            )
+        return None
+
     for product in PRODUCTS_UP:
         r_kw = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
         alpha = acceptance_probability(cfg, product)
-        beta = activation_probability(cfg, product)
-        e_act_up += float(alpha * beta * dt_h / eta_d * r_kw.sum())
+        _bt = _merit_beta_t(product)
+        if _bt is not None:
+            e_act_up += float(alpha * dt_h / eta_d * (_bt * r_kw).sum())
+        else:
+            beta = activation_probability(cfg, product)
+            e_act_up += float(alpha * beta * dt_h / eta_d * r_kw.sum())
     for product in PRODUCTS_DN:
         r_kw = res[f"bm_reservation_{product}_kw"].to_numpy(dtype=float)
         alpha = acceptance_probability(cfg, product)
-        beta = activation_probability(cfg, product)
-        e_act_dn += float(alpha * beta * dt_h * eta_c * r_kw.sum())
+        _bt = _merit_beta_t(product)
+        if _bt is not None:
+            e_act_dn += float(alpha * dt_h * eta_c * (_bt * r_kw).sum())
+        else:
+            beta = activation_probability(cfg, product)
+            e_act_dn += float(alpha * beta * dt_h * eta_c * r_kw.sum())
     out["bm_expected_activation_energy_up_kwh"] = round(e_act_up, 4)
     out["bm_expected_activation_energy_dn_kwh"] = round(e_act_dn, 4)
 

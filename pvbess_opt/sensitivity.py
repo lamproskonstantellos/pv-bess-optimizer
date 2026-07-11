@@ -194,6 +194,8 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("curtailment_compensation_eur")
     if "augmentation_capex_eur" in df.columns:
         components.append("augmentation_capex_eur")
+    if "go_revenue_eur" in df.columns:
+        components.append("go_revenue_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -345,6 +347,9 @@ def _scale_revenue(
         # to the market value of the curtailed energy — classified
         # price-linked, so it scales with the Revenue driver.
         "curtailment_compensation_eur",
+        # GO revenue (Eq. E54): certificate prices move with the
+        # renewables market, so the driver scales it.
+        "go_revenue_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)

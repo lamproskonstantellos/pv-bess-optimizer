@@ -184,6 +184,7 @@ histogram.  Financial lifecycle totals:
 | (B7) | `build_model` → `m.balancing_revenue_expr` (`balancing.acceptance_probability`, `activation_probability`); KPI mirror `kpis._compute_balancing_kpis` |
 | (B8) | `economics.build_yearly_cashflow` balancing rows; `lifetime._BALANCING_RESERVATION_COLUMNS` |
 | (B9) | `build_model` → `BM_BLOCK_LINK` (gated on `bm_block_hours`); validator `io._validate_balancing_config` |
+| (B10) | `balancing.activation_probability_curve`; `build_model` per-step branch; `kpis` (revenue, drift mirror, expected energies); `rolling_horizon.realise_balancing_scenario`; parser `io.parse_merit_order_sheet` |
 | MC realisation | `rolling_horizon.realise_balancing_scenario`, `monte_carlo_balancing` |
 | config / prices | `balancing.resolve_balancing_config`, `resolve_balancing_timeseries`; validators `io._validate_balancing_config` |
 | plots | `plotting.balancing.plot_balancing_reservation_profile`, `plot_balancing_mc_distribution` (both return None without balancing columns) |
@@ -262,6 +263,31 @@ named symbols are pinned by
 against a built model, so this log cannot silently drift from the
 code.  (`file.py:NN` references are indicative of the audited
 revision; the symbols are the stable anchors.)
+
+### Merit-order activation curve (Eq. B10; `bm_merit_order_enabled`)
+
+The scalar per-product activation probability $\beta_k$ generalises
+to an optional piecewise price-to-probability curve read from the
+`bm_merit_order` sheet (columns: `product`, `price_eur_per_mwh`,
+`activation_probability_pct`; aFRR/mFRR products only — FCR is
+capacity-only; validated monotone NON-INCREASING in price):
+
+$$\beta_k(t) = \mathrm{interp}\big(\mathrm{curve}_k,\,
+p^{\mathrm{act}}_k(t)\big) \tag{B10}$$
+
+capturing that expensive bids activate less.  The coefficients are
+deterministic per step, so the MILP stays LINEAR: the B7/B8
+expected-value forms generalise with $\beta_k \to \beta_k(t)$ in
+the objective's activation term
+($\alpha_k \beta_k(t)\, p^{\mathrm{act}}_k(t)\, r_{k,t}\,
+\Delta t / 1000$), the SOC drift, the expected-activation KPIs, the
+SOC-dynamics audit mirror and the Monte Carlo realisation — one
+per-step $\beta$ array feeds all five consumers.  The curve applies
+to the INPUT activation price, not an endogenous bid price (bids are
+assumed at the input price level; documented assumption).  `FALSE`
+(default) keeps the constant-$\beta$ code path — not just the same
+values — so disabled runs stay bit-identical (a distributed per-step
+coefficient would change floating-point association).
 
 ### 1. Product taxonomy: PASS
 

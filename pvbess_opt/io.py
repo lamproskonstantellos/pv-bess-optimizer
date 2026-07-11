@@ -71,6 +71,7 @@ Mode-specific timeseries semantics
 
 from __future__ import annotations
 
+import itertools
 import logging
 import re
 from pathlib import Path
@@ -90,6 +91,7 @@ from .constants import (
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
 )
 from .io_style import style_workbook
+from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +294,9 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     # Revenue levy on gross market turnover (Eq. E33), e.g. the 3 %
     # special RES turnover levy applied in Greece.  Default-off.
     "revenue_levy_pct": 0.0,
+    # Guarantees-of-origin sale price (Eq. E54) on the PV grid-export
+    # volume.  Default-off.
+    "go_price_eur_per_mwh": 0.0,
     # Depreciation + corporate tax layer (Eqs. E34-E38): post-tax
     # cashflow columns appended by economics.apply_tax_layer.  The
     # rate default of 0 keeps every existing result bit-identical
@@ -383,6 +388,10 @@ BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
     # Multi-hour reservation blocks (Eq. B9): 0 = per-settlement-period
     # reservations (default, bit-identical).
     "bm_block_hours": 0,
+    # Merit-order activation curve (Eq. B10): read from the optional
+    # 'bm_merit_order' sheet.  False keeps the scalar
+    # *_activation_probability_pct path, bit-identical.
+    "bm_merit_order_enabled": False,
     # Extra SOC safety buffer applied on top of the worst-case
     # activation reservation (percent of activation energy).
     "bm_soc_headroom_pct": 10.0,
@@ -496,6 +505,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "optimizer_floor_enabled",
     "lender_cases_enabled",
     "plot_dscr_profile",
+    "bm_merit_order_enabled",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -991,6 +1001,16 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "column inside net_cashflow_eur (clamped: negative turnover never "
      "yields a rebate). Excluded from LCOE/LCOS. Validated in "
      "[0, 100]."),
+    ("go_price_eur_per_mwh", 0.0, "EUR/MWh",
+     "Guarantees-of-origin (GO) sale price applied to the PV "
+     "grid-export volume - the eligible renewable injection (BESS "
+     "discharge and self-consumed energy excluded: GOs are issued on "
+     "metered renewable injection; export basis stated explicitly as "
+     "the eligibility definition is jurisdiction-dependent). Flat "
+     "over the horizon (GO prices are contracted, not CPI-indexed); "
+     "the eligible MWh fade on the PV degradation curve. Fee-exempt "
+     "(certificates settle outside the power market) and excluded "
+     "from LCOE (revenue-agnostic metric). 0 = off (default)."),
     ("corporate_tax_rate_pct", 0.0, "%",
      "Corporate income tax rate applied to taxable income = EBITDA - "
      "straight-line depreciation - debt interest, with loss "
@@ -1250,6 +1270,17 @@ _BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "block), reserved capacity per product is held constant across "
      "each block, anchored on hour-of-year multiples; must be a "
      "positive multiple of the dispatch step and divide 24 evenly."),
+    ("bm_merit_order_enabled", False, "bool",
+     "Enable the merit-order activation-probability curve (Eq. B10) "
+     "read from the optional 'bm_merit_order' sheet (columns: "
+     "product, price_eur_per_mwh, activation_probability_pct; "
+     "monotone non-increasing in price per product; aFRR/mFRR "
+     "products only - FCR is capacity-only). beta_k(t) is then the "
+     "piecewise-linear interpolation of the curve at the step's "
+     "activation price, capturing that expensive bids activate less; "
+     "bids are assumed at the input price level. FALSE (default) "
+     "keeps the scalar *_activation_probability_pct path, "
+     "bit-identical."),
     ("bm_soc_headroom_pct", 10.0, "%",
      "Extra SOC safety buffer applied to the worst-case activation "
      "reservation in both directions."),
@@ -1840,6 +1871,28 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
                     sheet_name=f"max_injection_profile_{_src}",
                     index=False,
                 )
+        # Optional merit-order curve sheet (Eq. B10): written from a
+        # raw frame (typed['bm_merit_order']) or rebuilt from the
+        # parsed curve dict so read -> write round-trips.
+        _merit_frame = typed.get("bm_merit_order")
+        if _merit_frame is None:
+            _parsed_curve = balancing_section.get("bm_merit_order_curve")
+            if _parsed_curve:
+                _merit_frame = pd.DataFrame(
+                    [
+                        {
+                            "product": product,
+                            "price_eur_per_mwh": price,
+                            "activation_probability_pct": prob,
+                        }
+                        for product, points in _parsed_curve.items()
+                        for price, prob in points
+                    ],
+                )
+        if _merit_frame is not None:
+            _merit_frame.to_excel(
+                writer, sheet_name="bm_merit_order", index=False,
+            )
         sizing_df.to_excel(writer, sheet_name="sizing", index=False)
         scenarios_df.to_excel(writer, sheet_name="scenarios", index=False)
         trajectories_df.to_excel(
@@ -2121,6 +2174,79 @@ def reject_legacy_bess_capex_key(keys: Any, *, source: str) -> None:
 
 #: Sentinel value for the SOH-threshold automatic BESS replacement.
 BESS_REPLACEMENT_AUTO = "auto"
+
+
+#: Products a merit-order activation curve may target (Eq. B10):
+#: FCR is capacity-only, so it carries no activation curve.
+_MERIT_ORDER_PRODUCTS: frozenset[str] = frozenset({
+    "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn",
+})
+
+
+def parse_merit_order_sheet(
+    df: pd.DataFrame,
+) -> dict[str, list[tuple[float, float]]]:
+    """Parse and validate the ``bm_merit_order`` sheet (Eq. B10).
+
+    Returns ``{product: [(price_eur_per_mwh,
+    activation_probability_pct), ...]}`` sorted by price per product.
+    Validation raises with guidance: required columns, known
+    aFRR/mFRR products only, probabilities in [0, 100], no duplicate
+    prices, and a monotone NON-INCREASING probability in price
+    (expensive bids activate less — an increasing segment almost
+    always means swapped columns).
+    """
+    required = {"product", "price_eur_per_mwh", "activation_probability_pct"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            "bm_merit_order sheet is missing column(s) "
+            f"{sorted(missing)}; expected exactly {sorted(required)}."
+        )
+    curve: dict[str, list[tuple[float, float]]] = {}
+    for product, grp in df.groupby("product"):
+        name = str(product).strip().lower()
+        if name not in _MERIT_ORDER_PRODUCTS:
+            raise ValueError(
+                f"bm_merit_order: unknown product {name!r}; expected "
+                f"one of {sorted(_MERIT_ORDER_PRODUCTS)} (FCR is "
+                "capacity-only and carries no activation curve)."
+            )
+        pairs = sorted(
+            (
+                float(row["price_eur_per_mwh"]),
+                float(row["activation_probability_pct"]),
+            )
+            for _, row in grp.iterrows()
+        )
+        prices = [p for p, _ in pairs]
+        if len(set(prices)) != len(prices):
+            raise ValueError(
+                f"bm_merit_order: product {name!r} has duplicate "
+                "price points; each price may appear once."
+            )
+        for _, prob in pairs:
+            if not (0.0 <= prob <= 100.0):
+                raise ValueError(
+                    f"bm_merit_order: product {name!r} has an "
+                    f"activation probability of {prob!r} %; values "
+                    "must lie in [0, 100]."
+                )
+        probs = [q for _, q in pairs]
+        if any(b > a + 1e-9 for a, b in itertools.pairwise(probs)):
+            raise ValueError(
+                f"bm_merit_order: product {name!r} must be monotone "
+                "NON-INCREASING in price (expensive bids activate "
+                "less); an increasing segment usually means the "
+                "price / probability columns are swapped."
+            )
+        curve[name] = pairs
+    if not curve:
+        raise ValueError(
+            "bm_merit_order sheet contains no data rows; add at least "
+            "one product curve or set bm_merit_order_enabled = FALSE."
+        )
+    return curve
 
 
 def parse_augmentation_years(raw: Any) -> tuple[int, ...]:
@@ -3249,6 +3375,7 @@ def validate_workbook_params(
     # The per-MWh route-to-market fee is a non-negative charge on exported
     # energy (a negative value would be a rebate, never a fee).
     _require_non_negative(economics, "route_to_market_fee_eur_per_mwh")
+    _require_non_negative(economics, "go_price_eur_per_mwh")
 
     # Tax + depreciation layer (Eqs. E34-E38): the rate lives in
     # [0, 100]; the straight-line lives and the carry-forward window
@@ -3698,6 +3825,30 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     else:
         typed["balancing"] = dict(BALANCING_SHEET_DEFAULTS)
 
+    # Optional ``bm_merit_order`` sheet (Eq. B10): parsed and validated
+    # only when the switch is armed; a stray sheet with the switch off
+    # is inert (an INFO note records this), so the constant-beta path
+    # stays bit-identical.
+    if bool(typed["balancing"].get("bm_merit_order_enabled", False)):
+        if "bm_merit_order" not in sheets:
+            raise ValueError(
+                "bm_merit_order_enabled = TRUE requires the "
+                "'bm_merit_order' sheet (columns: product, "
+                "price_eur_per_mwh, activation_probability_pct); add "
+                "the sheet or set the switch to FALSE."
+            )
+        typed["balancing"]["bm_merit_order_curve"] = (
+            parse_merit_order_sheet(
+                pd.read_excel(xlsx_path, sheet_name="bm_merit_order"),
+            )
+        )
+    elif "bm_merit_order" in sheets:
+        logger.info(
+            "[balancing] a 'bm_merit_order' sheet is present but "
+            "bm_merit_order_enabled = FALSE; the merit-order curve is "
+            "inert and the scalar activation probabilities apply."
+        )
+
     # Optional ``ppa`` sheet — same master-switch pattern: absent means
     # the contract is disabled and the run is bit-identical to before.
     if "ppa" in sheets:
@@ -3794,7 +3945,7 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         == "self_consumption"
         and "load_kwh" in ts.columns
     ):
-        _dt_h = float(dt_minutes) / 60.0
+        _dt_h = dt_hours_from({"dt_minutes": dt_minutes})
         _load = ts["load_kwh"].to_numpy(dtype=float)
         _pv_sup = (
             ts["pv_kwh"].to_numpy(dtype=float)
@@ -4192,6 +4343,7 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
      "Lifetime curtailment compensation [EUR]"),
     ("total_augmentation_capex_eur_lifecycle",
      "Lifetime augmentation CAPEX [EUR]"),
+    ("total_go_revenue_eur_lifecycle", "Lifetime GO revenue [EUR]"),
     # Post-tax family (Eq. E39): NaN while the tax layer is off, so the
     # non-zero/NaN-skipping renderer keeps zero-default digests
     # noise-free ('n/a' = tax not modelled, never a duplicate of the

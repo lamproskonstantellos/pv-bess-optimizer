@@ -362,6 +362,38 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (guarantees-of-origin revenue)
+
+- `go_price_eur_per_mwh` on the economics sheet (Eq. E54; default 0 =
+  off, bit-identical): sells guarantees of origin on the eligible
+  renewable injection - the availability- and curtailment-derated PV
+  grid export (BESS discharge and self-consumed energy excluded: GOs
+  are issued on metered renewable injection; the export basis is
+  stated explicitly as jurisdiction-dependent).  Flat contracted
+  price, PV-fade volume; fee-exempt (certificates settle outside the
+  power market) and excluded from LCOE/LCOS.  Its own go_revenue_eur
+  cashflow column (monthly on the PV production shape with exact
+  reconciliation), a lifetime total in SUMMARY when non-zero, a "GO
+  revenue" band in the revenue stack / yearly bars / NPV waterfall,
+  and Revenue-driver membership in the sensitivity tornado.
+
+### Added (merit-order activation-probability curve)
+
+- `bm_merit_order_enabled` on the balancing sheet (Eq. B10; default
+  FALSE, bit-identical - the constant-beta code path is preserved,
+  not just its values): replaces the scalar per-product activation
+  probability with a piecewise price-to-probability curve read from
+  the optional `bm_merit_order` sheet (columns product,
+  price_eur_per_mwh, activation_probability_pct; aFRR/mFRR products
+  only; validated monotone non-increasing in price with guidance on
+  swapped columns).  beta_k(t) interpolates the curve at each step's
+  activation price - expensive bids activate less - and the same
+  per-step array feeds the MILP objective, the SOC drift, the
+  expected-activation KPIs, the SOC-dynamics audit mirror and the
+  Monte Carlo realisation, so the model stays linear and internally
+  consistent.  Bids are assumed at the input activation price level
+  (documented modelling assumption).
+
 ### Added (mid-life re-solve validation)
 
 - `midlife_resolve_year` on the simulation sheet (Eq. E53; default 0

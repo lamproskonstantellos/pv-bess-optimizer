@@ -16,11 +16,11 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E53 (+ suffixed E8a, E13a-E13d, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E54 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
-| S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
-| B | (reserved) | balancing product structure | — |
+| S | `self_consumption_design.md` | system/dispatch constraints (shared with merchant mode) | S36 |
+| B | `balancing_market_design.md` | balancing product structure | B10 |
 | I | (reserved) | intraday venue | — |
 
 New equations take the next free tag in their namespace at merge time
@@ -409,6 +409,31 @@ around the restriction (e.g. charging the BESS instead of spilling).
 This is a physical constraint, not a KPI derate: no post-solve
 scaling occurs, and audit invariant 7 sees the composed cap.  Use the
 quota for lifecycle economics, the signal for operational studies.
+
+### Guarantees-of-origin revenue (Eq. E54)
+
+`go_price_eur_per_mwh` (economics sheet; 0 = off, default,
+bit-identical) sells guarantees of origin on the **eligible renewable
+injection** — the availability- and curtailment-derated PV grid
+export.  BESS discharge and self-consumed energy are excluded: GOs
+are issued on metered renewable injection, and the export basis is
+stated explicitly because the eligibility definition is
+jurisdiction-dependent.
+
+$$R^{\mathrm{GO}}_y = p_{\mathrm{GO}} \cdot E^{\mathrm{PV,exp}}_1
+\cdot f^{PV}_y \qquad (y \ge 1) \tag{E54}$$
+
+The price is flat over the horizon (GO prices are contracted, not
+CPI-indexed) while the eligible MWh fade on the PV degradation curve.
+Classification: **fee-exempt** (certificates settle outside the power
+market, so neither the aggregator fee nor the route-to-market fee
+touches the stream) and **excluded from LCOE/LCOS** (revenue-agnostic
+metrics).  Its own cashflow column (`go_revenue_eur`, monthly on the
+PV production shape with exact reconciliation), a lifetime total
+(`total_go_revenue_eur_lifecycle`, SUMMARY-optional), a "GO revenue"
+band in the revenue stack / yearly bars / NPV waterfall drawn only
+when non-zero, and Revenue-driver membership in the sensitivity
+tornado (certificate prices move with the renewables market).
 
 ### Year-1 revenue bases and the nine canonical aggregates
 
@@ -1435,6 +1460,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E51) | `build_yearly_cashflow` augmentation_capex_eur column + LCOS numerator events + `apply_tax_layer` tranches |
 | (E52) | `build_yearly_cashflow` Year-0 BESS CAPEX x (1 + ob); LCOS / depreciation bases |
 | (E53) | `pipeline._run_midlife_resolve` (+ `lifetime.factors_for_year`); io writers' conditional sheet/section |
+| (E54) | `build_yearly_cashflow` go_revenue_eur column (PV-fade volume, flat price); fee-exempt / LCOE-excluded |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

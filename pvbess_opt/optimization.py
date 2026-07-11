@@ -79,6 +79,7 @@ from .balancing import (
     BalancingTimeseries,
     acceptance_probability,
     activation_probability,
+    activation_probability_curve,
     capacity_share_kw,
     resolve_balancing_config,
     resolve_balancing_timeseries,
@@ -839,6 +840,31 @@ def build_model(
     balancing_cfg, balancing_ts, balancing_active = _resolve_balancing_inputs(
         params, ts, n_steps=n_steps, bess_present=bess_present,
     )
+    # Merit-order activation curve (Eq. B10): per-step deterministic
+    # beta_k(t) coefficients keep the MILP linear.  None (default)
+    # keeps the CONSTANT-beta code path at every consumer below, so a
+    # disabled curve is bit-identical (the constant form multiplies
+    # the summed expression once; distributing a per-step coefficient
+    # would change floating-point association).
+    _beta_merit: dict[str, Any] | None = None
+    if balancing_active and getattr(
+        balancing_cfg, "bm_merit_order_enabled", False,
+    ):
+        _merit_curve = (
+            (params.get("balancing") or {}).get("bm_merit_order_curve")
+            or None
+        )
+        if _merit_curve:
+            _beta_merit = {
+                k: activation_probability_curve(
+                    balancing_cfg, _merit_curve, k,
+                    getattr(
+                        balancing_ts,
+                        f"{k}_activation_price_eur_per_mwh",
+                    ),
+                )
+                for k in PRODUCTS_WITH_ACTIVATION
+            }
     if balancing_active:
         product_caps = {
             k: capacity_share_kw(balancing_cfg, k, p_bess)
@@ -894,7 +920,18 @@ def build_model(
         # Expected-value activation drifts in kWh, deterministic from the
         # solver's point of view. FCR is symmetric in expectation so it
         # contributes zero net energy.
-        if balancing_active:
+        if balancing_active and _beta_merit is not None:
+            act_charge = eta_c * dt_h * sum(
+                acceptance_probability(balancing_cfg, k)
+                * float(_beta_merit[k][t]) * m.r_balancing[k, t]
+                for k in PRODUCTS_DN
+            )
+            act_discharge = (dt_h / eta_d) * sum(
+                acceptance_probability(balancing_cfg, k)
+                * float(_beta_merit[k][t]) * m.r_balancing[k, t]
+                for k in PRODUCTS_UP
+            )
+        elif balancing_active:
             act_charge = eta_c * dt_h * sum(
                 _alpha_beta(balancing_cfg, k) * m.r_balancing[k, t]
                 for k in PRODUCTS_DN
@@ -936,7 +973,19 @@ def build_model(
         final_discharge = (
             m.bess_dis_load[n_steps - 1] + m.bess_dis_grid[n_steps - 1]
         ) / eta_d
-        if balancing_active:
+        if balancing_active and _beta_merit is not None:
+            t_final = n_steps - 1
+            final_act_charge = eta_c * dt_h * sum(
+                acceptance_probability(balancing_cfg, k)
+                * float(_beta_merit[k][t_final]) * m.r_balancing[k, t_final]
+                for k in PRODUCTS_DN
+            )
+            final_act_discharge = (dt_h / eta_d) * sum(
+                acceptance_probability(balancing_cfg, k)
+                * float(_beta_merit[k][t_final]) * m.r_balancing[k, t_final]
+                for k in PRODUCTS_UP
+            )
+        elif balancing_active:
             t_final = n_steps - 1
             final_act_charge = eta_c * dt_h * sum(
                 _alpha_beta(balancing_cfg, k) * m.r_balancing[k, t_final]
@@ -1341,16 +1390,28 @@ def build_model(
         # the input prices.
         act_terms = []
         for k in PRODUCTS_WITH_ACTIVATION:
-            alpha_beta = _alpha_beta(balancing_cfg, k)
             price_col = getattr(
                 balancing_ts, f"{k}_activation_price_eur_per_mwh",
             )
-            act_terms.append(
-                alpha_beta * dt_h * sum(
-                    float(price_col[t]) * m.r_balancing[k, t]
-                    for t in time_index
-                ) / 1000.0
-            )
+            if _beta_merit is not None:
+                # Eq. B10: the B7/B8 constant beta generalises to the
+                # per-step merit-order coefficient beta_k(t).
+                _alpha_k = acceptance_probability(balancing_cfg, k)
+                act_terms.append(
+                    _alpha_k * dt_h * sum(
+                        float(_beta_merit[k][t]) * float(price_col[t])
+                        * m.r_balancing[k, t]
+                        for t in time_index
+                    ) / 1000.0
+                )
+            else:
+                alpha_beta = _alpha_beta(balancing_cfg, k)
+                act_terms.append(
+                    alpha_beta * dt_h * sum(
+                        float(price_col[t]) * m.r_balancing[k, t]
+                        for t in time_index
+                    ) / 1000.0
+                )
         m.balancing_revenue_expr = pyo.Expression(
             expr=sum(cap_terms) + sum(act_terms),
         )
