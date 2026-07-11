@@ -611,6 +611,30 @@ def build_model(
         {t: float(p_export * dt_h * max_injection_bess_per_step[t]) for t in time_index}
         if max_injection_bess_per_step is not None else None
     )
+    # Per-step exogenous-curtailment signal (Eq. E48 companion, the
+    # re-dispatch mode): a [0, 1] share multiplying the export caps so
+    # the MILP charges or curtails around operator curtailment instead
+    # of spilling at the derate stage.  Absent column = factor 1
+    # everywhere (bit-identical); mutual exclusivity with the quota
+    # keys is enforced by the loader.
+    if "curtailment_signal" in ts.columns:
+        _signal = {
+            t: min(1.0, max(0.0, float(ts.loc[t, "curtailment_signal"])))
+            for t in time_index
+        }
+        export_cap_kwh_per_step = {
+            t: export_cap_kwh_per_step[t] * _signal[t] for t in time_index
+        }
+        if export_cap_pv_kwh_per_step is not None:
+            export_cap_pv_kwh_per_step = {
+                t: export_cap_pv_kwh_per_step[t] * _signal[t]
+                for t in time_index
+            }
+        if export_cap_bess_kwh_per_step is not None:
+            export_cap_bess_kwh_per_step = {
+                t: export_cap_bess_kwh_per_step[t] * _signal[t]
+                for t in time_index
+            }
     # In strict mode the PV load-serving flow is bounded by BOTH the combined
     # cap and (when present) the PV sub-cap, so the load-priority floor uses
     # the tighter of the two.
@@ -1479,6 +1503,13 @@ def model_to_dataframe(
     export_cap_kwh_per_step = (
         p_export * dt_h * max_injection_per_step
     )
+    # Mirror the build_model signal composition (re-dispatch curtailment
+    # mode) so the reported cap column — and invariant_7's headroom test
+    # on it — sees the cap the solver actually faced.
+    if "curtailment_signal" in ts.columns:
+        export_cap_kwh_per_step = export_cap_kwh_per_step * np.clip(
+            ts["curtailment_signal"].to_numpy(dtype=float), 0.0, 1.0,
+        )
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
     pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
@@ -1527,12 +1558,22 @@ def model_to_dataframe(
         params, ts, "max_injection_profile_pv",
     )
     if mi_pv is not None:
-        res["grid_export_cap_pv_kwh"] = p_export * dt_h * mi_pv
+        cap_pv = p_export * dt_h * mi_pv
+        if "curtailment_signal" in ts.columns:
+            cap_pv = cap_pv * np.clip(
+                ts["curtailment_signal"].to_numpy(dtype=float), 0.0, 1.0,
+            )
+        res["grid_export_cap_pv_kwh"] = cap_pv
     mi_bess = _resolve_optional_max_injection_per_step(
         params, ts, "max_injection_profile_bess",
     )
     if mi_bess is not None:
-        res["grid_export_cap_bess_kwh"] = p_export * dt_h * mi_bess
+        cap_bess = p_export * dt_h * mi_bess
+        if "curtailment_signal" in ts.columns:
+            cap_bess = cap_bess * np.clip(
+                ts["curtailment_signal"].to_numpy(dtype=float), 0.0, 1.0,
+            )
+        res["grid_export_cap_bess_kwh"] = cap_bess
 
     res["soc_kwh"] = [pyo.value(model.soc[t]) for t in time_index]
     if bess_capacity_kwh > 1e-9:

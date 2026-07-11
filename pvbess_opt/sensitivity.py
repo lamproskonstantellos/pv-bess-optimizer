@@ -190,6 +190,8 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("capacity_market_revenue_eur")
     if "revenue_levy_eur" in df.columns:
         components.append("revenue_levy_eur")
+    if "curtailment_compensation_eur" in df.columns:
+        components.append("curtailment_compensation_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -328,6 +330,11 @@ def _scale_revenue(
         # zero-turnover clamp (max(f*base, 0) == f*max(base, 0)), so
         # the constant scale is exact.
         "revenue_levy_eur",
+        # Curtailment compensation (Eq. E49): the compensated volume
+        # is paid at an administered price that regimes typically link
+        # to the market value of the curtailed energy — classified
+        # price-linked, so it scales with the Revenue driver.
+        "curtailment_compensation_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)

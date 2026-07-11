@@ -270,6 +270,16 @@ Scope rules (one scope across every consumer, per
   the availability-derate list (derate exactly once); they are
   written only when a contract is active, keeping disabled runs
   bit-identical.
+* **Curtailment risk allocation**: `revenue_pv_ppa_eur` and
+  `ppa_covered_dam_value_eur` are also members of the curtailment
+  derate list (Eq. E48 in `docs/economics_design.md`) — under
+  pay-as-produced settlement the generator bears curtailment, since
+  the contract pays for delivered volume.  The **baseload** structure
+  is the exception: its fixed-volume leg settles financially
+  regardless of physical delivery, so `apply_curtailment_derate`
+  skips the production-decoupled keys (the same
+  `ppa_baseload_shortfall_mwh` marker used by the availability
+  derate).
 
 ## Implementation map
 

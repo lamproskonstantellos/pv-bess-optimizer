@@ -355,7 +355,7 @@ def evaluate_scenario(
     base_typed: dict[str, Any], scenario: dict[str, Any], *, solver_opts: dict[str, Any],
 ) -> dict[str, Any]:
     """Run one scenario and return its comparison row."""
-    from .availability import apply_unavailability_derate
+    from .availability import apply_operating_derates
     from .io import read_inputs, write_workbook
     from .kpis import compute_kpis
     from .optimization import run_scenario
@@ -371,9 +371,7 @@ def evaluate_scenario(
         params, ts, return_unrounded=True, **solver_opts,
     )
     kpis = compute_kpis(res, params, verify_balance=False)
-    kpis = apply_unavailability_derate(
-        kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
-    )
+    kpis = apply_operating_derates(kpis, params)
     bundle = _build_financials(xlsx, params, ts, kpis, res)
     fin = bundle.get("fin_kpis") or {}
 

@@ -34,7 +34,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .availability import apply_unavailability_derate
+from .availability import apply_operating_derates
 from .balancing import (
     PRODUCTS_ALL,
     PRODUCTS_DN,
@@ -714,9 +714,7 @@ def rolling_horizon_dispatch(
     # Identical scope to the pipeline's headline Year-1 KPIs: the same
     # post-solve unavailability derate is applied here so the foresight
     # gap compares derated-vs-derated (the factor cancels in the ratio).
-    kpis = apply_unavailability_derate(
-        kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
-    )
+    kpis = apply_operating_derates(kpis, params)
     kpis["year_close_soc_shortfall_kwh"] = round(year_close_shortfall_kwh, 4)
     return full, kpis
 

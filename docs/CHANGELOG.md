@@ -362,6 +362,37 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (exogenous curtailment: expected quota + hour-resolved signal)
+
+- `curtailment_pct` on the project sheet (Eq. E48; default 0 = off,
+  bit-identical — the derate returns the KPI dict without new keys):
+  an expected grid-operator curtailment share applied as a post-solve
+  derate on the **export side only** (export energies, per-origin
+  export profits, DAM revenues and the pay-as-produced PPA leg;
+  self-consumption, load and grid import untouched; the baseload
+  fixed-volume leg exempt via the same production-decoupled marker as
+  the availability derate).  `profit_total_eur` is recomposed from
+  its scaled components so the nine-aggregate scope identity
+  survives.  `curtailment_compensated_pct` and
+  `curtailment_compensation_price_eur_per_mwh` reimburse a share of
+  the curtailed energy at an administered price (Eq. E49): a
+  dedicated `curtailment_compensation_eur` cashflow column
+  (revenue-classified, blended PV/BESS fade, DAM-inflation indexed,
+  monthly via the fee-share weights) totalling into
+  `lifetime_curtailment_compensation_eur`, with its own revenue band
+  in the cashflow figures and membership in the sensitivity Revenue
+  driver.  Availability and curtailment now compose through a single
+  entry point (`availability.apply_operating_derates`, availability
+  first) across all five KPI paths.
+- `curtailment_signal` timeseries column (values in `[0, 1]`):
+  hour-resolved curtailment that multiplies the export cap INSIDE the
+  MILP, letting the optimizer re-dispatch around the restriction
+  (e.g. charge the BESS instead of spilling) rather than scaling
+  results after the fact.  The dispatch-frame cap columns mirror the
+  composed cap so audit invariant 7 checks the true limit.  Mutually
+  exclusive with `curtailment_pct` — the loader rejects the
+  combination as double-counting.
+
 ### Added (annual cycle cap with warranty basis)
 
 - `max_cycles_per_year` on the bess sheet (Eq. E46; default 0 = off,

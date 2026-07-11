@@ -303,6 +303,13 @@ def plot_revenue_stack_yearly(
         levy_arr = op["revenue_levy_eur"].astype(float).to_numpy()
     else:
         levy_arr = np.zeros_like(load_pv)
+    # Curtailment compensation (Eq. E49), an administered payment >= 0.
+    if "curtailment_compensation_eur" in op.columns:
+        curtailment_arr = (
+            op["curtailment_compensation_eur"].astype(float).to_numpy()
+        )
+    else:
+        curtailment_arr = np.zeros_like(load_pv)
     _toll_treatment = str(
         (econ or {}).get("bess_toll_merchant_treatment", "zeroed")
         or "zeroed"
@@ -508,6 +515,16 @@ def plot_revenue_stack_yearly(
             label="Capacity-market revenue",
         )
         bottoms = bottoms + capacity_market_arr
+    if np.any(np.abs(curtailment_arr) > 1e-9):
+        # Curtailment compensation (Eq. E49) — administered payment
+        # next to the other non-market revenue bands.
+        ax.bar(
+            years, curtailment_arr, bottom=bottoms,
+            color=financial_color("Curtailment compensation"),
+            edgecolor="black", linewidth=0.4,
+            label="Curtailment compensation",
+        )
+        bottoms = bottoms + curtailment_arr
     if np.any(np.abs(support_net_arr) > 1e-9):
         # Signed netting (Eq. E31a): compensation years stack with the
         # revenue components, clawback years below the fee stack (and
@@ -542,7 +559,7 @@ def plot_revenue_stack_yearly(
     net = net + bal_agg_fee + rtm_fee + opt_fee + gcf_fee + imb_cost
     net = (
         net + toll_arr + floor_topup_arr + support_arr + support_net_arr
-        + capacity_market_arr + levy_arr
+        + capacity_market_arr + levy_arr + curtailment_arr
     )
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()

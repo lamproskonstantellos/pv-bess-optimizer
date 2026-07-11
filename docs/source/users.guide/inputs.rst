@@ -46,6 +46,14 @@ Balancing price columns         balancing only           Optional per-step balan
                                                          ``{afrr,mfrr}_{up,dn}_activation_price_eur_per_mwh``
                                                          (see the ``balancing`` sheet
                                                          reference below).
+``curtailment_signal``          no                       Per-step export-availability factor
+                                                         in ``[0, 1]`` (0 = export fully
+                                                         curtailed, 1 = unrestricted).
+                                                         Multiplies the export cap inside the
+                                                         optimizer so dispatch adapts to the
+                                                         restriction.  Mutually exclusive
+                                                         with ``curtailment_pct`` on the
+                                                         ``project`` sheet.
 ==============================  =======================  ====================================
 
 Sheet ``project``
@@ -107,6 +115,19 @@ High-level run configuration:
 * ``unavailability_pct``: annual outage / maintenance factor
   (default 1 %).  Applied as a post-solve derate on PV generation,
   BESS discharge, and revenue.
+* ``curtailment_pct`` (default 0): expected grid-operator curtailment
+  of **exported** energy, in percent.  Applied as a post-solve derate
+  on the export-side energies and revenues only (after the
+  availability derate); self-consumption, load and grid import are
+  unaffected.  Mutually exclusive with the ``curtailment_signal``
+  timeseries column below — setting both is an error.
+* ``curtailment_compensated_pct`` (default 0): share of the curtailed
+  energy that is financially compensated, in percent.
+* ``curtailment_compensation_price_eur_per_mwh`` (default 0):
+  administered compensation price for the compensated curtailed
+  energy.  The product of the three keys produces the
+  ``curtailment_compensation_eur`` cashflow column, indexed on DAM
+  inflation, and the ``lifetime_curtailment_compensation_eur`` KPI.
 * ``site_capex_eur`` (default 0): site-wide lump-sum CAPEX in
   absolute EUR for items that are not naturally per-kWp / per-kW
   (substation construction, MV/HV grid upgrades, interconnection

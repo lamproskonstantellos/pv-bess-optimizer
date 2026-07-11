@@ -818,6 +818,12 @@ def build_yearly_cashflow(
     # EUR bases).  Older KPI dicts without the split charge no RTM fee.
     pv_export_mwh_1 = float(year1_kpis.get("pv_export_mwh", 0.0) or 0.0)
     bess_export_mwh_1 = float(year1_kpis.get("bess_export_mwh", 0.0) or 0.0)
+    # Curtailment compensation (Eq. E49): Year-1 administered payment
+    # computed by availability.apply_curtailment_derate; 0 / absent
+    # keeps the column all-zero (bit-identity).
+    curtailment_comp_1 = float(
+        year1_kpis.get("curtailment_compensation_eur", 0.0) or 0.0
+    )
 
     # BESS tolling agreement (Eqs. E29/E29a): a fixed EUR/MW/yr payment
     # for dispatch rights over a phase window (Eq. E25).  The toll is a
@@ -1142,6 +1148,7 @@ def build_yearly_cashflow(
             state_support_clawback_y = 0.0
             capacity_market_rev_y = 0.0
             revenue_levy_y = 0.0
+            curtailment_comp_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -1424,6 +1431,27 @@ def build_yearly_cashflow(
                 ) + 0.0
             else:
                 revenue_levy_y = 0.0
+            # Curtailment compensation (Eq. E49): the Year-1
+            # administered payment fades on the per-origin export
+            # factors pro-rata to the curtailed-export split and
+            # indexes on the plain dam_inflation_pct scalar (an
+            # administered price rides no trajectory).  No aggregator
+            # fee (not market revenue); excluded from LCOE/LCOS.
+            if curtailment_comp_1 != 0.0:
+                _curt_w_tot = pv_export_mwh_1 + bess_export_mwh_1
+                if _curt_w_tot > 1e-12:
+                    _curt_blend = (
+                        pv_export_mwh_1 * pv_factor
+                        + bess_export_mwh_1 * bess_factor
+                    ) / _curt_w_tot
+                else:
+                    _curt_blend = pv_factor
+                curtailment_comp_y = (
+                    curtailment_comp_1 * _curt_blend
+                    * (1.0 + dam_infl) ** (y - 1)
+                )
+            else:
+                curtailment_comp_y = 0.0
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -1456,6 +1484,7 @@ def build_yearly_cashflow(
             + state_support_y + state_support_clawback_y
             + capacity_market_rev_y
             + revenue_levy_y
+            + curtailment_comp_y
             + ppa_y + opex_y + capex_y + devex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
@@ -1488,6 +1517,7 @@ def build_yearly_cashflow(
                     capacity_market_rev_y
                 ),
                 "revenue_levy_eur": float(revenue_levy_y),
+                "curtailment_compensation_eur": float(curtailment_comp_y),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -1978,6 +2008,7 @@ def derive_monthly_cashflow(
     has_ss_cb_col = "state_support_clawback_eur" in yearly_cf.columns
     has_cm_col = "capacity_market_revenue_eur" in yearly_cf.columns
     has_levy_col = "revenue_levy_eur" in yearly_cf.columns
+    has_curt_col = "curtailment_compensation_eur" in yearly_cf.columns
     has_tax_col = "corporate_tax_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
@@ -2043,6 +2074,10 @@ def derive_monthly_cashflow(
         levy_y = (
             float(yearly_indexed.loc[y, "revenue_levy_eur"])
             if has_levy_col else 0.0
+        )
+        curt_y = (
+            float(yearly_indexed.loc[y, "curtailment_compensation_eur"])
+            if has_curt_col else 0.0
         )
         tax_y = (
             float(yearly_indexed.loc[y, "corporate_tax_eur"])
@@ -2130,6 +2165,11 @@ def derive_monthly_cashflow(
             # approximation as the structural fees; shares sum to one,
             # so the yearly reconciliation is exact).
             levy_m = float(fee_share.loc[m]) * levy_y
+            # Curtailment compensation (Eq. E49) rides the same
+            # revenue-share weights (an export-shape approximation;
+            # shares sum to one, so the yearly reconciliation is
+            # exact).
+            curt_m = float(fee_share.loc[m]) * curt_y
             # Corporate tax (Eq. E37) settles annually, so it books in
             # month 12 — the December factor equals the yearly
             # 1/(1+r)^y factor (Eq. E4), keeping the monthly and yearly
@@ -2153,6 +2193,7 @@ def derive_monthly_cashflow(
                 + ss_m + ss_cb_m
                 + cm_m
                 + levy_m
+                + curt_m
                 + ppa_m + opex_m + capex_m + devex_m
             )
             # End-of-month discounting: month m of year y lands at
@@ -2182,6 +2223,7 @@ def derive_monthly_cashflow(
                     "state_support_clawback_eur": float(ss_cb_m),
                     "capacity_market_revenue_eur": float(cm_m),
                     "revenue_levy_eur": float(levy_m),
+                    "curtailment_compensation_eur": float(curt_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -2210,6 +2252,7 @@ def derive_monthly_cashflow(
         "state_support_eur", "state_support_clawback_eur",
         "capacity_market_revenue_eur",
         "revenue_levy_eur",
+        "curtailment_compensation_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
@@ -2236,6 +2279,7 @@ def derive_monthly_cashflow(
                     "state_support_eur", "state_support_clawback_eur",
                     "capacity_market_revenue_eur",
                     "revenue_levy_eur",
+                    "curtailment_compensation_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
@@ -2460,6 +2504,10 @@ def compute_financial_kpis(
     total_revenue_levy_eur_lifecycle = (
         float(df.loc[after_y0_mask, "revenue_levy_eur"].sum())
         if "revenue_levy_eur" in df.columns else 0.0
+    )
+    lifetime_curtailment_compensation_eur = (
+        float(df.loc[after_y0_mask, "curtailment_compensation_eur"].sum())
+        if "curtailment_compensation_eur" in df.columns else 0.0
     )
 
     # ---- Post-tax KPIs (Eq. E39) -------------------------------------------
@@ -2886,6 +2934,10 @@ def compute_financial_kpis(
         # SUMMARY-optional.
         "total_revenue_levy_eur_lifecycle": float(round(
             total_revenue_levy_eur_lifecycle, 2,
+        )),
+        # Curtailment compensation (Eq. E49); >= 0, SUMMARY-optional.
+        "lifetime_curtailment_compensation_eur": float(round(
+            lifetime_curtailment_compensation_eur, 2,
         )),
         # Post-tax KPI family (Eq. E39) — additive to the pre-tax
         # baseline; all NaN while corporate_tax_rate_pct = 0.

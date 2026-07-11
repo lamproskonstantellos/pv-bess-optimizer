@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E47 (+ suffixed E8a, E13a-E13d, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E49 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -276,6 +276,49 @@ node stays at the true demand and its ribbons conserve energy.  Because
 grid import is not a monetised stream — the self-consumption savings,
 which *are* derated, already carry the downtime cost — Eq. E8a leaves
 every financial KPI unchanged.
+
+### Exogenous curtailment
+
+Two mutually exclusive input surfaces model grid-operator curtailment
+(`read_workbook` raises if both are set, since a quota on top of a
+signal would double-count the same lost energy).
+
+**Expected-quota derate (Eqs. E48/E49; `curtailment_pct`).**  A flat
+expected curtailment share $q = \texttt{curtailment\_pct}/100$ scales
+the **export-side** KPIs only, after the availability derate:
+
+$$X^{\mathrm{curt}} = (1 - q)\, X^{\mathrm{avail}} \tag{E48}$$
+
+(`availability.apply_curtailment_derate`; the derated list spans the
+export energies, the per-origin export profits, the DAM revenues and
+the PPA contract leg — self-consumption, load and grid import are
+untouched because curtailment binds the grid connection, not the
+plant, and the baseload-shortfall marker keys are exempt since a
+baseload PPA settles financially regardless of physical delivery).
+`profit_total_eur` is recomposed from the deltas of its constituent
+streams so the scope identity above survives the derate.  A share
+$c = \texttt{curtailment\_compensated\_pct}/100$ of the curtailed
+energy is reimbursed at the administered price
+$p = \texttt{curtailment\_compensation\_price\_eur\_per\_mwh}$:
+
+$$K^{\mathrm{curt}} = q \cdot c \cdot p \cdot E^{\mathrm{export,avail}}_1 \tag{E49}$$
+
+which enters the cashflow as its own column
+(`curtailment_compensation_eur`, revenue-classified for LCOE), fades
+on the blended PV/BESS export mix, indexes on the DAM inflation rate
+(administered prices track the market index, not a trajectory), and
+totals into `lifetime_curtailment_compensation_eur`.  Both derates
+share one entry point — `availability.apply_operating_derates`
+(availability first, then curtailment) — so every KPI path composes
+them identically.
+
+**Hour-resolved signal (`curtailment_signal` timeseries column).**  A
+per-step factor in $[0,1]$ multiplies the export cap *inside the
+MILP* (`optimization.build_model`), so the optimizer re-dispatches
+around the restriction (e.g. charging the BESS instead of spilling).
+This is a physical constraint, not a KPI derate: no post-solve
+scaling occurs, and audit invariant 7 sees the composed cap.  Use the
+quota for lifecycle economics, the signal for operational studies.
 
 ### Year-1 revenue bases and the nine canonical aggregates
 
@@ -1296,6 +1339,8 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E45) | `economics.build_yearly_cashflow` baseload PPA no-fade / no-reversion branch |
 | (E46) | `optimization.build_model` → `CYC_ANNUAL` (Year-1 basis) |
 | (E47) | `lifetime.warranty_cycle_utilisation`; degradation-sheet columns + pipeline reset warning |
+| (E48) | `availability.apply_curtailment_derate` (export-side scaling; composed via `apply_operating_derates`) |
+| (E49) | `apply_curtailment_derate` compensation term + `build_yearly_cashflow` curtailment_compensation_eur column |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

@@ -152,6 +152,14 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "grid_charging_fee_exempt": False,
     "grid_cap_includes_load": False,
     "unavailability_pct": 1.0,
+    # Exogenous system-operator curtailment (Eqs. E48/E49): quota mode,
+    # off by default (bit-identical).  Mutually exclusive with a
+    # per-step curtailment_signal timeseries column (the MILP
+    # re-dispatch mode).  Project sheet so the keys reach both the
+    # MILP params and the economics merge with zero extra plumbing.
+    "curtailment_pct": 0.0,
+    "curtailment_compensated_pct": 0.0,
+    "curtailment_compensation_price_eur_per_mwh": 0.0,
     "site_capex_eur": 0.0,
     "site_devex_eur": 0.0,
     "currency_format": "auto",
@@ -612,6 +620,22 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("unavailability_pct", 1.0, "%",
      "Annual unavailability (outages / scheduled maintenance) applied as "
      "a post-solve derate on PV generation, BESS discharge, and revenue."),
+    ("curtailment_pct", 0.0, "%",
+     "Expected share of annual grid export curtailed by the system "
+     "operator (exogenous quota, Eq. E48). Applied post-solve as a "
+     "second derate on export volumes and export revenue only, after "
+     "the unavailability derate. 0 = off (default, bit-identical). "
+     "Mutually exclusive with a curtailment_signal timeseries column "
+     "(the per-step re-dispatch mode)."),
+    ("curtailment_compensated_pct", 0.0, "%",
+     "Share of the curtailed export volume that is financially "
+     "compensated (redispatch-compensation regimes, Eq. E49). Quota "
+     "mode only; rejected when a curtailment_signal column is present "
+     "(the dispatch already monetises the response)."),
+    ("curtailment_compensation_price_eur_per_mwh", 0.0, "EUR/MWh",
+     "Price paid on the compensated curtailed volume. 0 (default) "
+     "keeps the compensation line all-zero even when the shares are "
+     "set. Non-negative."),
     ("site_capex_eur", 0.0, "EUR",
      "Site-wide lump-sum CAPEX in absolute EUR for items that are not "
      "naturally per-kWp/per-kW (substation construction, MV/HV grid "
@@ -2951,6 +2975,20 @@ def validate_workbook_params(
             f"'gearing_pct' must be in [0, 100]; got {gearing!r}."
         )
 
+    # Exogenous curtailment quota (Eqs. E48/E49): percent shares live
+    # in [0, 100], the administered price is non-negative.  The
+    # quota-vs-signal exclusivity is checked in read_workbook, where
+    # the timeseries is in scope.
+    for key in ("curtailment_pct", "curtailment_compensated_pct"):
+        value = float(project.get(key, 0.0) or 0.0)
+        if not (0.0 <= value <= 100.0):
+            raise ValueError(
+                f"{key!r} must be in [0, 100]; got {value!r}."
+            )
+    _require_non_negative(
+        project, "curtailment_compensation_price_eur_per_mwh",
+    )
+
     # Target-DSCR debt sizing (Eqs. E41-E43): the keys are inert in
     # manual mode; in target_dscr mode the target must be a real
     # lender covenant (>= 1) and a repayment tenor must exist.
@@ -3601,6 +3639,35 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
                 "problem infeasible.",
                 _import_cap_kw,
             )
+    # Exogenous curtailment (Eqs. E48/E49): the per-step signal column
+    # and the quota keys answer different questions (re-dispatch vs
+    # post-solve derate) and combining them would double-count — hard
+    # error.  The signal itself must be a [0, 1] share per step.
+    if "curtailment_signal" in ts.columns:
+        _quota = float(
+            typed["project"].get("curtailment_pct", 0.0) or 0.0
+        )
+        _comp_share = float(
+            typed["project"].get("curtailment_compensated_pct", 0.0)
+            or 0.0
+        )
+        if _quota > 0.0 or _comp_share > 0.0:
+            raise ValueError(
+                "The timeseries carries a curtailment_signal column "
+                "AND the project sheet sets curtailment_pct / "
+                "curtailment_compensated_pct: the per-step signal "
+                "re-dispatches around the curtailment inside the MILP, "
+                "while the quota is a post-solve derate - combining "
+                "them double-counts. Clear the quota keys or drop the "
+                "column."
+            )
+        _sig = ts["curtailment_signal"].to_numpy(dtype=float)
+        if np.isnan(_sig).any() or (_sig < 0.0).any() or (_sig > 1.0).any():
+            raise ValueError(
+                "curtailment_signal values must lie in [0, 1] with no "
+                "blanks (the per-step share of the export cap that "
+                "remains available)."
+            )
     ts = _apply_balancing_timeseries_fallback(ts, typed["balancing"])
     # Single-price imbalance settlement has no canonical DAM
     # relationship to proxy, so the column is mandatory (the dual
@@ -3721,6 +3788,19 @@ def _typed_to_flat(
         ),
         "grid_cap_includes_load": bool(project["grid_cap_includes_load"]),
         "unavailability_pct": float(project["unavailability_pct"]),
+        # Exogenous curtailment (Eqs. E48/E49): consumed by the shared
+        # post-solve derate entry point (availability.apply_operating_derates).
+        "curtailment_pct": float(
+            project.get("curtailment_pct", 0.0) or 0.0
+        ),
+        "curtailment_compensated_pct": float(
+            project.get("curtailment_compensated_pct", 0.0) or 0.0
+        ),
+        "curtailment_compensation_price_eur_per_mwh": float(
+            project.get(
+                "curtailment_compensation_price_eur_per_mwh", 0.0,
+            ) or 0.0
+        ),
         "site_capex_eur": float(project.get("site_capex_eur", 0.0) or 0.0),
         "site_devex_eur": float(project.get("site_devex_eur", 0.0) or 0.0),
         "show_titles": bool(project["show_titles"]),
@@ -3905,6 +3985,8 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_capacity_market_revenue_eur_lifecycle",
      "Lifetime capacity-market revenue [EUR]"),
     ("total_revenue_levy_eur_lifecycle", "Lifetime revenue levy [EUR]"),
+    ("lifetime_curtailment_compensation_eur",
+     "Lifetime curtailment compensation [EUR]"),
     # Post-tax family (Eq. E39): NaN while the tax layer is off, so the
     # non-zero/NaN-skipping renderer keeps zero-default digests
     # noise-free ('n/a' = tax not modelled, never a duplicate of the

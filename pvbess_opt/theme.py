@@ -313,6 +313,9 @@ FINANCIAL_COLORS: dict[str, str] = {
     # Revenue levy on gross market turnover (Eq. E33) — a free shade of
     # the pink deduction family.
     "revenue_levy":            "#EC407A",  # Material pink 400
+    # Curtailment compensation (Eq. E49) — a lighter amber next to the
+    # state-support band (both administered payments).
+    "curtailment_compensation": "#FFB300",  # Material amber 600
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -440,6 +443,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "State support",
     "State-support netting",
     "Capacity-market revenue",
+    "Curtailment compensation",
     "Grid-charging cost",
     "Energy aggregator fee",
     "Balancing aggregator fee",
@@ -491,6 +495,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "State support":                    "state_support",
     "State-support netting":            "state_support_clawback",
     "Capacity-market revenue":          "capacity_market_revenue",
+    "Curtailment compensation":         "curtailment_compensation",
     "Grid-charging cost":               "grid_charge_cost",
     "Energy aggregator fee":            "aggregator_fee",
     "Balancing aggregator fee":         "balancing_aggregator_fee",
@@ -536,6 +541,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "State support",
     "State-support netting",
     "Capacity-market revenue",
+    "Curtailment compensation",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.

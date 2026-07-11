@@ -45,7 +45,10 @@ def test_project_sheet_keys():
         "retail_tariff_eur_per_mwh", "allow_bess_grid_charging",
         "grid_charging_fee_eur_per_mwh", "grid_charging_fee_exempt",
         "grid_cap_includes_load",
-        "unavailability_pct", "site_capex_eur", "site_devex_eur",
+        "unavailability_pct",
+        "curtailment_pct", "curtailment_compensated_pct",
+        "curtailment_compensation_price_eur_per_mwh",
+        "site_capex_eur", "site_devex_eur",
         "currency_format", "show_titles",
     }
     assert set(PROJECT_SHEET_DEFAULTS) == expected

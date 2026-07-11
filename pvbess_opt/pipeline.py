@@ -32,7 +32,7 @@ from typing import Any
 
 import pandas as pd
 
-from pvbess_opt.availability import apply_unavailability_derate, availability_factor
+from pvbess_opt.availability import apply_operating_derates, availability_factor
 from pvbess_opt.balancing import resolve_balancing_config
 from pvbess_opt.degradation import build_degradation_report
 from pvbess_opt.economics import (
@@ -671,10 +671,7 @@ def _low_price_sizing_cashflow(
         **(solver_opts or {}),
     )
     deck_kpis = compute_kpis(res, deck_params, verify_balance=False)
-    deck_kpis = apply_unavailability_derate(
-        deck_kpis,
-        float(deck_params.get("unavailability_pct", 0.0) or 0.0),
-    )
+    deck_kpis = apply_operating_derates(deck_kpis, deck_params)
     bundle = _build_financials(
         deck_xlsx, deck_params, deck_ts, deck_kpis, res,
         solver_opts=solver_opts,
@@ -1323,9 +1320,7 @@ def _run_one(
             kpis = compute_kpis(res, params, verify_balance=False)
             # Post-solve unavailability derate.  Multiplies a
             # curated set of MWh / EUR keys by (1 - unavailability_pct/100).
-            kpis = apply_unavailability_derate(
-                kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
-            )
+            kpis = apply_operating_derates(kpis, params)
             _emit_bess_utilisation_audit(kpis, params)
             kpis_monthly = compute_monthly_kpis(res)
 

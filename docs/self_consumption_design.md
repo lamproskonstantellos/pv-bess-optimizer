@@ -276,6 +276,18 @@ $x^{pg}_t$ / $x^{bg}_t$ otherwise).  The combined `EXPORT_CAP` still
 binds, so PV and BESS injection together never exceed the connection
 nameplate.
 
+**Curtailment signal composition.**  When the `timeseries` sheet
+carries a `curtailment_signal` column (per-step factor in $[0,1]$),
+`build_model` multiplies the S15 right-hand side — and the S16
+sub-cap right-hand sides when present — by the clamped signal before
+the strict-floor derivation, so the optimizer re-dispatches around
+hour-resolved grid-operator restrictions instead of receiving a
+post-solve derate (Eqs. E48/E49 in `docs/economics_design.md` cover
+the expected-quota alternative; the two surfaces are mutually
+exclusive at load time).  `model_to_dataframe` mirrors the composed
+caps into the frame's cap columns so audit invariant 7 checks the
+true limit.
+
 ### NO_SIM_GRID_IMPORT(t), NO_SIM_GRID_EXPORT(t)
 
 $$x^{gl}_t + x^{gb}_t \le M_{\mathrm{imp}}\, u^{io}_t, \qquad
