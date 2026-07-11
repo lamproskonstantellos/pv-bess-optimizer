@@ -293,6 +293,19 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "debt_interest_rate_pct": 5.0,
     "debt_tenor_years": 15,
     "debt_repayment": "annuity",
+    # Target-DSCR debt sizing (Eqs. E41-E43): manual keeps the
+    # gearing_pct convention, so the defaults are bit-identical.
+    "debt_sizing_mode": "manual",
+    "target_dscr": 1.30,
+    "debt_sizing_case": "base",
+    # Lender cases (Eq. E44): production haircut + case table, both
+    # inert at their defaults (factor 100 = no haircut).
+    "production_p90_factor_pct": 100.0,
+    "lender_cases_enabled": False,
+    "debt_sizing_deck": "low",
+    # DSCR-profile figure: rendered only when a debt layer is active,
+    # so the TRUE default emits no file for all-equity runs.
+    "plot_dscr_profile": True,
     # Grid emissions / 24/7 CFE accounting (off by default: intensity 0).
     "grid_co2_intensity_kg_per_mwh": 0.0,
     "grid_co2_annual_decline_pct": 0.0,
@@ -364,10 +377,9 @@ PPA_SHEET_DEFAULTS: dict[str, Any] = {
     # Master switch — when False the engine, KPIs and outputs are
     # bit-identical to a workbook without the sheet.
     "ppa_enabled": False,
-    # Contract structure.  'pay_as_produced' is the implemented
-    # envelope; 'baseload' is reserved (designed in docs/ppa_design.md,
-    # rejected by validation with guidance until shortfall pricing
-    # lands).
+    # Contract structure: 'pay_as_produced' (as-generated offtake on a
+    # share of the PV export) or 'baseload' (a contracted flat band
+    # settled financially against the plant's export — Eqs. P9-P11).
     "ppa_structure": "pay_as_produced",
     # Settlement decomposition: 'physical' (sleeved — the covered
     # volume is paid the strike and never touches the DAM) or 'cfd'
@@ -385,6 +397,9 @@ PPA_SHEET_DEFAULTS: dict[str, Any] = {
     # Negative-DAM-hour clause: 'none' (pay through negative hours) or
     # 'suspend' (contract pauses in DAM < 0 steps — Eqs. P6-P8).
     "ppa_negative_price_rule": "none",
+    # Baseload band (MW) for ppa_structure='baseload'; 0 keeps the
+    # structure inert (must be > 0 when baseload is enabled).
+    "ppa_baseload_mw": 0.0,
 }
 
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
@@ -449,6 +464,8 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "balancing_enabled",
     "ppa_enabled",
     "optimizer_floor_enabled",
+    "lender_cases_enabled",
+    "plot_dscr_profile",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -483,6 +500,8 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_yearly_scope",
     "pv_source",
     "debt_repayment",
+    "debt_sizing_mode",
+    "debt_sizing_case",
     "ppa_structure",
     "ppa_settlement",
     "ppa_negative_price_rule",
@@ -497,9 +516,12 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
     "pv_source": frozenset({"auto", "file", "pvgis"}),
-    "debt_repayment": frozenset({"annuity", "linear"}),
-    # 'baseload' parses (so old workbooks load) but validation rejects
-    # it with guidance while only pay_as_produced is implemented.
+    "debt_repayment": frozenset({"annuity", "linear", "sculpted"}),
+    "debt_sizing_mode": frozenset({"manual", "target_dscr"}),
+    # 'p90' and 'low_price' parse (the key surface is stable) but
+    # validation rejects them with guidance until the matching lender
+    # cases are implemented; only 'base' is accepted today.
+    "debt_sizing_case": frozenset({"base", "p90", "low_price"}),
     "ppa_structure": frozenset({"pay_as_produced", "baseload"}),
     "ppa_settlement": frozenset({"physical", "cfd"}),
     "ppa_negative_price_rule": frozenset({"none", "suspend"}),
@@ -929,9 +951,50 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Annual debt interest rate (used only when gearing_pct > 0)."),
     ("debt_tenor_years", 15, "years",
      "Debt repayment tenor in years (used only when gearing_pct > 0)."),
-    ("debt_repayment", "annuity", "annuity | linear",
-     "Repayment profile: annuity (level debt service) or linear "
-     "(level principal)."),
+    ("debt_repayment", "annuity", "annuity | linear | sculpted",
+     "Repayment profile: annuity (level debt service), linear (level "
+     "principal) or sculpted (debt service proportional to the yearly "
+     "cashflow at a level DSCR, Eqs. E40/E40a - the profile lenders "
+     "use so coverage does not bind in a single year)."),
+    ("debt_sizing_mode", "manual", "manual | target_dscr",
+     "How the debt amount is set. manual (default): debt = gearing_pct "
+     "x Year-0 investment, unchanged behaviour. target_dscr: debt is "
+     "sized to hold target_dscr on the sizing case (Eqs. E41-E43); "
+     "gearing_pct is then an input echo only and the sized gearing is "
+     "reported as an output."),
+    ("target_dscr", 1.30, "-",
+     "Minimum (annuity/linear) or level (sculpted) debt service "
+     "coverage ratio the sized debt must hold on the sizing case. "
+     "Used only when debt_sizing_mode = target_dscr; must be >= 1.0."),
+    ("debt_sizing_case", "base", "base | p90 | low_price",
+     "Cashflow case the debt is sized against. base = the run's own "
+     "yearly cashflow. p90 = the production-P90 case (Eq. E44; set "
+     "production_p90_factor_pct < 100 or the case degenerates to "
+     "base). low_price = the yearly cashflow of the price deck named "
+     "by debt_sizing_deck, re-dispatched with that deck's prices "
+     "(needs <column>__<deck> variant columns on the timeseries "
+     "sheet; roughly doubles the run's solve time)."),
+    ("debt_sizing_deck", "low", "deck name",
+     "Price deck the low_price sizing case re-dispatches with (the "
+     "<column>__<deck> suffix on the timeseries sheet, matched "
+     "lowercase). Used only when debt_sizing_case = low_price."),
+    ("production_p90_factor_pct", 100.0, "%",
+     "P90-to-P50 annual production ratio in percent (e.g. 92 = the "
+     "P90 year delivers 92 % of the modelled energy). 100 = disabled "
+     "(default; results bit-identical). A deterministic yearly "
+     "haircut on the PV-linked revenue streams (Eq. E44) - distinct "
+     "from the forecast-noise Monte Carlo on the simulation sheet, "
+     "which perturbs intra-year dispatch."),
+    ("lender_cases_enabled", False, "bool",
+     "Evaluate the lender case table (base and production-P90 cases): "
+     "per-case min/avg DSCR, equity IRR, NPV and debt capacity, "
+     "written to a lender_cases sheet and a SUMMARY block. Off by "
+     "default."),
+    ("plot_dscr_profile", True, "bool",
+     "Render the per-year DSCR-profile figure when a debt layer is "
+     "active (gearing_pct > 0 or debt_sizing_mode = target_dscr). "
+     "All-equity runs emit no figure regardless, so the TRUE default "
+     "changes nothing for unlevered outputs."),
     ("grid_co2_intensity_kg_per_mwh", 0.0, "kg/MWh",
      "Grid carbon intensity for emissions / 24/7 CFE accounting "
      "(0 = off, the default; an optional grid_co2_kg_per_mwh time-series "
@@ -1093,10 +1156,12 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "the dispatch, KPIs and outputs are bit-identical to a workbook "
      "without the sheet. See docs/ppa_design.md."),
     ("ppa_structure", "pay_as_produced", "enum",
-     "Contract structure. 'pay_as_produced' (as-generated offtake on a "
-     "share of the PV export) is the implemented envelope; 'baseload' "
-     "is reserved for a future shaped profile and is rejected with "
-     "guidance while unimplemented."),
+     "Contract structure. 'pay_as_produced': as-generated offtake on "
+     "a share of the PV export. 'baseload': a contracted flat band of "
+     "ppa_baseload_mw settles a fixed per-step volume financially "
+     "against the plant's total export (shortfall implicitly bought "
+     "at spot, excess sold at spot; cfd settlement only - Eqs. "
+     "P9-P11); ppa_volume_share_pct does not apply."),
     ("ppa_settlement", "physical", "enum",
      "physical | cfd. physical (sleeved): the covered volume is paid "
      "the strike and never touches the DAM. cfd: all PV export sells "
@@ -1109,7 +1174,9 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("ppa_volume_share_pct", 100.0, "%",
      "Covered share of the PV EXPORT, applied pro-rata per step "
      "(self-consumed PV is settled at retail and is not offtake "
-     "volume; BESS export is not covered)."),
+     "volume; BESS export is not covered). pay_as_produced only - "
+     "the baseload band is absolute and ignores this share (a "
+     "warning flags a non-100 value)."),
     ("ppa_term_years", 10, "years",
      "Operating years 1..term under contract. After the term the "
      "stream ends; under physical settlement the covered volume's DAM "
@@ -1129,6 +1196,13 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "The dispatch then curtails or charges the BESS instead of "
      "exporting covered PV at a loss. Common in European "
      "pay-as-produced offtake terms and premium schemes."),
+    ("ppa_baseload_mw", 0.0, "MW",
+     "Contracted flat delivery band for ppa_structure='baseload': "
+     "every in-term step settles the fixed volume ppa_baseload_mw x "
+     "dt against the plant's total export (PV + BESS); shortfall is "
+     "bought at the DAM price, excess sells at the DAM price "
+     "(financial settlement, Eq. P9). Must be > 0 when the baseload "
+     "structure is enabled; ignored for pay_as_produced."),
 )
 
 
@@ -1801,6 +1875,15 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         # Free-form PVGIS strings: a blank cell resolves to the default
         # (None); a non-blank cell is taken verbatim (stripped).
         return _parse_pv_path(raw, default)
+    if key == "debt_sizing_deck":
+        # Free-form deck name (matched lowercase against the
+        # <column>__<deck> variant suffixes); a blank cell keeps the
+        # default.  Deck existence is checked by the validator, not
+        # the parser.
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+            return default
+        token = str(raw).strip().lower()
+        return token if token else default
     if key == "bess_replacement_year":
         return _parse_bess_replacement_year(raw, default)
     # A boolean in a numeric field is always an input mistake, and Python
@@ -2403,24 +2486,55 @@ def _validate_balancing_config(
 def _validate_ppa_config(ppa: dict[str, Any]) -> None:
     """Validate the ``ppa`` sheet (skipped when the contract is disabled).
 
-    The structure enum accepts ``baseload`` at parse time so old
-    workbooks load, but an ENABLED baseload contract is rejected here
-    with guidance — the shaped profile is designed (docs/ppa_design.md)
-    and deliberately not implemented yet.
+    The baseload structure (Eqs. P9-P11) is cfd-only in v1: under
+    symmetric spot settlement the physical sleeved variant totals
+    identically (``Q·strike + (delivered − Q)·DAM = delivered·DAM +
+    Q·(strike − DAM)``), so a physical flag would change nothing but
+    the flow attribution — rejected with that guidance until the flow
+    attribution work lands.
     """
     if not bool(ppa.get("ppa_enabled", False)):
         return
 
     structure = str(ppa.get("ppa_structure", "pay_as_produced") or "").lower()
-    if structure == "baseload":
+    if structure not in ("pay_as_produced", "baseload"):
         raise ValueError(
-            "ppa_structure='baseload' is designed but not implemented "
-            "(it needs shortfall-pricing rules — see docs/ppa_design.md). "
-            "Use ppa_structure='pay_as_produced' or disable the contract."
+            "ppa_structure must be 'pay_as_produced' or 'baseload'; "
+            f"got {structure!r}."
         )
-    if structure not in ("pay_as_produced",):
+    if structure == "baseload":
+        baseload_mw = float(ppa.get("ppa_baseload_mw", 0.0) or 0.0)
+        if baseload_mw <= 0.0:
+            raise ValueError(
+                "ppa_structure='baseload' requires 'ppa_baseload_mw' "
+                f"> 0 (the contracted band); got {baseload_mw!r}."
+            )
+        settlement_bl = str(
+            ppa.get("ppa_settlement", "physical") or "physical"
+        ).lower()
+        if settlement_bl != "cfd":
+            raise ValueError(
+                "ppa_structure='baseload' supports ppa_settlement="
+                "'cfd' only: with symmetric spot settlement a "
+                "physical sleeved variant totals identically "
+                "(Q x strike + (delivered - Q) x DAM = delivered x "
+                "DAM + Q x (strike - DAM)), so only the flow "
+                "attribution would differ - that work is deferred. "
+                "Set ppa_settlement='cfd'."
+            )
+        share_bl = float(ppa.get("ppa_volume_share_pct", 100.0) or 0.0)
+        if share_bl != 100.0:
+            logger.warning(
+                "ppa_volume_share_pct=%s is ignored for the baseload "
+                "structure: the band ppa_baseload_mw is an ABSOLUTE "
+                "volume, not a share of export.",
+                share_bl,
+            )
+    baseload_mw_any = float(ppa.get("ppa_baseload_mw", 0.0) or 0.0)
+    if baseload_mw_any < 0.0:
         raise ValueError(
-            f"ppa_structure must be 'pay_as_produced'; got {structure!r}."
+            f"'ppa_baseload_mw' must be non-negative; got "
+            f"{baseload_mw_any!r}."
         )
 
     # Settlement must be a known enum: the KPI engine and the cashflow each
@@ -2743,6 +2857,78 @@ def validate_workbook_params(
     if not (0.0 <= gearing <= 100.0):
         raise ValueError(
             f"'gearing_pct' must be in [0, 100]; got {gearing!r}."
+        )
+
+    # Target-DSCR debt sizing (Eqs. E41-E43): the keys are inert in
+    # manual mode; in target_dscr mode the target must be a real
+    # lender covenant (>= 1) and a repayment tenor must exist.
+    sizing_mode = str(
+        economics.get("debt_sizing_mode", "manual") or "manual"
+    ).strip().lower()
+    if sizing_mode == "target_dscr":
+        raw_target = economics.get("target_dscr")
+        target_dscr = 1.30 if raw_target is None else float(raw_target)
+        if target_dscr < 1.0:
+            raise ValueError(
+                "'target_dscr' must be >= 1.0 (a debt service coverage "
+                f"covenant); got {target_dscr!r}."
+            )
+        raw_tenor = economics.get("debt_tenor_years")
+        tenor = 15 if raw_tenor is None else int(raw_tenor)
+        if tenor < 1:
+            raise ValueError(
+                "debt_sizing_mode='target_dscr' requires "
+                f"'debt_tenor_years' >= 1; got {tenor!r}."
+            )
+        sizing_case = str(
+            economics.get("debt_sizing_case", "base") or "base"
+        ).strip().lower()
+        if sizing_case == "p90":
+            raw_p90 = economics.get("production_p90_factor_pct")
+            p90_factor = 100.0 if raw_p90 is None else float(raw_p90)
+            if p90_factor >= 100.0:
+                logger.warning(
+                    "debt_sizing_case='p90' with "
+                    "production_p90_factor_pct=100: the sizing case "
+                    "degenerates to the base cashflow. Set the factor "
+                    "below 100 for a real P90 haircut."
+                )
+        if sizing_case == "low_price":
+            raw_deck = economics.get("debt_sizing_deck")
+            deck = str("low" if raw_deck is None else raw_deck)
+            deck = deck.strip().lower()
+            if not deck:
+                raise ValueError(
+                    "debt_sizing_case='low_price' requires "
+                    "'debt_sizing_deck' to name a price deck."
+                )
+            ts = typed.get("ts")
+            if ts is not None and hasattr(ts, "columns"):
+                suffix = f"__{deck}"
+                if not any(str(c).endswith(suffix) for c in ts.columns):
+                    available = sorted({
+                        str(c).split("__", 1)[1]
+                        for c in ts.columns if "__" in str(c)
+                    })
+                    raise ValueError(
+                        "debt_sizing_case='low_price' needs "
+                        f"'<column>__{deck}' variant columns on the "
+                        "timeseries sheet (debt_sizing_deck="
+                        f"{deck!r}); decks available: "
+                        f"{available or 'none'}."
+                    )
+
+    # P90 production factor (Eq. E44): a ratio of annual energies in
+    # percent — 0 is meaningless (no production at all is not a
+    # lender case) and > 100 would be a P90 ABOVE the P50.
+    raw_p90_factor = economics.get("production_p90_factor_pct")
+    p90_factor_pct = (
+        100.0 if raw_p90_factor is None else float(raw_p90_factor)
+    )
+    if not (0.0 < p90_factor_pct <= 100.0):
+        raise ValueError(
+            "'production_p90_factor_pct' must be in (0, 100]; got "
+            f"{p90_factor_pct!r}."
         )
 
     # Revenue-fee percentages are a fraction of gross revenue, so they live
@@ -3485,6 +3671,11 @@ def write_assumptions_summary(
     lines.append("[economic]")
     if econ:
         for key in sorted(econ):
+            # Internal underscore keys (e.g. the frozen sized debt) are
+            # derived state, not assumptions — the visible keys that
+            # produced them are already in the snapshot.
+            if key.startswith("_"):
+                continue
             lines.append(f"  {key} = {econ[key]!r}")
     out_path.write_text("\n".join(lines) + "\n")
     return out_path
@@ -3549,6 +3740,29 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
      "Lifetime corporate tax [EUR]"),
 )
 
+# Leverage ratios: rendered only when FINITE — a DSCR of ~1.x is a
+# ratio, so the non-zero gate of the optional-financial table above
+# would render meaningless rows for all-equity runs (NaN) and hide
+# nothing otherwise.
+_SUMMARY_LEVERAGE_KEYS: tuple[tuple[str, str], ...] = (
+    ("equity_irr_pct", "Equity IRR [%]"),
+    ("min_dscr", "Minimum DSCR over tenor [-]"),
+    ("avg_dscr", "Average DSCR over tenor [-]"),
+)
+
+# Target-DSCR debt sizing block (Eqs. E41-E43): the whole family is
+# NaN in manual mode, so the section self-skips; within the section
+# each row renders only when finite (binding year is n/a under the
+# level-coverage sculpted profile).
+_SUMMARY_DEBT_SIZING_KEYS: tuple[tuple[str, str], ...] = (
+    ("target_dscr", "Target DSCR [-]"),
+    ("debt_capacity_eur", "Debt capacity, uncapped [EUR]"),
+    ("sized_debt_eur", "Sized debt [EUR]"),
+    ("gearing_sized_pct", "Sized gearing [%]"),
+    ("gearing_input_pct", "Gearing input, echo [%]"),
+    ("binding_dscr_year", "Binding DSCR year"),
+)
+
 # Rolling-horizon / benchmark digest: rendered only when the
 # rolling-horizon Monte Carlo ran (``mc_n_seeds`` present).  The
 # benchmark gaps are the two DISTINCT numbers a publication needs --
@@ -3590,6 +3804,7 @@ def write_summary_md(
     params: dict[str, Any],
     solver_name: str | None = None,
     replacement_note: str | None = None,
+    lender_cases: pd.DataFrame | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -3644,6 +3859,67 @@ def write_summary_md(
             value = financial_kpis.get(key)
             if isinstance(value, (int, float)) and abs(float(value)) > 1e-9:
                 lines.append(f"| {label} | {_summary_fmt(value)} |")
+        # Leverage ratios render when FINITE (all-equity runs carry
+        # NaNs and stay noise-free).
+        for key, label in _SUMMARY_LEVERAGE_KEYS:
+            value = financial_kpis.get(key)
+            if isinstance(value, (int, float)) and np.isfinite(
+                float(value)
+            ):
+                lines.append(f"| {label} | {_summary_fmt(value)} |")
+        lines.append("")
+
+        # Debt sizing block (Eqs. E41-E43): dscr_target_met is finite
+        # only when target-DSCR sizing resolved, so manual-mode digests
+        # stay byte-identical.
+        met = financial_kpis.get("dscr_target_met")
+        if isinstance(met, (int, float)) and np.isfinite(float(met)):
+            lines.append("## Debt sizing (target DSCR)")
+            lines.append("")
+            lines.append("| Metric | Value |")
+            lines.append("| --- | ---: |")
+            for key, label in _SUMMARY_DEBT_SIZING_KEYS:
+                value = financial_kpis.get(key)
+                if isinstance(value, (int, float)) and np.isfinite(
+                    float(value)
+                ):
+                    lines.append(
+                        f"| {label} | {_summary_fmt(value)} |"
+                    )
+            lines.append(
+                "| DSCR target met | "
+                f"{'yes' if float(met) > 0.0 else 'no'} |"
+            )
+            lines.append("")
+            if float(met) <= 0.0:
+                lines.append(
+                    "Target DSCR not achievable on the sizing case; "
+                    "debt capacity is zero and the run completes "
+                    "all-equity."
+                )
+                lines.append("")
+
+    # Lender case table (Eq. E44): present only when
+    # lender_cases_enabled produced the frame, so default digests are
+    # byte-identical.
+    if lender_cases is not None and not lender_cases.empty:
+        lines.append("## Lender cases")
+        lines.append("")
+        lines.append(
+            "| Case | Production [%] | Min DSCR | Avg DSCR | "
+            "Equity IRR [%] | NPV [EUR] | Debt capacity [EUR] |"
+        )
+        lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
+        for _, row in lender_cases.iterrows():
+            lines.append(
+                f"| {row['case']} "
+                f"| {_summary_fmt(row['production_factor_pct'])} "
+                f"| {_summary_fmt(row['min_dscr'])} "
+                f"| {_summary_fmt(row['avg_dscr'])} "
+                f"| {_summary_fmt(row['equity_irr_pct'])} "
+                f"| {_summary_fmt(row['npv_eur'])} "
+                f"| {_summary_fmt(row['debt_capacity_eur'])} |"
+            )
         lines.append("")
 
     if kpis_year1.get("mc_n_seeds"):
@@ -3765,6 +4041,7 @@ def write_results_workbook(
     degradation: pd.DataFrame | None = None,
     debt_schedule: pd.DataFrame | None = None,
     emissions: pd.DataFrame | None = None,
+    lender_cases: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -3819,6 +4096,10 @@ def write_results_workbook(
             degradation.to_excel(writer, sheet_name="degradation", index=False)
         if debt_schedule is not None and not debt_schedule.empty:
             debt_schedule.to_excel(writer, sheet_name="debt_schedule", index=False)
+        if lender_cases is not None and not lender_cases.empty:
+            lender_cases.to_excel(
+                writer, sheet_name="lender_cases", index=False,
+            )
         if emissions is not None and not emissions.empty:
             emissions.to_excel(writer, sheet_name="emissions", index=False)
         style_workbook(writer.book)

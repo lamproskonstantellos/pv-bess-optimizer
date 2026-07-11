@@ -34,7 +34,7 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     # Financial
     "plot_cumulative_cashflow", "plot_yearly_cashflow_bars",
     "plot_npv_waterfall", "plot_payback", "plot_monthly_cashflow_year1",
-    "plot_npv_tornado", "plot_irr_tornado",
+    "plot_npv_tornado", "plot_irr_tornado", "plot_dscr_profile",
     # Lifecycle
     "plot_revenue_stack_yearly", "plot_lifetime_cycles",
     "plot_lcoe_summary", "plot_lcos_summary",

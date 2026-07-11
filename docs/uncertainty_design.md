@@ -31,6 +31,19 @@ Availability (unplanned outage) is handled separately as a
 deterministic post-solve derate (Eq. E8, `docs/economics_design.md`),
 applied identically to the PF benchmark and every MC seed.
 
+**Not in scope here — the P90 production lender case.**  The
+forecast-noise machinery above models INTRA-year dispatch realism:
+what a well-nominated plant loses to imperfect foresight within the
+modelled year.  The lender convention of a downside resource year —
+the P90 exceedance annual energy — is a distinct, INTER-annual
+channel and lives in the economics layer as a deterministic yearly
+haircut (`production_p90_factor_pct`, Eq. E44 in
+`docs/economics_design.md`): it consumes no U-tag and no rng, scales
+the PV-linked cashflow lines only, and can serve as the sizing case
+for target-DSCR debt.  Combining the two answers different questions
+on purpose: the Monte Carlo distributes Year-1 profit, the P90 case
+stresses multi-year debt service.
+
 ### Imbalance settlement exposure (Eqs. U6-U9)
 
 `imbalance_enabled` settles each committed block's realised net grid

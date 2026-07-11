@@ -114,6 +114,9 @@ def test_economics_sheet_keys():
         "sensitivity_ppa_price_delta_pct",
         "gearing_pct", "debt_interest_rate_pct", "debt_tenor_years",
         "debt_repayment",
+        "debt_sizing_mode", "target_dscr", "debt_sizing_case",
+        "production_p90_factor_pct", "lender_cases_enabled",
+        "debt_sizing_deck", "plot_dscr_profile",
         "grid_co2_intensity_kg_per_mwh", "grid_co2_annual_decline_pct",
     }
     assert set(ECONOMICS_SHEET_DEFAULTS) == expected
@@ -144,7 +147,7 @@ def test_ppa_sheet_keys():
         "ppa_enabled", "ppa_structure", "ppa_settlement",
         "ppa_price_eur_per_mwh", "ppa_volume_share_pct",
         "ppa_term_years", "ppa_inflation_pct",
-        "ppa_negative_price_rule",
+        "ppa_negative_price_rule", "ppa_baseload_mw",
     }
     assert set(PPA_SHEET_DEFAULTS) == expected
 

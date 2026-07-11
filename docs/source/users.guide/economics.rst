@@ -174,6 +174,34 @@ Headline financial KPIs returned by
   ``total_optimizer_fee_eur_lifecycle``: lifecycle totals of the
   route-to-market fee structures (all ≤ 0; the latter two render in
   ``SUMMARY.md`` only when the corresponding knob is set)
+* ``equity_irr_pct`` / ``min_dscr`` / ``avg_dscr``: leverage KPIs
+  (NaN for all-equity runs; rendered in ``SUMMARY.md`` only when
+  finite).  ``debt_repayment = sculpted`` keeps the DSCR level across
+  the tenor (Eqs. E40/E40a), so min and avg coincide - recommended
+  for projects with a mid-life BESS replacement, whose CFADS dip
+  would otherwise bind an annuity schedule in a single year.
+* ``debt_capacity_eur`` / ``sized_debt_eur`` / ``gearing_sized_pct``
+  / ``gearing_input_pct`` / ``target_dscr`` / ``dscr_target_met`` /
+  ``binding_dscr_year``: the target-DSCR sizing family
+  (Eqs. E41-E43), reported only when ``debt_sizing_mode =
+  target_dscr`` (NaN otherwise).  The capacity is the uncapped
+  maximum sustainable debt; the sized debt caps it at the Year-0
+  outlay and gearing is an output.  The sized debt is FROZEN for the
+  run: the sensitivity tornado and the uncertainty pipeline replay
+  the committed amount, never a per-perturbation re-size.
+  ``dscr_target_met`` reports 1/0; an unachievable target completes
+  the run all-equity (capacity 0) rather than erroring.
+* With ``lender_cases_enabled`` the run additionally writes the
+  lender case table (Eq. E44) — rows ``base`` / ``p90``, columns
+  min/avg DSCR, equity IRR, NPV and debt capacity per case — to a
+  ``lender_cases`` results sheet and a ``SUMMARY.md`` block.  The
+  P90 row applies the ``production_p90_factor_pct`` haircut to the
+  PV-linked streams and re-evaluates coverage on the same committed
+  debt.  ``debt_sizing_case = p90`` sizes the debt against that
+  haircut CFADS, so the base year then shows a coverage cushion
+  above the target.  With ``debt_sizing_case = low_price`` the table
+  gains a ``low_price`` row from the deck re-dispatch that sized the
+  debt (the table alone never triggers a solve).
 * ``npv_post_tax_eur`` / ``irr_post_tax_pct`` /
   ``equity_irr_post_tax_pct`` / ``simple_payback_post_tax_years`` /
   ``discounted_payback_post_tax_years`` /

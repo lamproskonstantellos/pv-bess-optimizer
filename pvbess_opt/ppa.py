@@ -14,9 +14,20 @@ of the PV export — with two settlement decompositions:
 Both settlements total ``share × export × strike`` on the covered
 volume, so the dispatch incentive is identical (the MILP prices PV
 export at ``(1 − s)·DAM + s·strike``) and only the revenue
-decomposition differs.  ``baseload`` is reserved in the structure enum
-but not implemented — it needs shortfall-pricing rules (see the design
-note).
+decomposition differs.
+
+A second structure — **baseload** — settles a contracted flat band
+``ppa_baseload_mw`` financially against the plant's total export
+(Eqs. P9-P11): every in-term step exchanges the fixed volume at
+``strike − DAM`` (shortfall implicitly bought at spot, excess sold at
+spot — the two forms are identical under symmetric spot settlement:
+``Q·strike + (delivered − Q)·DAM = delivered·DAM + Q·(strike − DAM)``).
+v1 is cfd-only: with that identity a physical sleeved variant totals
+the same, and the financial decomposition reuses the existing PPA
+columns end-to-end.  The fixed-volume leg contains no decision
+variables, so dispatch is provably unchanged (Eq. P11) — firming
+becomes a dispatch incentive only under asymmetric imbalance pricing,
+which is recorded as future work in the design note.
 
 This module owns the parsed configuration; the consumers are
 :func:`pvbess_opt.kpis.add_economic_columns` (per-step EUR columns),
@@ -43,9 +54,7 @@ __all__ = [
     "resolve_ppa_config",
 ]
 
-# ``baseload`` is reserved for the designed-but-not-implemented shaped
-# profile (docs/ppa_design.md); the loader rejects it with guidance.
-PPA_STRUCTURES: tuple[str, ...] = ("pay_as_produced",)
+PPA_STRUCTURES: tuple[str, ...] = ("pay_as_produced", "baseload")
 PPA_SETTLEMENTS: tuple[str, ...] = ("physical", "cfd")
 PPA_NEGATIVE_PRICE_RULES: tuple[str, ...] = ("none", "suspend")
 
@@ -80,23 +89,41 @@ class PpaConfig:
     ppa_term_years: int = 10
     ppa_inflation_pct: float = 0.0
     ppa_negative_price_rule: str = "none"
+    ppa_baseload_mw: float = 0.0
 
     @property
     def active(self) -> bool:
         """True when the contract binds the Year-1 dispatch / revenue."""
-        return (
-            self.ppa_enabled
-            and self.ppa_structure == "pay_as_produced"
-            and self.ppa_volume_share_pct > 0.0
-            and self.ppa_term_years >= 1
-        )
+        if not (self.ppa_enabled and self.ppa_term_years >= 1):
+            return False
+        if self.ppa_structure == "pay_as_produced":
+            return self.ppa_volume_share_pct > 0.0
+        if self.ppa_structure == "baseload":
+            return self.ppa_baseload_mw > 0.0
+        return False
 
     @property
     def share_frac(self) -> float:
-        """Covered share of PV export in [0, 1] (0 when inactive)."""
-        if not self.active:
+        """Covered share of PV export in [0, 1] (0 when inactive).
+
+        The baseload band is an ABSOLUTE volume, not a share — it
+        reports 0 here so no share-based algebra ever touches it.
+        """
+        if not self.active or self.ppa_structure != "pay_as_produced":
             return 0.0
         return max(0.0, min(1.0, float(self.ppa_volume_share_pct) / 100.0))
+
+    @property
+    def reshapes_dispatch_price(self) -> bool:
+        """True when the contract changes the MILP's PV export price.
+
+        Only the pay-as-produced structure blends the strike into the
+        per-step price (Eqs. P4/P8).  The baseload leg contains no
+        decision variables (Eq. P11: an additive constant in the
+        objective), so dispatch stays merchant-optimal and the price
+        rebuild is skipped.
+        """
+        return self.active and self.ppa_structure == "pay_as_produced"
 
     @property
     def suspension_active(self) -> bool:

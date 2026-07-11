@@ -202,6 +202,22 @@ def apply_unavailability_derate(
     """
     if derated_keys is None:
         derated_keys = _default_derated_keys()
+    # Baseload PPA (Eqs. P9/E45): the contract's fixed-volume leg is
+    # PRODUCTION-DECOUPLED — the offtaker settles Q_t regardless of
+    # plant availability — so the two PPA EUR keys must NOT derate for
+    # that structure.  The structure is detected from the P10
+    # diagnostic KPI, which exists if and only if the baseload branch
+    # wrote the columns (the bit-identity contract makes it a reliable
+    # marker), so no call site has to thread the ppa config through.
+    # The shortfall/excess diagnostics themselves stay RAW everywhere
+    # (shortfall RISES with unavailability; the exact correction needs
+    # per-step recomputation — the bess_utilization_diagnostics
+    # precedent).
+    if "ppa_baseload_shortfall_mwh" in kpis:
+        derated_keys = tuple(
+            k for k in derated_keys
+            if k not in ("revenue_pv_ppa_eur", "ppa_covered_dam_value_eur")
+        )
     factor = availability_factor(unavailability_pct)
     out = dict(kpis)
     for key in derated_keys:

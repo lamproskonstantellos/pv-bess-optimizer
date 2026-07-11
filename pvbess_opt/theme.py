@@ -342,6 +342,13 @@ FINANCIAL_COLORS: dict[str, str] = {
     "percentile_p50":    "#1565C0",   # alias of net (blue)
     "percentile_p90":    "#2E7D32",   # alias of revenue (green)
     "perfect_foresight": "#212121",   # alias of net_revenue_line (charcoal)
+    # DSCR profile lines (Eqs. E20/E44): indigo base-case coverage, a
+    # red-family downside for the P90 case (the percentile-red
+    # semantic, own shade) and a neutral grey for the target-DSCR
+    # reference line.
+    "dscr_base":   "#283593",  # Material indigo 800
+    "dscr_p90":    "#E53935",  # Material red 600
+    "dscr_target": "#616161",  # Material grey 700
 }
 
 
@@ -414,6 +421,9 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Real net revenue",
     "Simple payback",
     "Discounted payback",
+    "DSCR base case",
+    "DSCR P90 case",
+    "Target DSCR",
     # Bar / stack components
     "Revenue",
     "Balancing revenue",
@@ -464,6 +474,9 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Real net revenue":                 "net_revenue_line",
     "Simple payback":                   "net_revenue_line",
     "Discounted payback":               "net",
+    "DSCR base case":                   "dscr_base",
+    "DSCR P90 case":                    "dscr_p90",
+    "Target DSCR":                      "dscr_target",
     "Revenue":                          "revenue",
     "Balancing revenue":                 "balancing_revenue",
     "OPEX":                             "opex",
@@ -508,6 +521,9 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Real net revenue",
     "Simple payback",
     "Discounted payback",
+    "DSCR base case",
+    "DSCR P90 case",
+    "Target DSCR",
     # Then bars / stacks, positive flows first
     "Revenue",
     "Balancing revenue",

@@ -46,18 +46,20 @@ def test_amortization_empty_without_debt_or_tenor():
 def test_equity_irr_exceeds_project_irr_on_positive_spread():
     net_cf = np.array([-1000.0] + [200.0] * 10)
     project_irr = calculate_irr(net_cf) * 100.0
-    equity_irr, min_dscr = _leverage_kpis(net_cf, {
+    equity_irr, min_dscr, avg_dscr = _leverage_kpis(net_cf, {
         "gearing_pct": 70.0, "debt_interest_rate_pct": 5.0,
         "debt_tenor_years": 7, "debt_repayment": "annuity",
     })
     assert equity_irr > project_irr            # leverage amplifies the spread
     assert np.isfinite(min_dscr) and min_dscr > 0.0
+    # The average sits between the minimum and the maximum coverage.
+    assert avg_dscr >= min_dscr
 
 
 def test_all_equity_returns_nan():
     net_cf = np.array([-1000.0] + [200.0] * 10)
-    eq, dscr = _leverage_kpis(net_cf, {"gearing_pct": 0.0})
-    assert np.isnan(eq) and np.isnan(dscr)
+    eq, dscr, avg = _leverage_kpis(net_cf, {"gearing_pct": 0.0})
+    assert np.isnan(eq) and np.isnan(dscr) and np.isnan(avg)
 
 
 def test_build_debt_schedule_columns_and_none_when_all_equity():
@@ -140,3 +142,87 @@ def test_leverage_full_run_sheet_and_unlevered_unchanged(tmp_path):
     for c in range(1, ws.max_column + 1):
         dim = ws.column_dimensions.get(get_column_letter(c))
         assert dim is not None and COL_WIDTH_MIN <= float(dim.width) <= COL_WIDTH_MAX
+
+
+# ---------------------------------------------------------------------------
+# Sculpted repayment profile (Eqs. E40/E40a)
+# ---------------------------------------------------------------------------
+
+
+IRREGULAR_CFADS = [220.0, 180.0, 60.0, 240.0, 210.0, 190.0, 230.0]
+
+
+def test_sculpted_balance_amortises_to_zero():
+    sched = _amortization_schedule(
+        800.0, 0.06, 7, "sculpted", cfads=IRREGULAR_CFADS,
+    )
+    assert len(sched) == 7
+    assert sched[-1]["debt_balance_eur"] == pytest.approx(0.0, abs=1e-6)
+    assert sum(r["principal_eur"] for r in sched) == pytest.approx(
+        800.0, rel=1e-9,
+    )
+
+
+def test_sculpted_dscr_is_level():
+    """Per-year CFADS/service is constant across positive-CFADS years,
+    incl. a replacement-style dip — the whole point of sculpting."""
+    sched = _amortization_schedule(
+        800.0, 0.06, 7, "sculpted", cfads=IRREGULAR_CFADS,
+    )
+    dscrs = [
+        IRREGULAR_CFADS[int(r["year"]) - 1] / r["debt_service_eur"]
+        for r in sched if r["debt_service_eur"] > 0.0
+    ]
+    for d in dscrs[:-1]:
+        assert d == pytest.approx(dscrs[0], rel=1e-9)
+    # The final-year cent sweep may deviate by float residue only.
+    assert dscrs[-1] == pytest.approx(dscrs[0], rel=1e-6)
+    # E40a closed form: DSCR_impl = PV(max(CFADS,0)) / B at the debt rate.
+    pv = sum(
+        c * 1.06 ** (-y) for y, c in enumerate(IRREGULAR_CFADS, start=1)
+    )
+    assert dscrs[0] == pytest.approx(pv / 800.0, rel=1e-9)
+
+
+def test_sculpted_requires_cfads():
+    with pytest.raises(ValueError, match="sculpted repayment requires"):
+        _amortization_schedule(800.0, 0.06, 7, "sculpted")
+
+
+def test_sculpted_negative_cfads_year_carries_and_amortises():
+    cfads = [220.0, -50.0, 0.0, 240.0, 210.0, 190.0, 230.0]
+    sched = _amortization_schedule(700.0, 0.05, 7, "sculpted", cfads=cfads)
+    by_year = {int(r["year"]): r for r in sched}
+    for y in (2, 3):  # non-positive CFADS: no service, balance carries
+        assert by_year[y]["debt_service_eur"] == 0.0
+        assert by_year[y]["principal_eur"] == 0.0
+        assert by_year[y]["debt_balance_eur"] == pytest.approx(
+            by_year[y - 1]["debt_balance_eur"],
+        )
+    assert sched[-1]["debt_balance_eur"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_sculpted_min_equals_avg_dscr():
+    net_cf = np.array([-1000.0, 220.0, 180.0, 60.0, 240.0, 210.0, 190.0,
+                       230.0, 230.0])
+    eq, min_dscr, avg_dscr = _leverage_kpis(net_cf, {
+        "gearing_pct": 70.0, "debt_interest_rate_pct": 5.0,
+        "debt_tenor_years": 7, "debt_repayment": "sculpted",
+    })
+    assert np.isfinite(eq)
+    assert min_dscr == pytest.approx(avg_dscr, rel=1e-6)
+
+
+def test_sculpted_debt_schedule_level_dscr_column():
+    yearly = pd.DataFrame({
+        "net_cashflow_eur": [-1000.0, 220.0, 180.0, 60.0, 240.0, 210.0,
+                             190.0, 230.0, 230.0],
+    })
+    sched = build_debt_schedule(yearly, {
+        "gearing_pct": 60.0, "debt_interest_rate_pct": 5.0,
+        "debt_tenor_years": 7, "debt_repayment": "sculpted",
+    })
+    assert sched is not None
+    dscrs = sched.loc[sched["debt_service_eur"] > 0.0, "dscr"]
+    assert dscrs.nunique() <= 2  # 4dp rounding: level within a cent
+    assert sched["debt_balance_eur"].iloc[-1] == pytest.approx(0.0, abs=0.01)

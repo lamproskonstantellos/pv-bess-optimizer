@@ -376,6 +376,17 @@ def build_lifetime_dispatch(
     pv_cols = [c for c in _PV_ORIGIN_COLUMNS if c in res_year1.columns]
     bess_cols = [c for c in _BESS_ORIGIN_COLUMNS if c in res_year1.columns]
     pv_rev_cols = [c for c in _PV_REVENUE_COLUMNS if c in res_year1.columns]
+    # Baseload PPA (Eqs. P9/E45): the contract volume is FIXED, not
+    # PV-degrading, so its two EUR columns must not ride the PV fade —
+    # they are excluded here and the yearly cashflow's no-fade branch
+    # applies the same convention (economics.build_yearly_cashflow).
+    if str(
+        econ.get("ppa_structure", "pay_as_produced") or "pay_as_produced"
+    ).strip().lower() == "baseload":
+        pv_rev_cols = [
+            c for c in pv_rev_cols
+            if c not in ("revenue_pv_ppa_eur", "ppa_covered_dam_value_eur")
+        ]
     bess_rev_cols = [c for c in _BESS_REVENUE_COLUMNS if c in res_year1.columns]
     # Balancing reservations live on BESS capacity, so they degrade
     # with the BESS capacity-fade curve.

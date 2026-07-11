@@ -1117,8 +1117,17 @@ def build_model(
     # rationally curtails or routes PV into the BESS instead of
     # exporting at a loss.  The mask derives from THIS call's dam_price,
     # so rolling-horizon windows recompute it per window.
+    #
+    # The BASELOAD structure deliberately does not reshape this price
+    # (Eq. P11): its fixed-volume leg Q_t·(strike − DAM_t) contains no
+    # decision variables, so appending it to the objective would be an
+    # additive constant — merchant-optimal dispatch is already
+    # baseload-optimal, and pv_export_price stays the DAM alias.  This
+    # gate changes only if a v2 firming incentive lands (a shortfall
+    # variable d_t >= Q_t − delivered_t priced at an asymmetric
+    # imbalance premium; recorded in docs/ppa_design.md).
     ppa_cfg = resolve_ppa_config(params.get("ppa"))
-    if ppa_cfg.active and pv_present:
+    if ppa_cfg.active and ppa_cfg.reshapes_dispatch_price and pv_present:
         s_ppa = ppa_cfg.share_frac
         strike = float(ppa_cfg.ppa_price_eur_per_mwh)
         if ppa_cfg.suspension_active:

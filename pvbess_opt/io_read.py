@@ -343,12 +343,24 @@ def _resolve_pvgis(typed: dict[str, Any]) -> None:
     if nameplate <= 0.0:
         raise ValueError("pv_source='pvgis' requires pv_nameplate_kwp > 0.")
 
+    # None-explicit geometry parsing: a missing/blank field falls back
+    # to the PVGIS-sensible default, but an EXPLICIT value — including
+    # 0 — passes through verbatim (a falsy-`or` would silently replace
+    # losses_pct = 0 with 14, mis-modelling a loss-free array).
+    raw_tilt = pv.get("tilt")
+    tilt = "optimal" if raw_tilt is None else raw_tilt
+    raw_azimuth = pv.get("azimuth")
+    azimuth = 0.0 if raw_azimuth is None else float(raw_azimuth)
+    raw_losses = pv.get("losses_pct")
+    losses_pct = 14.0 if raw_losses is None else float(raw_losses)
+    raw_year = pv.get("weather_year")
+    weather_year = 2019 if raw_year is None else raw_year
     result = fetch_pv_profile(
         float(lat), float(lon),
-        tilt=pv.get("tilt", "optimal"),
-        azimuth=float(pv.get("azimuth", 0.0) or 0.0),
-        losses_pct=float(pv.get("losses_pct", 14.0) or 14.0),
-        weather_year=pv.get("weather_year", 2019),
+        tilt=tilt,
+        azimuth=azimuth,
+        losses_pct=losses_pct,
+        weather_year=weather_year,
         raddatabase=pv.get("raddatabase") or None,
     )
     scaled = result.per_kwp_kwh * nameplate
@@ -494,10 +506,11 @@ def resolve_pv_source(
     )
 
     if decision == "pvgis":
-        if pv_kwh_has_data or override_has_data:
+        if pv_kwh_has_data or override_has_data or ts_path is not None:
             logger.warning(
-                "pv_source resolves to PVGIS but the timeseries already "
-                "carries PV data; the location wins and the column is ignored."
+                "pv_source resolves to PVGIS but the workbook also carries "
+                "PV data (a filled pv_kwh column and/or a timeseries_path "
+                "file); the location wins and that PV data is ignored."
             )
         _resolve_pvgis(typed)
         if "pv_kwh_override" in typed["ts"].columns:

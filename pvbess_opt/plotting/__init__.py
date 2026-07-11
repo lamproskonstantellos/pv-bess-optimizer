@@ -45,6 +45,7 @@ from .emissions import (
 )
 from .financial import (
     plot_cumulative_cashflow,
+    plot_dscr_profile,
     plot_irr_tornado,
     plot_monthly_cashflow_year1,
     plot_npv_tornado,
@@ -125,6 +126,7 @@ __all__ = [
     "plot_daily_supply",
     "plot_daily_surplus",
     "plot_dam_intraday_heatmap",
+    "plot_dscr_profile",
     "plot_efficient_frontier",
     "plot_energy_sankey",
     "plot_foresight_gap_comparison",

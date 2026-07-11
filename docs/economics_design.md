@@ -16,9 +16,9 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E39 (+ suffixed E8a, E13a-E13d) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E45 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
-| P | `ppa_design.md` | PPA settlement and dispatch coupling | P8 |
+| P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
 | B | (reserved) | balancing product structure | — |
 | I | (reserved) | intraday venue | — |
@@ -310,6 +310,21 @@ where $S_1$ is the Year-1 strike-leg value: `revenue_pv_ppa_eur`
 under physical settlement, `revenue_pv_ppa_eur` +
 `ppa_covered_dam_value_eur` under CfD (reconstructing strike × covered
 from the two-way difference leg).
+
+Baseload structure (`ppa_structure = 'baseload'`; Eqs. P9-P11 in
+`docs/ppa_design.md`): the contract volume is a FIXED band, not a
+PV-degrading share, so the stream drops the fade factor on **both**
+legs and has **no** post-term reversion (cfd-only — nothing was
+sleeved):
+
+$$R^{\mathrm{PPA,bl}}_y = S_1 (1+i_{\mathrm{PPA}})^{y-1}
+- V^{\mathrm{cov}}_1 (1+i_{\mathrm{DAM}})^{y-1}
+\quad (1 \le y \le T^{\mathrm{PPA}};\; 0 \text{ otherwise}) \tag{E45}$$
+
+The same production-decoupled classification holds everywhere the
+pay-as-produced leg rides PV: the availability derate skips the two
+PPA keys for baseload and the lifetime frame excludes them from the
+$f^{PV}$ scaling (each with its own lock test).
 
 The energy-aggregator fee is applied **once**, to the gross DAM +
 retail revenue only, and is clamped so a negative gross never flips
@@ -966,10 +981,168 @@ $$\mathrm{annuity}: \; s = B\,\frac{r_d}{1-(1+r_d)^{-T_d}}; \qquad
 
 Equity cashflow: $\mathrm{CF}^{eq}_0 = \mathrm{CF}_0 + B$;
 $\mathrm{CF}^{eq}_y = \mathrm{CF}_y - s_y$ for $y \le T_d$.  KPIs:
-`equity_irr_pct` = IRR of $\mathrm{CF}^{eq}$ and
-`min_dscr` $= \min_y \mathrm{CF}_y / s_y$
+`equity_irr_pct` = IRR of $\mathrm{CF}^{eq}$,
+`min_dscr` $= \min_y \mathrm{CF}_y / s_y$ and
+`avg_dscr` $= \mathrm{mean}_y\, \mathrm{CF}_y / s_y$ over
+positive-service tenor years
 (`economics._leverage_kpis`; full table via
-`economics.build_debt_schedule`).
+`economics.build_debt_schedule`).  The three render in SUMMARY.md
+only when finite (all-equity runs carry NaNs).
+
+Sculpted repayment (`debt_repayment = sculpted`, Eqs. E40/E40a) —
+the lender profile in which debt service tracks CFADS at a constant
+DSCR instead of binding in one year:
+
+$$s_y = \frac{\max(\mathrm{CFADS}_y, 0)}{\mathrm{DSCR}_s}, \qquad
+P_y = \max\!\left(0,\, s_y - r_d B_{y-1}\right), \qquad
+B_y = B_{y-1} - P_y \tag{E40}$$
+
+with $\mathrm{CFADS}_y =$ `net_cashflow_eur`$[y]$ (operating net,
+replacement CAPEX included — the same numerator convention as the
+per-year DSCR column).  For a GIVEN debt $B$ (manual mode) the
+implied constant DSCR follows from the identity that the PV of debt
+service at the debt rate equals the outstanding principal:
+
+$$\mathrm{DSCR}_s = \frac{\sum_{y=1}^{T_d}
+\max(\mathrm{CFADS}_y, 0)\,(1+r_d)^{-y}}{B} \tag{E40a}$$
+
+A $\mathrm{CFADS}_y \le 0$ year pays nothing (unpaid interest is not
+capitalised in this simple model) and later years absorb it; any
+clamp residual sweeps into the final year's principal so the balance
+amortises to ~0 exactly.  Under sculpting `min_dscr` $=$ `avg_dscr`
+by construction.
+
+### Target-DSCR debt sizing (Eqs. E41-E43; `debt_sizing_mode`)
+
+`debt_sizing_mode = target_dscr` inverts the amortization schedule:
+instead of deriving DSCR from a user-chosen gearing, the maximum
+debt $B^{*}$ that holds `target_dscr` ($\mathrm{DSCR}_t \ge 1$) on
+the sizing-case CFADS is solved in closed form per repayment profile
+(`economics.size_debt`), and **gearing becomes an output**.  The
+annuity's level service binds at the minimum-CFADS tenor year:
+
+$$B^{*}_{\mathrm{ann}} = \frac{\min_{1\le y\le T_d} \mathrm{CFADS}_y}
+{\mathrm{DSCR}_t}\cdot\frac{1-(1+r_d)^{-T_d}}{r_d}
+\quad (r_d>0; \; T_d\,\min_y \mathrm{CFADS}_y/\mathrm{DSCR}_t
+\text{ at } r_d=0) \tag{E41}$$
+
+Linear service $s_y = B/T_d + r_d B (T_d-y+1)/T_d$ is linear in $B$,
+so every tenor year yields an upper bound and $B^{*}$ is their
+minimum; sculpted sizing is the E40a inverse (coverage is level at
+the target in every positive-CFADS year by construction):
+
+$$B^{*}_{\mathrm{lin}} = \min_{1\le y\le T_d}
+\frac{\mathrm{CFADS}_y}{\mathrm{DSCR}_t\left(\tfrac{1}{T_d}
++ r_d\,\tfrac{T_d-y+1}{T_d}\right)}; \qquad
+B^{*}_{\mathrm{sculpt}} = \frac{\sum_{y=1}^{T_d}
+\max(\mathrm{CFADS}_y,0)\,(1+r_d)^{-y}}{\mathrm{DSCR}_t} \tag{E42}$$
+
+Debt can only fund the Year-0 outlay, so the committed amount caps
+there and the sized gearing follows:
+
+$$D = \min\!\left(B^{*}, |\mathrm{CF}_0|\right); \qquad
+\texttt{gearing\_sized\_pct} = 100\,D/|\mathrm{CF}_0|; \qquad
+\texttt{debt\_capacity\_eur} = B^{*} \tag{E43}$$
+
+(the capacity is reported uncapped so the user sees when the outlay,
+not the DSCR, binds).  Equity cashflow and the leverage KPIs then
+follow E20 with debt $= D$.  Conventions, all deliberate:
+
+* **Non-circular by construction** — `net_cashflow_eur` contains no
+  financing lines and no fee is debt-funded, so sizing on the base
+  cashflow needs no iteration.
+* **Frozen debt** — `economics.resolve_debt_sizing` runs exactly
+  once per run (pipeline, right after the base cashflow) and stashes
+  the result under internal underscore keys; sensitivity and
+  uncertainty replays consume the frozen amount and never re-size
+  per perturbation (debt is committed at financial close).  The
+  corporate-tax layer re-applies afterwards so its E20 interest
+  deduction runs on the sized debt.
+* **Infeasible target is not an error** — a non-positive CFADS year
+  inside the tenor gives the level-service profiles capacity 0
+  (`dscr_target_met = False`); the run completes all-equity with a
+  neutral SUMMARY line.  A replacement-year CAPEX dip inside the
+  tenor therefore craters annuity/linear capacity — correct under
+  the stated CFADS convention; prefer `sculpted` for
+  replacement-bearing projects.
+* **`gearing_pct` is an input echo only** in this mode (a UserWarning
+  says so when it is non-zero); `gearing_input_pct` re-echoes it next
+  to `gearing_sized_pct` in the KPI dict and SUMMARY block.
+* **LCOE / LCOS are untouched** — financing costs remain excluded
+  (E21/E22 never read financing lines; sizing introduces no new cost
+  line), and `net_cashflow_eur` does not change, so every default
+  figure is bit-identical.
+* `debt_sizing_case` fixes the CFADS the debt is sized against:
+  `base` (the run's own cashflow), `p90` (the E44 production
+  haircut; a warning flags the degenerate factor-100 case) or
+  `low_price` — the yearly cashflow of the price deck named by
+  `debt_sizing_deck` (default `low`), re-dispatched with that deck's
+  prices through the multi-deck scenario machinery
+  (`pipeline._low_price_sizing_cashflow`; `<column>__<deck>` variant
+  columns required on the timeseries, checked by the validator, and
+  the run's solve time roughly doubles).  E41-E44 apply verbatim to
+  the deck CFADS — unlike the P90 haircut this is a genuine
+  re-dispatch, so BESS arbitrage adapts to the deck's spreads.  The
+  deck run forces its own sizing / lender / sensitivity extras off,
+  so the recursion terminates after one level.
+
+### P90 production lender case (Eq. E44; `production_p90_factor_pct`)
+
+Lenders size against a downside resource year: with
+$f = $ `production_p90_factor_pct`$/100$, the P90 case applies a
+deterministic INTER-ANNUAL haircut to the PV-linked streams of the
+yearly cashflow (`lender.apply_production_case`) and re-evaluates
+the leverage metrics on the resulting CFADS:
+
+$$\mathrm{CFADS}^{P90}_y = \mathrm{CFADS}_y\Big|_{\,G_y \to f G_y,\;
+\mathrm{PPA}_y \to f\,\mathrm{PPA}_y,\;
+\mathrm{RtM}_y \to f\,\mathrm{RtM}_y,\;
+\mathrm{IMB}_y \to f\,\mathrm{IMB}_y} \tag{E44}$$
+
+where $G_y$ is the retail/DAM **gross** (recovered from the base
+frame per the `sensitivity._scale_revenue` identity
+`revenue_eur + |aggregator_fee_eur| == gross`, the aggregator fee
+then rederived with the same fraction and non-negative-gross clamp),
+PPA is the pay-as-produced volume leg, RtM the per-MWh
+route-to-market fee (E13c — export VOLUME falls with production,
+unlike under the price-perturbing Revenue tornado driver, where it
+stays fixed) and IMB the E28 imbalance line (PV-curve volume).
+Everything else is deliberately NOT scaled: the balancing family
+(BESS reservation revenue; the partial PV-coupling of activation is
+a flagged approximation), toll / capacity-market / state-support
+payments (contractual EUR/MW), the optimizer floor+share pair
+(BESS-margin structures), the grid-charging fee (grid-import
+volume) and the revenue levy (mixed base, kept at the base value —
+conservative), OPEX / CAPEX / DEVEX.  This factor multiplies
+already-availability-derated revenue (E8/E8a applied upstream), so
+it is NOT an availability derate — adding it to the derate list
+would double-count.
+
+Scope split with the uncertainty machinery (cross-referenced in
+`docs/uncertainty_design.md`): the U1 forecast-noise Monte Carlo
+models intra-year dispatch realism against imperfect foresight; the
+P90 factor is an inter-annual resource case.  No re-dispatch happens
+— the scaling is a documented cashflow-level approximation (a real
+P90 irradiance year moves BESS arbitrage volumes and curtailment
+nonlinearly); re-solving the dispatch with a scaled PV profile
+through the scenario engine is recorded as future work.
+
+`lender_cases_enabled` evaluates the case table
+(`lender.build_lender_cases`): rows `base` and `p90`, columns
+min/avg DSCR, equity IRR (E20 on the case CFADS with the run's
+resolved — frozen — debt), case NPV and E41/E42 debt capacity at the
+configured `target_dscr`; written to a `lender_cases` results sheet
+and a SUMMARY block, both absent by default.  A `low_price` row
+joins them when `debt_sizing_case = low_price` already re-dispatched
+the deck (the same frame serves both surfaces — the table alone
+never triggers a solve; being a price case it keeps full production,
+so its factor column reads 100).  LCOE / LCOS are
+deliberately excluded from the table: they are Lazard cost figures,
+and scaling the energy denominator without the cost numerator would
+misstate them.  `debt_sizing_case = p90` sizes the debt (E41-E43) on
+$\mathrm{CFADS}^{P90}$ while the run's own cashflow stays the base
+case — the sized run then shows the base-case coverage cushion above
+the target.
 
 ### LCOE and LCOS (Lazard-style, revenue-agnostic)
 
@@ -1086,6 +1259,11 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E33) | `build_yearly_cashflow` revenue_levy_eur clamp + fee-share monthly allocation |
 | (E34)-(E38) | `economics.apply_tax_layer` (straight-line tranches, EBITDA, FIFO carry-forward, tax clamp, post-tax family) |
 | (E39) | `compute_financial_kpis` post-tax KPI block (NaN-gated on the rate) |
+| (E40)-(E40a) | `economics._amortization_schedule` sculpted branch + implied-DSCR closed form |
+| (E41)-(E42) | `economics.size_debt` closed-form debt capacity per repayment profile |
+| (E43) | `economics.size_debt` outlay cap + `resolve_debt_sizing` frozen-debt resolution; sizing KPI family in `compute_financial_kpis` |
+| (E44) | `lender.apply_production_case` per-column haircut + `lender.build_lender_cases` case table |
+| (E45) | `economics.build_yearly_cashflow` baseload PPA no-fade / no-reversion branch |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

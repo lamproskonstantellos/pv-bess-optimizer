@@ -234,7 +234,9 @@ def test_pvgis_source_ignores_filled_column_with_warning(
     assert float(loaded["ts"]["pv_kwh"].sum()) == pytest.approx(
         0.2 * 1000.0 * HOURS,
     )
-    assert any("column is ignored" in r.getMessage() for r in caplog.records)
+    assert any(
+        "that PV data is ignored" in r.getMessage() for r in caplog.records
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -336,3 +338,166 @@ def test_bad_latitude_rejected_through_loader(tmp_path):
     out = _write(tmp_path, typed)
     with pytest.raises(ValueError, match="latitude"):
         read_workbook(out)
+
+
+# ---------------------------------------------------------------------------
+# PVGIS field-wiring audit: every pv-sheet geometry field reaches the
+# fetch verbatim, explicit zeros survive, blanks fall back to defaults,
+# and PVGIS ALWAYS wins over workbook PV data (column and external
+# timeseries_path file alike).
+# ---------------------------------------------------------------------------
+
+
+def test_pvgis_all_geometry_fields_reach_fetch_from_excel(
+    tmp_path, monkeypatch,
+):
+    captured = _mock_pvgis(monkeypatch)
+    typed = _typed(
+        pv_kwh="empty",
+        pv_overrides={
+            "pv_source": "pvgis",
+            "latitude": 37.98, "longitude": 23.73,
+            "tilt": 25.0, "azimuth": 15.0, "losses_pct": 3.5,
+            "weather_year": 2020, "raddatabase": "PVGIS-SARAH3",
+        },
+    )
+    read_workbook(_write(tmp_path, typed, "fields.xlsx"))
+    assert captured["lat"] == pytest.approx(37.98)
+    assert captured["lon"] == pytest.approx(23.73)
+    opts = captured["opts"]
+    assert opts["tilt"] == pytest.approx(25.0)
+    assert opts["azimuth"] == pytest.approx(15.0)
+    assert opts["losses_pct"] == pytest.approx(3.5)
+    assert opts["weather_year"] == 2020
+    assert opts["raddatabase"] == "PVGIS-SARAH3"
+
+
+def test_pvgis_explicit_zero_losses_and_azimuth_survive(
+    tmp_path, monkeypatch,
+):
+    """An explicit 0 is a value, not a blank: losses_pct = 0 must reach
+    the fetch as 0 (a falsy-`or` would silently restore the 14 %
+    default), and azimuth = 0 (due south) likewise."""
+    captured = _mock_pvgis(monkeypatch)
+    typed = _typed(
+        pv_kwh="empty",
+        pv_overrides={
+            "pv_source": "pvgis",
+            "latitude": 37.98, "longitude": 23.73,
+            "losses_pct": 0.0, "azimuth": 0.0,
+        },
+    )
+    read_workbook(_write(tmp_path, typed, "zeros.xlsx"))
+    assert captured["opts"]["losses_pct"] == 0.0
+    assert captured["opts"]["azimuth"] == 0.0
+
+
+def test_pvgis_null_geometry_falls_back_to_defaults(monkeypatch):
+    """Hand-built / YAML-null geometry fields fall back to the PVGIS
+    defaults instead of crashing on float(None)/int(None)."""
+    from pvbess_opt.io_read import resolve_pv_source
+
+    captured = _mock_pvgis(monkeypatch)
+    typed = _typed(pv_kwh="empty", pv_overrides={
+        "pv_source": "pvgis",
+        "latitude": 37.98, "longitude": 23.73,
+        "tilt": None, "azimuth": None, "losses_pct": None,
+        "weather_year": None, "raddatabase": None,
+    })
+    resolve_pv_source(typed)
+    opts = captured["opts"]
+    assert opts["tilt"] == "optimal"
+    assert opts["azimuth"] == 0.0
+    assert opts["losses_pct"] == 14.0
+    assert opts["weather_year"] == 2019
+    assert opts["raddatabase"] is None
+
+
+def test_pvgis_blank_cells_resolve_to_defaults_via_excel(
+    tmp_path, monkeypatch,
+):
+    """Blank workbook cells parse to the sheet defaults and the fetch
+    receives exactly those."""
+    captured = _mock_pvgis(monkeypatch)
+    typed = _typed(
+        pv_kwh="empty",
+        pv_overrides={
+            "pv_source": "pvgis",
+            "latitude": 37.98, "longitude": 23.73,
+            "tilt": None, "losses_pct": None, "weather_year": None,
+        },
+    )
+    read_workbook(_write(tmp_path, typed, "blanks.xlsx"))
+    assert captured["opts"]["tilt"] == "optimal"
+    assert captured["opts"]["losses_pct"] == 14.0
+    assert captured["opts"]["weather_year"] == 2019
+
+
+def test_pvgis_replaces_pv_and_scales_by_nameplate(tmp_path, monkeypatch):
+    """With pv_source = pvgis the resolved pv_kwh IS the fetched profile
+    scaled by the nameplate — the filled timeseries column is ignored."""
+    captured = _mock_pvgis(monkeypatch, per_kwp_value=0.25)
+    typed = _typed(
+        pv_kwh="filled",  # 100 kWh in every step — must NOT survive
+        pv_overrides={
+            "pv_source": "pvgis", "latitude": 37.98, "longitude": 23.73,
+        },
+    )
+    out = read_workbook(_write(tmp_path, typed, "replace.xlsx"))
+    pv_kwh = out["ts"]["pv_kwh"].to_numpy(dtype=float)
+    assert captured["lat"] == pytest.approx(37.98)
+    # 0.25 kWh/kWp x 1000 kWp = 250 kWh per hour step.
+    assert pv_kwh.sum() == pytest.approx(0.25 * 1000.0 * HOURS)
+    assert not np.any(pv_kwh == 100.0)
+
+
+def test_pvgis_ignores_external_timeseries_path_pv(
+    tmp_path, monkeypatch, caplog,
+):
+    """pv_source = pvgis + a pv-sheet timeseries_path file: the location
+    wins — the file PV is ignored (with a warning) while the ts sheet's
+    price columns are untouched."""
+    captured = _mock_pvgis(monkeypatch, per_kwp_value=0.25)
+    external = tmp_path / "pv_profile.csv"
+    pd.DataFrame({
+        "timestamp": pd.date_range("2019-01-01", periods=HOURS, freq="h"),
+        "pv_kwh": np.full(HOURS, 999.0),
+    }).to_csv(external, index=False)
+    typed = _typed(
+        pv_kwh="empty",
+        pv_overrides={
+            "pv_source": "pvgis", "latitude": 37.98, "longitude": 23.73,
+            "timeseries_path": str(external),
+        },
+    )
+    from pvbess_opt.io_read import resolve_pv_source
+
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io_read"):
+        resolve_pv_source(typed, base_dir=tmp_path)
+    pv_kwh = typed["ts"]["pv_kwh"].to_numpy(dtype=float)
+    assert pv_kwh.sum() == pytest.approx(0.25 * 1000.0 * HOURS)
+    assert not np.any(pv_kwh == 999.0)
+    assert captured["opts"] is not None
+    # Prices from the ts sheet survive untouched.
+    assert (
+        typed["ts"]["dam_price_eur_per_mwh"].to_numpy() == 50.0
+    ).all()
+    assert any(
+        "that PV data is ignored" in r.getMessage() for r in caplog.records
+    )
+
+
+def test_file_mode_never_calls_pvgis(tmp_path, monkeypatch):
+    """pv_source = file with a location set: the file wins and the
+    PVGIS fetch is NEVER called."""
+    captured = _mock_pvgis(monkeypatch)
+    typed = _typed(
+        pv_kwh="filled",
+        pv_overrides={
+            "pv_source": "file",
+            "latitude": 37.98, "longitude": 23.73,
+        },
+    )
+    out = read_workbook(_write(tmp_path, typed, "filemode.xlsx"))
+    assert "lat" not in captured  # fetch never invoked
+    assert (out["ts"]["pv_kwh"].to_numpy() == 100.0).all()

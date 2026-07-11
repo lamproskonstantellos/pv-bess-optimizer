@@ -125,7 +125,9 @@ Sheet ``pv``
   (PVGIS picks the optimal inclination).
 * ``azimuth``: array azimuth in degrees: ``0`` = south, ``90`` = west,
   ``-90`` = east.
-* ``losses_pct``: PVGIS system losses (percent).
+* ``losses_pct``: PVGIS system losses (percent).  A blank cell means
+  the PVGIS default (14); an explicit ``0`` is honoured (loss-free
+  array).
 * ``weather_year``: PVGIS weather year; use a non-leap year for a clean
   8760-hour profile, or ``tmy``.
 * ``raddatabase``: optional PVGIS radiation-database override
@@ -377,19 +379,97 @@ is bit-identical to the unlevered case:
 * ``debt_interest_rate_pct`` (default 5): fixed annual rate on the
   drawn debt.
 * ``debt_tenor_years`` (default 15): amortisation horizon in years.
-* ``debt_repayment`` ∈ ``annuity | linear`` (default ``annuity``):
-  ``annuity`` levels the total debt service; ``linear`` levels the
-  principal repayment.  Both fully amortise the loan to a zero closing
-  balance by the end of the tenor.
+* ``debt_repayment`` ∈ ``annuity | linear | sculpted`` (default
+  ``annuity``): ``annuity`` levels the total debt service; ``linear``
+  levels the principal repayment; ``sculpted`` shapes the debt
+  service proportionally to the yearly cashflow so the coverage ratio
+  is level across the tenor instead of binding in one year (the
+  profile lenders use for irregular cashflows).  All three fully
+  amortise the loan to a zero closing balance by the end of the
+  tenor.
 
-When ``gearing_pct > 0`` the run reports two leverage KPIs alongside
-the project metrics, ``equity_irr_pct`` (IRR on the equity cashflow
-after debt service) and ``min_dscr`` (the minimum debt-service
-coverage ratio over the tenor), and writes a styled ``debt_schedule``
+When ``gearing_pct > 0`` the run reports three leverage KPIs
+alongside the project metrics — ``equity_irr_pct`` (IRR on the equity
+cashflow after debt service), ``min_dscr`` and ``avg_dscr`` (the
+minimum / average debt-service coverage ratio over the tenor) — and
+writes a styled ``debt_schedule``
 sheet (year, opening / closing balance, interest, principal, debt
 service, equity cashflow, DSCR).  The unlevered metrics
 (``npv_eur``, project ``irr_pct``, LCOE, LCOS, …) are computed from
 the pre-financing cashflow and are unchanged by gearing.
+
+Target-DSCR debt sizing
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Instead of fixing the debt through ``gearing_pct``, the debt amount
+can be **sized to a lender covenant**.  Three ``economics`` keys,
+inert at their defaults:
+
+* ``debt_sizing_mode`` ∈ ``manual | target_dscr`` (default
+  ``manual``): ``manual`` keeps the ``gearing_pct`` convention
+  unchanged.  ``target_dscr`` solves the maximum debt that holds the
+  target coverage on the sizing case in closed form per repayment
+  profile, caps it at the Year-0 outlay, and reports **gearing as an
+  output** (``gearing_sized_pct``); ``gearing_pct`` is then an input
+  echo only and the run warns when it is non-zero.
+* ``target_dscr`` (default 1.30, must be >= 1.0): the minimum
+  (``annuity`` / ``linear``) or level (``sculpted``) debt service
+  coverage ratio the sized debt must hold.
+* ``debt_sizing_case`` ∈ ``base | p90 | low_price`` (default
+  ``base``): the cashflow case the debt is sized against.  ``base``
+  is the run's own yearly cashflow; ``p90`` sizes against the
+  production-P90 haircut below (a warning flags the degenerate
+  combination with a factor of 100); ``low_price`` re-dispatches the
+  year with the price deck named by ``debt_sizing_deck`` and sizes
+  on that deck's cashflow — a genuine re-solve through the
+  multi-deck scenario machinery, so BESS arbitrage adapts to the
+  deck's spreads and the run's solve time roughly doubles.
+* ``debt_sizing_deck`` (default ``low``): the price deck the
+  ``low_price`` case re-dispatches with — the ``<column>__<deck>``
+  variant-column suffix on the ``timeseries`` sheet, matched
+  lowercase.  Validation requires matching variant columns and lists
+  the decks actually available.
+
+The sized run reports ``debt_capacity_eur`` (uncapped),
+``sized_debt_eur``, ``gearing_sized_pct``, ``dscr_target_met`` and
+the binding DSCR year, renders a "Debt sizing" block in
+``SUMMARY.md``, and freezes the sized debt for every downstream
+consumer (sensitivity and uncertainty replays never re-size — debt is
+committed at financial close).  If the target cannot be held (a
+loss-making year inside the tenor under a level-service profile), the
+debt capacity is zero and the run completes all-equity with a neutral
+message — never an error.
+
+Lender cases (P90 production haircut)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two ``economics`` keys add the lender's downside-resource view, both
+inert at their defaults:
+
+* ``production_p90_factor_pct`` (default 100, validated in
+  ``(0, 100]``): the P90-to-P50 annual production ratio in percent
+  (e.g. ``92`` = the P90 year delivers 92 % of the modelled energy).
+  Applied as a deterministic yearly haircut on the PV-linked revenue
+  streams (retail/DAM with the aggregator fee rederived, PPA volume,
+  route-to-market fee, imbalance cost); balancing, contracted BESS
+  payments, OPEX and CAPEX are deliberately untouched.  This is
+  distinct from the forecast-noise Monte Carlo on the ``simulation``
+  sheet, which perturbs intra-year dispatch — see the design docs for
+  the scope split.  No re-dispatch happens (documented cashflow-level
+  approximation).
+* ``lender_cases_enabled`` (default FALSE): evaluate the lender case
+  table — rows ``base`` and ``p90`` with per-case min/avg DSCR,
+  equity IRR, NPV and debt capacity — written to a ``lender_cases``
+  sheet in ``03_results.xlsx`` and a "Lender cases" block in
+  ``SUMMARY.md``.  The per-case leverage KPIs run on the SAME
+  committed debt as the run (frozen under target-DSCR sizing), so the
+  table answers "same debt, worse resource year".  LCOE / LCOS are
+  deliberately excluded from the table.
+* ``plot_dscr_profile`` (default TRUE): render the per-year
+  DSCR-profile figure (``dscr_profile.pdf``) when a debt layer is
+  active.  All-equity runs emit no figure regardless, so the TRUE
+  default changes nothing for unlevered outputs; see
+  :doc:`financial_plots`.
 
 In a YAML / JSON config the same settings can be supplied as a
 ``financing:`` block whose keys are expressed as fractions / years and
@@ -516,14 +596,22 @@ base case under any positive cashflow configuration.
 Sheet ``ppa``
 -------------
 
-Pay-as-produced PPA contract on a share of the PV export
-(design note: ``docs/ppa_design.md``).  Master-switch pattern like the
-``balancing`` sheet: disabled (the shipped default) leaves every
+PPA contract engine (design note: ``docs/ppa_design.md``) —
+pay-as-produced on a share of the PV export, or a baseload band
+settled against the plant's total export.  Master-switch pattern like
+the ``balancing`` sheet: disabled (the shipped default) leaves every
 output bit-identical to a build without the feature.
 
 * ``ppa_enabled``: master switch (default FALSE).
-* ``ppa_structure``: ``pay_as_produced`` (implemented); ``baseload``
-  is reserved for a future shaped profile and rejected with guidance.
+* ``ppa_structure``: ``pay_as_produced`` (as-generated offtake on a
+  share of the PV export) or ``baseload`` — a contracted flat band of
+  ``ppa_baseload_mw`` settles a fixed per-step volume financially
+  against the plant's total export (PV + BESS): shortfall is
+  implicitly bought at spot, excess sold at spot.  Baseload is
+  cfd-only (a physical sleeved variant totals identically under
+  symmetric spot settlement and is deferred) and provably
+  dispatch-neutral: the fixed-volume leg has no decision variables,
+  so merchant-optimal dispatch is already baseload-optimal.
 * ``ppa_settlement``: ``physical`` (sleeved: the covered volume is
   paid the strike and never touches the DAM) or ``cfd`` (full DAM
   exposure plus a two-way strike-minus-DAM leg, negative whenever the
@@ -534,7 +622,17 @@ output bit-identical to a build without the feature.
 * ``ppa_price_eur_per_mwh``: the contract strike.
 * ``ppa_volume_share_pct``: covered share of the PV **export**,
   pro-rata per step (self-consumed PV is settled at retail; BESS
-  export is not covered).
+  export is not covered).  ``pay_as_produced`` only — the baseload
+  band is absolute and a non-100 share is warned as ignored.
+* ``ppa_baseload_mw``: the contracted flat band for the baseload
+  structure (must be > 0 there; ignored for ``pay_as_produced``).
+  The per-step volume honours the timeseries resolution
+  (``MW × dt``).  Two raw diagnostics report physical coverage:
+  ``ppa_baseload_shortfall_mwh`` / ``ppa_baseload_excess_mwh``
+  (never availability-derated).  In ``self_consumption`` mode
+  delivered energy is export only, so a band above typical surplus
+  export produces a permanently shortfall-heavy contract — check the
+  shortfall KPI.
 * ``ppa_term_years``: operating years 1..term under contract; after
   the term the stream ends and, under physical settlement, the covered
   volume's DAM value rejoins the DAM revenue stream (where the
@@ -677,8 +775,9 @@ decides the source from ``pv_source``, whether the ``pv_kwh`` column (or a
    * - ``pvgis``
      - (any)
      - present
-     - **pvgis**: the column is ignored (a warning is logged if it has
-       data)
+     - **pvgis**: any workbook PV data — a filled ``pv_kwh`` column
+       and/or a ``timeseries_path`` file — is ignored (a warning is
+       logged); price columns are consumed as usual
    * - ``pvgis``
      - (any)
      - missing

@@ -1,6 +1,6 @@
 """IEEE-styled financial plots.
 
-Seven plots total:
+Eight plots total:
 
 * :func:`plot_cumulative_cashflow`  — cumulative undiscounted + discounted lines
 * :func:`plot_yearly_cashflow_bars` — stacked yearly bars (revenue / opex / capex)
@@ -9,6 +9,7 @@ Seven plots total:
 * :func:`plot_monthly_cashflow_year1` — Year-1 monthly bars
 * :func:`plot_npv_tornado`          — sorted NPV tornado
 * :func:`plot_irr_tornado`          — sorted IRR tornado (omits the discount-rate row)
+* :func:`plot_dscr_profile`         — per-year debt-service coverage over the tenor
 
 EUR axes use the compact ``EUR 12.3M`` / ``EUR 45k`` formatter via
 :func:`pvbess_opt.plotting._currency.euro_axis_formatter`.
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "plot_cumulative_cashflow",
+    "plot_dscr_profile",
     "plot_irr_tornado",
     "plot_monthly_cashflow_year1",
     "plot_npv_tornado",
@@ -197,6 +199,88 @@ def plot_cumulative_cashflow(
     ax.set_ylabel("EUR")
     _apply_eur_yaxis(ax, econ)
     _maybe_set_title(ax, f"Cumulative Cash-flow - {_title_window(yearly_cf)}")
+    ax.grid(True, linestyle="--", alpha=0.5)
+    apply_universal_margins(ax, skip_y=True)
+    _integer_year_axis(ax, years, bars=False)
+    apply_fine_ticks(ax)
+    apply_financial_legend(ax)
+    return save_figure(out_path)
+
+
+# ---------------------------------------------------------------------------
+# DSCR profile
+# ---------------------------------------------------------------------------
+
+
+def plot_dscr_profile(
+    debt_schedule: pd.DataFrame | None, out_path: Path,
+    *,
+    p90_schedule: pd.DataFrame | None = None,
+    target_dscr: float | None = None,
+    econ: dict[str, Any] | None = None,
+) -> Path | None:
+    """Per-year debt-service coverage over the tenor (Eqs. E20/E44).
+
+    Base-case DSCR line from :func:`economics.build_debt_schedule`,
+    an optional P90 production-case line (Eq. E44 — same committed
+    debt, haircut CFADS) and an optional target-DSCR reference drawn
+    as a plotted dashed series with a legend entry (house rule: no
+    computed values as axes text).  Returns None without touching the
+    filesystem for all-equity runs (no schedule), so default output
+    directories stay bit-identical.
+    """
+    if debt_schedule is None or debt_schedule.empty:
+        return None
+    out_path = Path(out_path)
+    op_years = debt_schedule["year"].to_numpy(dtype=float)
+    start = int(
+        (econ or {}).get(
+            "project_start_year",
+            PROJECT_SHEET_DEFAULTS["project_start_year"],
+        )
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
+    years = op_years + (start - 1)
+    dscr = debt_schedule["dscr"].to_numpy(dtype=float)
+    base_mask = np.isfinite(dscr)
+    if not bool(base_mask.any()):
+        return None
+
+    plt.figure(figsize=(7, 4))
+    ax = plt.gca()
+    ax.plot(
+        years[base_mask], dscr[base_mask],
+        color=financial_color("DSCR base case"),
+        linewidth=1.5, marker="o", markersize=3,
+        label="DSCR base case",
+    )
+    if p90_schedule is not None and not p90_schedule.empty:
+        p90_years = p90_schedule["year"].to_numpy(dtype=float) + (start - 1)
+        p90_dscr = p90_schedule["dscr"].to_numpy(dtype=float)
+        p90_mask = np.isfinite(p90_dscr)
+        if bool(p90_mask.any()):
+            ax.plot(
+                p90_years[p90_mask], p90_dscr[p90_mask],
+                color=financial_color("DSCR P90 case"),
+                linewidth=1.5, marker="s", markersize=3,
+                label="DSCR P90 case",
+            )
+    if target_dscr is not None and np.isfinite(float(target_dscr)):
+        ax.plot(
+            years, np.full(years.shape, float(target_dscr)),
+            color=financial_color("Target DSCR"),
+            linewidth=1.2, linestyle="--",
+            label="Target DSCR",
+        )
+    # DSCR = 1 is the break-even coverage — the same neutral rule line
+    # every cashflow figure draws at zero.
+    ax.axhline(1.0, color="black", linewidth=0.8, alpha=0.6)
+
+    ax.set_xlabel("Year")
+    ax.set_ylabel("DSCR [-]")
+    _maybe_set_title(ax, "Debt Service Coverage - " + (
+        f"{int(years.min())}-{int(years.max())}"
+    ))
     ax.grid(True, linestyle="--", alpha=0.5)
     apply_universal_margins(ax, skip_y=True)
     _integer_year_axis(ax, years, bars=False)

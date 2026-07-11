@@ -268,6 +268,148 @@ Production release.
   is a separate column family).  Locked by hand-computed schedules,
   a FIFO-expiry worked example and an independent levered reference.
 
+### Added (sculpted debt repayment + average DSCR)
+
+- `debt_repayment` gains the `sculpted` profile (Eqs. E40/E40a): debt
+  service tracks CFADS at the constant implied DSCR - the lender
+  profile in which coverage is level across the tenor instead of
+  binding in one year.  CFADS = net_cashflow_eur (replacement CAPEX
+  included, the per-year-DSCR numerator convention); a CFADS <= 0
+  year pays nothing (interest not capitalised) and later years absorb
+  it; any clamp residual sweeps into the final year's principal so
+  the balance amortises to ~0 exactly.  `_leverage_kpis` now returns
+  `avg_dscr` alongside `min_dscr` (equal under sculpting by
+  construction) and levered runs gain the `avg_dscr` KPI - the only
+  key addition for already-levered runs, called out here per the
+  bit-identity contract (feature-OFF runs are unchanged).  SUMMARY.md
+  gains a finite-gated leverage block (equity IRR, min/avg DSCR).
+
+### Added (target-DSCR debt sizing)
+
+- `debt_sizing_mode = target_dscr` (Eqs. E41-E43; default `manual` =
+  unchanged gearing_pct convention, bit-identical): the debt amount
+  is SIZED to hold `target_dscr` (default 1.30, validated >= 1.0) on
+  the sizing-case CFADS, in closed form per repayment profile - the
+  exact inverse of the amortization schedule, so replaying the sized
+  debt reproduces the target to machine precision (annuity/linear
+  bind at the minimum-CFADS year; sculpted holds the target level in
+  every positive-CFADS year).  Capacity caps at the Year-0 outlay and
+  gearing becomes an OUTPUT: new KPI family `debt_capacity_eur` /
+  `sized_debt_eur` / `gearing_sized_pct` / `gearing_input_pct` /
+  `target_dscr` / `dscr_target_met` / `binding_dscr_year` (all NaN in
+  manual mode) plus a SUMMARY.md "Debt sizing" block.  Sizing
+  resolves ONCE per run and the sized debt is FROZEN (debt is
+  committed at financial close): sensitivity and uncertainty replays
+  consume the committed amount, never a per-perturbation re-size; the
+  corporate-tax layer re-applies so its interest deduction runs on
+  the sized debt.  An unachievable target (a loss-making year inside
+  the tenor under a level-service profile) completes the run
+  all-equity with a neutral message, never an error; a non-zero
+  `gearing_pct` in sizing mode warns that it is an input echo only.
+  `debt_sizing_case` fixes the CFADS case (`base` implemented; `p90`
+  / `low_price` reserved and rejected with guidance).  LCOE/LCOS and
+  every default figure are untouched (financing stays excluded and
+  `net_cashflow_eur` does not change).
+
+### Added (P90 production lender case)
+
+- `production_p90_factor_pct` (Eq. E44; default 100 = disabled,
+  bit-identical): the lender convention of a downside resource year
+  as a deterministic INTER-annual haircut on the PV-linked cashflow
+  lines - retail/DAM gross recovered from the base frame and the
+  aggregator fee rederived through its clamp (the sensitivity
+  gross/net identity), PPA volume, route-to-market fee (export
+  volume falls with production) and the E28 imbalance line; the
+  balancing family, contracted BESS payments (toll / floor+share /
+  state support / capacity market), grid-charging fee, levy, OPEX
+  and CAPEX deliberately unscaled, each decision documented in the
+  new `pvbess_opt/lender.py`.  Explicitly distinct from the
+  forecast-noise Monte Carlo (intra-year dispatch realism) - scope
+  split cross-referenced in both design docs; no re-dispatch
+  (documented cashflow-level approximation, scenario-engine re-solve
+  recorded as future work).  `lender_cases_enabled` (default FALSE)
+  writes the case table - base and P90 rows with per-case min/avg
+  DSCR, equity IRR, NPV and E41/E42 debt capacity, all on the run's
+  frozen committed debt - to a `lender_cases` results sheet and a
+  SUMMARY block (LCOE/LCOS deliberately excluded: Lazard cost
+  figures would be misstated by an energy-only scaling).
+  `debt_sizing_case = p90` activates: the target-DSCR debt is sized
+  against the haircut CFADS while the run's own cashflow stays the
+  base case (a warning flags the degenerate factor-100 combination).
+
+### Added (baseload PPA structure)
+
+- `ppa_structure = 'baseload'` goes live (Eqs. P9-P11 + E45; it
+  previously parsed but was rejected with guidance): a contracted
+  flat band of `ppa_baseload_mw` settles a fixed per-step volume
+  financially against the plant's TOTAL export - shortfall
+  implicitly bought at spot, excess sold at spot, which under
+  symmetric settlement is identical to the net leg Q x (strike -
+  DAM) on top of full merchant revenue (the identity is also why v1
+  is cfd-only: a physical sleeved variant totals the same and only
+  the deferred flow attribution would differ).  The per-step volume
+  honours the timeseries resolution (MW x dt).  Dispatch is provably
+  unchanged (P11): the leg carries no decision variables, so
+  merchant-optimal dispatch is already baseload-optimal - a genuine
+  firming incentive needs asymmetric imbalance pricing, sketched as
+  v2 in the design doc and deliberately not built.  Raw
+  shortfall/excess coverage diagnostics (P10) join the Year-1 KPIs.
+  Classification, each with a lock test: the fixed-volume leg
+  neither availability-derates nor rides the PV fade, and the E45
+  yearly stream drops the fade on both legs with no post-term
+  reversion.  Existing PPA columns, theme labels and figures are
+  reused unchanged; zero-band runs are bit-identical.  Validation:
+  band > 0, cfd-only with the equivalence guidance, share-ignored
+  warning.
+
+### Added (low-price-deck debt sizing case)
+
+- `debt_sizing_case = low_price` activates (it previously parsed but
+  was rejected with guidance): the target-DSCR debt is sized on the
+  yearly cashflow of the price deck named by the new
+  `debt_sizing_deck` key (default `low`), obtained by re-dispatching
+  the year with that deck's prices through the multi-deck scenario
+  machinery - a genuine re-solve (BESS arbitrage adapts to the
+  deck's spreads), unlike the cashflow-level P90 haircut; the run's
+  solve time roughly doubles and the workbook note says so.  E41-E44
+  apply verbatim to the deck CFADS; the deck run forces its own
+  sizing / lender / sensitivity extras off so the resolution
+  terminates after one level.  Validation requires matching
+  `<column>__<deck>` variant columns on the timeseries sheet and
+  lists the decks actually available.  The lender case table gains a
+  `low_price` row when the sizing case already re-dispatched the
+  deck - the same frame serves both surfaces, and the table alone
+  never triggers a solve.
+
+### Added (DSCR-profile figure)
+
+- `dscr_profile.pdf` in the financial-plot family: per-year debt
+  service coverage over the tenor from the debt_schedule machinery,
+  with an optional `DSCR P90 case` companion line (Eq. E44 - same
+  committed debt, haircut cashflow) and, in target-DSCR sizing mode,
+  the target drawn as a dashed reference series carried in the
+  legend (house rule: no computed values as axes text; the DSCR = 1
+  break-even line is the same neutral rule line every cashflow
+  figure draws at zero).  Rendered only when a debt layer is active
+  (`gearing_pct > 0` or `debt_sizing_mode = target_dscr`) and gated
+  by the new `plot_dscr_profile` key (default TRUE - all-equity runs
+  emit no file, so default output directories are bit-identical).
+  Three theme registrations (`DSCR base case`, `DSCR P90 case`,
+  `Target DSCR`) with unique palette hexes join the canonical
+  label/colour/legend registries and their consistency sweeps.
+
+### Fixed (debt-layer follow-ups)
+
+- The corporate-tax layer's debt-interest schedule now threads the
+  yearly CFADS vector, so `debt_repayment = sculpted` combined with
+  `corporate_tax_rate_pct > 0` and `gearing_pct > 0` computes the
+  sculpted interest deduction instead of raising ("sculpted repayment
+  requires the yearly cashflow").
+- The run snapshot's `[economic]` section skips internal
+  underscore-prefixed keys (derived state such as the frozen sized
+  debt); the visible keys that produced them are already in the
+  snapshot.
+
 ### Added (post-tax financial KPIs)
 
 - `npv_post_tax_eur` / `irr_post_tax_pct` / `equity_irr_post_tax_pct`
@@ -342,6 +484,29 @@ Production release.
   CAPEX driver already followed (Year-0 outlay).  The perturbation
   itself is unchanged — it scales every year of the stream by the same
   factor — only the EUR endpoint annotations move.
+
+### Fixed (PVGIS input-path audit)
+
+- Explicit zeros in the PVGIS geometry fields now survive to the
+  fetch: `losses_pct = 0` (a loss-free array) was silently replaced
+  by the 14 % default through a falsy-`or` fallback, and `azimuth = 0`
+  (due south) only worked because it coincided with the default.
+  Geometry parsing is now None-explicit — a blank cell / YAML null in
+  `tilt`, `azimuth`, `losses_pct` or `weather_year` falls back to the
+  documented default, while every explicit value (0 included) passes
+  through verbatim; a null no longer risks a `float(None)` crash on
+  hand-built configs.
+- The "PV data ignored" warning now also fires when a pv-sheet
+  `timeseries_path` file carries the PV column while `pv_source`
+  resolves to PVGIS (previously only a filled inline `pv_kwh` column
+  warned), with one unified message: the location wins and the
+  workbook/file PV data is ignored; the price columns of the
+  timeseries are consumed as usual.  A field-wiring audit locks the
+  full path: every pv-sheet geometry field reaches the PVGIS request
+  verbatim from both the Excel and the YAML surface, the fetched
+  per-kWp profile is scaled by the nameplate and OVERWRITES any
+  workbook PV, and `pv_source = file` never contacts PVGIS even when
+  a location is present.
 
 ### Changed (breaking)
 
