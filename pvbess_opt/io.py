@@ -190,6 +190,10 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "initial_soc_frac": 0.50,
     "terminal_soc_equal": True,
     "max_cycles_per_day": 1.0,
+    # Annual warranty throughput cap (Eqs. E46/E47): 0 = off (default,
+    # bit-identical); basis nameplate keeps current cycle accounting.
+    "max_cycles_per_year": 0.0,
+    "cycle_cap_basis": "nameplate",
     # Full installed BESS cost per kWh of nameplate energy capacity
     # (Lazard-style band 215-315 EUR/kWh).
     "capex_bess_eur_per_kwh": 250.0,
@@ -507,6 +511,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_monthly_scope",
     "plot_yearly_scope",
     "pv_source",
+    "cycle_cap_basis",
     "debt_repayment",
     "debt_sizing_mode",
     "debt_sizing_case",
@@ -524,6 +529,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
     "pv_source": frozenset({"auto", "file", "pvgis"}),
+    "cycle_cap_basis": frozenset({"nameplate", "faded"}),
     "debt_repayment": frozenset({"annuity", "linear", "sculpted"}),
     "debt_sizing_mode": frozenset({"manual", "target_dscr"}),
     # 'p90' and 'low_price' parse (the key surface is stable) but
@@ -685,6 +691,19 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "If TRUE, force final SOC == initial SOC (closed cycle)."),
     ("max_cycles_per_day", 1.0, "-",
      "Daily equivalent-cycle cap (sum of discharge / capacity)."),
+    ("max_cycles_per_year", 0.0, "cycles/year",
+     "Annual full-equivalent-cycle cap (warranty throughput limit, "
+     "Eq. E46). 0 disables (default). Enforced in the Year-1 dispatch "
+     "as total discharge <= cap x capacity; projected years are "
+     "checked analytically (Eq. E47) and reported in the degradation "
+     "sheet. A warning flags a daily cap that already binds tighter "
+     "(max_cycles_per_day x 365 < max_cycles_per_year)."),
+    ("cycle_cap_basis", "nameplate", "nameplate | faded",
+     "Capacity basis for the annual cycle cap accounting (Eq. E47): "
+     "nameplate (installed kWh, default) or faded (SOH-adjusted kWh "
+     "per year, the common warranty convention). Year-1 dispatch is "
+     "identical under both (the Year-1 factor is 1); the switch "
+     "changes the projected-year utilisation report."),
     ("bess_wear_cost_eur_per_mwh", 10.0, "EUR/MWh",
      "Cycle wear cost penalised per MWh discharged in the dispatch "
      "objective (default 10; 0 = off). A dispatch shadow price only: "
@@ -2889,6 +2908,7 @@ def validate_workbook_params(
         "bess_power_kw",
         "bess_capacity_kwh",
         "max_cycles_per_day",
+        "max_cycles_per_year",
         "capex_bess_eur_per_kwh",
         "devex_bess_eur_per_kw",
         "opex_bess_eur_per_kw",
@@ -2898,6 +2918,24 @@ def validate_workbook_params(
         "bess_replacement_year",
     ):
         _require_non_negative(bess, key)
+
+    # Annual cycle cap (Eq. E46): flag a daily cap that already binds
+    # tighter than the requested annual one — the annual key would then
+    # never be the active constraint.
+    raw_annual_cycles = bess.get("max_cycles_per_year")
+    annual_cycles = (
+        0.0 if raw_annual_cycles is None else float(raw_annual_cycles)
+    )
+    if annual_cycles > 0.0:
+        raw_daily = bess.get("max_cycles_per_day")
+        daily = 1.0 if raw_daily is None else float(raw_daily)
+        if daily * 365.0 < annual_cycles:
+            logger.warning(
+                "max_cycles_per_day = %.4g caps the year at %.4g "
+                "equivalent cycles, tighter than max_cycles_per_year "
+                "= %.4g - the annual cap will never bind.",
+                daily, daily * 365.0, annual_cycles,
+            )
     for key in (
         "site_capex_eur",
         "site_devex_eur",
@@ -3647,6 +3685,13 @@ def _typed_to_flat(
         "initial_soc_frac": float(bess["initial_soc_frac"]),
         "terminal_soc_equal": bool(bess["terminal_soc_equal"]),
         "max_cycles_per_day": float(bess["max_cycles_per_day"]),
+        # Annual warranty throughput cap (Eqs. E46/E47).
+        "max_cycles_per_year": float(
+            bess.get("max_cycles_per_year", 0.0) or 0.0
+        ),
+        "cycle_cap_basis": str(
+            bess.get("cycle_cap_basis", "nameplate") or "nameplate"
+        ),
         "bess_power_kw": bess_power_kw,
         "bess_capacity_kwh": bess_capacity_kwh,
         "bess_wear_cost_eur_per_mwh": float(

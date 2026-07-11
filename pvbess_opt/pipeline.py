@@ -890,6 +890,14 @@ def _build_degradation_report(
         # auto, or 0 = never) — set by _build_financials, which runs
         # before this report in the pipeline.
         replacement_year=effective_bess_replacement_year(econ),
+        # Warranty utilisation columns (Eq. E47) join only when the
+        # annual cycle cap is set.
+        max_cycles_per_year=float(
+            params.get("max_cycles_per_year", 0.0) or 0.0
+        ),
+        cycle_cap_basis=str(
+            params.get("cycle_cap_basis", "nameplate") or "nameplate"
+        ),
     )
 
 
@@ -1130,6 +1138,15 @@ def _resolve_uncertainty_config(
 ) -> dict[str, Any]:
     """Merge CLI overrides on top of the workbook ``# uncertainty`` group."""
     enabled = bool(config.rolling_horizon) or bool(econ.get("uncertainty_enabled", False))
+    if enabled and float(econ.get("max_cycles_per_year", 0.0) or 0.0) > 0.0:
+        # Eq. E46 is a year-long constraint; rolling-horizon windows
+        # solve sub-year horizons, so the annual cap binds only in the
+        # deterministic Year-1 solve (documented design choice).
+        logger.warning(
+            "[cycles] max_cycles_per_year is enforced in the "
+            "deterministic Year-1 solve only; rolling-horizon windows "
+            "solve sub-year horizons and carry the daily cap alone."
+        )
     compare = (
         bool(config.compare_uncertainty_sources)
         or bool(econ.get("uncertainty_compare_sources", False))
@@ -1620,6 +1637,25 @@ def _run_one(
         )
 
         degradation_df = _build_degradation_report(res, params, econ, kpis)
+        if (
+            degradation_df is not None
+            and "warranty_utilisation_pct" in degradation_df.columns
+        ):
+            # Eq. E47: >100 % can only occur via a replacement /
+            # augmentation reset on the nameplate basis — the Year-1
+            # MILP cap (Eq. E46) holds Year 1 itself.
+            _over = degradation_df.loc[
+                degradation_df["warranty_utilisation_pct"] > 100.0 + 1e-6,
+                "project_year",
+            ].astype(int).tolist()
+            if _over:
+                logger.warning(
+                    "[cycles] projected warranty utilisation exceeds "
+                    "100 %% of max_cycles_per_year in project years %s "
+                    "(see the degradation sheet's "
+                    "warranty_utilisation_pct column).",
+                    _over,
+                )
         emissions_df = _build_emissions_report(res, econ)
 
         write_results_workbook(

@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E45 (+ suffixed E8a, E13a-E13d, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E47 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -213,6 +213,36 @@ component $1-(1-d_B)^{Y-y_0}$ and the cycle component $d_c K_Y$
 (`bess_calendar_fade_pct_y_final`, `bess_cycle_fade_pct_y_final`,
 `bess_total_fade_pct_y_final`); calendar + cycle = total whenever the
 $\max(0,\cdot)$ floor is inactive.
+
+**Annual throughput cap (Eqs. E46/E47; `max_cycles_per_year`).**
+Warranties are quoted in cycles per year — sometimes on remaining
+(faded) capacity — while the only dispatch cap today is daily.  With
+`max_cycles_per_year` $= C_{yr} > 0$ the Year-1 MILP adds one
+year-long constraint (`CYC_ANNUAL`; a plain linear sum, no big-M):
+
+$$\sum_t \left(x^{bl}_t + x^{bg}_t\right) \le C_{yr}\, E^{\mathrm{cap}} \tag{E46}$$
+
+Both `cycle_cap_basis` settings coincide in Year 1 (the Year-1 factor
+is 1), so one constraint serves both.  The projected years need no
+constraint — under the analytic scaling recipe the year-$y$ discharge
+is $D_1 f^{B}_y$ against capacity $E^{\mathrm{cap}}$ (nameplate) or
+$E^{\mathrm{cap}} f^{B}_y$ (faded), so the utilisation
+
+$$\mathrm{FEC}_y = \frac{D_1 f^{B}_y}{E^{\mathrm{cap}}}
+\;\; (\text{nameplate}) \qquad \text{or} \qquad
+\mathrm{FEC}_y = \frac{D_1}{E^{\mathrm{cap}}}
+\;\; (\text{faded}) \tag{E47}$$
+
+is constant on the faded basis and maximal in Year 1 (or a
+replacement reset year) on nameplate — the Year-1 constraint is
+sufficient and `lifetime.warranty_cycle_utilisation` proves it per
+year in the degradation sheet (`cycles_on_basis`,
+`warranty_utilisation_pct`, written only when the cap is set); the
+pipeline warns when a reset year projects above 100 %.  The cap is a
+constraint, not a cost line — LCOE / LCOS classification is
+unaffected.  Under rolling-horizon dispatch the annual cap applies
+only to the deterministic Year-1 solve (windows cover sub-year
+horizons; a warning notes this).
 
 ### Availability
 
@@ -1264,6 +1294,8 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E43) | `economics.size_debt` outlay cap + `resolve_debt_sizing` frozen-debt resolution; sizing KPI family in `compute_financial_kpis` |
 | (E44) | `lender.apply_production_case` per-column haircut + `lender.build_lender_cases` case table |
 | (E45) | `economics.build_yearly_cashflow` baseload PPA no-fade / no-reversion branch |
+| (E46) | `optimization.build_model` → `CYC_ANNUAL` (Year-1 basis) |
+| (E47) | `lifetime.warranty_cycle_utilisation`; degradation-sheet columns + pipeline reset warning |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

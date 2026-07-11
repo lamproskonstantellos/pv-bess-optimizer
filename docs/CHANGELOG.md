@@ -362,6 +362,27 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (annual cycle cap with warranty basis)
+
+- `max_cycles_per_year` on the bess sheet (Eq. E46; default 0 = off,
+  bit-identical): an annual full-equivalent-cycle warranty cap
+  enforced in the Year-1 dispatch as one year-long linear constraint
+  (`CYC_ANNUAL`), coexisting with the daily cap — a warning flags a
+  daily cap that already binds tighter.  `cycle_cap_basis`
+  (`nameplate` default | `faded`) picks the capacity basis of the
+  cycle ACCOUNTING (Eq. E47): Year-1 dispatch is identical under both
+  (the Year-1 factor is 1), while the projected years are checked
+  analytically — the faded-basis utilisation is constant and the
+  nameplate one maximal in Year 1 or a replacement reset year, which
+  is exactly why the single Year-1 constraint is sufficient.  The
+  degradation sheet gains `cycles_on_basis` /
+  `warranty_utilisation_pct` columns (only when the cap is set) via
+  the new `lifetime.warranty_cycle_utilisation` helper, and the
+  pipeline warns when a replacement reset projects utilisation above
+  100 %.  Under rolling-horizon dispatch the annual cap applies to
+  the deterministic Year-1 solve only (documented; a warning notes
+  the combination).
+
 ### Added (balancing reservation blocks)
 
 - `bm_block_hours` on the balancing sheet (Eq. B9; default 0 =

@@ -60,6 +60,7 @@ __all__ = [
     "build_lifetime_dispatch",
     "effective_bess_replacement_year",
     "resolve_bess_replacement_year",
+    "warranty_cycle_utilisation",
 ]
 
 # Columns scaled by the PV degradation curve.
@@ -264,6 +265,49 @@ def bess_capacity_factors(
             cumulative_cycles += (year1_discharge_mwh * factor) / capacity_mwh
         factors.append(factor)
     return factors
+
+
+def warranty_cycle_utilisation(
+    n_years: int,
+    *,
+    year1_discharge_mwh: float,
+    capacity_mwh: float,
+    factors: list[float],
+    basis: str = "nameplate",
+    max_cycles_per_year: float = 0.0,
+) -> tuple[list[float], list[bool]]:
+    """Per-year full-equivalent cycles on the chosen basis (Eq. E47).
+
+    Under the analytic scaling recipe the year-``y`` discharge is
+    ``D_1 f_y``, so::
+
+        FEC_y = D_1 f_y / E_N          (basis = 'nameplate')
+        FEC_y = D_1 f_y / (E_N f_y)
+              = D_1 / E_N              (basis = 'faded')
+
+    The faded-basis ratio is constant and the nameplate-basis ratio is
+    maximal in Year 1 (or in a replacement reset year), which is why
+    the Year-1 MILP constraint (Eq. E46) is sufficient and the
+    projected years only need this analytic check.  Returns
+    ``(cycles_per_year, exceeds_cap_mask)``; the mask is all-False
+    when ``max_cycles_per_year`` is 0 (cap off).
+    """
+    basis = str(basis or "nameplate").strip().lower()
+    cycles: list[float] = []
+    exceeds: list[bool] = []
+    for y in range(1, int(n_years) + 1):
+        factor = float(factors[y - 1]) if y <= len(factors) else 1.0
+        if capacity_mwh <= 1e-12:
+            fec = 0.0
+        elif basis == "faded" and factor > 1e-12:
+            fec = year1_discharge_mwh / capacity_mwh
+        else:
+            fec = year1_discharge_mwh * factor / capacity_mwh
+        cycles.append(fec)
+        exceeds.append(
+            max_cycles_per_year > 0.0 and fec > max_cycles_per_year + 1e-9
+        )
+    return cycles, exceeds
 
 
 def _bess_factor(

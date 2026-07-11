@@ -983,6 +983,24 @@ def build_model(
             lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
             m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * e_cap_param)
 
+        # --- Annual throughput cap (Eq. E46) ----------------------------------
+        # Warranty limits are quoted in cycles per YEAR; the Year-1
+        # constraint is sufficient because nameplate- and faded-basis
+        # coincide at the Year-1 factor of 1 and the projected years
+        # are checked analytically (Eq. E47, degradation report).
+        raw_annual_cycles = params.get("max_cycles_per_year")
+        max_cycles_per_year = (
+            0.0 if raw_annual_cycles is None else float(raw_annual_cycles)
+        )
+        if max_cycles_per_year > 0.0:
+            m.CYC_ANNUAL = pyo.Constraint(expr=(
+                sum(
+                    m.bess_dis_load[t] + m.bess_dis_grid[t]
+                    for t in range(n_steps)
+                )
+                <= max_cycles_per_year * e_cap_param
+            ))
+
     # --- Balancing-market constraints (gated) ---------------------------------
     if balancing_active:
         h_buf = float(balancing_cfg.bm_soc_headroom_pct) / 100.0

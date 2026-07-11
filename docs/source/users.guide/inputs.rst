@@ -169,6 +169,17 @@ Sheet ``bess``
 * ``soc_min_frac`` / ``soc_max_frac`` / ``initial_soc_frac`` /
   ``terminal_soc_equal`` / ``max_cycles_per_day``: operating
   envelope.
+* ``max_cycles_per_year`` (default 0 = off) /
+  ``cycle_cap_basis`` (``nameplate`` default | ``faded``): annual
+  full-equivalent-cycle warranty cap, enforced in the Year-1
+  dispatch as one year-long constraint and checked analytically for
+  the projected years (degradation sheet ``cycles_on_basis`` /
+  ``warranty_utilisation_pct`` columns).  The basis only changes the
+  projected-year accounting — Year-1 dispatch is identical under
+  both.  A warning flags a daily cap that already binds tighter, a
+  replacement reset projecting above 100 %, or the combination with
+  rolling-horizon dispatch (the annual cap binds the deterministic
+  solve only).
 * ``capex_bess_eur_per_kwh`` (default 250 EUR/kWh): full installed
   BESS CAPEX per kWh of nameplate energy capacity (cells + PCS + BOP
   + EPC; Lazard band 215-315 EUR/kWh).  Set 0 for an existing BESS.
