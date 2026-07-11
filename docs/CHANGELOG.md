@@ -362,6 +362,29 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (grid import capacity limit)
+
+- `p_grid_import_max_kw` on the project sheet (Eq. S35): a
+  connection-point import limit capping grid-to-load plus
+  grid-to-BESS charging per step, mirroring the export-cap machinery
+  minus the injection profile (a flat limit; same empty / `inf` /
+  `unlimited` / `disabled` token parsing, strict positivity when
+  finite).  The `IMPORT_CAP` constraint is attached ONLY when the
+  value is finite, so an absent / unlimited key changes nothing in
+  the model topology (bit-identity); a finite cap also validly
+  tightens the no-simultaneous-grid-I/O big-M.  In merchant mode the
+  cap collapses to a grid-charging power limit.  A two-tier
+  feasibility guard fires at load time: a step whose load exceeds
+  PV + BESS power + the cap is rejected pre-solve with the worst
+  timestamp and the numbers (the load balance is infeasible for
+  every state of charge); load above the cap alone only warns, and
+  the solver-level infeasibility error remains the documented
+  fallback (the certificate is necessary, not sufficient).  The
+  dispatch frame gains a `grid_import_cap_kwh` column (finite caps
+  only) and the audit suite a tenth invariant
+  (`invariant_10_import_cap_excess_kwh`, Eq. S36, vacuous when
+  unlimited).
+
 ### Added (low-price-deck debt sizing case)
 
 - `debt_sizing_case = low_price` activates (it previously parsed but

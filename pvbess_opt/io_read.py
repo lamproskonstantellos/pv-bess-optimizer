@@ -200,8 +200,10 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
                 # and unparseable types fail loudly at load instead of
                 # slipping through as raw strings until the xlsx
                 # round-trip (three-surface parity).
-                if key == "p_grid_export_max_kw":
-                    known[key] = _parse_grid_export_max(value, defaults[key])
+                if key in ("p_grid_export_max_kw", "p_grid_import_max_kw"):
+                    known[key] = _parse_grid_export_max(
+                        value, defaults[key], key,
+                    )
                 else:
                     known[key] = _parse_value(key, value, defaults[key])
                 continue

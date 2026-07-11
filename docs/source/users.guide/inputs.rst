@@ -67,6 +67,17 @@ High-level run configuration:
   Big-M is substituted for the disabled cap so the MILP stays
   solver-agnostic (HiGHS, Gurobi, CBC); the constraint itself is never
   removed.  A negative number or ``0`` remains a validation error.
+* ``p_grid_import_max_kw``: grid-connection import limit (kW),
+  capping grid-to-load plus grid-to-BESS charging per step (the
+  export cap's mirror; same empty / ``inf`` / ``unlimited`` /
+  ``disabled`` token semantics, default unlimited).  Unlike the
+  export cap the constraint is attached only when the value is
+  finite, so an unlimited cap leaves results bit-identical.  In
+  merchant mode it collapses to a grid-charging power limit.  A
+  workbook whose load exceeds every possible supply (PV + BESS power
+  + this cap) in some step is rejected before the solve with the
+  worst timestamp named; load above the cap alone only warns
+  (PV/battery state of charge may still bridge it).
 * ``retail_tariff_eur_per_mwh``: retail tariff used in self_consumption mode.
 * ``allow_bess_grid_charging``: TRUE → BESS may charge from grid in
   PV-zero periods.

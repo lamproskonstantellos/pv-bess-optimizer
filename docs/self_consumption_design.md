@@ -10,7 +10,7 @@ carve-outs relative to `merchant` mode (see
 The companion conformance test
 `tests/test_logic_spec_conformance.py` parses the constraint headings
 under "Hard constraints: formal statements" and the invariant headings
-under "Nine audit invariants" out of THIS file and asserts each symbol
+under "Ten audit invariants" out of THIS file and asserts each symbol
 is attached to a freshly built Pyomo model, so the document cannot
 drift from the code without breaking CI.
 
@@ -52,6 +52,7 @@ full workbook reference: `docs/source/users.guide/inputs.rst`):
 | project | `mode` | `self_consumption` | regime switch |
 | project | `retail_tariff_eur_per_mwh` | 120.0 | scalar tariff $\pi^{\mathrm{ret}}$ (per-step `retail_price_eur_per_mwh` column overrides) |
 | project | `p_grid_export_max_kw` | 5000.0 | export nameplate $P^{G}$ (empty/`inf` token disables the cap) |
+| project | `p_grid_import_max_kw` | empty (unlimited) | import nameplate $P^{\mathrm{imp}}$ for Eq. (S35); same token semantics |
 | project | `grid_cap_includes_load` | FALSE | cap basis: surplus export (default) vs total plant injection |
 | project | `allow_bess_grid_charging` | FALSE | enables `grid_to_bess` + the PV-gating binary |
 | bess | `efficiency_charge` / `efficiency_discharge` | 0.95 / 0.95 | $\eta_c$, $\eta_d$ |
@@ -307,7 +308,34 @@ $M_{\mathrm{pv}} = \max_t G_t \cdot 1.001$.  Declared only when
 charge from the grid only in steps where PV is effectively zero
 (Section 6 gating rule).  When disabled, $x^{gb}_t = 0$ is pinned.
 
-## Nine audit invariants
+### IMPORT_CAP(t)
+
+$$x^{gl}_t + x^{gb}_t \le P^{\mathrm{imp}} \Delta t \tag{S35}$$
+
+Connection-point import limit (`p_grid_import_max_kw`), the mirror of
+Eq. (S15) minus the injection profile: a flat cap on grid-to-load
+plus grid-to-BESS charging per step, a direct $\le$ to a constant (no
+big-M).  Attached ONLY when the workbook value is finite — an empty /
+`unlimited` cell leaves the model topology (and every result)
+bit-identical.  Both modes; merchant pins $x^{gl}_t = 0$, so the cap
+collapses to a grid-charging power limit there (inert without
+`allow_bess_grid_charging`).  A finite cap also tightens
+$M_{\mathrm{imp}}$ (Eq. S18): the NO_SIM_GRID_IMPORT left-hand side
+is exactly the capped sum, so
+$M_{\mathrm{imp}} \le P^{\mathrm{imp}} \Delta t \cdot 1.001$ is valid.
+
+Feasibility is guarded in two tiers at load time
+(`io.read_workbook`; re-checked in `build_model` for direct callers):
+a step with
+$L_t > G_t + \left(P^{B} + P^{\mathrm{imp}}\right) \Delta t$
+makes LOAD_BAL infeasible for **every** SOC trajectory, so the
+workbook is rejected pre-solve with the worst timestamp and the
+numbers; a step where only $L_t > P^{\mathrm{imp}} \Delta t$ merely
+warns (PV output and battery state of charge can still bridge it —
+the certificate is necessary, not sufficient, and the solver-level
+infeasibility error remains the fallback).
+
+## Ten audit invariants
 
 After every solve `optimization.verify_dispatch_invariants` returns the
 residual dictionary below; tolerance
@@ -373,6 +401,14 @@ $$\max_t \left|x^{pl}_t - \mathrm{floor}_t\right| \tag{S29}$$
 
 `self_consumption` only; $\mathrm{floor}_t$ as in Eq. (S7).
 
+### invariant_10_import_cap_excess_kwh
+
+$$\max_t \max\!\left(0,\; x^{gl}_t + x^{gb}_t - P^{\mathrm{imp}} \Delta t\right) \tag{S36}$$
+
+Both modes; vacuously $0.0$ when the cap is unlimited (the
+`grid_import_cap_kwh` dispatch column exists only for finite caps) —
+a stable-contract key like the balancing residuals.
+
 ## Settlement & cashflow equations
 
 Per-step EUR columns are written by `kpis.add_economic_columns` (always
@@ -410,7 +446,7 @@ plus `bess_from_pv_self_consumption_frac`,
 `kpis.attribute_green_discharge`, which splits each discharge by the
 PV share of the energy charged into the battery), SOC statistics
 (`soc_min_pct` / `soc_max_pct` / `soc_avg_pct`), energy totals, and the
-nine invariant keys above.  The headline profit KPI is
+ten invariant keys above.  The headline profit KPI is
 `profit_total_eur`; the nine canonical revenue aggregates are defined
 in `docs/economics_design.md`.
 
@@ -435,19 +471,21 @@ in `docs/economics_design.md`.
 | (S21)-(S29) | `optimization.verify_dispatch_invariants` |
 | (S30)-(S32) | `kpis.add_economic_columns` |
 | (S33)-(S34) | `kpis.compute_kpis`, `kpis.attribute_green_discharge` |
+| (S35) | `IMPORT_CAP`; two-tier guard in `io.read_workbook` + `build_model`; `derive_tight_big_m` M_imp tightening |
+| (S36) | `optimization.verify_dispatch_invariants` (vacuous when the cap is unlimited) |
 
 ## Validation & tests
 
 * `tests/test_logic_spec_conformance.py`: parses the constraint H3s
   under "Hard constraints: formal statements" (≥ 12 names) and the
-  invariant H3s under "Nine audit invariants" (exactly 9) out of this
+  invariant H3s under "Ten audit invariants" (exactly 10) out of this
   file; asserts every constraint is attached to a freshly built
   `self_consumption` model and every invariant is reported within
   `ENERGY_TOLERANCE` after a real solve.
 * `tests/test_optimization.py`, `tests/test_dispatch_analytic.py`:
   constraint-level behaviour against hand-computed dispatches.
 * `tests/test_dispatch_invariant_hardening.py`,
-  `tests/test_realscale_all_combos.py`: the nine invariants across
+  `tests/test_realscale_all_combos.py`: the ten invariants across
   all mode × asset combinations (1-day fast lane; full-year slow lane).
 * `tests/test_logic_spec_conformance.py::test_balancing_verification_symbols_present`:
   balancing symbols on a balancing-enabled model (appendix of

@@ -41,6 +41,7 @@ def test_project_sheet_keys():
     expected = {
         "project_lifecycle_years", "project_start_year", "mode",
         "p_grid_export_max_kw",
+        "p_grid_import_max_kw",
         "retail_tariff_eur_per_mwh", "allow_bess_grid_charging",
         "grid_charging_fee_eur_per_mwh", "grid_charging_fee_exempt",
         "grid_cap_includes_load",
@@ -249,6 +250,13 @@ def test_round_trip(tmp_path):
     out = read_workbook(dst)
     for section in ("project", "pv", "bess", "economics", "simulation"):
         for key in typed[section]:
+            if key == "p_grid_import_max_kw":
+                # Deliberate asymmetry: the template default is None
+                # (an EMPTY cell in the shipped workbook), which the
+                # reader materialises as float('inf') = cap disabled
+                # (Eq. S35), mirroring the export cap's token rule.
+                assert out[section][key] == float("inf")
+                continue
             assert out[section][key] == typed[section][key], (
                 f"section={section} key={key}"
             )

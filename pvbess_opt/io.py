@@ -139,6 +139,10 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "project_start_year": 2026,
     "mode": "self_consumption",
     "p_grid_export_max_kw": 5000.0,
+    # Connection-point import limit (Eq. S35).  None parses to inf =
+    # unlimited (the default; results bit-identical to a run without
+    # the key — no IMPORT_CAP constraint is attached).
+    "p_grid_import_max_kw": None,
     "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
     # Regulated charging-side wedge (EUR/MWh) on grid-charged BESS
@@ -553,6 +557,16 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("p_grid_export_max_kw", 5000, "kW",
      "Max grid export (kW). Leave empty or use 'inf' / 'unlimited' / "
      "'disabled' to remove cap; no injection limit is applied."),
+    ("p_grid_import_max_kw", None, "kW",
+     "Max grid import (kW) at the connection point, capping "
+     "grid-to-load plus grid-to-BESS charging per step (Eq. S35). "
+     "Leave empty or use 'inf' / 'unlimited' / 'disabled' to remove "
+     "the cap (default). Must be strictly positive when set. In "
+     "merchant mode the cap collapses to a grid-charging power limit. "
+     "If a timestep's load exceeds every possible supply (PV + BESS "
+     "power + this cap) the workbook is rejected before the solve; "
+     "if the load merely exceeds the cap alone, a warning notes that "
+     "feasibility then depends on PV and battery state of charge."),
     ("retail_tariff_eur_per_mwh", 120, "EUR/MWh",
      "Retail tariff used in self_consumption mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",
@@ -1917,15 +1931,20 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
     return coerced
 
 
-def _parse_grid_export_max(raw: Any, default: Any) -> float:
-    """Parse ``p_grid_export_max_kw``.
+def _parse_grid_export_max(
+    raw: Any, default: Any, key: str = "p_grid_export_max_kw",
+) -> float:
+    """Parse the grid-cap keys (``p_grid_export_max_kw`` and, with the
+    same token semantics, ``p_grid_import_max_kw``).
 
     Returns ``float('inf')`` when the cap is disabled (empty cell, or one
     of the ``_GRID_EXPORT_UNLIMITED_TOKENS`` strings, case-insensitive).
     A finite positive float is returned unchanged.  Negative or zero
     values are returned as-is so the loader can raise a validation error;
-    unparseable values fall back to ``default`` with a warning.
+    unparseable values fall back to ``default`` with a warning (a None
+    default means unlimited).
     """
+    fallback = float("inf") if default is None else float(default)
     if raw is None:
         return float("inf")
     if isinstance(raw, float) and np.isnan(raw):
@@ -1938,19 +1957,19 @@ def _parse_grid_export_max(raw: Any, default: Any) -> float:
             value = float(raw)
         except ValueError:
             logger.warning(
-                "Workbook value for 'p_grid_export_max_kw' could not be "
-                "parsed (got %r); using default %r.", raw, default,
+                "Workbook value for %r could not be "
+                "parsed (got %r); using default %r.", key, raw, default,
             )
-            return float(default)
+            return fallback
     else:
         try:
             value = float(raw)
         except (TypeError, ValueError):
             logger.warning(
-                "Workbook value for 'p_grid_export_max_kw' could not be "
-                "parsed (got %r); using default %r.", raw, default,
+                "Workbook value for %r could not be "
+                "parsed (got %r); using default %r.", key, raw, default,
             )
-            return float(default)
+            return fallback
     if np.isinf(value):
         return float("inf")
     return value
@@ -2057,8 +2076,8 @@ def _parse_kv_sheet(
                     f"boolean {bool(raw)!r}; write a numeric value instead "
                     "(e.g. 1 for 1 %)."
                 )
-            if key == "p_grid_export_max_kw":
-                out[key] = _parse_grid_export_max(raw, defaults[key])
+            if key in ("p_grid_export_max_kw", "p_grid_import_max_kw"):
+                out[key] = _parse_grid_export_max(raw, defaults[key], key)
             else:
                 out[key] = _parse_value(key, raw, defaults[key])
             continue
@@ -3410,6 +3429,16 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             "'inf' / 'unlimited' / 'disabled' to remove the cap; got "
             f"{grid_cap!r}."
         )
+    # Same contract for the import cap (Eq. S35).
+    import_cap = typed["project"].get(
+        "p_grid_import_max_kw", float("inf"),
+    )
+    if not np.isinf(import_cap) and float(import_cap) <= 0.0:
+        raise ValueError(
+            "p_grid_import_max_kw must be a positive number, or empty / "
+            "'inf' / 'unlimited' / 'disabled' to remove the cap; got "
+            f"{import_cap!r}."
+        )
 
     if "max_injection_profile" in sheets:
         try:
@@ -3450,6 +3479,55 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     ts = typed.pop("ts")
     dt_minutes = detect_timestep_minutes(ts)
     validate_workbook_params(typed, dt_minutes=dt_minutes)
+    # Two-tier feasibility guard for a finite grid-import cap (Eq. S35),
+    # here because ts and dt_minutes are both in scope.  Tier 1 is a
+    # certificate: a step whose load exceeds PV + BESS power + the cap
+    # makes LOAD_BAL infeasible for EVERY state of charge, so the
+    # workbook is rejected before any solver time.  Tier 2 only warns:
+    # load above the cap alone can still be served from PV/BESS, so
+    # feasibility depends on the SOC trajectory the solver finds.
+    _import_cap_kw = float(
+        typed["project"].get("p_grid_import_max_kw", float("inf"))
+    )
+    if (
+        not np.isinf(_import_cap_kw)
+        and str(typed["project"].get("mode", "")).lower()
+        == "self_consumption"
+        and "load_kwh" in ts.columns
+    ):
+        _dt_h = float(dt_minutes) / 60.0
+        _load = ts["load_kwh"].to_numpy(dtype=float)
+        _pv_sup = (
+            ts["pv_kwh"].to_numpy(dtype=float)
+            if "pv_kwh" in ts.columns else np.zeros_like(_load)
+        )
+        _bess_kw = float(typed["bess"].get("bess_power_kw", 0.0) or 0.0)
+        _deficit = _load - (
+            _pv_sup + (_bess_kw + _import_cap_kw) * _dt_h
+        )
+        _worst = int(np.argmax(_deficit)) if len(_deficit) else 0
+        if len(_deficit) and float(_deficit[_worst]) > 1e-9:
+            raise ValueError(
+                "p_grid_import_max_kw makes the load balance infeasible: "
+                f"at {ts['timestamp'].iloc[_worst]} the load "
+                f"({_load[_worst]:.1f} kWh) exceeds the maximum possible "
+                f"supply of PV ({_pv_sup[_worst]:.1f} kWh) + BESS power "
+                f"({_bess_kw:.0f} kW x {_dt_h:g} h) + import cap "
+                f"({_import_cap_kw:.0f} kW x {_dt_h:g} h) regardless of "
+                "the battery state of charge. Raise p_grid_import_max_kw "
+                "or bess_power_kw, or fix the load data."
+            )
+        if len(_load) and float(
+            (_load - _import_cap_kw * _dt_h).max()
+        ) > 1e-9:
+            logger.warning(
+                "p_grid_import_max_kw = %.0f kW is below the load in "
+                "some steps: the grid alone cannot serve those hours, "
+                "so feasibility depends on PV output and the battery "
+                "state of charge; the solver may still report the "
+                "problem infeasible.",
+                _import_cap_kw,
+            )
     ts = _apply_balancing_timeseries_fallback(ts, typed["balancing"])
     # Single-price imbalance settlement has no canonical DAM
     # relationship to proxy, so the column is mandatory (the dual
@@ -3509,6 +3587,21 @@ def _typed_to_flat(
     else:
         p_grid_export_cap_milp = raw_grid_cap
 
+    # The import cap (Eq. S35) passes float('inf') through unchanged:
+    # build_model attaches the IMPORT_CAP constraint only when the value
+    # is finite, so an unlimited cap leaves the model topology (and every
+    # result) bit-identical to a workbook without the key.
+    raw_import_cap = float(
+        project.get("p_grid_import_max_kw", float("inf"))
+    )
+    grid_import_unlimited = bool(np.isinf(raw_import_cap))
+    if not grid_import_unlimited:
+        logger.info(
+            "[simulation] Grid import cap: %.0f kW at the connection "
+            "point (grid-to-load + grid-to-BESS per step).",
+            raw_import_cap,
+        )
+
     params: dict[str, Any] = {
         "dt_minutes": int(typed["dt_minutes"]),
         # bess
@@ -3532,6 +3625,9 @@ def _typed_to_flat(
         # the published params schema (asserted by the test suite / available
         # to API consumers), so they are retained intentionally.
         "grid_export_unlimited": grid_export_unlimited,
+        # Import cap (Eq. S35): inf = unlimited (no constraint attached).
+        "p_grid_import_max_kw": raw_import_cap,
+        "grid_import_unlimited": grid_import_unlimited,
         "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
         "mode": str(project["mode"]),
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),

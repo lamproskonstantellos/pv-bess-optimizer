@@ -29,7 +29,9 @@ Tight big-M values
 Big-Ms are derived per-instance using the symmetric ``bess_power_kw``
 limit (the asymmetric p_charge_max / p_dis_max pair is not supported):
 
-* ``M_imp = (load_max + bess_power_kw × dt_h) × 1.001``
+* ``M_imp = (load_max + bess_power_kw × dt_h) × 1.001`` (tightened to
+  the finite grid-import cap ``p_grid_import_max_kw × dt_h × 1.001``
+  when that is smaller — Eq. S35)
 * ``M_exp = p_grid_export_max × dt_h × max_injection_frac × 1.001``
   (gates the no-simultaneous grid-export binary only; the per-step
   injection cap is a direct ``<=`` to a constant and needs no big-M)
@@ -424,8 +426,20 @@ def derive_tight_big_m(
         load_max = 0.0
     pv_max = float(ts["pv_kwh"].max()) if "pv_kwh" in ts.columns else 0.0
 
+    # A finite import cap (Eq. S35) is a valid upper bound on the
+    # NO_SIM_GRID_IMPORT left-hand side (exactly the capped sum), so it
+    # tightens M_imp; with the cap unlimited the expression is untouched
+    # (bit-identity for cap-absent runs).
+    m_imp = (load_max + p_bess * dt_h) * 1.001
+    raw_import_cap = params.get("p_grid_import_max_kw")
+    p_import = (
+        float("inf") if raw_import_cap is None else float(raw_import_cap)
+    )
+    if np.isfinite(p_import):
+        m_imp = min(m_imp, p_import * dt_h * 1.001)
+
     return {
-        "M_imp": (load_max + p_bess * dt_h) * 1.001,
+        "M_imp": m_imp,
         "M_exp": p_export * dt_h * tightest_max_inj_frac * 1.001,
         "M_charge": p_bess * dt_h * 1.001,
         "M_pv": pv_max * 1.001,
@@ -607,6 +621,29 @@ def build_model(
         }
     else:
         strict_floor_cap_kwh_per_step = export_cap_kwh_per_step
+
+    # Connection-point import cap (Eq. S35): inf / absent = unlimited
+    # (no constraint attached below — model topology unchanged).
+    raw_import_cap = params.get("p_grid_import_max_kw")
+    p_import = (
+        float("inf") if raw_import_cap is None else float(raw_import_cap)
+    )
+    if np.isfinite(p_import) and mode == "self_consumption":
+        # Defense-in-depth re-check of the loader's infeasibility
+        # certificate (io.read_workbook) for direct build_model callers:
+        # a step whose load exceeds PV + BESS power + the cap makes
+        # LOAD_BAL infeasible for every state of charge.
+        p_bess_cert = float(params.get("bess_power_kw", 0.0) or 0.0)
+        for t in time_index:
+            if load[t] > pv[t] + (p_bess_cert + p_import) * dt_h + 1e-9:
+                raise ValueError(
+                    "p_grid_import_max_kw makes the load balance "
+                    f"infeasible at step {t}: load {load[t]:.1f} kWh "
+                    f"exceeds PV {pv[t]:.1f} kWh + BESS power "
+                    f"{p_bess_cert:.0f} kW + import cap {p_import:.0f} "
+                    "kW for the step regardless of the battery state "
+                    "of charge."
+                )
     big_m = derive_tight_big_m(params, ts, dt_h=dt_h, mode=mode)
 
     m = pyo.ConcreteModel()
@@ -1038,6 +1075,22 @@ def build_model(
             ),
         )
 
+    # Connection-point import cap (Eq. S35): grid-to-load plus
+    # grid-to-BESS charging per step.  A direct <= to a constant like
+    # EXPORT_CAP (no big-M); attached ONLY when the cap is finite, so an
+    # absent / unlimited key leaves the model topology bit-identical.
+    # Merchant mode pins grid_to_load to zero, so the cap collapses to a
+    # grid-charging power limit there (inert without
+    # allow_bess_grid_charging).
+    if np.isfinite(p_import):
+        import_cap_kwh = float(p_import * dt_h)
+        m.IMPORT_CAP = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.grid_to_load[t] + m.grid_to_bess[t] <= import_cap_kwh
+            ),
+        )
+
     # --- self_consumption-only constraints --------------------------------------------
     # Merchant mode intentionally omits the no-simultaneous-grid-IO
     # constraint (the y_grid_io binary below): the audit verified that
@@ -1399,6 +1452,15 @@ def model_to_dataframe(
         pyo.value(model.grid_export_total[t]) for t in time_index
     ]
     res["grid_export_cap_kwh"] = export_cap_kwh_per_step
+    # Import cap (Eq. S35): written ONLY when the cap is finite, so
+    # cap-absent dispatch frames stay bit-identical (contrast the export
+    # cap column, unconditional because that cap always exists).
+    raw_import_cap = params.get("p_grid_import_max_kw")
+    p_import = (
+        float("inf") if raw_import_cap is None else float(raw_import_cap)
+    )
+    if np.isfinite(p_import):
+        res["grid_import_cap_kwh"] = float(p_import * dt_h)
     # Actual quantity the EXPORT_CAP binds on.  Equals grid_export_total_kwh in
     # the default mode; equals total plant injection (load-serving flows plus
     # surplus export) under grid_cap_includes_load in self_consumption mode.
@@ -1709,7 +1771,7 @@ def verify_dispatch_invariants(
 ) -> dict[str, float]:
     """Check the dispatch invariants on a solved dispatch.
 
-    Verifies the nine general-dispatch invariants plus, when the
+    Verifies the ten general-dispatch invariants plus, when the
     balancing block fired, the six INV-B1..INV-B6 balancing-market
     invariants.  Returns a dict of named residuals; the pipeline's
     ``--strict`` mode rejects any residual above the energy tolerance.
@@ -1717,7 +1779,7 @@ def verify_dispatch_invariants(
     Returns
     -------
     dict[str, float]
-        Nine general-dispatch keys:
+        Ten general-dispatch keys:
 
         * ``invariant_1_pv_balance_kwh``
         * ``invariant_2_load_balance_kwh`` (self_consumption only; 0.0 in merchant)
@@ -1728,6 +1790,8 @@ def verify_dispatch_invariants(
         * ``invariant_7_curtail_behavior_count`` (BOTH modes)
         * ``invariant_8_soc_closed_cycle_kwh`` (when terminal_soc_equal)
         * ``invariant_9_pv_load_priority_kwh`` (self_consumption only; Section 2)
+        * ``invariant_10_import_cap_excess_kwh`` (Eq. S35; 0.0
+          vacuously when the cap is unlimited)
 
         Plus six balancing-invariant keys (always present; zero when the
         balancing block did not fire):
@@ -1901,6 +1965,20 @@ def verify_dispatch_invariants(
     else:
         inv_9 = 0.0
 
+    # Invariant 10 — import cap (Eq. S35): per-step grid-to-load plus
+    # grid-to-BESS never exceeds the cap.  Vacuously 0.0 when the cap
+    # column is absent (cap unlimited) — a stable-contract key like the
+    # balancing residuals.
+    if "grid_import_cap_kwh" in res.columns:
+        import_cap = res["grid_import_cap_kwh"].to_numpy(dtype=float)
+        inv_10 = float(
+            np.maximum(
+                0.0, grid_to_load + grid_to_bess - import_cap,
+            ).max() if len(import_cap) else 0.0
+        )
+    else:
+        inv_10 = 0.0
+
     general_invariants: dict[str, float] = {
         "invariant_1_pv_balance_kwh": inv_1,
         "invariant_2_load_balance_kwh": inv_2,
@@ -1911,6 +1989,7 @@ def verify_dispatch_invariants(
         "invariant_7_curtail_behavior_count": inv_7,
         "invariant_8_soc_closed_cycle_kwh": inv_8,
         "invariant_9_pv_load_priority_kwh": inv_9,
+        "invariant_10_import_cap_excess_kwh": inv_10,
     }
     balancing_invariants = _balancing_invariants(
         res, params,
