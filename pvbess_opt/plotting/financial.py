@@ -299,12 +299,12 @@ def _optional_revenue_streams(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
            np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
            np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
-           np.ndarray]:
+           np.ndarray, np.ndarray]:
     """Return the (balancing, balancing-fee, ppa, rtm-fee, optimizer-fee,
     grid-charging-fee, imbalance-cost, toll-revenue, floor-top-up,
     state-support, state-support-netting, capacity-market,
     revenue-levy, curtailment-compensation, augmentation-capex,
-    go-revenue) yearly columns.
+    go-revenue, support-settlement) yearly columns.
 
     Missing or all-zero columns come back as zero arrays so callers can
     stack them unconditionally; all-zero streams draw nothing.
@@ -319,7 +319,7 @@ def _optional_revenue_streams(
         "state_support_eur", "state_support_clawback_eur",
         "capacity_market_revenue_eur", "revenue_levy_eur",
         "curtailment_compensation_eur", "augmentation_capex_eur",
-        "go_revenue_eur",
+        "go_revenue_eur", "support_settlement_eur",
     ):
         if col in yearly_cf.columns:
             out.append(yearly_cf[col].to_numpy(dtype=float))
@@ -328,7 +328,7 @@ def _optional_revenue_streams(
     return (
         out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7],
         out[8], out[9], out[10], out[11], out[12], out[13], out[14],
-        out[15],
+        out[15], out[16],
     )
 
 
@@ -356,6 +356,7 @@ def _stack_cashflow_bars(
     curtailment_comp: np.ndarray | None = None,
     aug_capex: np.ndarray | None = None,
     go_revenue: np.ndarray | None = None,
+    support_settlement: np.ndarray | None = None,
 ) -> None:
     """Draw the shared cashflow bar stack (yearly bars / NPV waterfall).
 
@@ -476,6 +477,21 @@ def _stack_cashflow_bars(
                label="State-support netting")
         pos_bottom = pos_bottom + np.clip(support_net, 0.0, None)
         neg_bottom = neg_bottom + np.clip(support_net, None, 0.0)
+    if support_settlement is not None and np.any(
+        np.abs(support_settlement) > 1e-9
+    ):
+        # Signed per year (Eqs. E55-E57): sliding-FiP years stack with
+        # the revenue, two-way CfD repayment years below — one band,
+        # element-wise bottoms (the state-support netting pattern).
+        ax.bar(years, support_settlement, width=width,
+               bottom=np.where(
+                   support_settlement >= 0.0, pos_bottom, neg_bottom,
+               ),
+               color=financial_color("Support settlement (FiP/CfD)"),
+               edgecolor="black", linewidth=0.4,
+               label="Support settlement (FiP/CfD)")
+        pos_bottom = pos_bottom + np.clip(support_settlement, 0.0, None)
+        neg_bottom = neg_bottom + np.clip(support_settlement, None, 0.0)
     ax.bar(years, devex, width=width, bottom=neg_bottom,
            color=financial_color("DEVEX"),
            edgecolor="black", linewidth=0.4, label="DEVEX")
@@ -509,9 +525,8 @@ def plot_yearly_cashflow_bars(
     revenue = yearly_cf["revenue_eur"].to_numpy(dtype=float)
     (balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost,
      toll, floor_topup, support, support_net, capacity_market,
-     levy, curtailment_comp, aug_capex, go_revenue) = (
-        _optional_revenue_streams(yearly_cf)
-    )
+     levy, curtailment_comp, aug_capex, go_revenue,
+     support_settlement) = _optional_revenue_streams(yearly_cf)
     opex = yearly_cf["opex_eur"].to_numpy(dtype=float)  # negative
     if "devex_eur" in yearly_cf.columns:
         devex = yearly_cf["devex_eur"].to_numpy(dtype=float)  # negative
@@ -527,7 +542,7 @@ def plot_yearly_cashflow_bars(
         ax, years, width, revenue, balancing, ppa, opex, devex, capex,
         bal_fee, rtm_fee, opt_fee, gcf_fee, imb_cost, toll, floor_topup,
         support, support_net, capacity_market, levy, curtailment_comp,
-        aug_capex, go_revenue,
+        aug_capex, go_revenue, support_settlement,
     )
     ax.plot(years, net, color=financial_color("Net cash-flow"), linewidth=1.5,
             marker="o", markersize=3, label="Net cash-flow")
@@ -575,9 +590,8 @@ def plot_npv_waterfall(
     revenue_disc = yearly_cf["revenue_eur"].astype(float).to_numpy() * disc_factor
     (balancing, bal_fee, ppa, rtm_fee, opt_fee, gcf_fee, imb_cost,
      toll, floor_topup, support, support_net, capacity_market,
-     levy, curtailment_comp, aug_capex, go_revenue) = (
-        _optional_revenue_streams(yearly_cf)
-    )
+     levy, curtailment_comp, aug_capex, go_revenue,
+     support_settlement) = _optional_revenue_streams(yearly_cf)
     balancing_disc = balancing * disc_factor
     bal_fee_disc = bal_fee * disc_factor
     ppa_disc = ppa * disc_factor
@@ -594,6 +608,7 @@ def plot_npv_waterfall(
     curtailment_comp_disc = curtailment_comp * disc_factor
     aug_capex_disc = aug_capex * disc_factor
     go_revenue_disc = go_revenue * disc_factor
+    support_settlement_disc = support_settlement * disc_factor
     opex_disc = yearly_cf["opex_eur"].astype(float).to_numpy() * disc_factor
     if "devex_eur" in yearly_cf.columns:
         devex_disc = (
@@ -617,7 +632,7 @@ def plot_npv_waterfall(
         rtm_fee_disc, opt_fee_disc, gcf_fee_disc, imb_cost_disc,
         toll_disc, floor_topup_disc, support_disc, support_net_disc,
         capacity_market_disc, levy_disc, curtailment_comp_disc,
-        aug_capex_disc, go_revenue_disc,
+        aug_capex_disc, go_revenue_disc, support_settlement_disc,
     )
 
     ax.plot(

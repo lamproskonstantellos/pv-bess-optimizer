@@ -362,6 +362,33 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (sliding Feed-in-Premium / two-way CfD support settlement)
+
+- `support_scheme` on the ppa sheet (Eqs. E55-E57; default 'none',
+  bit-identical): reference-period state-support settlement on the
+  eligible PV export.  'sliding_fip' pays max(strike - reference, 0)
+  per month on the volume-weighted monthly DAM reference price (the
+  Greek DAPEEP sliding Feed-in-Premium; `support_strike_eur_per_mwh`
+  is the reference tariff, Timi Anaforas); 'cfd_two_way' settles
+  strike - reference both ways (repayment years go negative and the
+  net cashflow carries the sign).  The premium is a settlement
+  overlay - dispatch still sells at the DAM - and is mutually
+  exclusive with a corporate PPA.
+  `support_negative_hour_suspension` removes negative-DAM hours from
+  both sides of the reference-price weighting, reusing the PPA
+  suspension clause's strict p < 0 classifier;
+  `support_ref_period='hourly'` degenerates to the per-step CfD
+  algebra as a cross-check mode.  The Year-1 KPI pair and its
+  per-month detail carry both operating derates; the cashflow
+  projects a FLAT strike leg against a dam-inflation-indexed
+  reference and PV-fade volume with the sliding clamp re-applied per
+  month per year, cutting off after `support_term_years`.
+  Fee-exempt, excluded from LCOE/LCOS, its own signed figure band,
+  monthly allocation on the Year-1 settlement shape with exact
+  reconciliation, a lifetime SUMMARY row, and a dedicated
+  SupportStrike tornado driver (exact full rebuild at the perturbed
+  strike; the Revenue driver leaves the mixed column untouched).
+
 ### Added (NPV tail risk: VaR / CVaR)
 
 - `risk_metrics_enabled` + `risk_alpha_pct` on the simulation sheet

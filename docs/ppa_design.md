@@ -281,6 +281,18 @@ Scope rules (one scope across every consumer, per
   `ppa_baseload_shortfall_mwh` marker used by the availability
   derate).
 
+## Reference-period support settlement (cross-reference)
+
+`support_scheme` on the same workbook sheet settles STATE support
+(the Greek DAPEEP sliding Feed-in-Premium or a two-way CfD) on the
+eligible PV export — mutually exclusive with `ppa_enabled` (a plant
+settles under a corporate PPA or a support scheme, not both; the
+loader rejects the combination).  The engine, equations (E55-E57)
+and classification live in `docs/economics_design.md`; the
+negative-hour eligibility (E57) reuses this document's strict
+`negative_price_mask` classifier (Eq. P6) so the two clauses can
+never diverge on what a "negative hour" is.
+
 ## Implementation map
 
 | Equation | Implementing symbol |

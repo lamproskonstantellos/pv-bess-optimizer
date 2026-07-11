@@ -35,8 +35,15 @@ ATB 2024 reports ~99 % availability for fixed-tilt PV).
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from .balancing import PRODUCTS_ALL, PRODUCTS_WITH_ACTIVATION
+
+#: KPI keys holding per-month lists that scale with the same factors
+#: as their scalar totals (the support settlement's monthly
+#: eligible-volume detail feeds the cashflow projection, so it must
+#: carry the identical derates or the Year-1 rows would diverge).
+_DERATED_LIST_KEYS: tuple[str, ...] = ("support_monthly_eligible_mwh",)
 
 __all__ = [
     "apply_curtailment_derate",
@@ -123,6 +130,12 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     # reservation throughput which the derate applies to.
     "bm_expected_activation_energy_up_kwh",
     "bm_expected_activation_energy_dn_kwh",
+    # Reference-period support settlement (Eqs. E55-E57): both ride
+    # the eligible PV EXPORT volume, so they derate with the export
+    # energies (the settlement may be negative under cfd_two_way — a
+    # linear scale keeps the sign).
+    "support_settlement_eur",
+    "support_eligible_export_mwh",
 )
 
 
@@ -160,11 +173,11 @@ def _default_derated_keys() -> tuple[str, ...]:
 
 
 def apply_unavailability_derate(
-    kpis: dict[str, float],
+    kpis: dict[str, Any],
     unavailability_pct: float,
     *,
     derated_keys: Iterable[str] | None = None,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Return ``kpis`` with every revenue-bearing key scaled by availability.
 
     Post-condition: every revenue-bearing top-level EUR key is scaled by
@@ -225,6 +238,14 @@ def apply_unavailability_derate(
     for key in derated_keys:
         if key in out and isinstance(out[key], (int, float)):
             out[key] = float(out[key]) * factor
+    # Per-month list keys scale element-wise with the same factor so
+    # the cashflow projection they feed matches the scalar totals.
+    for key in _DERATED_LIST_KEYS:
+        _lst = out.get(key)
+        if isinstance(_lst, list):
+            # The KPI dict is float-typed for the scalar contract; the
+            # monthly-detail lists are a documented exception.
+            out[key] = [float(v) * factor for v in _lst]
     # Grid import is the one energy flow that must NOT simply scale down with
     # availability.  During plant downtime the grid covers the full load the
     # offline plant would otherwise have served, so annual import RISES rather
@@ -282,6 +303,11 @@ _CURTAILMENT_DERATED_KEYS: tuple[str, ...] = (
     # leg is exempted below via the P10 marker.
     "revenue_pv_ppa_eur",
     "ppa_covered_dam_value_eur",
+    # Reference-period support settlement (Eqs. E55-E57): settles on
+    # the metered eligible PV export, so the operator's curtailment
+    # cuts the settled volume like the DAM revenue it tops up.
+    "support_settlement_eur",
+    "support_eligible_export_mwh",
 )
 
 # The scaled keys that are algebraic components of profit_total_eur
@@ -295,7 +321,7 @@ _CURTAILMENT_PROFIT_COMPONENTS: tuple[str, ...] = (
 
 
 def apply_curtailment_derate(
-    kpis: dict[str, float],
+    kpis: dict[str, Any],
     curtailment_pct: float,
     *,
     compensated_pct: float = 0.0,
@@ -341,6 +367,14 @@ def apply_curtailment_derate(
             out[key] = old * factor
             if key in _CURTAILMENT_PROFIT_COMPONENTS:
                 profit_delta += out[key] - old
+    # Per-month list keys scale with the same factor (see the
+    # unavailability derate for the reasoning).
+    for key in _DERATED_LIST_KEYS:
+        _lst = out.get(key)
+        if isinstance(_lst, list):
+            # The KPI dict is float-typed for the scalar contract; the
+            # monthly-detail lists are a documented exception.
+            out[key] = [float(v) * factor for v in _lst]
     compensation = (
         curtailed_export_mwh
         * max(0.0, min(1.0, float(compensated_pct or 0.0) / 100.0))
@@ -357,8 +391,8 @@ def apply_curtailment_derate(
 
 
 def apply_operating_derates(
-    kpis: dict[str, float], params: dict[str, float],
-) -> dict[str, float]:
+    kpis: dict[str, Any], params: dict[str, Any],
+) -> dict[str, Any]:
     """Availability then curtailment, both read from ``params``.
 
     The single post-solve derate entry point every caller uses, so the

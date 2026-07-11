@@ -743,6 +743,19 @@ While under contract the PPA stream carries **no aggregator fee**
 stays out of LCOE/LCOS.  The ``sensitivity_ppa_price_delta_pct``
 economics key adds a PPA-price tornado driver when the contract is on.
 
+* ``support_scheme`` (default ``none``) /
+  ``support_strike_eur_per_mwh`` / ``support_term_years`` (default
+  20) / ``support_ref_period`` (``monthly`` default | ``hourly``) /
+  ``support_negative_hour_suspension`` (default ``FALSE``):
+  reference-period state-support settlement on the eligible PV
+  export — ``sliding_fip`` pays ``max(strike - reference, 0)`` per
+  month on the volume-weighted monthly DAM reference price (the
+  Greek DAPEEP sliding Feed-in-Premium; the strike is the reference
+  tariff), ``cfd_two_way`` settles ``strike - reference`` both ways.
+  The premium is a settlement overlay (dispatch still sells at the
+  DAM); negative-DAM hours can be excluded from the eligible volume;
+  mutually exclusive with ``ppa_enabled``.
+
 Sheet ``simulation``
 --------------------
 

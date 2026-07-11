@@ -589,6 +589,36 @@ def compute_kpis(
                 * res["pv_to_grid_kwh"].fillna(0.0) * _not_susp
             ).sum() / 1000.0
         )
+    # Reference-period support settlement (Eqs. E55-E57): a
+    # post-solve overlay on the eligible PV export; keys written ONLY
+    # when a scheme is armed so default runs stay bit-identical.
+    _support_scheme = str(
+        (params.get("ppa") or {}).get("support_scheme", "none") or "none"
+    ).strip().lower()
+    support_kpis: dict[str, Any] = {}
+    if (
+        _support_scheme in ("sliding_fip", "cfd_two_way")
+        and "pv_to_grid_kwh" in res.columns
+        and "dam_price_eur_per_mwh" in res.columns
+        and "timestamp" in res.columns
+    ):
+        from .ppa import compute_support_settlement
+
+        _ppa_raw = params.get("ppa") or {}
+        support_kpis = compute_support_settlement(
+            res,
+            scheme=_support_scheme,
+            strike_eur_per_mwh=float(
+                _ppa_raw.get("support_strike_eur_per_mwh", 0.0) or 0.0
+            ),
+            ref_period=str(
+                _ppa_raw.get("support_ref_period", "monthly") or "monthly"
+            ),
+            suspend_negative=bool(
+                _ppa_raw.get("support_negative_hour_suspension", False)
+            ),
+        )
+
     total_import = (
         _sum_mwh(res, "grid_to_load_kwh") + _sum_mwh(res, "bess_charge_grid_kwh")
     )
@@ -786,6 +816,8 @@ def compute_kpis(
     # unconditionally.
     # ---------------------------------------------------------------------
     kpis.update(_compute_balancing_kpis(res, params))
+    if support_kpis:
+        kpis.update(support_kpis)
 
     # ---------------------------------------------------------------------
     # Canonical revenue aggregates for the financial-plot stack.  These

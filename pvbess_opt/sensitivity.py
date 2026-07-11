@@ -77,6 +77,8 @@ _DRIVER_TYPE_BY_VARIABLE: dict[str, str] = {
     "Revenue": "revenue",
     "DiscountRate": "discount_rate",
     "PpaPrice": "ppa_price",
+    # Same EUR/MWh strike semantics as the PPA driver.
+    "SupportStrike": "ppa_price",
 }
 
 
@@ -124,6 +126,24 @@ def variables_for_npv_sensitivity(
         raw.append(
             {"name": "PpaPrice", "kind": "relative", "delta": ppa_d,
              "label": "PPA price"},
+        )
+    # Support-scheme strike driver (Eqs. E55-E57): the cashflow
+    # rebuilds the settlement from the strike-independent Year-1
+    # monthly detail, so a full rebuild at the perturbed strike is
+    # EXACT (including the sliding one-way clamp).  Shares the PPA
+    # delta knob — both are EUR/MWh strike perturbations.
+    if str(
+        econ.get("support_scheme", "none") or "none"
+    ).strip().lower() in ("sliding_fip", "cfd_two_way"):
+        sup_d = float(
+            econ.get(
+                "sensitivity_ppa_price_delta_pct",
+                DEFAULT_SENSITIVITY_DELTA_PCT,
+            )
+        ) / 100.0
+        raw.append(
+            {"name": "SupportStrike", "kind": "relative", "delta": sup_d,
+             "label": "Support strike"},
         )
     return [v for v in raw if float(v["delta"]) > 0.0]  # type: ignore[arg-type]
 
@@ -196,6 +216,8 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("augmentation_capex_eur")
     if "go_revenue_eur" in df.columns:
         components.append("go_revenue_eur")
+    if "support_settlement_eur" in df.columns:
+        components.append("support_settlement_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -353,6 +375,12 @@ def _scale_revenue(
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)
+    # support_settlement_eur (Eqs. E55-E57) does NOT scale with the
+    # Revenue driver either: the strike leg is an administered tariff
+    # and only the reference leg co-moves with prices — a constant
+    # scale would be wrong on the mixed column, so the dedicated
+    # SupportStrike driver perturbs the strike via a full rebuild
+    # instead (the optimizer-fee vs route-to-market-fee precedent).
     # toll_revenue_eur (Eq. E29) does NOT scale with the Revenue driver:
     # it is a fixed contractual EUR/MW payment — the driver perturbs
     # market prices, which a toll is by construction insulated from
@@ -769,6 +797,41 @@ def run_sensitivity_analysis(
             high_kpis = compute_financial_kpis(
                 build_yearly_cashflow(
                     _ppa_kpis_at(1.0 + delta), econ, capacities,
+                ),
+                econ,
+            )
+            _record(name, label, "base", 0.0, base_strike, base_kpis)
+            _record(
+                name, label, "low", -delta,
+                base_strike * (1.0 - delta), low_kpis,
+            )
+            _record(
+                name, label, "high", +delta,
+                base_strike * (1.0 + delta), high_kpis,
+            )
+            continue
+
+        if name == "SupportStrike":
+            base_strike = float(
+                econ.get("support_strike_eur_per_mwh", 0.0) or 0.0
+            )
+            if base_strike <= 0.0:
+                continue
+            low_kpis = compute_financial_kpis(
+                build_yearly_cashflow(
+                    year1_kpis,
+                    {**econ, "support_strike_eur_per_mwh":
+                     base_strike * (1.0 - delta)},
+                    capacities,
+                ),
+                econ,
+            )
+            high_kpis = compute_financial_kpis(
+                build_yearly_cashflow(
+                    year1_kpis,
+                    {**econ, "support_strike_eur_per_mwh":
+                     base_strike * (1.0 + delta)},
+                    capacities,
                 ),
                 econ,
             )

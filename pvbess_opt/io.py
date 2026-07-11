@@ -436,6 +436,15 @@ PPA_SHEET_DEFAULTS: dict[str, Any] = {
     # Baseload band (MW) for ppa_structure='baseload'; 0 keeps the
     # structure inert (must be > 0 when baseload is enabled).
     "ppa_baseload_mw": 0.0,
+    # Reference-period support settlement (Eqs. E55-E57): the Greek
+    # DAPEEP sliding Feed-in-Premium or a two-way CfD on the eligible
+    # PV export.  'none' (default) is bit-identical; mutually
+    # exclusive with ppa_enabled.
+    "support_scheme": "none",
+    "support_strike_eur_per_mwh": 0.0,
+    "support_term_years": 20,
+    "support_ref_period": "monthly",
+    "support_negative_hour_suspension": False,
 }
 
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
@@ -510,6 +519,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "plot_dscr_profile",
     "bm_merit_order_enabled",
     "risk_metrics_enabled",
+    "support_negative_hour_suspension",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -556,6 +566,8 @@ _STR_KEYS: frozenset[str] = frozenset({
     "imbalance_pricing",
     "bess_toll_merchant_treatment",
     "optimizer_margin_basis",
+    "support_scheme",
+    "support_ref_period",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -578,6 +590,8 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "imbalance_pricing": frozenset({"single", "dual"}),
     "bess_toll_merchant_treatment": frozenset({"zeroed", "retained"}),
     "optimizer_margin_basis": frozenset({"dam", "dam_plus_balancing"}),
+    "support_scheme": frozenset({"none", "sliding_fip", "cfd_two_way"}),
+    "support_ref_period": frozenset({"monthly", "hourly"}),
 }
 
 
@@ -1371,6 +1385,34 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "bought at the DAM price, excess sells at the DAM price "
      "(financial settlement, Eq. P9). Must be > 0 when the baseload "
      "structure is enabled; ignored for pay_as_produced."),
+    ("support_scheme", "none", "enum",
+     "State-support settlement on the eligible PV export: 'none' "
+     "(default, bit-identical), 'sliding_fip' (one-way sliding "
+     "premium - the Greek DAPEEP convention: the plant receives "
+     "max(strike - reference price, 0) per month) or 'cfd_two_way' "
+     "(strike - reference, both signs). The premium is a settlement "
+     "overlay - dispatch still sells at the DAM. Mutually exclusive "
+     "with ppa_enabled = TRUE (a plant settles under a corporate PPA "
+     "or a support scheme, not both)."),
+    ("support_strike_eur_per_mwh", 0.0, "EUR/MWh",
+     "Reference tariff (strike) of the support scheme (the Greek "
+     "Timi Anaforas). Must be > 0 when support_scheme is not "
+     "'none'."),
+    ("support_term_years", 20, "years",
+     "Support duration in operating years (1..project_lifecycle_"
+     "years); settlement is zero after the term. Inert while "
+     "support_scheme = 'none'."),
+    ("support_ref_period", "monthly", "enum",
+     "Reference-price averaging period: 'monthly' (volume-weighted "
+     "mean DAM price over the month, the Greek settlement "
+     "convention, Eq. E55) or 'hourly' (degenerates to the per-step "
+     "CfD algebra - a cross-check mode; the multi-year cashflow "
+     "still projects on the monthly detail)."),
+    ("support_negative_hour_suspension", False, "bool",
+     "Exclude negative-DAM-price hours from the eligible settlement "
+     "volume (the EU market-design rule adopted in the Greek "
+     "scheme, Eq. E57). Uses the same strict DAM < 0 classifier as "
+     "the PPA suspension clause."),
 )
 
 
@@ -2837,6 +2879,38 @@ def _validate_ppa_config(ppa: dict[str, Any]) -> None:
     the flow attribution — rejected with that guidance until the flow
     attribution work lands.
     """
+    # Support scheme (Eqs. E55-E57): validated whether or not the
+    # corporate PPA is enabled — the two surfaces are mutually
+    # exclusive, and the scheme's own ranges hold on their own.
+    _scheme = str(ppa.get("support_scheme", "none") or "none").strip().lower()
+    if _scheme not in ("none", "sliding_fip", "cfd_two_way"):
+        raise ValueError(
+            "support_scheme must be 'none', 'sliding_fip' or "
+            f"'cfd_two_way'; got {_scheme!r}."
+        )
+    if _scheme != "none":
+        if bool(ppa.get("ppa_enabled", False)):
+            raise ValueError(
+                "support_scheme cannot combine with ppa_enabled = TRUE: "
+                "a plant settles under a corporate PPA or a state "
+                "support scheme, not both; disable one of the two."
+            )
+        _strike = float(
+            ppa.get("support_strike_eur_per_mwh", 0.0) or 0.0
+        )
+        if _strike <= 0.0:
+            raise ValueError(
+                "support_scheme requires support_strike_eur_per_mwh "
+                f"> 0 (the reference tariff); got {_strike!r}."
+            )
+        _term_raw = ppa.get("support_term_years", 20)
+        _term = int(20 if _term_raw is None else _term_raw)
+        if _term < 1:
+            raise ValueError(
+                "support_term_years must be >= 1; got "
+                f"{_term!r}."
+            )
+
     if not bool(ppa.get("ppa_enabled", False)):
         return
 
@@ -4379,6 +4453,8 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_augmentation_capex_eur_lifecycle",
      "Lifetime augmentation CAPEX [EUR]"),
     ("total_go_revenue_eur_lifecycle", "Lifetime GO revenue [EUR]"),
+    ("lifetime_support_settlement_eur",
+     "Lifetime support settlement [EUR]"),
     # Post-tax family (Eq. E39): NaN while the tax layer is off, so the
     # non-zero/NaN-skipping renderer keeps zero-default digests
     # noise-free ('n/a' = tax not modelled, never a duplicate of the

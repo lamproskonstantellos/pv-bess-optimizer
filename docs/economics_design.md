@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E54 (+ suffixed E8a, E13a-E13d, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E57 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U11 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | `self_consumption_design.md` | system/dispatch constraints (shared with merchant mode) | S36 |
@@ -434,6 +434,60 @@ PV production shape with exact reconciliation), a lifetime total
 band in the revenue stack / yearly bars / NPV waterfall drawn only
 when non-zero, and Revenue-driver membership in the sensitivity
 tornado (certificate prices move with the renewables market).
+
+### Reference-period support settlement (Eqs. E55-E57)
+
+`support_scheme` on the ppa sheet ('none' = off, default,
+bit-identical) settles state support on the **eligible PV export** —
+the Greek DAPEEP sliding Feed-in-Premium ('sliding_fip') or a
+two-way CfD ('cfd_two_way').  The premium is a settlement OVERLAY:
+dispatch still sells at the DAM (the per-step CfD philosophy), and a
+plant settles under a corporate PPA **or** a support scheme, never
+both (the loader rejects the combination).  Per month $m$ the
+volume-weighted reference price over eligible steps is
+
+$$P^{\mathrm{ref}}_m = \frac{\sum_{t \in m,\ \mathrm{elig}}
+p^{\mathrm{DAM}}_t\, e^{\mathrm{exp}}_t}
+{\sum_{t \in m,\ \mathrm{elig}} e^{\mathrm{exp}}_t} \tag{E55}$$
+
+and the settlement premium (with $K$ =
+`support_strike_eur_per_mwh`, the reference tariff — Timi Anaforas):
+
+$$R^{\mathrm{sup}}_m = E^{\mathrm{elig}}_m \cdot
+\begin{cases}
+\max(K - P^{\mathrm{ref}}_m,\, 0) & \text{sliding\_fip} \\
+K - P^{\mathrm{ref}}_m & \text{cfd\_two\_way}
+\end{cases} \tag{E56}$$
+
+zero after `support_term_years`.  `support_negative_hour_suspension`
+removes the negative-DAM steps from BOTH sides of Eq. E55 (the EU
+market-design rule adopted in the Greek scheme):
+
+$$\mathrm{elig} = \{t : p^{\mathrm{DAM}}_t \ge 0\}
+\quad\text{(else all steps)} \tag{E57}$$
+
+reusing the strict $p < 0$ classifier the PPA suspension clause
+defined (`ppa.negative_price_mask` — one definition, two consumers).
+`support_ref_period = 'hourly'` degenerates Eq. E56 to the per-step
+CfD algebra as a cross-check mode.  The Year-1 KPI pair
+(`support_settlement_eur`, `support_eligible_export_mwh`) carries
+both operating derates (availability and curtailment — the
+settlement rides metered export), as does the per-month detail the
+cashflow consumes.  Projection: the strike leg is FLAT (an
+administered tariff), the reference leg rides `dam_inflation_pct`,
+the volume rides the PV fade, and the sliding clamp re-applies per
+month per year — so a rising reference can extinguish the premium
+mid-life.  Real reference-price dynamics differ from the flat-index
+projection (a documented limitation of the same class as the DAM
+curve assumption).  Classification: no aggregator fee (settles with
+the market operator) and EXCLUDED from LCOE/LCOS.  The signed
+cashflow column (`support_settlement_eur`; two-way years can be
+NEGATIVE and net_cf carries the sign), monthly on the Year-1
+settlement shape (exact reconciliation), a lifetime SUMMARY row, a
+signed figure band, and a dedicated `SupportStrike` tornado driver
+(a full rebuild at the perturbed strike is exact, including the
+clamp; the Revenue driver deliberately leaves the mixed column
+untouched).
 
 ### Year-1 revenue bases and the nine canonical aggregates
 
@@ -1461,6 +1515,9 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E52) | `build_yearly_cashflow` Year-0 BESS CAPEX x (1 + ob); LCOS / depreciation bases |
 | (E53) | `pipeline._run_midlife_resolve` (+ `lifetime.factors_for_year`); io writers' conditional sheet/section |
 | (E54) | `build_yearly_cashflow` go_revenue_eur column (PV-fade volume, flat price); fee-exempt / LCOE-excluded |
+| (E55) | `ppa.compute_support_settlement` volume-weighted monthly reference price |
+| (E56) | `ppa.compute_support_settlement` premium; `build_yearly_cashflow` support_settlement_eur projection; `sensitivity` SupportStrike driver |
+| (E57) | eligibility via `ppa.negative_price_mask` (shared strict p < 0 classifier) |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

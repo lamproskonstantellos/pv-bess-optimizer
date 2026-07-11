@@ -845,6 +845,36 @@ def build_yearly_cashflow(
     go_price = max(0.0, float(
         econ.get("go_price_eur_per_mwh", 0.0) or 0.0
     ))
+    # Reference-period support settlement (Eqs. E55-E57): rebuilt each
+    # year from the Year-1 monthly detail (eligible MWh already
+    # availability- and curtailment-derated at the KPI layer, reference
+    # prices raw) so the strike leg stays flat (administered tariff)
+    # while the reference leg rides dam_inflation_pct and the volume
+    # rides the PV fade.  Under ref_period='hourly' the Year-1 row is a
+    # monthly approximation of the exact per-step KPI (hourly mode is a
+    # cross-check tool; documented).
+    support_scheme = str(
+        econ.get("support_scheme", "none") or "none"
+    ).strip().lower()
+    support_strike = float(
+        econ.get("support_strike_eur_per_mwh", 0.0) or 0.0
+    )
+    _sup_term_raw = econ.get("support_term_years", 20)
+    support_term = int(20 if _sup_term_raw is None else _sup_term_raw)
+    support_e_m = [
+        float(v) for v in (
+            year1_kpis.get("support_monthly_eligible_mwh") or []
+        )
+    ]
+    support_p_m = [
+        float(v) for v in (
+            year1_kpis.get("support_monthly_ref_price_eur_per_mwh") or []
+        )
+    ]
+    support_on = (
+        support_scheme in ("sliding_fip", "cfd_two_way")
+        and bool(support_e_m)
+    )
 
     # BESS tolling agreement (Eqs. E29/E29a): a fixed EUR/MW/yr payment
     # for dispatch rights over a phase window (Eq. E25).  The toll is a
@@ -1181,6 +1211,7 @@ def build_yearly_cashflow(
             revenue_levy_y = 0.0
             curtailment_comp_y = 0.0
             go_revenue_y = 0.0
+            support_settlement_y = 0.0
             augmentation_capex_y = 0.0
         else:
             if y == 1:
@@ -1499,6 +1530,21 @@ def build_yearly_cashflow(
                 curtailment_comp_y = 0.0
             # GO revenue (Eq. E54): flat price, PV-fade volume.
             go_revenue_y = go_price * pv_export_mwh_1 * pv_factor
+            # Support settlement (Eq. E56): per-month premium on the
+            # escalated reference price, clamped one-way for the
+            # sliding FiP; zero after the support term.
+            if support_on and y <= support_term:
+                support_settlement_y = 0.0
+                _ref_esc = (1.0 + dam_infl) ** (y - 1)
+                for _e_m, _p_m in zip(
+                    support_e_m, support_p_m, strict=False,
+                ):
+                    _diff = support_strike - _p_m * _ref_esc
+                    if support_scheme == "sliding_fip":
+                        _diff = max(_diff, 0.0)
+                    support_settlement_y += _e_m * pv_factor * _diff
+            else:
+                support_settlement_y = 0.0
 
         revenue_net_y = revenue_gross_y + aggregator_fee_y
         # Split the aggregator fee across the two streams in proportion
@@ -1533,6 +1579,7 @@ def build_yearly_cashflow(
             + revenue_levy_y
             + curtailment_comp_y
             + go_revenue_y
+            + support_settlement_y
             + ppa_y + opex_y + capex_y + devex_y
             + augmentation_capex_y
         )
@@ -1568,6 +1615,7 @@ def build_yearly_cashflow(
                 "revenue_levy_eur": float(revenue_levy_y),
                 "curtailment_compensation_eur": float(curtailment_comp_y),
                 "go_revenue_eur": float(go_revenue_y),
+                "support_settlement_eur": float(support_settlement_y),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -2082,6 +2130,42 @@ def derive_monthly_cashflow(
     has_levy_col = "revenue_levy_eur" in yearly_cf.columns
     has_curt_col = "curtailment_compensation_eur" in yearly_cf.columns
     has_go_col = "go_revenue_eur" in yearly_cf.columns
+    has_sup_col = "support_settlement_eur" in yearly_cf.columns
+    # Support-settlement monthly weights: the settlement is natively
+    # monthly, so the Year-1 per-month magnitudes (recomputed from the
+    # dispatch frame when possible) allocate each projected year; the
+    # sliding clamp can shift the within-year shape in later years —
+    # the Year-1 shape is the documented approximation (fee_share
+    # class).  Shares sum to one, so yearly reconciliation is exact.
+    sup_share = pd.Series(1.0 / 12.0, index=range(1, 13))
+    if has_sup_col:
+        try:
+            from .ppa import compute_support_settlement
+
+            _sup_detail = compute_support_settlement(
+                res,
+                scheme=str(
+                    econ.get("support_scheme", "none") or "none"
+                ),
+                strike_eur_per_mwh=float(
+                    econ.get("support_strike_eur_per_mwh", 0.0) or 0.0
+                ),
+                ref_period=str(
+                    econ.get("support_ref_period", "monthly") or "monthly"
+                ),
+                suspend_negative=bool(
+                    econ.get("support_negative_hour_suspension", False)
+                ),
+            )
+            _sup_m = pd.Series(
+                [abs(float(v)) for v in
+                 _sup_detail["support_monthly_settlement_eur"]],
+                index=range(1, 13),
+            )
+            if float(_sup_m.sum()) > 1e-9:
+                sup_share = _sup_m / float(_sup_m.sum())
+        except (ValueError, KeyError):
+            pass
     has_tax_col = "corporate_tax_eur" in yearly_cf.columns
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
@@ -2156,6 +2240,10 @@ def derive_monthly_cashflow(
         go_y = (
             float(yearly_indexed.loc[y, "go_revenue_eur"])
             if has_go_col else 0.0
+        )
+        sup_y = (
+            float(yearly_indexed.loc[y, "support_settlement_eur"])
+            if has_sup_col else 0.0
         )
         tax_y = (
             float(yearly_indexed.loc[y, "corporate_tax_eur"])
@@ -2259,6 +2347,8 @@ def derive_monthly_cashflow(
                 go_m = float(monthly_pv_mwh_y1.loc[m]) / pv_y1_total * go_y
             else:
                 go_m = go_y / 12.0
+            # Support settlement rides its Year-1 monthly shape.
+            sup_m = float(sup_share.loc[m]) * sup_y
             # Corporate tax (Eq. E37) settles annually, so it books in
             # month 12 — the December factor equals the yearly
             # 1/(1+r)^y factor (Eq. E4), keeping the monthly and yearly
@@ -2286,6 +2376,7 @@ def derive_monthly_cashflow(
                 + levy_m
                 + curt_m
                 + go_m
+                + sup_m
                 + ppa_m + opex_m + capex_m + devex_m
                 + aug_m
             )
@@ -2318,6 +2409,7 @@ def derive_monthly_cashflow(
                     "revenue_levy_eur": float(levy_m),
                     "curtailment_compensation_eur": float(curt_m),
                     "go_revenue_eur": float(go_m),
+                    "support_settlement_eur": float(sup_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -2349,6 +2441,7 @@ def derive_monthly_cashflow(
         "revenue_levy_eur",
         "curtailment_compensation_eur",
         "go_revenue_eur",
+        "support_settlement_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "augmentation_capex_eur",
@@ -2378,6 +2471,7 @@ def derive_monthly_cashflow(
                     "revenue_levy_eur",
                     "curtailment_compensation_eur",
                     "go_revenue_eur",
+                    "support_settlement_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "augmentation_capex_eur",
@@ -2746,6 +2840,10 @@ def compute_financial_kpis(
     total_go_revenue_eur_lifecycle = (
         float(df.loc[after_y0_mask, "go_revenue_eur"].sum())
         if "go_revenue_eur" in df.columns else 0.0
+    )
+    lifetime_support_settlement_eur = (
+        float(df.loc[after_y0_mask, "support_settlement_eur"].sum())
+        if "support_settlement_eur" in df.columns else 0.0
     )
 
     if "calendar_year" in df.columns and (df["project_year"] >= 1).any():
@@ -3142,6 +3240,10 @@ def compute_financial_kpis(
         # GO revenue (Eq. E54); >= 0, SUMMARY-optional.
         "total_go_revenue_eur_lifecycle": float(round(
             total_go_revenue_eur_lifecycle, 2,
+        )),
+        # Support settlement (Eqs. E55-E57); signed, SUMMARY-optional.
+        "lifetime_support_settlement_eur": float(round(
+            lifetime_support_settlement_eur, 2,
         )),
         # Post-tax KPI family (Eq. E39) — additive to the pre-tax
         # baseline; all NaN while corporate_tax_rate_pct = 0.
