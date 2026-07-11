@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E49 (+ suffixed E8a, E13a-E13d, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E52 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -155,7 +155,67 @@ Only the FIRST threshold crossing is charged.  If the fresh pack would
 cross the threshold again within the remaining horizon the run log
 carries a prominent warning and `SUMMARY.md` notes it, but the model
 does not charge a second replacement.  Projects whose battery wears
-through two packs need an explicit scheduled strategy.
+through two packs need an explicit scheduled strategy — or the staged
+augmentation surface below, which supersedes the single replacement.
+
+### Augmentation and overbuild (Eqs. E50-E52)
+
+Staged capacity additions and a day-1 DC overbuild generalise the
+single replacement into a **pooled capacity engine**
+(`lifetime.bess_capacity_factors_pooled`).  The plant is a set of
+installed pools; pool $i$ of size $E_i$ installed in project year
+$a_i$ fades on its own calendar-plus-cycle curve, and the plant
+factor is the nameplate-clamped pool sum:
+
+$$f_y = \min\!\left(1,\; \frac{\sum_i E_i\, \varphi_i(y)}{E_N}\right),
+\qquad
+\varphi_i(y) = \max\!\left(0,\, (1-d_{\mathrm{cal}})^{\,y-a_i}
+- d_{\mathrm{cyc}} K_i(y)\right) \tag{E50}$$
+
+where $K_i$ accumulates each pool's **pro-rata** share of the plant
+throughput (apportioned by surviving pool capacity, cycled over the
+pool's nameplate size — a documented modelling choice; FIFO
+apportionment would differ only when fade rates diverge, and the two
+coincide at equal rates).  With no events and no overbuild the engine
+delegates to the single-pool `bess_capacity_factors` (bit-identity,
+including the replacement reset).
+
+**Augmentation events (`bess_augmentation_years`, CSV).**  Each event
+year $a$ installs a fresh pool: `top_up` mode restores the plant to
+exactly nameplate ($\Delta E_a = \max(0, E_N - \sum_i E_i
+\varphi_i(a))$), `fixed_kwh` adds `bess_augmentation_kwh`.  The event
+is priced on the declining unit-cost curve and books as its own
+signed cashflow column:
+
+$$X_a = -\Delta E_a \cdot c_{\mathrm{bess}}
+\cdot (1 - d_{\mathrm{cost}})^{a} \tag{E51}$$
+
+(`augmentation_capex_eur`; month-12 booking in the monthly frame —
+the replacement-CAPEX convention; a matching depreciation tranche
+enters service the year after).  The lifetime total is
+`total_augmentation_capex_eur_lifecycle` (SUMMARY-optional), the
+events join the **LCOS numerator** (storage cost, same class as
+replacement CAPEX; market fees stay excluded), the CAPEX sensitivity
+driver scales the column (unit-cost-linked) while the Revenue driver
+leaves it fixed, and the cashflow figures draw an "Augmentation
+CAPEX" bar only when non-zero.  Augmentation is **mutually exclusive
+with `bess_replacement_year`** (scheduled or `auto`): the loader
+rejects the combination rather than applying a silent precedence.
+
+**Day-1 DC overbuild (`bess_overbuild_pct`).**  Installs
+$(1 + ob)\,E_N$ at Year-0 prices with usable capacity clamped at
+nameplate, so fade consumes the overbuilt margin first:
+
+$$\mathrm{capex}^{\mathrm{BESS}}_0 = -c_{\mathrm{bess}}
+(1 + ob)\, E_N \tag{E52}$$
+
+Dispatch always solves at nameplate — the overbuild changes only the
+factor curve (through the E50 clamp), Year-0 CAPEX, the depreciation
+base and the LCOS numerator.  Zero defaults are bit-identical for
+both surfaces.  Note for sizing sweeps: `sizing.py` re-runs the
+Year-1 dispatch only, so augmentation affects the frontier ranking
+solely through the NPV of the factor curve and event CAPEX (no code
+interaction; recorded here).
 
 ### Wear cost vs replacement cost (no double counting)
 
@@ -1341,6 +1401,9 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E47) | `lifetime.warranty_cycle_utilisation`; degradation-sheet columns + pipeline reset warning |
 | (E48) | `availability.apply_curtailment_derate` (export-side scaling; composed via `apply_operating_derates`) |
 | (E49) | `apply_curtailment_derate` compensation term + `build_yearly_cashflow` curtailment_compensation_eur column |
+| (E50) | `lifetime.bess_capacity_factors_pooled` (per-pool fade + nameplate clamp; delegates when inactive) |
+| (E51) | `build_yearly_cashflow` augmentation_capex_eur column + LCOS numerator events + `apply_tax_layer` tranches |
+| (E52) | `build_yearly_cashflow` Year-0 BESS CAPEX x (1 + ob); LCOS / depreciation bases |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

@@ -68,6 +68,7 @@ from pvbess_opt.lifetime import (
     aggregate_lifetime_to_yearly,
     build_lifetime_dispatch,
     effective_bess_replacement_year,
+    resolve_augmentation_config,
     resolve_bess_replacement_year,
 )
 from pvbess_opt.modes import resolve_mode
@@ -894,6 +895,17 @@ def _build_degradation_report(
         ),
         cycle_cap_basis=str(
             params.get("cycle_cap_basis", "nameplate") or "nameplate"
+        ),
+        # Pooled capacity surface (Eqs. E50-E52): the SOH plot then
+        # shows the overbuild headroom and top-up resets the finance
+        # layer prices.
+        overbuild_pct=float(params.get("bess_overbuild_pct", 0.0) or 0.0),
+        augmentation_years=resolve_augmentation_config(params)[1],
+        augmentation_mode=str(
+            params.get("bess_augmentation_mode", "top_up") or "top_up"
+        ),
+        augmentation_kwh=float(
+            params.get("bess_augmentation_kwh", 0.0) or 0.0
         ),
     )
 

@@ -51,14 +51,16 @@ from typing import Any
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
-from .io import PROJECT_SHEET_DEFAULTS
+from .io import PROJECT_SHEET_DEFAULTS, parse_augmentation_years
 from .kpis import require_economic_columns
 
 __all__ = [
     "aggregate_lifetime_to_yearly",
     "bess_capacity_factors",
+    "bess_capacity_factors_pooled",
     "build_lifetime_dispatch",
     "effective_bess_replacement_year",
+    "resolve_augmentation_config",
     "resolve_bess_replacement_year",
     "warranty_cycle_utilisation",
 ]
@@ -267,6 +269,127 @@ def bess_capacity_factors(
     return factors
 
 
+def resolve_augmentation_config(
+    econ: dict[str, Any],
+) -> tuple[float, tuple[int, ...], str, float]:
+    """Parse the augmentation / overbuild surface from the flat params.
+
+    Returns ``(overbuild_frac, augmentation_years, mode, added_kwh)``
+    with the all-off default ``(0.0, (), 'top_up', 0.0)``.  Range and
+    exclusivity validation happens at load time
+    (``io.validate_workbook_params``); this resolver only normalises,
+    so every consumer (cashflow, lifetime projection, degradation
+    report) reads one parse of the same keys.
+    """
+    overbuild_frac = max(
+        0.0, float(econ.get("bess_overbuild_pct", 0.0) or 0.0) / 100.0
+    )
+    years = parse_augmentation_years(econ.get("bess_augmentation_years"))
+    mode = str(
+        econ.get("bess_augmentation_mode", "top_up") or "top_up"
+    ).strip().lower()
+    added_kwh = max(
+        0.0, float(econ.get("bess_augmentation_kwh", 0.0) or 0.0)
+    )
+    return overbuild_frac, years, mode, added_kwh
+
+
+def bess_capacity_factors_pooled(
+    n_years: int,
+    *,
+    d_bess_annual: float,
+    d_bess_per_cycle: float = 0.0,
+    year1_discharge_mwh: float = 0.0,
+    capacity_mwh: float = 0.0,
+    replacement_year: int = 0,
+    overbuild_frac: float = 0.0,
+    augmentation_years: tuple[int, ...] = (),
+    augmentation_mode: str = "top_up",
+    augmentation_kwh: float = 0.0,
+) -> tuple[list[float], dict[int, float]]:
+    """Per-pool BESS capacity factors with overbuild + staged additions.
+
+    The plant is a set of installed pools.  Pool ``i`` of size ``E_i``
+    (MWh) installed in project year ``a_i`` fades on its own
+    calendar-plus-cycle curve (Eq. E50)::
+
+        phi_i(y) = max(0, (1 - d_cal)^(y - a_i) - d_cyc * K_i(y))
+
+    where ``K_i`` accumulates the pool's PRO-RATA share of the plant
+    throughput (apportioned by surviving pool capacity — the modelling
+    choice documented in ``docs/economics_design.md``; at equal fade
+    rates the apportionment is irrelevant).  The plant factor is the
+    nameplate-clamped pool sum::
+
+        f_y = min(1, sum_i E_i * phi_i(y) / E_N)
+
+    so a day-1 DC overbuild (pool 0 sized ``(1 + ob) * E_N``, Eq. E52)
+    holds the usable capacity at nameplate until fade consumes the
+    margin, and a ``top_up`` augmentation event restores it to exactly
+    nameplate in the event year.  Returns ``(factors, added_mwh)``
+    where ``added_mwh`` maps each event year to the energy actually
+    installed (the Eq. E51 CAPEX base; ``top_up`` events that find the
+    plant still above nameplate add nothing).
+
+    With no overbuild and no events the call **delegates** to
+    :func:`bess_capacity_factors` (bit-identity, including the
+    replacement reset).  The pooled path never coexists with a
+    replacement — the loader rejects the combination — and a
+    zero-capacity plant has nothing to pool, so both delegate too.
+    """
+    events = tuple(sorted({int(y) for y in augmentation_years}))
+    active = (overbuild_frac > 0.0 or bool(events)) and capacity_mwh > 1e-12
+    if not active:
+        return bess_capacity_factors(
+            n_years,
+            d_bess_annual=d_bess_annual,
+            d_bess_per_cycle=d_bess_per_cycle,
+            year1_discharge_mwh=year1_discharge_mwh,
+            capacity_mwh=capacity_mwh,
+            replacement_year=replacement_year,
+        ), {}
+    if replacement_year > 0:
+        raise ValueError(
+            "bess_replacement_year cannot combine with augmentation / "
+            "overbuild (the pooled capacity engine supersedes the single "
+            "replacement); set bess_replacement_year = 0."
+        )
+    mode = str(augmentation_mode or "top_up").strip().lower()
+    # Each pool: [install_year, size_mwh, cumulative_cycles].
+    pools: list[list[float]] = [[1.0, capacity_mwh * (1.0 + overbuild_frac), 0.0]]
+
+    def _phi(pool: list[float], y: int) -> float:
+        calendar = (1.0 - d_bess_annual) ** (y - int(pool[0]))
+        return max(0.0, calendar - d_bess_per_cycle * pool[2])
+
+    factors: list[float] = []
+    added_mwh: dict[int, float] = {}
+    for y in range(1, int(n_years) + 1):
+        if y in events:
+            surviving = sum(p[1] * _phi(p, y) for p in pools)
+            if mode == "fixed_kwh":
+                delta = augmentation_kwh / 1000.0
+            else:
+                delta = max(0.0, capacity_mwh - surviving)
+            if delta > 1e-12:
+                pools.append([float(y), delta, 0.0])
+                added_mwh[y] = delta
+        survivals = [p[1] * _phi(p, y) for p in pools]
+        available = sum(survivals)
+        factor = min(1.0, available / capacity_mwh)
+        # Pro-rata throughput apportionment: the plant discharges
+        # D_1 * f_y this year; each pool cycles its share over its own
+        # NAMEPLATE size (the same nameplate-cycle convention as the
+        # single-pool accumulator in bess_capacity_factors).
+        if available > 1e-12:
+            discharge = year1_discharge_mwh * factor
+            for pool, surv in zip(pools, survivals, strict=True):
+                if pool[1] > 1e-12:
+                    pool[2] += discharge * (surv / available) / pool[1]
+        factors.append(factor)
+    return factors, added_mwh
+
+
 def warranty_cycle_utilisation(
     n_years: int,
     *,
@@ -445,13 +568,20 @@ def build_lifetime_dispatch(
         pd.to_datetime(res_year1["timestamp"]).dt.year.iloc[0]
     )
 
-    bess_factors = bess_capacity_factors(
+    _ob_frac, _aug_years, _aug_mode, _aug_kwh = resolve_augmentation_config(
+        econ,
+    )
+    bess_factors, _ = bess_capacity_factors_pooled(
         n_years,
         d_bess_annual=d_bess,
         d_bess_per_cycle=d_bess_per_cycle,
         year1_discharge_mwh=year1_discharge_mwh,
         capacity_mwh=capacity_mwh,
         replacement_year=bess_repl_year,
+        overbuild_frac=_ob_frac,
+        augmentation_years=_aug_years,
+        augmentation_mode=_aug_mode,
+        augmentation_kwh=_aug_kwh,
     )
 
     chunks: list[pd.DataFrame] = []

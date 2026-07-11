@@ -362,6 +362,38 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (BESS augmentation + day-1 DC overbuild)
+
+- A pooled capacity engine
+  (`lifetime.bess_capacity_factors_pooled`, Eq. E50) generalises the
+  single replacement: every installed pool fades on its own
+  calendar + cycle curve, the plant factor is the nameplate-clamped
+  pool sum, and plant throughput is apportioned pro-rata to surviving
+  pool capacity.  With no events and no overbuild the engine delegates
+  to the single-pool accumulator (bit-identity, replacement included).
+  Two default-off surfaces drive it from the bess sheet:
+  - `bess_augmentation_years` (CSV, e.g. `8,15`) schedules staged
+    augmentation events — `top_up` mode restores the plant to
+    nameplate, `fixed_kwh` adds `bess_augmentation_kwh` — each priced
+    on the declining unit-cost curve
+    (`bess_cost_decline_pct_per_year`, Eq. E51) and booked as its own
+    `augmentation_capex_eur` cashflow column (month-12 investment
+    convention, matching depreciation tranche the year after, CAPEX
+    sensitivity driver membership, "Augmentation CAPEX" bar in the
+    yearly stack and NPV waterfall when non-zero, lifetime total in
+    SUMMARY, LCOS numerator inclusion).  Mutually exclusive with
+    `bess_replacement_year` (scheduled or `auto`) — the loader
+    rejects the combination rather than picking silently.
+  - `bess_overbuild_pct` installs `(1 + ob) x` nameplate at Year-0
+    prices (Eq. E52) with usable capacity clamped at nameplate, so
+    fade consumes the overbuilt margin first; dispatch always solves
+    at nameplate and the premium flows into Year-0 CAPEX, the
+    depreciation base and the LCOS numerator.
+  The degradation report and SOH figure ride the pooled curve (an
+  `augmentation_added_kwh` column appears when events are set), and
+  the lifetime dispatch projection scales BESS flows on the same
+  factors as the cashflow.
+
 ### Added (exogenous curtailment: expected quota + hour-resolved signal)
 
 - `curtailment_pct` on the project sheet (Eq. E48; default 0 = off,

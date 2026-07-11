@@ -209,6 +209,14 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "opex_bess_eur_per_kw": 14.0,
     "bess_replacement_year": 0,
     "bess_replacement_cost_pct": 50.0,
+    # Staged augmentation + day-1 DC overbuild (Eqs. E50-E52), all
+    # default-off / bit-identical.  A non-empty events CSV supersedes
+    # the single replacement (mutually exclusive at load time).
+    "bess_overbuild_pct": 0.0,
+    "bess_augmentation_years": None,
+    "bess_augmentation_mode": "top_up",
+    "bess_augmentation_kwh": 0.0,
+    "bess_cost_decline_pct_per_year": 0.0,
     "bess_degradation_annual_pct": 2.0,
     # LFP cycle-fade default (matches the canonical workbook row in
     # _BESS_ROWS and the schema default); range 0.005-0.010.
@@ -520,6 +528,7 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_yearly_scope",
     "pv_source",
     "cycle_cap_basis",
+    "bess_augmentation_mode",
     "debt_repayment",
     "debt_sizing_mode",
     "debt_sizing_case",
@@ -538,6 +547,7 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
     "pv_source": frozenset({"auto", "file", "pvgis"}),
     "cycle_cap_basis": frozenset({"nameplate", "faded"}),
+    "bess_augmentation_mode": frozenset({"top_up", "fixed_kwh"}),
     "debt_repayment": frozenset({"annuity", "linear", "sculpted"}),
     "debt_sizing_mode": frozenset({"manual", "target_dscr"}),
     # 'p90' and 'low_price' parse (the key surface is stable) but
@@ -761,6 +771,34 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("bess_replacement_cost_pct", 50, "%",
      "Replacement cost as percent of original BESS CAPEX. Charged in "
      "the effective replacement year (scheduled or auto)."),
+    ("bess_overbuild_pct", 0.0, "%",
+     "Day-1 DC overbuild: installs (1 + pct/100) x bess_capacity_kwh, "
+     "charged in Year-0 CAPEX at capex_bess_eur_per_kwh, with usable "
+     "capacity clamped at nameplate (AC / warranty limit) so fade "
+     "consumes the overbuilt margin first. Dispatch always solves at "
+     "nameplate; the overbuild only changes the capacity-factor curve "
+     "and Year-0 CAPEX. 0 = off (default). Cannot combine with "
+     "bess_replacement_year."),
+    ("bess_augmentation_years", "", "years (CSV)",
+     "Comma-separated project years of staged augmentation events, "
+     "e.g. '8,15'. Empty = no augmentation (default). Each event adds "
+     "a fresh pool of cells priced on the declining cost curve "
+     "(bess_cost_decline_pct_per_year); every pool fades on its own "
+     "calendar + cycle curve and the plant capacity is the "
+     "nameplate-clamped pool sum. Supersedes the single replacement: "
+     "cannot combine with bess_replacement_year != 0 or 'auto'."),
+    ("bess_augmentation_mode", "top_up", "enum",
+     "Accepted values: 'top_up' (default) restores usable capacity to "
+     "nameplate at each event year; 'fixed_kwh' adds "
+     "bess_augmentation_kwh at every event."),
+    ("bess_augmentation_kwh", 0.0, "kWh",
+     "Energy added per event in 'fixed_kwh' mode; must be > 0 when "
+     "that mode is active with events scheduled. Ignored in 'top_up' "
+     "mode (a warning notes a non-zero leftover value)."),
+    ("bess_cost_decline_pct_per_year", 0.0, "%/year",
+     "Annual decline of the BESS unit cost applied to augmentation "
+     "events: the event-year unit cost is capex_bess_eur_per_kwh x "
+     "(1 - pct/100)^year. 0 = flat cost (default); range 0-30."),
     ("bess_degradation_annual_pct", 2.0, "%",
      "Linear BESS capacity fade. Approximate Tier-1 LFP cell warranty."),
     ("bess_degradation_pct_per_cycle", 0.008, "%",
@@ -1952,6 +1990,17 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
             return default
         token = str(raw).strip().lower()
         return token if token else default
+    if key == "bess_augmentation_years":
+        # Free-form CSV of event years ('8,15'); a blank cell keeps the
+        # default (None = no events).  Numeric single-year cells arrive
+        # as floats from openpyxl, so normalise through str.  Content
+        # validation (integers, 1..lifecycle) is the validator's job.
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+            return default
+        if isinstance(raw, float) and raw == int(raw):
+            raw = int(raw)
+        token = str(raw).strip()
+        return token if token else default
     if key == "bess_replacement_year":
         return _parse_bess_replacement_year(raw, default)
     # A boolean in a numeric field is always an input mistake, and Python
@@ -2059,6 +2108,47 @@ def reject_legacy_bess_capex_key(keys: Any, *, source: str) -> None:
 
 #: Sentinel value for the SOH-threshold automatic BESS replacement.
 BESS_REPLACEMENT_AUTO = "auto"
+
+
+def parse_augmentation_years(raw: Any) -> tuple[int, ...]:
+    """Parse ``bess_augmentation_years`` into a sorted year tuple.
+
+    Accepts the CSV string surface (``'8,15'``), a bare number, or an
+    already-structured list/tuple (the YAML surface).  Blank / None
+    disables augmentation (``()``).  Raises ``ValueError`` on
+    non-integer entries — a mistyped events list must never silently
+    drop an investment event.  Range checks (1..lifecycle, exclusivity
+    with the replacement) live in ``validate_workbook_params``.
+    """
+    if raw is None:
+        return ()
+    if isinstance(raw, float) and np.isnan(raw):
+        return ()
+    if isinstance(raw, (list, tuple)):
+        tokens = [str(v) for v in raw]
+    else:
+        if isinstance(raw, float) and raw == int(raw):
+            raw = int(raw)
+        tokens = str(raw).strip().split(",")
+    years: set[int] = set()
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            value = float(token)
+        except ValueError:
+            raise ValueError(
+                "bess_augmentation_years must be a comma-separated list "
+                f"of project years (e.g. '8,15'); got {token!r}."
+            ) from None
+        if value != int(value):
+            raise ValueError(
+                "bess_augmentation_years entries must be whole project "
+                f"years; got {token!r}."
+            )
+        years.add(int(value))
+    return tuple(sorted(years))
 
 
 def _parse_bess_replacement_year(raw: Any, default: Any) -> int | str:
@@ -2960,6 +3050,69 @@ def validate_workbook_params(
                 "= %.4g - the annual cap will never bind.",
                 daily, daily * 365.0, annual_cycles,
             )
+
+    # Augmentation + overbuild (Eqs. E50-E52): parse the events CSV
+    # loudly, range-check the percentage knobs, require the fixed-kwh
+    # size when that mode is armed, and reject the combination with
+    # the single replacement — the pooled capacity engine supersedes
+    # it, and a silent precedence would change which CAPEX is charged.
+    aug_years = parse_augmentation_years(bess.get("bess_augmentation_years"))
+    overbuild = float(bess.get("bess_overbuild_pct", 0.0) or 0.0)
+    if not (0.0 <= overbuild <= 100.0):
+        raise ValueError(
+            f"'bess_overbuild_pct' must be in [0, 100]; got {overbuild!r}."
+        )
+    cost_decline = float(
+        bess.get("bess_cost_decline_pct_per_year", 0.0) or 0.0
+    )
+    if not (0.0 <= cost_decline <= 30.0):
+        raise ValueError(
+            "'bess_cost_decline_pct_per_year' must be in [0, 30]; "
+            f"got {cost_decline!r}."
+        )
+    _require_non_negative(bess, "bess_augmentation_kwh")
+    if aug_years:
+        _aug_lifecycle = int(
+            project.get("project_lifecycle_years", 20) or 20
+        )
+        for year in aug_years:
+            if not (1 <= year <= _aug_lifecycle):
+                raise ValueError(
+                    "bess_augmentation_years entries must lie in "
+                    f"1..project_lifecycle_years ({_aug_lifecycle}); "
+                    f"got {year}."
+                )
+        aug_mode = str(
+            bess.get("bess_augmentation_mode", "top_up") or "top_up"
+        ).strip().lower()
+        aug_kwh = float(bess.get("bess_augmentation_kwh", 0.0) or 0.0)
+        if aug_mode == "fixed_kwh" and aug_kwh <= 0.0:
+            raise ValueError(
+                "bess_augmentation_mode = 'fixed_kwh' with scheduled "
+                "events requires bess_augmentation_kwh > 0; got "
+                f"{aug_kwh!r}."
+            )
+        if aug_mode == "top_up" and aug_kwh > 0.0:
+            logger.warning(
+                "bess_augmentation_kwh = %.4g is ignored in 'top_up' "
+                "mode (each event restores the plant to nameplate).",
+                aug_kwh,
+            )
+    if aug_years or overbuild > 0.0:
+        raw_repl = bess.get("bess_replacement_year", 0)
+        if isinstance(raw_repl, str):
+            repl_set = raw_repl.strip().lower() == BESS_REPLACEMENT_AUTO
+        else:
+            repl_set = bool(int(raw_repl or 0))
+        if repl_set:
+            raise ValueError(
+                "bess_augmentation_years / bess_overbuild_pct cannot "
+                "combine with bess_replacement_year (the staged "
+                "pooled-capacity engine supersedes the single "
+                "replacement, Eqs. E50-E52); set bess_replacement_year "
+                "= 0 and model the mid-life investment as an "
+                "augmentation event instead."
+            )
     for key in (
         "site_capex_eur",
         "site_devex_eur",
@@ -3764,6 +3917,21 @@ def _typed_to_flat(
         "bess_wear_cost_eur_per_mwh": float(
             bess.get("bess_wear_cost_eur_per_mwh", 0.0) or 0.0
         ),
+        # Augmentation + overbuild (Eqs. E50-E52): consumed by the
+        # pooled capacity engine (lifetime.resolve_augmentation_config).
+        "bess_overbuild_pct": float(
+            bess.get("bess_overbuild_pct", 0.0) or 0.0
+        ),
+        "bess_augmentation_years": bess.get("bess_augmentation_years"),
+        "bess_augmentation_mode": str(
+            bess.get("bess_augmentation_mode", "top_up") or "top_up"
+        ),
+        "bess_augmentation_kwh": float(
+            bess.get("bess_augmentation_kwh", 0.0) or 0.0
+        ),
+        "bess_cost_decline_pct_per_year": float(
+            bess.get("bess_cost_decline_pct_per_year", 0.0) or 0.0
+        ),
         # pv
         "pv_nameplate_kwp": pv_nameplate_kwp,
         # project
@@ -3987,6 +4155,8 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_revenue_levy_eur_lifecycle", "Lifetime revenue levy [EUR]"),
     ("lifetime_curtailment_compensation_eur",
      "Lifetime curtailment compensation [EUR]"),
+    ("total_augmentation_capex_eur_lifecycle",
+     "Lifetime augmentation CAPEX [EUR]"),
     # Post-tax family (Eq. E39): NaN while the tax layer is off, so the
     # non-zero/NaN-skipping renderer keeps zero-default digests
     # noise-free ('n/a' = tax not modelled, never a duplicate of the

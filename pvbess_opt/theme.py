@@ -316,6 +316,10 @@ FINANCIAL_COLORS: dict[str, str] = {
     # Curtailment compensation (Eq. E49) — a lighter amber next to the
     # state-support band (both administered payments).
     "curtailment_compensation": "#FFB300",  # Material amber 600
+    # Augmentation CAPEX events (Eq. E51) — a lighter shade of the
+    # CAPEX red family: an investment outflow, not a fee, so it stays
+    # out of the pink deduction shades.
+    "augmentation_capex": "#E57373",  # Material red 300
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -444,6 +448,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "State-support netting",
     "Capacity-market revenue",
     "Curtailment compensation",
+    "Augmentation CAPEX",
     "Grid-charging cost",
     "Energy aggregator fee",
     "Balancing aggregator fee",
@@ -496,6 +501,7 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "State-support netting":            "state_support_clawback",
     "Capacity-market revenue":          "capacity_market_revenue",
     "Curtailment compensation":         "curtailment_compensation",
+    "Augmentation CAPEX":               "augmentation_capex",
     "Grid-charging cost":               "grid_charge_cost",
     "Energy aggregator fee":            "aggregator_fee",
     "Balancing aggregator fee":         "balancing_aggregator_fee",
@@ -554,6 +560,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "OPEX",
     "DEVEX",
     "CAPEX",
+    "Augmentation CAPEX",
     "Grid-charging cost",
     "Energy aggregator fee",
     "Balancing aggregator fee",

@@ -216,6 +216,27 @@ Sheet ``bess``
   replacement CAPEX charged in the cashflow in that year; ``0`` never
   replaces.  Only one replacement is ever charged; if the fresh pack
   would cross the threshold again the run log warns.
+* ``bess_overbuild_pct`` (default 0): day-1 DC overbuild.  Installs
+  ``(1 + pct/100) x bess_capacity_kwh`` charged in Year-0 CAPEX, with
+  usable capacity clamped at nameplate so fade consumes the overbuilt
+  margin first.  Dispatch always solves at nameplate.  Cannot combine
+  with ``bess_replacement_year``.
+* ``bess_augmentation_years`` (default empty): comma-separated project
+  years of staged augmentation events, e.g. ``8,15``.  Each event adds
+  a fresh pool of cells; every pool fades on its own calendar + cycle
+  curve and the plant capacity is the nameplate-clamped pool sum.  The
+  event CAPEX books as its own ``augmentation_capex_eur`` cashflow
+  column (month 12, like the replacement) and joins the LCOS
+  numerator.  Supersedes — and cannot combine with — the single
+  replacement.
+* ``bess_augmentation_mode`` (``top_up`` default | ``fixed_kwh``):
+  ``top_up`` restores usable capacity to nameplate at each event;
+  ``fixed_kwh`` adds ``bess_augmentation_kwh`` per event (required
+  > 0 in that mode).
+* ``bess_cost_decline_pct_per_year`` (default 0, range 0-30): annual
+  decline of the BESS unit cost applied to augmentation events — the
+  event-year unit cost is ``capex_bess_eur_per_kwh x
+  (1 - pct/100)^year``.
 * ``bess_degradation_annual_pct``: linear calendar BESS capacity fade.
 * ``bess_degradation_pct_per_cycle``: cycle-based capacity fade per
   full equivalent cycle, in percent (LFP default 0.008, range

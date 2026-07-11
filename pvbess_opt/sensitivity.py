@@ -192,6 +192,8 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("revenue_levy_eur")
     if "curtailment_compensation_eur" in df.columns:
         components.append("curtailment_compensation_eur")
+    if "augmentation_capex_eur" in df.columns:
+        components.append("augmentation_capex_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -215,13 +217,21 @@ def _scale_capex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     (per-asset CAPEX + per-asset DEVEX + the site-wide lump sum) and any
     BESS replacement CAPEX in its scheduled year — the replacement is a
     percentage of the same unit cost, so a +/-X % CAPEX world moves it
-    by the same factor.  The driver VALUE reported on the tornado is the
-    Year-0 outlay only (see ``run_sensitivity_analysis``).
+    by the same factor.  Augmentation events (Eq. E51) are priced off
+    the same unit cost too (``capex_bess_eur_per_kwh`` on the declining
+    curve), so their column scales with the driver; the Revenue driver
+    leaves it untouched (an investment outflow has no price component).
+    The driver VALUE reported on the tornado is the Year-0 outlay only
+    (see ``run_sensitivity_analysis``).
     """
     df = yearly_cf.copy()
     df["capex_eur"] = df["capex_eur"].astype(float) * float(factor)
     if "devex_eur" in df.columns:
         df["devex_eur"] = df["devex_eur"].astype(float) * float(factor)
+    if "augmentation_capex_eur" in df.columns:
+        df["augmentation_capex_eur"] = (
+            df["augmentation_capex_eur"].astype(float) * float(factor)
+        )
     return _recompute_net(df)
 
 

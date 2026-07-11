@@ -80,7 +80,11 @@ from .constants import (
 )
 from .io import PROJECT_SHEET_DEFAULTS, read_workbook
 from .kpis import require_economic_columns
-from .lifetime import bess_capacity_factors, effective_bess_replacement_year
+from .lifetime import (
+    bess_capacity_factors_pooled,
+    effective_bess_replacement_year,
+    resolve_augmentation_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -734,6 +738,14 @@ def build_yearly_cashflow(
     # DEVEX and OPEX stay on the power basis (development, permitting
     # and fixed O&M scale with the power block).
     capex_bess_y0 = -float(econ["capex_bess_eur_per_kwh"]) * bess_kwh
+    # Day-1 DC overbuild (Eq. E52): the installed energy is
+    # (1 + ob) x nameplate at Year-0 prices, while dispatch and every
+    # revenue base stay on nameplate (the pooled factor curve carries
+    # the margin).  ob = 0 leaves the row bit-identical.
+    _aug_overbuild_frac, _aug_years, _aug_mode, _aug_kwh = (
+        resolve_augmentation_config(econ)
+    )
+    capex_bess_y0 *= 1.0 + _aug_overbuild_frac
     # Site-wide lump-sum CAPEX/DEVEX (substation, grid upgrades,
     # interconnection, environmental studies, ...) are not per-asset, so
     # they fold straight into the Year-0 outflow rows.
@@ -1112,14 +1124,24 @@ def build_yearly_cashflow(
     year1_discharge_mwh = float(
         year1_kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
     )
-    bess_factors = bess_capacity_factors(
+    bess_factors, _aug_added_mwh = bess_capacity_factors_pooled(
         n_years,
         d_bess_annual=bess_deg_annual,
         d_bess_per_cycle=bess_deg_per_cycle,
         year1_discharge_mwh=year1_discharge_mwh,
         capacity_mwh=capacity_mwh,
         replacement_year=bess_repl_year,
+        overbuild_frac=_aug_overbuild_frac,
+        augmentation_years=_aug_years,
+        augmentation_mode=_aug_mode,
+        augmentation_kwh=_aug_kwh,
     )
+    # Augmentation CAPEX (Eq. E51): each event buys the added energy at
+    # the event-year unit cost on the declining curve.
+    _aug_unit_cost = float(econ.get("capex_bess_eur_per_kwh", 0.0) or 0.0)
+    _aug_cost_decline = float(
+        econ.get("bess_cost_decline_pct_per_year", 0.0) or 0.0
+    ) / 100.0
 
     rows: list[dict[str, float]] = []
     for y in range(0, n_years + 1):
@@ -1149,6 +1171,7 @@ def build_yearly_cashflow(
             capacity_market_rev_y = 0.0
             revenue_levy_y = 0.0
             curtailment_comp_y = 0.0
+            augmentation_capex_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -1257,6 +1280,18 @@ def build_yearly_cashflow(
             else:
                 capex_y = 0.0
             devex_y = 0.0
+            # Augmentation event (Eq. E51): the added kWh from the
+            # pooled engine, priced at the declining event-year unit
+            # cost.  Zero in every non-event year (and identically
+            # zero with the feature off, keeping the column inert).
+            _aug_added_y = _aug_added_mwh.get(y, 0.0)
+            if _aug_added_y > 0.0:
+                augmentation_capex_y = (
+                    -_aug_added_y * 1000.0 * _aug_unit_cost
+                    * (1.0 - _aug_cost_decline) ** y
+                )
+            else:
+                augmentation_capex_y = 0.0
             balancing_capacity_y = (
                 _bm_cap_y1_y * bess_factor * g_bm_cap[y - 1]
             )
@@ -1486,6 +1521,7 @@ def build_yearly_cashflow(
             + revenue_levy_y
             + curtailment_comp_y
             + ppa_y + opex_y + capex_y + devex_y
+            + augmentation_capex_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
         rows.append(
@@ -1522,6 +1558,7 @@ def build_yearly_cashflow(
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
                 "devex_eur": float(devex_y),
+                "augmentation_capex_eur": float(augmentation_capex_y),
                 "net_cashflow_eur": float(net_cf),
                 "discount_factor": float(discount_factor),
                 "discounted_cf_eur": float(net_cf * discount_factor),
@@ -1625,8 +1662,13 @@ def apply_tax_layer(
     # Straight-line tranches (Eq. E34): (base, first year, life).
     # All Year-1 starts except the replacement tranche, which enters
     # service the year AFTER its month-12 booking (Eq. E4 convention).
+    # The day-1 overbuild premium (Eq. E52) is part of the Year-0 BESS
+    # investment, so its book value depreciates with the energy block.
+    _tax_ob_frac = max(0.0, float(
+        econ.get("bess_overbuild_pct", 0.0) or 0.0
+    ) / 100.0)
     bess_capex = float(econ.get("capex_bess_eur_per_kwh", 0.0) or 0.0) \
-        * bess_kwh
+        * bess_kwh * (1.0 + _tax_ob_frac)
     tranches: list[tuple[float, int, int]] = [
         (
             (float(econ.get("capex_pv_eur_per_kw", 0.0) or 0.0)
@@ -1657,6 +1699,22 @@ def apply_tax_layer(
             repl_year + 1,
             _life("depreciation_years_bess", 10),
         ))
+    # Augmentation events (Eq. E51) are mid-life investments exactly
+    # like the replacement tranche: each enters service the year AFTER
+    # its month-12 booking, on the BESS depreciation life.  The base is
+    # read off the cashflow column so the book value matches the
+    # declining-cost pricing to the cent.
+    if "augmentation_capex_eur" in df.columns:
+        _aug_events = df.loc[
+            (df["project_year"] >= 1)
+            & (df["augmentation_capex_eur"].abs() > 1e-12)
+        ]
+        for _, _aug_ev in _aug_events.iterrows():
+            tranches.append((
+                -float(_aug_ev["augmentation_capex_eur"]),
+                int(_aug_ev["project_year"]) + 1,
+                _life("depreciation_years_bess", 10),
+            ))
 
     # Debt interest (the E20 schedule on the resolved debt — the frozen
     # sized amount in target-DSCR mode, else gearing x |CF_0|; zero
@@ -2013,6 +2071,7 @@ def derive_monthly_cashflow(
     has_ppa_col = "ppa_revenue_eur" in yearly_cf.columns
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
+    has_aug_col = "augmentation_capex_eur" in yearly_cf.columns
 
     rows: list[dict[str, Any]] = []
     yearly_indexed = yearly_cf.set_index("project_year")
@@ -2092,6 +2151,10 @@ def derive_monthly_cashflow(
         )
         devex_y = (
             float(yearly_indexed.loc[y, "devex_eur"]) if has_devex_col else 0.0
+        )
+        aug_y = (
+            float(yearly_indexed.loc[y, "augmentation_capex_eur"])
+            if has_aug_col else 0.0
         )
 
         if abs(yearly_y1_revenue) > 1e-9:
@@ -2177,11 +2240,13 @@ def derive_monthly_cashflow(
             # income and the carry-forward stay yearly-only (annual
             # accounting concepts, no monthly counterpart).
             tax_m = tax_y if m == 12 else 0.0
-            # Investment events (BESS replacement CAPEX, any operating-
-            # year DEVEX) book in month 12 so the monthly DCF carries
-            # the yearly end-of-year discount factor for them exactly.
+            # Investment events (BESS replacement CAPEX, augmentation
+            # CAPEX, any operating-year DEVEX) book in month 12 so the
+            # monthly DCF carries the yearly end-of-year discount
+            # factor for them exactly.
             capex_m = capex_y if m == 12 else 0.0
             devex_m = devex_y if m == 12 else 0.0
+            aug_m = aug_y if m == 12 else 0.0
             # balancing_m is GROSS, so its fee (bal_fee_m, negative) enters
             # the net here — unlike rev_m, which is already net of the energy
             # aggregator fee (fee_m is informational on the monthly frame).
@@ -2195,6 +2260,7 @@ def derive_monthly_cashflow(
                 + levy_m
                 + curt_m
                 + ppa_m + opex_m + capex_m + devex_m
+                + aug_m
             )
             # End-of-month discounting: month m of year y lands at
             # (y - 1) + m/12, so December of year y discounts exactly like
@@ -2229,6 +2295,7 @@ def derive_monthly_cashflow(
                     "opex_eur": float(opex_m),
                     "capex_eur": float(capex_m),
                     "devex_eur": float(devex_m),
+                    "augmentation_capex_eur": float(aug_m),
                     "net_cashflow_eur": float(net_m),
                     "discounted_cf_eur": float(net_m * disc_factor),
                     "corporate_tax_eur": float(tax_m),
@@ -2255,6 +2322,7 @@ def derive_monthly_cashflow(
         "curtailment_compensation_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
+        "augmentation_capex_eur",
         "net_cashflow_eur", "discounted_cf_eur",
         "corporate_tax_eur",
         "net_cashflow_post_tax_eur", "discounted_cf_post_tax_eur",
@@ -2282,6 +2350,7 @@ def derive_monthly_cashflow(
                     "curtailment_compensation_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
+                    "augmentation_capex_eur",
                     "net_cashflow_eur", "discounted_cf_eur",
                     "corporate_tax_eur",
                     "net_cashflow_post_tax_eur",
@@ -2573,6 +2642,10 @@ def compute_financial_kpis(
         float(df.loc[after_y0_mask, "ppa_revenue_eur"].sum())
         if "ppa_revenue_eur" in df.columns else 0.0
     )
+    total_augmentation_capex_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "augmentation_capex_eur"].sum())
+        if "augmentation_capex_eur" in df.columns else 0.0
+    )
 
     if "calendar_year" in df.columns and (df["project_year"] >= 1).any():
         first_op_year_row = df.loc[df["project_year"] == 1].iloc[0]
@@ -2688,7 +2761,15 @@ def compute_financial_kpis(
             and "bess_discharge_mwh" in lifetime_yearly.columns
         ):
             # BESS-attributable CAPEX share: BESS energy block + BESS DEVEX.
-            bess_capex_y0 = float(econ.get("capex_bess_eur_per_kwh", 0.0)) * bess_kwh
+            # The day-1 overbuild premium (Eq. E52) is storage CAPEX, so
+            # it belongs in the LCOS numerator with the energy block.
+            _lcos_ob_frac = max(0.0, float(
+                econ.get("bess_overbuild_pct", 0.0) or 0.0
+            ) / 100.0)
+            bess_capex_y0 = (
+                float(econ.get("capex_bess_eur_per_kwh", 0.0)) * bess_kwh
+                * (1.0 + _lcos_ob_frac)
+            )
             bess_devex_y0 = (
                 float(econ.get("devex_bess_eur_per_kw", 0.0) or 0.0) * bess_kw
             )
@@ -2710,6 +2791,20 @@ def compute_financial_kpis(
                 disc_bess_capex += (
                     bess_capex_y0 * (bess_repl_pct / 100.0) * disc_repl
                 )
+            # Augmentation CAPEX (Eq. E51) is storage cost of the same
+            # class as the replacement, so its discounted events join
+            # the LCOS numerator (market fees stay excluded per the
+            # house convention).  The column is signed negative.
+            if "augmentation_capex_eur" in df.columns:
+                _aug_rows = df.loc[
+                    (df[project_year_col] >= 1)
+                    & (df["augmentation_capex_eur"].abs() > 1e-12)
+                ]
+                for _, _aug_row in _aug_rows.iterrows():
+                    disc_bess_capex += (
+                        -float(_aug_row["augmentation_capex_eur"])
+                        * float(_aug_row["discount_factor"])
+                    )
 
             opex_bess_per_kw = float(econ.get("opex_bess_eur_per_kw", 0.0))
             disc_bess_opex = 0.0
@@ -2938,6 +3033,10 @@ def compute_financial_kpis(
         # Curtailment compensation (Eq. E49); >= 0, SUMMARY-optional.
         "lifetime_curtailment_compensation_eur": float(round(
             lifetime_curtailment_compensation_eur, 2,
+        )),
+        # Augmentation CAPEX events (Eq. E51); <= 0, SUMMARY-optional.
+        "total_augmentation_capex_eur_lifecycle": float(round(
+            total_augmentation_capex_eur_lifecycle, 2,
         )),
         # Post-tax KPI family (Eq. E39) — additive to the pre-tax
         # baseline; all NaN while corporate_tax_rate_pct = 0.
