@@ -362,6 +362,21 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (balancing reservation blocks)
+
+- `bm_block_hours` on the balancing sheet (Eq. B9; default 0 =
+  per-settlement-period reservations, bit-identical): with a positive
+  value (e.g. 4, the common European capacity-auction block) every
+  per-product balancing reservation is pinned to its block-anchor
+  value via gated linking equalities (`BM_BLOCK_LINK`), anchored on
+  hour-of-year multiples so rolling-horizon windows that bisect a
+  block stay aligned with the year grid.  A pure restriction of the
+  per-step feasible set: the B1-B8 machinery, the objective and the
+  audit invariants apply unchanged, and the blocked objective can
+  never exceed the per-step one (locked by a direct two-solve test).
+  Validation requires a whole multiple of the dispatch step that
+  divides 24 evenly.
+
 ### Added (grid import capacity limit)
 
 - `p_grid_import_max_kw` on the project sheet (Eq. S35): a

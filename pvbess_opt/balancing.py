@@ -131,6 +131,8 @@ class BalancingConfig:
 
     fcr_required_duration_hours: float = 0.5
     bm_settlement_minutes: int = 15
+    # Multi-hour reservation blocks (Eq. B9); 0 = per-settlement-period.
+    bm_block_hours: int = 0
     bm_soc_headroom_pct: float = 10.0
     bm_inflation_pct: float = 2.0
     bm_price_sigma_capacity_pct: float = 25.0
@@ -195,7 +197,10 @@ def resolve_balancing_config(raw: dict[str, Any]) -> BalancingConfig:
         value = raw[name]
         if fld.type is bool or name == "balancing_enabled":
             kwargs[name] = bool(value)
-        elif name in {"bm_settlement_minutes", "bm_mc_scenarios", "bm_random_seed"}:
+        elif name in {
+            "bm_settlement_minutes", "bm_block_hours",
+            "bm_mc_scenarios", "bm_random_seed",
+        }:
             kwargs[name] = int(value)
         else:
             kwargs[name] = float(value)

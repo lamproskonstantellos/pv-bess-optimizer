@@ -114,6 +114,30 @@ fade curve, indexed by `bm_inflation_pct`:
 
 $$R^{\mathrm{bm,cap/act}}_y = R^{\mathrm{bm,cap/act}}_1\, f^{B}_y\, (1+i_{\mathrm{bm}})^{y-1} \tag{B8}$$
 
+### Reservation blocks (Eq. B9; `bm_block_hours`)
+
+European capacity auctions clear in multi-hour blocks (4 h in common
+HEnEx / regelleistung practice) rather than per settlement period.
+With `bm_block_hours` $= H > 0$ every per-product reservation is
+pinned to its block-anchor value:
+
+$$r_{k,t} = r_{k,\,a(b(t))} \quad \forall t, \qquad
+b(t) = \left\lfloor h(t) / H \right\rfloor \tag{B9}$$
+
+where $h(t)$ is the step's hour-of-year and $a(b)$ the first step of
+block $b$ in the solve window.  Implemented as a gated
+`ConstraintList` (`BM_BLOCK_LINK`) after the `r_balancing`
+declaration; 0 (the default) keeps per-settlement-period reservations
+and attaches nothing — bit-identical.  The blocked solution is a pure
+RESTRICTION of the per-step feasible set, so every B1-B8 constraint,
+the objective and the audit invariants apply unchanged (the blocked
+objective can never exceed the per-step one).  Anchoring on
+hour-of-year (not the window-local index) keeps rolling-horizon
+windows that bisect a block aligned with the year grid — the
+committed prefix fixes the block level.  Validation requires the
+block to be a whole multiple of the dispatch step and to divide 24
+evenly.
+
 The yearly cashflow carries three gross balancing columns
 (`balancing_capacity_revenue_eur`, `balancing_activation_revenue_eur`,
 `balancing_revenue_eur`) plus an optional fee column
@@ -159,6 +183,7 @@ histogram.  Financial lifecycle totals:
 | (B6) | `soc_dynamics` drift terms; KPI mirror `kpis._balancing_soc_drift` |
 | (B7) | `build_model` → `m.balancing_revenue_expr` (`balancing.acceptance_probability`, `activation_probability`); KPI mirror `kpis._compute_balancing_kpis` |
 | (B8) | `economics.build_yearly_cashflow` balancing rows; `lifetime._BALANCING_RESERVATION_COLUMNS` |
+| (B9) | `build_model` → `BM_BLOCK_LINK` (gated on `bm_block_hours`); validator `io._validate_balancing_config` |
 | MC realisation | `rolling_horizon.realise_balancing_scenario`, `monte_carlo_balancing` |
 | config / prices | `balancing.resolve_balancing_config`, `resolve_balancing_timeseries`; validators `io._validate_balancing_config` |
 | plots | `plotting.balancing.plot_balancing_reservation_profile`, `plot_balancing_mc_distribution` (both return None without balancing columns) |

@@ -583,6 +583,15 @@ The 34 keys (defaults in the design doc's Inputs table):
 * ``fcr_required_duration_hours``: FCR sustained-output requirement.
 * ``bm_settlement_minutes``: must equal the timeseries cadence
   (validated; the runtime uses the auto-detected ``dt_minutes``).
+* ``bm_block_hours``: reservation block length in hours (default 0 =
+  reservations may vary per settlement period, bit-identical).  With
+  a positive value (e.g. 4, the common European capacity-auction
+  block) the reserved capacity per product is held constant across
+  each block, anchored on hour-of-year multiples so rolling-horizon
+  windows stay aligned; must be a whole multiple of the dispatch
+  step and divide 24 evenly.  Blocking restricts the solver's
+  choices, so expected balancing revenue can only stay equal or
+  fall — the realistic auction granularity avoids overstating it.
 * ``bm_soc_headroom_pct``: SOC safety buffer on the worst-case
   activation reservation.
 * ``bm_inflation_pct``: yearly indexation of the balancing revenue

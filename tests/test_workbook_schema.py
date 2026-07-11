@@ -136,7 +136,8 @@ def test_balancing_sheet_keys():
             for p in products if p != "fcr"
         ),
         "fcr_required_duration_hours",
-        "bm_settlement_minutes", "bm_soc_headroom_pct", "bm_inflation_pct",
+        "bm_settlement_minutes", "bm_block_hours",
+        "bm_soc_headroom_pct", "bm_inflation_pct",
         "bm_price_sigma_capacity_pct", "bm_price_sigma_activation_pct",
         "bm_mc_scenarios", "bm_random_seed",
     }

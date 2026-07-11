@@ -825,6 +825,41 @@ def build_model(
             m.BALANCING_PRODUCTS, m.T, domain=pyo.NonNegativeReals,
             bounds=lambda _m, k, _t: (0.0, product_caps[k]),
         )
+        # Multi-hour reservation blocks (Eq. B9): European capacity
+        # auctions clear in blocks (e.g. 4 h), so every per-product
+        # reservation is pinned to its block-anchor value — a pure
+        # restriction of the per-step feasible set; the power-budget,
+        # SOC-headroom constraints and the objective are untouched.
+        # Blocks anchor on the hour-of-year of the step's timestamp, so
+        # rolling-horizon windows that bisect a block stay aligned with
+        # the year grid instead of drifting per window (the committed
+        # prefix fixes the block level).
+        block_hours = int(
+            getattr(balancing_cfg, "bm_block_hours", 0) or 0
+        )
+        if block_hours > 0:
+            if pd.api.types.is_datetime64_any_dtype(ts["timestamp"]):
+                _stamps = pd.to_datetime(ts["timestamp"])
+                _hours = (
+                    (_stamps.dt.dayofyear - 1) * 24
+                    + _stamps.dt.hour
+                    + _stamps.dt.minute / 60.0
+                ).to_numpy(dtype=float)
+            else:
+                _hours = np.arange(n_steps, dtype=float) * dt_h
+            _block_ids = np.floor(_hours / block_hours + 1e-9).astype(int)
+            _anchor_of_block: dict[int, int] = {}
+            for _t in range(n_steps):
+                _anchor_of_block.setdefault(int(_block_ids[_t]), _t)
+            m.BM_BLOCK_LINK = pyo.ConstraintList()
+            for _t in range(n_steps):
+                _a = _anchor_of_block[int(_block_ids[_t])]
+                if _a == _t:
+                    continue
+                for k in PRODUCTS_ALL:
+                    m.BM_BLOCK_LINK.add(
+                        m.r_balancing[k, _t] == m.r_balancing[k, _a]
+                    )
 
     # --- SOC dynamics ----------------------------------------------------
     def soc_dynamics(m, t):

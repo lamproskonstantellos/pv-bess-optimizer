@@ -360,6 +360,9 @@ BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
     # Settlement period (minutes); must equal 60 * dt_hours when
     # balancing_enabled.
     "bm_settlement_minutes": 15,
+    # Multi-hour reservation blocks (Eq. B9): 0 = per-settlement-period
+    # reservations (default, bit-identical).
+    "bm_block_hours": 0,
     # Extra SOC safety buffer applied on top of the worst-case
     # activation reservation (percent of activation energy).
     "bm_soc_headroom_pct": 10.0,
@@ -480,6 +483,7 @@ _INT_KEYS: frozenset[str] = frozenset({
     "uncertainty_window_hours",
     "uncertainty_commit_hours",
     "bm_settlement_minutes",
+    "bm_block_hours",
     "bm_mc_scenarios",
     "bm_random_seed",
     "ppa_term_years",
@@ -1145,6 +1149,13 @@ _BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("bm_settlement_minutes", 15, "int",
      "Balancing-market settlement period in minutes. Must equal "
      "60 * dt_hours when balancing_enabled is TRUE."),
+    ("bm_block_hours", 0, "hours",
+     "Reservation block length for balancing capacity products "
+     "(Eq. B9). 0 = reservations may vary per settlement period "
+     "(default). When > 0 (e.g. 4, the common European auction "
+     "block), reserved capacity per product is held constant across "
+     "each block, anchored on hour-of-year multiples; must be a "
+     "positive multiple of the dispatch step and divide 24 evenly."),
     ("bm_soc_headroom_pct", 10.0, "%",
      "Extra SOC safety buffer applied to the worst-case activation "
      "reservation in both directions."),
@@ -2493,6 +2504,30 @@ def _validate_balancing_config(
             "balancing sheet key 'bm_soc_headroom_pct' must be in "
             f"[0, 50]; got {headroom!r}."
         )
+
+    # Reservation block length (Eq. B9): blocks must sit on the dispatch
+    # grid and tile the day exactly, or the hour-of-year anchoring would
+    # drift across days.
+    raw_block = balancing.get("bm_block_hours")
+    block_hours = 0 if raw_block is None else int(raw_block)
+    if block_hours < 0:
+        raise ValueError(
+            "balancing sheet key 'bm_block_hours' must be >= 0 "
+            f"(0 = per-settlement-period reservations); got {block_hours!r}."
+        )
+    if block_hours > 0:
+        if (block_hours * 60) % int(dt_minutes) != 0:
+            raise ValueError(
+                f"balancing sheet key 'bm_block_hours' = {block_hours} h "
+                "must be a whole multiple of the dispatch step "
+                f"({int(dt_minutes)} min)."
+            )
+        if 24 % block_hours != 0:
+            raise ValueError(
+                f"balancing sheet key 'bm_block_hours' = {block_hours} h "
+                "must divide 24 evenly (e.g. 1, 2, 3, 4, 6, 8, 12, 24) "
+                "so blocks stay aligned day to day."
+            )
 
     mc_scenarios = int(balancing.get("bm_mc_scenarios", 200) or 0)
     if mc_scenarios < 1:
