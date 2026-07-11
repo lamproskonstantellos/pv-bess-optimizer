@@ -420,7 +420,10 @@ def test_sensitivity_drops_tax_columns_and_tornado_is_pre_tax():
         _scale_revenue(cf, 1.1, econ),
     ):
         assert not set(TAX_LAYER_COLUMNS) & set(scaled.columns)
-    # The pre-tax tornado is unchanged with the tax layer on vs off.
+    # The pre-tax tornado is unchanged with the tax layer on vs off:
+    # the tax layer only ADDS the TaxRate driver, whose rows carry
+    # NaN pre-tax metrics and dedicated post-tax columns — dropping
+    # those recovers the tax-off frame exactly.
     base_kpis = {"npv_eur": 1.0, "irr_pct": 1.0,
                  "simple_payback_years": 5.0}
     with_tax = run_sensitivity_analysis(
@@ -429,7 +432,17 @@ def test_sensitivity_drops_tax_columns_and_tornado_is_pre_tax():
     without_tax = run_sensitivity_analysis(
         _kpis(), _econ(), _caps(), base_kpis,
     )
-    pd.testing.assert_frame_equal(with_tax, without_tax)
+    assert "TaxRate" in set(with_tax["variable"])
+    assert "TaxRate" not in set(without_tax["variable"])
+    tax_rows = with_tax[with_tax["variable"] == "TaxRate"]
+    assert tax_rows["npv_eur"].isna().all()
+    assert tax_rows["irr_pct"].isna().all()
+    pre_tax_view = with_tax[with_tax["variable"] != "TaxRate"].drop(
+        columns=[
+            c for c in with_tax.columns if "post_tax" in c
+        ],
+    ).reset_index(drop=True)
+    pd.testing.assert_frame_equal(pre_tax_view, without_tax)
 
 
 def _lifetime_yearly() -> pd.DataFrame:

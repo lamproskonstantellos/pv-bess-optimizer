@@ -89,6 +89,7 @@ from .constants import (
     DEFAULT_MAX_INJECTION_PCT_HOURLY,
     DEFAULT_SENSITIVITY_DELTA_PCT,
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+    DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
 )
 from .io_style import style_workbook
 from .timeutils import dt_hours_from
@@ -317,6 +318,7 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "sensitivity_discount_rate_delta_pp": DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
     # PPA-strike tornado driver (active only when a PPA contract is on).
     "sensitivity_ppa_price_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
+    "sensitivity_tax_rate_delta_pp": DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
     # Project-finance debt layer (all-equity by default: gearing 0).
     "gearing_pct": 0.0,
     "debt_interest_rate_pct": 5.0,
@@ -547,6 +549,7 @@ _INT_KEYS: frozenset[str] = frozenset({
     "depreciation_years_bess",
     "depreciation_years_site",
     "tax_loss_carryforward_years",
+    "support_term_years",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -811,7 +814,7 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "nameplate; the overbuild only changes the capacity-factor curve "
      "and Year-0 CAPEX. 0 = off (default). Cannot combine with "
      "bess_replacement_year."),
-    ("bess_augmentation_years", "", "years (CSV)",
+    ("bess_augmentation_years", None, "years (CSV)",
      "Comma-separated project years of staged augmentation events, "
      "e.g. '8,15'. Empty = no augmentation (default). Each event adds "
      "a fresh pool of cells priced on the declining cost curve "
@@ -1085,6 +1088,13 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Symmetric +/- delta on the PPA strike. The driver appears in the "
      "tornado only when the ppa sheet's contract is enabled and the "
      "Year-1 PPA stream is non-zero."),
+    ("sensitivity_tax_rate_delta_pp", DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
+     "pp",
+     "TaxRate tornado driver +/- in percentage points. Active only "
+     "while the tax layer is on (corporate_tax_rate_pct > 0); each "
+     "leg is a full cashflow + tax-layer rebuild (taxes are "
+     "nonlinear), and the driver reports POST-TAX deltas in "
+     "dedicated columns - the pre-tax tornado is untouched."),
     ("gearing_pct", 0.0, "%",
      "Debt fraction of the initial investment (0 = all-equity, the "
      "default; unlevered results are unchanged)."),

@@ -366,6 +366,13 @@ Sheet ``economics``
   from LCOE/LCOS; the gross support is not scaled by the Revenue
   tornado driver while the netting is recomputed against the un-scaled
   threshold (revenue-stabilising).
+* ``sensitivity_tax_rate_delta_pp`` (default 5): TaxRate tornado
+  driver +/- in percentage points, active only while
+  ``corporate_tax_rate_pct`` > 0.  Each leg is a full cashflow +
+  tax-layer rebuild (taxes are nonlinear) and the driver reports
+  POST-TAX deltas in dedicated sensitivity columns; the pre-tax
+  tornado is untouched.  The cumulative-cashflow figure gains a
+  dashed post-tax line while the rate is on.
 * ``go_price_eur_per_mwh`` (default 0 = off): guarantees-of-origin
   sale price applied to the PV grid-export volume (the eligible
   renewable injection; BESS discharge and self-consumed energy

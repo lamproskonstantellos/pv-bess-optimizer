@@ -362,6 +362,20 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (TaxRate tornado driver + post-tax cumulative line)
+
+- `sensitivity_tax_rate_delta_pp` on the economics sheet (default 5)
+  arms a TaxRate tornado driver whenever the tax layer is on
+  (`corporate_tax_rate_pct` > 0).  Taxes are nonlinear (taxable-base
+  clamp, loss carry-forward), so each leg is a full cashflow +
+  tax-layer rebuild at the shifted statutory rate, and the driver
+  reports POST-TAX deltas in dedicated sensitivity columns that join
+  the frame only when it ran - its pre-tax metric columns stay NaN so
+  the published pre-tax tornado is untouched.  The
+  cumulative-cashflow figure gains a dashed 'Cumulative discounted
+  cash-flow (post-tax)' line rendered only while the rate is
+  positive; zero-rate outputs stay bit-identical.
+
 ### Added (sliding Feed-in-Premium / two-way CfD support settlement)
 
 - `support_scheme` on the ppa sheet (Eqs. E55-E57; default 'none',

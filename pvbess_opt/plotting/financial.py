@@ -193,6 +193,21 @@ def plot_cumulative_cashflow(
         linewidth=1.5, marker="o", markersize=3,
         label="Cumulative discounted cash-flow",
     )
+    # Opt-in post-tax companion (Eq. E39): rendered only while the tax
+    # layer is on, so zero-rate figures stay bit-identical.
+    _tax_rate = float(
+        (econ or {}).get("corporate_tax_rate_pct", 0.0) or 0.0
+    )
+    if _tax_rate > 0.0 and "cumulative_dcf_post_tax_eur" in yearly_cf.columns:
+        ax.plot(
+            years,
+            yearly_cf["cumulative_dcf_post_tax_eur"].to_numpy(dtype=float),
+            color=financial_color(
+                "Cumulative discounted cash-flow (post-tax)",
+            ),
+            linewidth=1.5, linestyle="--", marker="o", markersize=3,
+            label="Cumulative discounted cash-flow (post-tax)",
+        )
     ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.6)
 
     ax.set_xlabel("Year")

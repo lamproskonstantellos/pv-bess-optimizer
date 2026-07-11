@@ -769,6 +769,22 @@ def config_json_schema() -> dict[str, Any]:
             props["bess_replacement_year"] = {
                 "type": ["integer", "string"],
             }
+            # Events CSV (Eq. E51): a '8,15' string, a bare year, or
+            # null (no events, the default).
+            props["bess_augmentation_years"] = {
+                "type": ["string", "number", "null"],
+            }
+        if section == "project":
+            # Grid caps (Eqs. S15/S35): a positive number, an
+            # 'unlimited'-family token string, or null / inf for
+            # disabled — the reader materialises the disabled import
+            # cap as float('inf').
+            for _cap_key in (
+                "p_grid_export_max_kw", "p_grid_import_max_kw",
+            ):
+                props[_cap_key] = {
+                    "type": ["number", "string", "null"],
+                }
         properties[section] = {
             "type": "object",
             "properties": props,

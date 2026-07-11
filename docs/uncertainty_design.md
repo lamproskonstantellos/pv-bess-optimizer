@@ -288,6 +288,23 @@ ranges from the exported `lcoe_disc_*` / `lcos_disc_*` discounted
 components, per the Eq. E21-E22 note, rather than a multiplicative
 approximation.)
 
+### TaxRate driver (post-tax tornado columns)
+
+`sensitivity_tax_rate_delta_pp` (economics sheet; default 5 pp) arms
+a TaxRate driver whenever the tax layer is on
+(`corporate_tax_rate_pct` > 0).  Taxes are NONLINEAR (the
+taxable-base clamp, the loss carry-forward), so each leg is a full
+cashflow + tax-layer rebuild at the shifted statutory rate — never a
+scaled copy — and the driver reports its deltas in dedicated
+POST-TAX columns (`npv_post_tax_eur`, `delta_npv_post_tax_eur`,
+`irr_post_tax_pct`, `delta_irr_post_tax_pp`) that join the
+sensitivity frame only when the driver ran.  Its pre-tax metric
+columns stay NaN, so the pre-tax tornado layouts skip the driver and
+the published pre-tax tornado is untouched.  The companion opt-in
+figure element: the cumulative-cashflow chart draws a dashed
+`Cumulative discounted cash-flow (post-tax)` line only while the
+rate is positive (zero-rate figures stay bit-identical).
+
 ## Settlement & cashflow equations
 
 The uncertainty layer does not alter the cashflow algebra
@@ -324,6 +341,7 @@ parameters.
 | tornado drivers | `sensitivity.run_sensitivity_analysis`, `_scale_capex`, `_scale_opex`, `_scale_revenue`, `_infer_aggregator_fee_frac`, `_rebuild_with_discount_rate`, `variables_for_npv_sensitivity`, `variables_for_irr_sensitivity` |
 | CLI/workbook merge | `pipeline._resolve_uncertainty_config` |
 | (U10)-(U11) | `economics.var_cvar` + `economics.npv_for_year1_revenue`; `pipeline._compute_risk_metrics`; scenario-set rows in `scenarios.run_scenarios` |
+| TaxRate driver | `sensitivity.variables_for_npv_sensitivity` + the full-rebuild branch in `run_sensitivity_analysis`; post-tax line in `plotting.financial.plot_cumulative_cashflow` |
 
 ## Validation & tests
 

@@ -34,6 +34,7 @@ from .availability import availability_factor
 from .constants import (
     DEFAULT_SENSITIVITY_DELTA_PCT,
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+    DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
 )
 from .economics import (
     TAX_LAYER_COLUMNS,
@@ -79,6 +80,8 @@ _DRIVER_TYPE_BY_VARIABLE: dict[str, str] = {
     "PpaPrice": "ppa_price",
     # Same EUR/MWh strike semantics as the PPA driver.
     "SupportStrike": "ppa_price",
+    # Absolute percentage-point semantics like the discount rate.
+    "TaxRate": "discount_rate",
 }
 
 
@@ -144,6 +147,23 @@ def variables_for_npv_sensitivity(
         raw.append(
             {"name": "SupportStrike", "kind": "relative", "delta": sup_d,
              "label": "Support strike"},
+        )
+    # TaxRate driver (Eqs. E34-E38 downstream): active only while the
+    # tax layer is on.  Taxes are NONLINEAR (taxable-base clamp, loss
+    # carry-forward), so each leg is a full cashflow + tax-layer
+    # rebuild and the driver reports POST-TAX deltas in dedicated
+    # columns — the pre-tax metric columns stay NaN on its rows, so
+    # the pre-tax tornado layouts skip it.
+    if float(econ.get("corporate_tax_rate_pct", 0.0) or 0.0) > 0.0:
+        tax_d = float(
+            econ.get(
+                "sensitivity_tax_rate_delta_pp",
+                DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
+            )
+        )
+        raw.append(
+            {"name": "TaxRate", "kind": "absolute", "delta": tax_d,
+             "label": "Corporate tax rate"},
         )
     return [v for v in raw if float(v["delta"]) > 0.0]  # type: ignore[arg-type]
 
@@ -844,6 +864,64 @@ def run_sensitivity_analysis(
                 name, label, "high", +delta,
                 base_strike * (1.0 + delta), high_kpis,
             )
+            continue
+
+        if name == "TaxRate":
+            base_rate = float(
+                econ.get("corporate_tax_rate_pct", 0.0) or 0.0
+            )
+            if base_rate <= 0.0:
+                continue
+            low_rate = max(base_rate - delta, 0.0)
+            high_rate = min(base_rate + delta, 100.0)
+
+            def _post_tax_kpis_at(rate_pct: float) -> dict[str, float]:
+                econ_r = {**econ, "corporate_tax_rate_pct": rate_pct}
+                return compute_financial_kpis(
+                    build_yearly_cashflow(year1_kpis, econ_r, capacities),
+                    econ_r,
+                )
+
+            base_npv_pt = float(
+                base_kpis.get("npv_post_tax_eur", float("nan"))
+            )
+            base_irr_pt = float(
+                base_kpis.get("irr_post_tax_pct", float("nan"))
+            )
+
+            def _post_tax_fields(
+                k: dict[str, float],
+                *,
+                _base_npv_pt: float = base_npv_pt,
+                _base_irr_pt: float = base_irr_pt,
+            ) -> dict[str, float]:
+                npv_pt = float(k.get("npv_post_tax_eur", float("nan")))
+                irr_pt = float(k.get("irr_post_tax_pct", float("nan")))
+                d_npv = (
+                    float("nan")
+                    if (np.isnan(npv_pt) or np.isnan(_base_npv_pt))
+                    else npv_pt - _base_npv_pt
+                )
+                d_irr = (
+                    float("nan")
+                    if (np.isnan(irr_pt) or np.isnan(_base_irr_pt))
+                    else irr_pt - _base_irr_pt
+                )
+                return {
+                    "npv_post_tax_eur": npv_pt,
+                    "irr_post_tax_pct": irr_pt,
+                    "delta_npv_post_tax_eur": d_npv,
+                    "delta_irr_post_tax_pp": d_irr,
+                }
+
+            # Pre-tax metric columns stay NaN (kpis=None) — the driver
+            # moves only the post-tax family by construction.
+            _record(name, label, "base", 0.0, base_rate, None)
+            rows[-1].update(_post_tax_fields(base_kpis))
+            _record(name, label, "low", -delta, low_rate, None)
+            rows[-1].update(_post_tax_fields(_post_tax_kpis_at(low_rate)))
+            _record(name, label, "high", +delta, high_rate, None)
+            rows[-1].update(_post_tax_fields(_post_tax_kpis_at(high_rate)))
             continue
 
         if name == "DiscountRate":

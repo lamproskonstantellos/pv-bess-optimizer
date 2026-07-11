@@ -327,6 +327,9 @@ FINANCIAL_COLORS: dict[str, str] = {
     # olive band (administered support, distinct from the amber
     # state-support family and the purple netting).
     "support_settlement": "#9E9D24",  # Material lime 800
+    # Opt-in post-tax companion of the discounted cumulative line
+    # (Eq. E39); rendered dashed, only while the tax layer is on.
+    "cumulative_dcf_post_tax": "#5C6BC0",  # Material indigo 400
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -431,6 +434,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
+    "Cumulative discounted cash-flow (post-tax)",
     "Net revenue",
     "Real net revenue",
     "Simple payback",
@@ -488,6 +492,8 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Net cash-flow (discounted)":       "net_revenue_line",
     "Cumulative cash-flow":             "net_revenue_line",
     "Cumulative discounted cash-flow":  "net",
+    "Cumulative discounted cash-flow (post-tax)":
+        "cumulative_dcf_post_tax",
     "Net revenue":                      "net_revenue_line",
     "Real net revenue":                 "net_revenue_line",
     "Simple payback":                   "net_revenue_line",
@@ -539,6 +545,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
+    "Cumulative discounted cash-flow (post-tax)",
     "Net revenue",
     "Real net revenue",
     "Simple payback",

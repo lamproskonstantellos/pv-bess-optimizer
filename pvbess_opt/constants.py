@@ -16,6 +16,7 @@ __all__ = [
     "DEFAULT_MAX_INJECTION_PCT_HOURLY",
     "DEFAULT_SENSITIVITY_DELTA_PCT",
     "DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP",
+    "DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP",
 ]
 
 # Lazard 2024 utility-scale benchmark bands (EUR/MWh, EUR-equivalent at
@@ -31,6 +32,9 @@ BENCHMARK_LCOS_HIGH_EUR_PER_MWH: float = 274.0
 # points).
 DEFAULT_SENSITIVITY_DELTA_PCT: float = 10.0
 DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP: float = 2.0
+#: TaxRate tornado driver +/- in percentage points (statutory-rate
+#: changes move in whole points; 5 pp spans a typical reform).
+DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP: float = 5.0
 
 # Default share of ``p_grid_export_max_kw`` that is available for export,
 # in percent (per hour-of-day).  Applied when the workbook omits the

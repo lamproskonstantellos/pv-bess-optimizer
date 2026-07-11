@@ -121,6 +121,7 @@ def test_economics_sheet_keys():
         "sensitivity_opex_delta_pct", "sensitivity_revenue_delta_pct",
         "sensitivity_discount_rate_delta_pp",
         "sensitivity_ppa_price_delta_pct",
+        "sensitivity_tax_rate_delta_pp",
         "gearing_pct", "debt_interest_rate_pct", "debt_tenor_years",
         "debt_repayment",
         "debt_sizing_mode", "target_dscr", "debt_sizing_case",
