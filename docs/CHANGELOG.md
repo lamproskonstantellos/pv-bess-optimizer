@@ -362,6 +362,27 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (mid-life re-solve validation)
+
+- `midlife_resolve_year` on the simulation sheet (Eq. E53; default 0
+  = off, bit-identical - no extra solve, no workbook sheet, no
+  SUMMARY section): re-solves the MILP at the given project year
+  with degraded parameters - BESS energy capacity scaled by its
+  year-k capacity factor (power kept at nameplate), the PV column by
+  the year-k production factor, prices held at Year-1 levels - and
+  reports a scaled-vs-resolved delta table per lifetime-yearly KPI,
+  validating the analytic lifetime-scaling recipe against a fresh
+  dispatch.  The resolved side is aggregated and
+  availability-derated exactly the way the scaled side is built
+  (`lifetime.factors_for_year` shares the projection's resolution
+  path), so the delta isolates degradation nonlinearity (SOC
+  headroom, cycle-cap interaction, binary commitment).  The table
+  carries the requested MIP gap as its own row - deltas within the
+  gap are solver noise, not scaling bias.  Strictly diagnostic: the
+  re-solve runs after the financial bundle and never feeds the
+  cashflow or any KPI; combined with the rolling-horizon Monte Carlo
+  it validates the deterministic path only (the loader warns).
+
 ### Added (BESS augmentation + day-1 DC overbuild)
 
 - A pooled capacity engine

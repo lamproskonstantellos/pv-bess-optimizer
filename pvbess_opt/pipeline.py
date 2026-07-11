@@ -20,6 +20,7 @@ Output layout — written to ``results/<input>_<scenario>_<timestamp>/``::
 
 from __future__ import annotations
 
+import copy
 import logging
 import sys
 import tempfile
@@ -68,6 +69,7 @@ from pvbess_opt.lifetime import (
     aggregate_lifetime_to_yearly,
     build_lifetime_dispatch,
     effective_bess_replacement_year,
+    factors_for_year,
     resolve_augmentation_config,
     resolve_bess_replacement_year,
 )
@@ -910,6 +912,129 @@ def _build_degradation_report(
     )
 
 
+#: Lifetime-yearly columns compared by the mid-life re-solve (Eq. E53)
+#: and, identically, availability-derated on both sides.
+_MIDLIFE_COMPARE_COLUMNS: tuple[str, ...] = (
+    "pv_generation_mwh", "pv_to_load_mwh", "pv_to_grid_mwh",
+    "bess_charge_mwh", "bess_discharge_mwh",
+    "import_to_load_mwh", "export_total_mwh",
+    "revenue_eur_dam_retail",
+)
+
+
+def _run_midlife_resolve(
+    params: dict[str, Any],
+    ts: pd.DataFrame,
+    econ: dict[str, Any],
+    kpis: dict[str, Any],
+    lifetime_yearly: pd.DataFrame | None,
+    *,
+    solver_opts: dict[str, Any] | None = None,
+) -> pd.DataFrame | None:
+    """Diagnostic mid-life re-solve of the dispatch (Eq. E53).
+
+    Re-solves the MILP at project year ``k`` with degraded parameters
+    — BESS energy capacity scaled by its year-``k`` capacity factor
+    (power kept at nameplate: the fade model degrades energy, not the
+    converter), the PV column scaled by the year-``k`` production
+    factor, prices held at Year-1 levels — so the delta against the
+    analytic lifetime-scaling recipe isolates degradation
+    nonlinearity (SOC-headroom effects, cycle-cap interaction, binary
+    commitment).  The resolved side is aggregated and
+    availability-derated EXACTLY the way ``_build_financials`` builds
+    the scaled side, and the comparison joins the year-``k`` row of
+    ``lifetime_yearly``.  Purely diagnostic: runs after the financial
+    bundle and feeds only the results workbook and ``SUMMARY.md``;
+    the inputs are deep-copied so nothing upstream mutates.  The
+    terminal-SOC fractions are capacity-relative, so the faded solve
+    keeps the same SOC conventions by construction.
+    """
+    k = int(econ.get("midlife_resolve_year", 0) or 0)
+    if k <= 0:
+        return None
+    if lifetime_yearly is None or lifetime_yearly.empty:
+        return None
+    scaled_rows = lifetime_yearly.loc[lifetime_yearly["project_year"] == k]
+    if scaled_rows.empty:
+        logger.warning(
+            "[midlife] project year %d not present in the lifetime "
+            "projection; skipping the re-solve validation.", k,
+        )
+        return None
+    capacity_mwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0) / 1000.0
+    pv_f, bess_f = factors_for_year(
+        econ,
+        year=k,
+        year1_discharge_mwh=float(
+            kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
+        ),
+        capacity_mwh=capacity_mwh,
+    )
+    logger.info(
+        "[midlife] re-solving project year %d with faded parameters: "
+        "pv_factor=%.4f, bess_factor=%.4f (BESS power kept at "
+        "nameplate; Year-1 prices).", k, pv_f, bess_f,
+    )
+    params_k = copy.deepcopy(params)
+    params_k["bess_capacity_kwh"] = (
+        float(params.get("bess_capacity_kwh", 0.0) or 0.0) * bess_f
+    )
+    ts_k = ts.copy(deep=True)
+    if "pv_kwh" in ts_k.columns:
+        ts_k["pv_kwh"] = ts_k["pv_kwh"].astype(float) * pv_f
+    res_k, _solver_k, _full_k = run_scenario(
+        params_k, ts_k, return_unrounded=True, **(solver_opts or {}),
+    )
+    # Materialise the per-step EUR columns; the KPI dict itself is not
+    # consumed — the resolved side is aggregated below with the exact
+    # constructor the scaled side used.
+    compute_kpis(res_k, params_k, verify_balance=False)
+    res_k["project_year"] = int(k)
+    _start = int(
+        econ.get("project_start_year",
+                 PROJECT_SHEET_DEFAULTS["project_start_year"])
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
+    res_k["calendar_year"] = _start + k - 1
+    resolved = aggregate_lifetime_to_yearly(res_k)
+    avail_factor = availability_factor(
+        float(econ.get("unavailability_pct", 0.0) or 0.0)
+    )
+    if avail_factor < 1.0 and not resolved.empty:
+        for col in _MIDLIFE_COMPARE_COLUMNS:
+            if col in resolved.columns:
+                resolved[col] = resolved[col].astype(float) * avail_factor
+
+    eps = 1e-9
+    rows: list[dict[str, Any]] = []
+    for col in _MIDLIFE_COMPARE_COLUMNS:
+        if col not in scaled_rows.columns or col not in resolved.columns:
+            continue
+        scaled_v = float(scaled_rows[col].iloc[0])
+        resolved_v = float(resolved[col].iloc[0])
+        delta = resolved_v - scaled_v
+        rows.append({
+            "kpi": col,
+            "scaled": round(scaled_v, 6),
+            "resolved": round(resolved_v, 6),
+            "delta": round(delta, 6),
+            "delta_pct": round(
+                100.0 * delta / max(abs(scaled_v), eps), 4,
+            ),
+        })
+    # The requested optimality gap bounds the smallest meaningful
+    # delta; carried as its own row so the workbook sheet is
+    # self-describing (SUMMARY repeats the caveat in prose).
+    gap = float((solver_opts or {}).get("mip_gap", 0.001) or 0.001)
+    rows.append({
+        "kpi": "requested_mip_gap",
+        "scaled": gap, "resolved": gap, "delta": 0.0, "delta_pct": 0.0,
+    })
+    return pd.DataFrame(
+        rows, columns=["kpi", "scaled", "resolved", "delta", "delta_pct"],
+    )
+
+
 def _build_emissions_report(
     res: pd.DataFrame, econ: dict[str, Any],
 ) -> pd.DataFrame | None:
@@ -1665,6 +1790,19 @@ def _run_one(
                 )
         emissions_df = _build_emissions_report(res, econ)
 
+        # Mid-life re-solve validation (Eq. E53): strictly AFTER the
+        # financial bundle — its delta table is diagnostic and can
+        # never feed the cashflow.
+        midlife_df = _run_midlife_resolve(
+            params, ts, econ, kpis, bundle.get("lifetime_yearly"),
+            solver_opts={
+                "solver_name": config.solver,
+                "mip_gap": config.mip_gap,
+                "time_limit_seconds": config.time_limit,
+                "tee": config.tee,
+            },
+        )
+
         write_results_workbook(
             out_dir / "03_results.xlsx",
             res_year1=res,
@@ -1683,6 +1821,7 @@ def _run_one(
             debt_schedule=bundle.get("debt_schedule"),
             emissions=emissions_df,
             lender_cases=bundle.get("lender_cases"),
+            midlife_resolve=midlife_df,
         )
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
@@ -1692,6 +1831,7 @@ def _run_one(
             solver_name=resolved_solver,
             replacement_note=_format_replacement_note(econ),
             lender_cases=bundle.get("lender_cases"),
+            midlife_resolve=midlife_df,
         )
 
         # Balancing plot pair promised by the README's report list; both

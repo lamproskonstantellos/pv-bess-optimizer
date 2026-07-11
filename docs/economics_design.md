@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E52 (+ suffixed E8a, E13a-E13d, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E53 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
@@ -303,6 +303,36 @@ constraint, not a cost line — LCOE / LCOS classification is
 unaffected.  Under rolling-horizon dispatch the annual cap applies
 only to the deterministic Year-1 solve (windows cover sub-year
 horizons; a warning notes this).
+
+### Mid-life re-solve validation (Eq. E53)
+
+The analytic lifetime-scaling recipe (the `lifetime.py` header;
+reconciliation invariant within 0.1 % in
+`docs/source/technical.documentation/lifetime_scaling.rst`) can be
+validated against a fresh dispatch: `midlife_resolve_year` = $k$ (a
+`simulation`-sheet key; 0 = off, default) re-solves the MILP with
+degraded parameters — BESS energy capacity $E_N f_k$ with **power
+kept at nameplate** (the fade model degrades energy, not the
+converter), the PV column scaled by $\mathrm{pv\_factor}(k)$, prices
+held at Year-1 levels — and reports, per lifetime-yearly KPI $X$:
+
+$$\Delta_k(X) = \frac{X^{\mathrm{resolve}}_k - X^{\mathrm{scaled}}_k}
+{\max(|X^{\mathrm{scaled}}_k|,\, \varepsilon)} \tag{E53}$$
+
+The resolved side is aggregated and availability-derated exactly the
+way the scaled side was built (`lifetime.factors_for_year` feeds the
+faded parameters through the same resolution path the projection
+uses), so the delta isolates degradation NONLINEARITY: SOC-headroom
+effects, cycle-cap interaction and binary commitment — the
+mechanisms a linear per-year scaling cannot see.  The table
+(results-workbook sheet `midlife_resolve` + a `SUMMARY.md` section,
+both absent when off) carries the requested MIP gap as its own row:
+deltas at or below the gap are solver noise, not scaling bias.
+Strictly diagnostic — the re-solve runs AFTER the financial bundle
+and never feeds the cashflow, NPV or any KPI; under a
+rolling-horizon run it validates the deterministic path only (the
+loader warns).  Terminal-SOC fractions are capacity-relative, so the
+faded solve keeps the same SOC conventions by construction.
 
 ### Availability
 
@@ -1404,6 +1434,7 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E50) | `lifetime.bess_capacity_factors_pooled` (per-pool fade + nameplate clamp; delegates when inactive) |
 | (E51) | `build_yearly_cashflow` augmentation_capex_eur column + LCOS numerator events + `apply_tax_layer` tranches |
 | (E52) | `build_yearly_cashflow` Year-0 BESS CAPEX x (1 + ob); LCOS / depreciation bases |
+| (E53) | `pipeline._run_midlife_resolve` (+ `lifetime.factors_for_year`); io writers' conditional sheet/section |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

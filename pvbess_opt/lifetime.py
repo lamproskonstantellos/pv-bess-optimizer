@@ -60,6 +60,7 @@ __all__ = [
     "bess_capacity_factors_pooled",
     "build_lifetime_dispatch",
     "effective_bess_replacement_year",
+    "factors_for_year",
     "resolve_augmentation_config",
     "resolve_bess_replacement_year",
     "warranty_cycle_utilisation",
@@ -466,6 +467,51 @@ def _bess_factor(
     calendar = (1.0 - d_bess_annual) ** years_since_install
     cycle = d_bess_per_cycle * cumulative_cycles_through
     return max(0.0, calendar - cycle)
+
+
+def factors_for_year(
+    econ: dict[str, Any],
+    *,
+    year: int,
+    year1_discharge_mwh: float,
+    capacity_mwh: float,
+) -> tuple[float, float]:
+    """Return ``(pv_factor, bess_factor)`` for one project year.
+
+    Resolved through the exact path :func:`build_lifetime_dispatch`
+    uses (LID + linear PV curve; the pooled BESS engine with the
+    effective replacement year and the augmentation surface), so
+    single-year consumers — the mid-life re-solve validation
+    (Eq. E53 in ``docs/economics_design.md``) — can never drift from
+    the lifetime projection.
+    """
+    year = int(year)
+    lid = float(econ.get("pv_degradation_year1_pct", 0.0) or 0.0) / 100.0
+    d_annual = float(
+        econ.get("pv_degradation_annual_pct", 0.0) or 0.0
+    ) / 100.0
+    d_bess = float(
+        econ.get("bess_degradation_annual_pct", 0.0) or 0.0
+    ) / 100.0
+    d_cycle = float(
+        econ.get("bess_degradation_pct_per_cycle", 0.0) or 0.0
+    ) / 100.0
+    ob_frac, aug_years, aug_mode, aug_kwh = resolve_augmentation_config(
+        econ,
+    )
+    bess_factors, _ = bess_capacity_factors_pooled(
+        max(year, 1),
+        d_bess_annual=d_bess,
+        d_bess_per_cycle=d_cycle,
+        year1_discharge_mwh=float(year1_discharge_mwh),
+        capacity_mwh=float(capacity_mwh),
+        replacement_year=effective_bess_replacement_year(econ),
+        overbuild_frac=ob_frac,
+        augmentation_years=aug_years,
+        augmentation_mode=aug_mode,
+        augmentation_kwh=aug_kwh,
+    )
+    return _pv_factor(year, lid, d_annual), bess_factors[max(year, 1) - 1]
 
 
 def build_lifetime_dispatch(

@@ -448,6 +448,9 @@ SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "imbalance_pricing": "dual",
     "imbalance_price_mult_short": 1.25,
     "imbalance_price_mult_long": 0.75,
+    # Mid-life re-solve validation (Eq. E53): 0 = off (default,
+    # bit-identical — no extra solve, no workbook sheet).
+    "midlife_resolve_year": 0,
     "plot_daily_scope": "year1_only",
     "plot_monthly_scope": "all",
     "plot_yearly_scope": "all",
@@ -502,6 +505,7 @@ _INT_KEYS: frozenset[str] = frozenset({
     "uncertainty_n_seeds",
     "uncertainty_window_hours",
     "uncertainty_commit_hours",
+    "midlife_resolve_year",
     "bm_settlement_minutes",
     "bm_block_hours",
     "bm_mc_scenarios",
@@ -1152,6 +1156,15 @@ _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "DAM-proxy multiplier for the LONG imbalance price when the "
      "imbalance_price_long_eur_per_mwh column is absent (dual regime). "
      "Sign-aware like the short-side proxy."),
+    ("midlife_resolve_year", 0, "year",
+     "Project year at which to re-solve the dispatch with degraded "
+     "capacities (BESS energy x its capacity factor, PV column x its "
+     "production factor, power and prices at Year-1 levels) as a "
+     "validation of the analytic lifetime scaling. 0 = off (default); "
+     "otherwise must lie in 2..project_lifecycle_years. Adds one extra "
+     "solve; the delta table is diagnostic only (results-workbook "
+     "sheet 'midlife_resolve' + a SUMMARY section) and never alters "
+     "any financial output."),
     ("plot_daily_scope", "year1_only", "scope",
      "none | year1_only | all. 'all' produces ~365 * N_years * 3 daily PDFs."),
     ("plot_monthly_scope", "all", "scope",
@@ -3493,6 +3506,28 @@ def validate_workbook_params(
                 m_short, m_long,
             )
 
+    # Mid-life re-solve validation (Eq. E53): year 1 IS the solved
+    # dispatch (the delta would be identically zero by construction),
+    # so a meaningful validation year starts at 2.
+    _midlife = int(simulation_cfg.get("midlife_resolve_year", 0) or 0)
+    if _midlife != 0:
+        _ml_lifecycle = int(
+            project.get("project_lifecycle_years", 20) or 20
+        )
+        if not (2 <= _midlife <= _ml_lifecycle):
+            raise ValueError(
+                "midlife_resolve_year must be 0 (off) or lie in "
+                f"2..project_lifecycle_years ({_ml_lifecycle}); got "
+                f"{_midlife}."
+            )
+        if bool(simulation_cfg.get("uncertainty_enabled", False)):
+            logger.warning(
+                "[midlife] midlife_resolve_year validates the "
+                "DETERMINISTIC dispatch path only; the rolling-horizon "
+                "Monte Carlo is not re-run at year %d.",
+                _midlife,
+            )
+
     # Per-year trajectory vectors (Eq. E24): structural checks live in the
     # parser / normaliser; here the lifecycle-aware invariants are
     # enforced — full coverage of the project life, the Year-1 anchor
@@ -4233,6 +4268,7 @@ def write_summary_md(
     solver_name: str | None = None,
     replacement_note: str | None = None,
     lender_cases: pd.DataFrame | None = None,
+    midlife_resolve: pd.DataFrame | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -4347,6 +4383,43 @@ def write_summary_md(
                 f"| {_summary_fmt(row['equity_irr_pct'])} "
                 f"| {_summary_fmt(row['npv_eur'])} "
                 f"| {_summary_fmt(row['debt_capacity_eur'])} |"
+            )
+        lines.append("")
+
+    # Mid-life re-solve validation (Eq. E53): present only when
+    # midlife_resolve_year produced the delta table, so default digests
+    # stay byte-identical.  Deltas at or below the requested MIP gap
+    # are solver noise, not scaling bias — say so next to the table.
+    if midlife_resolve is not None and not midlife_resolve.empty:
+        _gap_rows = midlife_resolve.loc[
+            midlife_resolve["kpi"] == "requested_mip_gap", "scaled",
+        ]
+        lines.append("## Mid-life re-solve validation")
+        lines.append("")
+        lines.append(
+            "Scaled (analytic lifetime recipe) vs re-solved (fresh "
+            "dispatch at faded capacities) year-level KPIs. Diagnostic "
+            "only - the cashflow and every financial KPI use the "
+            "scaled path."
+        )
+        if not _gap_rows.empty:
+            lines.append(
+                f"Deltas within the requested MIP gap "
+                f"({float(_gap_rows.iloc[0]):g}) are solver noise, not "
+                "scaling bias."
+            )
+        lines.append("")
+        lines.append("| KPI | Scaled | Re-solved | Delta | Delta [%] |")
+        lines.append("| --- | ---: | ---: | ---: | ---: |")
+        for _, row in midlife_resolve.iterrows():
+            if str(row["kpi"]) == "requested_mip_gap":
+                continue
+            lines.append(
+                f"| {row['kpi']} "
+                f"| {_summary_fmt(row['scaled'])} "
+                f"| {_summary_fmt(row['resolved'])} "
+                f"| {_summary_fmt(row['delta'])} "
+                f"| {_summary_fmt(row['delta_pct'])} |"
             )
         lines.append("")
 
@@ -4470,6 +4543,7 @@ def write_results_workbook(
     debt_schedule: pd.DataFrame | None = None,
     emissions: pd.DataFrame | None = None,
     lender_cases: pd.DataFrame | None = None,
+    midlife_resolve: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -4527,6 +4601,10 @@ def write_results_workbook(
         if lender_cases is not None and not lender_cases.empty:
             lender_cases.to_excel(
                 writer, sheet_name="lender_cases", index=False,
+            )
+        if midlife_resolve is not None and not midlife_resolve.empty:
+            midlife_resolve.to_excel(
+                writer, sheet_name="midlife_resolve", index=False,
             )
         if emissions is not None and not emissions.empty:
             emissions.to_excel(writer, sheet_name="emissions", index=False)

@@ -750,6 +750,14 @@ Sheet ``simulation``
   into ``06_uncertainty_plots/`` alongside the input forecast bands.
   Set ``FALSE`` to emit only the per-source
   ``inputs_forecast_band_*.pdf`` and the seasonal / heatmap figures.
+* ``midlife_resolve_year`` (default 0 = off): re-solve the dispatch
+  at the given project year with degraded parameters (BESS energy
+  scaled by its capacity factor, PV by its production factor, power
+  and prices at Year-1 levels) to validate the analytic lifetime
+  scaling.  Must lie in ``2..project_lifecycle_years``.  Adds one
+  extra solve; the scaled-vs-resolved delta table is diagnostic only
+  (results-workbook sheet ``midlife_resolve`` and a ``SUMMARY.md``
+  section) and never alters any financial output.
 
 Sheet ``max_injection_profile``
 -------------------------------
