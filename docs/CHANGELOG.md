@@ -362,6 +362,24 @@ Production release.
   band > 0, cfd-only with the equivalence guidance, share-ignored
   warning.
 
+### Added (NPV tail risk: VaR / CVaR)
+
+- `risk_metrics_enabled` + `risk_alpha_pct` on the simulation sheet
+  (Eqs. U10/U11; default FALSE, bit-identical - nothing is computed
+  or written): the left tail of the NPV distribution over the
+  rolling-horizon Monte Carlo seeds.  Each seed's realised (derated)
+  Year-1 profit maps onto an NPV via a pro-rata rescale of the
+  Year-1 revenue bases and a re-run of the analytic cashflow
+  (documented approximation); VaR is the linear-interpolated
+  empirical alpha-quantile and CVaR the mean of the tail at or below
+  it (CVaR <= VaR by construction).  Outputs: a `risk_metrics`
+  results-workbook sheet and `npv_var_eur` / `npv_cvar_eur` rows in
+  the SUMMARY rolling section next to the seed count (small
+  ensembles give noisy tails).  With a scenario deck the same
+  estimators are appended to the scenario-comparison workbook table
+  over the scenarios' NPVs (equal weights; the comparison plots keep
+  one bar per real scenario).
+
 ### Added (guarantees-of-origin revenue)
 
 - `go_price_eur_per_mwh` on the economics sheet (Eq. E54; default 0 =

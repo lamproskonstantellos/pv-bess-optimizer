@@ -460,6 +460,9 @@ SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     # Mid-life re-solve validation (Eq. E53): 0 = off (default,
     # bit-identical — no extra solve, no workbook sheet).
     "midlife_resolve_year": 0,
+    # NPV tail risk over Monte Carlo seeds (Eqs. U10/U11); default-off.
+    "risk_metrics_enabled": False,
+    "risk_alpha_pct": 5.0,
     "plot_daily_scope": "year1_only",
     "plot_monthly_scope": "all",
     "plot_yearly_scope": "all",
@@ -506,6 +509,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "lender_cases_enabled",
     "plot_dscr_profile",
     "bm_merit_order_enabled",
+    "risk_metrics_enabled",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -1185,6 +1189,20 @@ _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "solve; the delta table is diagnostic only (results-workbook "
      "sheet 'midlife_resolve' + a SUMMARY section) and never alters "
      "any financial output."),
+    ("risk_metrics_enabled", False, "bool",
+     "Compute VaR/CVaR of NPV over the rolling-horizon Monte Carlo "
+     "seeds (Eqs. U10/U11): each seed's realised Year-1 profit maps "
+     "onto an NPV by rescaling the Year-1 revenue base pro-rata and "
+     "re-running the analytic cashflow (documented approximation). "
+     "Requires uncertainty_enabled with uncertainty_n_seeds > 0 (a "
+     "warning fires otherwise, and nothing is computed). FALSE "
+     "(default) adds nothing anywhere - bit-identical outputs."),
+    ("risk_alpha_pct", 5.0, "%",
+     "Tail level alpha for VaR/CVaR (5 = worst-5% tail; the "
+     "empirical linear-interpolated quantile). Range (0, 50]. Inert "
+     "while risk_metrics_enabled is FALSE. Note the default 30 "
+     "Monte Carlo seeds give noisy 5% tails - raise "
+     "uncertainty_n_seeds for stable estimates."),
     ("plot_daily_scope", "year1_only", "scope",
      "none | year1_only | all. 'all' produces ~365 * N_years * 3 daily PDFs."),
     ("plot_monthly_scope", "all", "scope",
@@ -3655,6 +3673,23 @@ def validate_workbook_params(
                 _midlife,
             )
 
+    # NPV tail risk (Eqs. U10/U11): the tail level must be a real
+    # left-tail; the seed requirement is a load-time warning (the deck
+    # path cannot be known here).
+    if bool(simulation_cfg.get("risk_metrics_enabled", False)):
+        _alpha_raw = simulation_cfg.get("risk_alpha_pct", 5.0)
+        _alpha = 5.0 if _alpha_raw is None else float(_alpha_raw)
+        if not (0.0 < _alpha <= 50.0):
+            raise ValueError(
+                f"'risk_alpha_pct' must lie in (0, 50]; got {_alpha!r}."
+            )
+        if not bool(simulation_cfg.get("uncertainty_enabled", False)):
+            logger.warning(
+                "[risk] risk_metrics_enabled without uncertainty_enabled: "
+                "the NPV distribution needs the rolling-horizon Monte "
+                "Carlo seeds; VaR/CVaR will be skipped at run time."
+            )
+
     # Per-year trajectory vectors (Eq. E24): structural checks live in the
     # parser / normaliser; here the lifecycle-aware invariants are
     # enforced — full coverage of the project life, the Year-1 anchor
@@ -4397,6 +4432,12 @@ _SUMMARY_ROLLING_KEYS: tuple[tuple[str, str], ...] = (
     ("imbalance_cost_p90_eur", "Imbalance cost P90 [EUR]"),
     ("bess_imbalance_hedge_value_mean_eur",
      "BESS imbalance hedge value, mean [EUR]"),
+    # NPV tail risk (Eqs. U10/U11) — rendered only when the risk block
+    # ran; read next to 'Monte Carlo seeds' (small ensembles give
+    # noisy tails).
+    ("risk_alpha_pct", "Risk tail level alpha [%]"),
+    ("npv_var_eur", "NPV VaR [EUR]"),
+    ("npv_cvar_eur", "NPV CVaR [EUR]"),
 )
 
 
@@ -4696,6 +4737,7 @@ def write_results_workbook(
     emissions: pd.DataFrame | None = None,
     lender_cases: pd.DataFrame | None = None,
     midlife_resolve: pd.DataFrame | None = None,
+    risk_metrics: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -4757,6 +4799,10 @@ def write_results_workbook(
         if midlife_resolve is not None and not midlife_resolve.empty:
             midlife_resolve.to_excel(
                 writer, sheet_name="midlife_resolve", index=False,
+            )
+        if risk_metrics is not None and not risk_metrics.empty:
+            risk_metrics.to_excel(
+                writer, sheet_name="risk_metrics", index=False,
             )
         if emissions is not None and not emissions.empty:
             emissions.to_excel(writer, sheet_name="emissions", index=False)

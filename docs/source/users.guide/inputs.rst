@@ -763,6 +763,15 @@ Sheet ``simulation``
   into ``06_uncertainty_plots/`` alongside the input forecast bands.
   Set ``FALSE`` to emit only the per-source
   ``inputs_forecast_band_*.pdf`` and the seasonal / heatmap figures.
+* ``risk_metrics_enabled`` (default ``FALSE``) / ``risk_alpha_pct``
+  (default 5, range (0, 50]): VaR/CVaR of NPV over the rolling-horizon
+  Monte Carlo seeds.  Each seed's realised Year-1 profit maps onto an
+  NPV by a pro-rata rescale of the Year-1 revenue base (documented
+  approximation); the empirical alpha-quantile and its tail mean land
+  in the ``risk_metrics`` results sheet and the SUMMARY rolling
+  section.  Requires ``uncertainty_enabled`` with seeds; with a
+  scenario deck the same estimators are appended to the comparison
+  workbook (equal-weight scenarios).
 * ``midlife_resolve_year`` (default 0 = off): re-solve the dispatch
   at the given project year with degraded parameters (BESS energy
   scaled by its capacity factor, PV by its production factor, power

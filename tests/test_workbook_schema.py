@@ -176,6 +176,7 @@ def test_simulation_sheet_keys():
         "imbalance_enabled", "imbalance_pricing",
         "imbalance_price_mult_short", "imbalance_price_mult_long",
         "midlife_resolve_year",
+        "risk_metrics_enabled", "risk_alpha_pct",
         "plot_daily_scope", "plot_monthly_scope", "plot_yearly_scope",
     }
     assert set(SIMULATION_SHEET_DEFAULTS) == expected

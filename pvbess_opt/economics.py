@@ -2396,6 +2396,73 @@ def derive_monthly_cashflow(
     return monthly_cf, quarterly_cf
 
 
+
+#: Year-1 EUR bases rescaled pro-rata when mapping a Monte Carlo
+#: seed's realised profit onto an NPV (Eqs. U10/U11 input mapping).
+#: The pro-rata scale ignores per-stream composition shifts between
+#: seeds — a documented approximation, acceptable for a tail summary.
+_SEED_PRO_RATA_KEYS: tuple[str, ...] = (
+    "profit_load_from_pv_eur",
+    "profit_load_from_bess_eur",
+    "profit_export_from_pv_eur",
+    "profit_export_from_bess_eur",
+    "expense_charge_bess_grid_eur",
+    "revenue_pv_ppa_eur",
+    "ppa_covered_dam_value_eur",
+    "curtailment_compensation_eur",
+    "profit_total_eur",
+)
+
+
+def npv_for_year1_revenue(
+    year1_kpis: dict[str, Any],
+    econ: dict[str, Any],
+    capacities: dict[str, float],
+    *,
+    profit_total_eur: float,
+) -> float:
+    """NPV with the Year-1 revenue base rescaled to a seed's profit.
+
+    Maps one rolling-horizon Monte Carlo seed onto the multi-year
+    model by scaling every per-stream Year-1 EUR base pro-rata to the
+    seed's realised ``profit_total_eur`` (both sides carry the same
+    availability derate, so the ratio is scope-consistent), then
+    re-running the cheap analytic cashflow.  Returns NaN when the
+    base profit is ~0 (no meaningful ratio).
+    """
+    base = float(year1_kpis.get("profit_total_eur", 0.0) or 0.0)
+    if abs(base) <= 1e-9:
+        return float("nan")
+    ratio = float(profit_total_eur) / base
+    scaled = dict(year1_kpis)
+    for key in _SEED_PRO_RATA_KEYS:
+        if key in scaled and scaled[key] is not None:
+            scaled[key] = float(scaled[key]) * ratio
+    cf = build_yearly_cashflow(scaled, econ, capacities)
+    return float(cf["discounted_cf_eur"].sum())
+
+
+def var_cvar(values: Any, alpha_pct: float) -> tuple[float, float]:
+    """Empirical VaR / CVaR at tail level ``alpha_pct`` (Eqs. U10/U11).
+
+    ``VaR_alpha`` is the linear-interpolated empirical alpha-quantile
+    of the values (the documented estimator: ``np.quantile`` default);
+    ``CVaR_alpha`` is the mean of the tail at or below the VaR, so
+    ``CVaR <= VaR`` by construction.  Non-finite entries are dropped;
+    an empty sample returns ``(nan, nan)``.
+    """
+    arr = np.asarray(
+        [float(v) for v in values if np.isfinite(float(v))], dtype=float,
+    )
+    if arr.size == 0:
+        return float("nan"), float("nan")
+    alpha = float(alpha_pct) / 100.0
+    var = float(np.quantile(arr, alpha))
+    tail = arr[arr <= var + 1e-12]
+    cvar = float(tail.mean()) if tail.size else var
+    return var, cvar
+
+
 # ---------------------------------------------------------------------------
 # Headline financial KPIs
 # ---------------------------------------------------------------------------

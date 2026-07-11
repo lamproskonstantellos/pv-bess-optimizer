@@ -66,6 +66,39 @@ cancels in the paired hedge difference — real forced outages
 increasing imbalance is a documented limitation).  The MC mean feeds
 the yearly cashflow (Eq. E28); P10/P50/P90 carry the distribution.
 
+### NPV tail risk over Monte Carlo seeds (Eqs. U10/U11)
+
+`risk_metrics_enabled` (simulation sheet; FALSE = off, default,
+bit-identical) reports the left tail of the NPV distribution over the
+rolling-horizon Monte Carlo seeds.  Each seed's realised (derated)
+Year-1 profit maps onto an NPV by rescaling every per-stream Year-1
+revenue base pro-rata and re-running the analytic cashflow
+(`economics.npv_for_year1_revenue`; the pro-rata scale ignores
+per-stream composition shifts between seeds — a documented
+approximation, acceptable for a tail summary).  The estimators:
+
+$$\mathrm{VaR}_\alpha(\mathrm{NPV}) =
+Q_\alpha\big(\{\mathrm{NPV}_s\}\big) \tag{U10}$$
+
+the linear-interpolated empirical $\alpha$-quantile over seeds $s$,
+and
+
+$$\mathrm{CVaR}_\alpha(\mathrm{NPV}) =
+\mathrm{mean}\{\mathrm{NPV}_s : \mathrm{NPV}_s \le
+\mathrm{VaR}_\alpha\} \tag{U11}$$
+
+the expected NPV in the $\alpha$ tail (CVaR <= VaR by construction).
+`risk_alpha_pct` sets the tail level (default 5; range (0, 50]).
+Outputs: the `risk_metrics` results sheet and `npv_var_eur` /
+`npv_cvar_eur` rows in the SUMMARY rolling section, read next to
+`mc_n_seeds` — the default 30 seeds give noisy 5 % tails, so raise
+`uncertainty_n_seeds` for stable estimates.  When a scenario deck
+runs with the flag on, the same estimators are appended to the
+scenario-comparison workbook table over the scenarios' `npv_eur`
+column (EQUAL WEIGHTS — a scenario list is not a probability
+distribution; documented caveat), leaving the comparison plots
+untouched.
+
 ## Inputs
 
 | Sheet | Key | Default | Role |
@@ -290,6 +323,7 @@ parameters.
 | derate symmetry | `availability.apply_unavailability_derate` at `rolling_horizon_dispatch` and `pipeline._run_one` |
 | tornado drivers | `sensitivity.run_sensitivity_analysis`, `_scale_capex`, `_scale_opex`, `_scale_revenue`, `_infer_aggregator_fee_frac`, `_rebuild_with_discount_rate`, `variables_for_npv_sensitivity`, `variables_for_irr_sensitivity` |
 | CLI/workbook merge | `pipeline._resolve_uncertainty_config` |
+| (U10)-(U11) | `economics.var_cvar` + `economics.npv_for_year1_revenue`; `pipeline._compute_risk_metrics`; scenario-set rows in `scenarios.run_scenarios` |
 
 ## Validation & tests
 

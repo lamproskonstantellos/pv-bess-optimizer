@@ -601,8 +601,40 @@ def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResul
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = Path(config.outdir) / f"{src.stem}_scenarios_{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
+    # NPV tail risk over the scenario set (Eqs. U10/U11): appended to
+    # the WORKBOOK table only (equal-weight scenarios - a deck is a
+    # scenario list, not a probability distribution; documented), so
+    # the comparison plots keep one bar per real scenario.
+    comparison_sheet = comparison
+    _sim_cfg = base_typed.get("simulation") or {}
+    if (
+        bool(_sim_cfg.get("risk_metrics_enabled", False))
+        and len(comparison) >= 2
+        and "npv_eur" in comparison.columns
+    ):
+        from .economics import var_cvar
+
+        _alpha = float(_sim_cfg.get("risk_alpha_pct", 5.0) or 5.0)
+        _var, _cvar = var_cvar(
+            comparison["npv_eur"].astype(float).tolist(), _alpha,
+        )
+        comparison_sheet = pd.concat(
+            [
+                comparison,
+                pd.DataFrame([
+                    {"name": f"npv_var_{_alpha:g}pct", "npv_eur": _var},
+                    {"name": f"npv_cvar_{_alpha:g}pct", "npv_eur": _cvar},
+                ]),
+            ],
+            ignore_index=True,
+        )
+        logger.info(
+            "[risk] scenario-set NPV tail (equal weights, %d rows): "
+            "VaR_%.3g%% = %.0f EUR, CVaR_%.3g%% = %.0f EUR.",
+            len(comparison), _alpha, _var, _alpha, _cvar,
+        )
     write_scenario_comparison_workbook(
-        out_dir / "scenario_comparison.xlsx", comparison,
+        out_dir / "scenario_comparison.xlsx", comparison_sheet,
     )
     plot_scenario_comparison_bars(comparison, out_dir / "scenario_comparison.pdf")
     if len(comparison) >= 2:

@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from pvbess_opt.availability import apply_operating_derates, availability_factor
@@ -43,8 +44,10 @@ from pvbess_opt.economics import (
     compute_financial_kpis,
     derive_asset_capacities,
     derive_monthly_cashflow,
+    npv_for_year1_revenue,
     read_economic_params,
     resolve_debt_sizing,
+    var_cvar,
 )
 from pvbess_opt.emissions import build_emissions_report
 from pvbess_opt.io import (
@@ -1035,6 +1038,74 @@ def _run_midlife_resolve(
     )
 
 
+
+def _compute_risk_metrics(
+    rolling_mc_df: pd.DataFrame | None,
+    kpis: dict[str, Any],
+    econ: dict[str, Any],
+    capacities: dict[str, float] | None,
+) -> pd.DataFrame | None:
+    """VaR/CVaR of NPV over the Monte Carlo seeds (Eqs. U10/U11).
+
+    Maps each seed's realised (derated) Year-1 profit onto an NPV via
+    the pro-rata revenue rescale
+    (:func:`pvbess_opt.economics.npv_for_year1_revenue`), then reports
+    the empirical tail statistics.  Returns None — and adds nothing
+    anywhere — unless ``risk_metrics_enabled`` is set and the MC frame
+    carries seeds; the KPI dict gains ``npv_var_eur`` /
+    ``npv_cvar_eur`` (+ the echoed tail level) so the SUMMARY rolling
+    section can render them next to ``mc_n_seeds`` (a 30-seed default
+    gives noisy 5 % tails — the seed count is the caveat).
+    """
+    if not bool(econ.get("risk_metrics_enabled", False)):
+        return None
+    if (
+        rolling_mc_df is None or rolling_mc_df.empty
+        or "profit_total_eur" not in rolling_mc_df.columns
+    ):
+        logger.warning(
+            "[risk] risk_metrics_enabled is set but no rolling-horizon "
+            "Monte Carlo seeds are available (uncertainty_enabled with "
+            "n_seeds > 0 required); skipping VaR/CVaR."
+        )
+        return None
+    base_profit = float(kpis.get("profit_total_eur", 0.0) or 0.0)
+    if abs(base_profit) <= 1e-9 or capacities is None:
+        logger.warning(
+            "[risk] Year-1 profit base is ~0; the pro-rata seed-to-NPV "
+            "mapping is undefined — skipping VaR/CVaR."
+        )
+        return None
+    _alpha_raw = econ.get("risk_alpha_pct", 5.0)
+    alpha_pct = 5.0 if _alpha_raw is None else float(_alpha_raw)
+    seed_profits = rolling_mc_df["profit_total_eur"].astype(float)
+    npvs = [
+        npv_for_year1_revenue(
+            kpis, econ, capacities, profit_total_eur=float(p),
+        )
+        for p in seed_profits
+    ]
+    var, cvar = var_cvar(npvs, alpha_pct)
+    finite = [v for v in npvs if np.isfinite(v)]
+    kpis["npv_var_eur"] = float(round(var, 2))
+    kpis["npv_cvar_eur"] = float(round(cvar, 2))
+    kpis["risk_alpha_pct"] = float(round(alpha_pct, 4))
+    logger.info(
+        "[risk] NPV over %d seeds: VaR_%.3g%% = %.0f EUR, "
+        "CVaR_%.3g%% = %.0f EUR.",
+        len(finite), alpha_pct, var, alpha_pct, cvar,
+    )
+    rows = [
+        {"metric": "n_seeds", "value": float(len(finite))},
+        {"metric": "risk_alpha_pct", "value": alpha_pct},
+        {"metric": "npv_mean_eur", "value": float(np.mean(finite))},
+        {"metric": "npv_min_eur", "value": float(np.min(finite))},
+        {"metric": "npv_var_eur", "value": var},
+        {"metric": "npv_cvar_eur", "value": cvar},
+    ]
+    return pd.DataFrame(rows, columns=["metric", "value"])
+
+
 def _build_emissions_report(
     res: pd.DataFrame, econ: dict[str, Any],
 ) -> pd.DataFrame | None:
@@ -1803,6 +1874,12 @@ def _run_one(
             },
         )
 
+        # NPV tail risk over the Monte Carlo seeds (Eqs. U10/U11):
+        # adds KPI rows + a results sheet only when armed and seeded.
+        risk_df = _compute_risk_metrics(
+            rolling_mc_df, kpis, econ, bundle.get("capacities"),
+        )
+
         write_results_workbook(
             out_dir / "03_results.xlsx",
             res_year1=res,
@@ -1822,6 +1899,7 @@ def _run_one(
             emissions=emissions_df,
             lender_cases=bundle.get("lender_cases"),
             midlife_resolve=midlife_df,
+            risk_metrics=risk_df,
         )
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
