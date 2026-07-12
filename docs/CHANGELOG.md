@@ -4,6 +4,18 @@
 
 Production release.
 
+### Added (intraday figures)
+
+- Two IEEE-styled venue figures in `04_financial_plots/`, emitted only
+  when the two-stage re-dispatch ran (default figure set unchanged):
+  `da_ida_price_duration.pdf` — DAM vs IDA price duration curves, each
+  sorted descending over the share of time (`Day-ahead price`
+  `#1E88E5`, `Intraday price` `#8E24AA`) — and `intraday_position.pdf`
+  — the per-step intraday net position (sells positive, buys negative)
+  as a step line (`Intraday net position` `#00897B`).  Both follow the
+  house figure contract (7x4 in canvas, registered labels, legend
+  below the axes, `empty_placeholder` gating).
+
 ### Added (two-stage intraday Monte Carlo)
 
 - The intraday venue inside the rolling-horizon Monte Carlo

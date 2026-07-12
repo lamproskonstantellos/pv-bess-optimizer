@@ -68,6 +68,13 @@ A family of plots is produced when the financial pipeline runs
     a dashed reference line carried in the legend — never as text
     inside the axes.
 
+12. ``da_ida_price_duration.pdf`` / ``intraday_position.pdf``: the
+    day-ahead vs intraday price duration curves (each series sorted
+    descending over the share of time) and the per-step intraday net
+    position (sells positive, buys negative) as a step line.  Written
+    only when the two-stage intraday re-dispatch ran (``id_enabled``
+    with a positive deviation budget); default runs emit neither file.
+
 When a PPA contract is enabled, the yearly revenue stack gains a
 ``PPA revenue`` bar drawn straight from the cashflow's
 ``ppa_revenue_eur`` column (term cutoff, escalation and the post-term

@@ -334,6 +334,13 @@ FINANCIAL_COLORS: dict[str, str] = {
     # with any of its four existing shades.
     "intraday_revenue": "#26C6DA",  # Material cyan 400
     "intraday_fee":     "#E91E63",  # Material pink 500
+    # Dedicated intraday figures (price duration + net position): a
+    # blue day-ahead price line, a purple intraday price line and a
+    # teal net-position step line — each a fresh unique shade next to
+    # its family (DAM blues / devex-clawback purples / toll teals).
+    "da_price_line":    "#1E88E5",  # Material blue 600
+    "ida_price_line":   "#8E24AA",  # Material purple 600
+    "id_position_line": "#00897B",  # Material teal 600
     # Opt-in post-tax companion of the discounted cumulative line
     # (Eq. E39); rendered dashed, only while the tax layer is on.
     "cumulative_dcf_post_tax": "#5C6BC0",  # Material indigo 400
@@ -449,6 +456,9 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "DSCR base case",
     "DSCR P90 case",
     "Target DSCR",
+    "Day-ahead price",
+    "Intraday price",
+    "Intraday net position",
     # Bar / stack components
     "Revenue",
     "Balancing revenue",
@@ -510,6 +520,9 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "DSCR base case":                   "dscr_base",
     "DSCR P90 case":                    "dscr_p90",
     "Target DSCR":                      "dscr_target",
+    "Day-ahead price":                  "da_price_line",
+    "Intraday price":                   "ida_price_line",
+    "Intraday net position":            "id_position_line",
     "Revenue":                          "revenue",
     "Balancing revenue":                 "balancing_revenue",
     "OPEX":                             "opex",
@@ -564,6 +577,9 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "DSCR base case",
     "DSCR P90 case",
     "Target DSCR",
+    "Day-ahead price",
+    "Intraday price",
+    "Intraday net position",
     # Then bars / stacks, positive flows first
     "Revenue",
     "Balancing revenue",

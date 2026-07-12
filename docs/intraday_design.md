@@ -237,6 +237,27 @@ DA + ID operation.  The Stage-1 profit is kept as
 E58/E59 settlement rows of the multi-year cashflow land with the
 economics layer; this document is extended in place as they ship.
 
+## Figures
+
+Two-stage runs add two IEEE-styled figures to `04_financial_plots/`
+(`pvbess_opt/plotting/intraday.py`), emitted only when the Stage-2
+frame carries the intraday columns so the default figure set stays
+bit-identical:
+
+* `da_ida_price_duration.pdf` — the DAM and IDA price duration curves
+  (each sorted descending over the share of time), the venue-spread
+  view that motivates the re-dispatch; lines `Day-ahead price`
+  (`#1E88E5`) and `Intraday price` (`#8E24AA`).
+* `intraday_position.pdf` — the per-step intraday net position
+  (sells positive, buys negative) as a step line over the year;
+  `Intraday net position` (`#00897B`).
+
+Both follow the house figure contract: 7x4 in canvas, registered
+theme colours/labels only, the shared legend below the axes, the
+universal margin discipline (the duration curve keeps its bounded
+0-100 % x-axis edge to edge) and the `empty_placeholder` gating when
+the columns are absent.
+
 ## Implementation map
 
 | Equation | Implementing symbol |
@@ -278,3 +299,8 @@ economics layer; this document is extended in place as they ship.
   `_scale_revenue(cf, 1.0)` no-op; the operating derates on the
   `id_*` keys; the theme registrations; the lifetime per-origin
   settlement recompute.
+- `tests/test_intraday_plots.py` — rendering smoke for both figures
+  with canonical-label enforcement (no theme fallback warnings); the
+  `empty_placeholder` gating when the venue columns are absent; the
+  index fallback of the position figure; the line colour/label
+  registrations.

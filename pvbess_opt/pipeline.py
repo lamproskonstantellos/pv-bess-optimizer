@@ -92,6 +92,7 @@ from pvbess_opt.plotting import (
     plot_bess_revenue_waterfall,
     plot_cfe_duration_curve,
     plot_cumulative_cashflow,
+    plot_da_ida_price_duration,
     plot_daily_combined,
     plot_daily_combined_merchant,
     plot_daily_combined_merchant_with_soc,
@@ -103,6 +104,7 @@ from pvbess_opt.plotting import (
     plot_daily_surplus,
     plot_dscr_profile,
     plot_energy_sankey,
+    plot_intraday_position,
     plot_irr_tornado,
     plot_lcoe_summary,
     plot_lcos_summary,
@@ -2075,6 +2077,22 @@ def _run_one(
                 )
             except Exception:
                 logger.exception("Emissions / CFE plot generation failed")
+        # Intraday-venue figures (Eqs. I1-I5): only when the Stage-2
+        # re-dispatch wrote its columns, so the default figure set is
+        # bit-identical (the DSCR conditional-figure pattern).
+        if "id_sell_pv_kwh" in res.columns:
+            try:
+                plot_da_ida_price_duration(
+                    res,
+                    layout["financial_plots"]
+                    / "da_ida_price_duration.pdf",
+                )
+                plot_intraday_position(
+                    res,
+                    layout["financial_plots"] / "intraday_position.pdf",
+                )
+            except Exception:
+                logger.exception("Intraday figure generation failed")
 
         if bundle.get("yearly_cf") is not None:
             _generate_financial_plots(
