@@ -15,7 +15,8 @@ Mixed-integer linear programming model for co-located PV + BESS dispatch
 at 15-minute resolution (auto-detected cadence), with a multi-year
 project-finance pipeline, stochastic balancing-market participation
 (FCR / aFRR / mFRR), a PPA contract engine (pay-as-produced and
-baseload structures), and
+baseload structures), an intraday venue settled by two-stage
+re-dispatch around the committed day-ahead position, and
 rolling-horizon Monte Carlo for uncertainty analysis.
 
 Two regulatory regimes are supported:
@@ -37,15 +38,41 @@ battery, not of the market regime, so it is available in
 self-consumption and merchant alike; leave `balancing_enabled = FALSE`
 on the `balancing` sheet wherever the asset does not offer the service.
 
+A third opt-in market layer is merchant-only: the intraday venue
+(`id_enabled` on the `intraday` sheet). The day-ahead solve commits a
+position; a second solve of the same model then re-dispatches against
+the intraday price (`ida_price_eur_per_mwh`) around that committed
+position, under a per-step deviation budget, an anti-wash-trading
+rule, per-origin (PV / BESS) trade tracking, and the unchanged
+physical plant limits. The margin is settled in spread form —
+deviations earn the intraday-minus-day-ahead spread net of the venue
+fee — so the day-ahead revenue stream stays intact and the venue adds
+only the re-dispatch margin. See
+[`docs/intraday_design.md`](docs/intraday_design.md).
+
 On top of the market regimes, the economics layer models the Greek
 contracted-revenue and fiscal landscape (all opt-in, neutral
 mechanisms): a BESS tolling agreement with merchant zeroing, an
 optimizer floor + share-above-floor structure, RRF-style state
 support with a two-way clawback against realised market revenue, a
 capacity-market payment with duration derating, a levy on gross
-market turnover (the Greek 3 % RES levy pattern), and a depreciation
+market turnover (the Greek 3 % RES levy pattern), a sliding
+feed-in-premium / two-way CfD support engine with reference-period
+settlement and a negative-hour suspension clause,
+guarantees-of-origin revenue on PV export, and a depreciation
 + corporate tax engine with loss carry-forward that reports post-tax
 NPV / IRR / equity IRR alongside the pre-tax baseline.
+
+The dispatch and asset layers carry further opt-in levers: a grid
+import capacity limit, hour-of-day injection cap profiles (shared or
+per source), exogenous curtailment with optional compensation, daily
+and annual cycle caps with a warranty-basis switch (nameplate or
+faded energy), BESS overbuild and scheduled augmentation plans priced
+on a declining cost curve, and a mid-life re-solve that validates the
+analytic year-N scaling against a full re-optimisation. On the risk
+side, the Monte Carlo ensemble reports VaR / CVaR tail metrics, and an
+imbalance settlement prices each seed's committed-vs-actual
+deviations.
 
 Three asset configurations are supported in both regimes: `hybrid`
 (PV + BESS), `pv_only`, and `bess_only`.
@@ -56,7 +83,8 @@ capacity space. Full techno-economic sizing tools (HOMER, Gridcog)
 sweep capacities to find an optimum; here the PV nameplate and the
 BESS power and capacity are inputs. The market model covers a
 self-consumption regime and a merchant day-ahead regime, with
-optional balancing-market participation.
+optional balancing-market participation and an optional intraday
+venue.
 
 ## Installation
 
@@ -108,7 +136,7 @@ produce identical results; `tests/test_input_surface_parity.py` checks
 the parity.
 
 1. **The workbook** (`inputs/input.xlsx`) is the primary surface.
-   Every parameter is a row on one of the seven kv sheets. The sheets
+   Every parameter is a row on one of the eight kv sheets. The sheets
    are migrated to the canonical schema by
    `python scripts/polish_input_workbook.py`, which drops removed
    keys, appends new ones in template order, creates missing sheets,
@@ -139,10 +167,12 @@ outputs are formatted identically.
 
 15-minute series of `timestamp`, `pv_kwh`, optionally `load_kwh`
 (required for `self_consumption`, ignored for `merchant`),
-`dam_price_eur_per_mwh`, and the nine optional per-product balancing
+`dam_price_eur_per_mwh`, the nine optional per-product balancing
 price columns (`fcr_capacity_price_eur_per_mwh`,
 `afrr_up_capacity_price_eur_per_mwh`,
-`afrr_up_activation_price_eur_per_mwh`, etc.). `pv_kwh` is the single
+`afrr_up_activation_price_eur_per_mwh`, etc.), and the optional
+`ida_price_eur_per_mwh` intraday price (required when the intraday
+venue is enabled). `pv_kwh` is the single
 PV column: fill it to source PV from the timeseries, or leave it empty
 and set a location on the `pv` sheet to source it from PVGIS instead.
 
@@ -150,8 +180,13 @@ and set a location on the `pv` sheet to source it from PVGIS instead.
 
 Project-level scalars including `mode`
 (`self_consumption` | `merchant`), `project_lifecycle_years`,
-`project_start_year`, `p_grid_export_max_kw`,
-`retail_tariff_eur_per_mwh`, `allow_bess_grid_charging`,
+`project_start_year`, `p_grid_export_max_kw`, the optional grid
+import limit `p_grid_import_max_kw`,
+`retail_tariff_eur_per_mwh`, `allow_bess_grid_charging`, the
+grid-charging fee wedge (`grid_charging_fee_eur_per_mwh`,
+`grid_charging_fee_exempt`), the exogenous-curtailment block
+(`curtailment_pct`, `curtailment_compensated_pct`,
+`curtailment_compensation_price_eur_per_mwh`),
 `grid_cap_includes_load`, `unavailability_pct`, and the site-wide lump
 sums (`site_capex_eur`, `site_devex_eur`). Two presentation knobs also
 live here: `currency_format` (`auto` | `millions` | `raw`, the axis /
@@ -176,8 +211,17 @@ location.
 `bess_power_kw` (symmetric charge / discharge limit),
 `bess_capacity_kwh`, the one-way efficiencies (`efficiency_charge` and
 `efficiency_discharge`, default 0.95 each, round-trip 0.9025), SOC
-bounds, `max_cycles_per_day`, and the calendar and per-cycle fade
-coefficients. `capex_bess_eur_per_kwh` is the full installed BESS
+bounds, the cycle caps (`max_cycles_per_day` and the optional
+`max_cycles_per_year` with `cycle_cap_basis` ∈
+`nameplate | faded` — the warranty basis the annual cap counts
+against), and the calendar and per-cycle fade
+coefficients. The capacity plan is also configured here:
+`bess_overbuild_pct` (Year-1 energy overbuild above nameplate) and
+scheduled augmentations (`bess_augmentation_years`,
+`bess_augmentation_kwh`, `bess_augmentation_mode` ∈
+`top_up | fixed_kwh`), priced on a declining cost curve
+(`bess_cost_decline_pct_per_year`) with `bess_replacement_cost_pct`
+scaling the replacement outlay. `capex_bess_eur_per_kwh` is the full installed BESS
 CAPEX per kWh of nameplate energy capacity (default 250; Lazard
 benchmark band 215-315 EUR/kWh); DEVEX and OPEX stay per kW of the
 power block. The replacement policy is `bess_replacement_year`:
@@ -208,16 +252,33 @@ profile, plus target-DSCR debt sizing via `debt_sizing_mode` /
 as an output — and the P90 production lender case
 `production_p90_factor_pct` / `lender_cases_enabled`), and
 grid-emissions intensity
-for the optional 24/7-CFE accounting. Per-asset CAPEX / DEVEX / OPEX
+for the optional 24/7-CFE accounting. The contracted-revenue and
+fiscal blocks live here too, all shipped off: BESS tolling
+(`bess_toll_*`), the optimizer floor + share
+(`optimizer_floor_*`, `optimizer_margin_basis`, term window), state
+support with a two-way clawback (`state_support_*`), the capacity
+market (`capacity_market_*`), the revenue levy (`revenue_levy_pct`),
+the guarantees-of-origin price (`go_price_eur_per_mwh`), and
+depreciation + corporate tax (`depreciation_years_*`,
+`corporate_tax_rate_pct`, `tax_loss_carryforward_years`, plus the
+`sensitivity_tax_rate_delta_pp` tornado driver). Per-asset
+CAPEX / DEVEX / OPEX
 live on the `pv` and `bess` sheets; the site-wide lump sums on
 `project`.
 
 ### `simulation`
 
-Master uncertainty switch, per-source enable flags, log-normal noise
-parameters, plot-scope flags
+Master uncertainty switch, per-source enable flags and log-normal
+sigmas (including the intraday pair `uncertainty_ida_enabled` /
+`uncertainty_sigma_ida`), the rolling-horizon window / commit
+geometry, plot-scope flags
 (`plot_daily_scope` / `plot_monthly_scope` / `plot_yearly_scope`
-∈ `none | year1_only | all`), uncertainty diagnostics flag.
+∈ `none | year1_only | all`), the uncertainty diagnostics flag, the
+imbalance settlement block (`imbalance_enabled`, `imbalance_pricing`,
+the long / short price multipliers), the tail-risk metrics
+(`risk_metrics_enabled`, `risk_alpha_pct` — VaR / CVaR on the Monte
+Carlo ensemble), and `midlife_resolve_year` (full re-optimisation of
+a later operating year to validate the analytic scaling).
 
 ### `max_injection_profile`
 
@@ -233,13 +294,17 @@ still binds); omit them for a single shared cap.
 
 ### `balancing`
 
-34 keys covering the master switch (`balancing_enabled`), per-product
+36 keys covering the master switch (`balancing_enabled`), per-product
 capacity shares of `bess_power_kw` (`fcr_capacity_share_pct`,
 `afrr_up_capacity_share_pct`, `afrr_dn_capacity_share_pct`,
 `mfrr_up_capacity_share_pct`, `mfrr_dn_capacity_share_pct`),
 acceptance and activation probabilities, fallback capacity and
 activation prices, the FCR sustained-duration requirement, the SOC
-safety buffer, a balancing-revenue inflation rate, and the Monte Carlo
+safety buffer, a balancing-revenue inflation rate, the reservation
+block structure (`bm_block_hours` — reservations committed in fixed
+multi-hour blocks rather than per step), an aFRR merit-order
+acceptance curve (`bm_merit_order_enabled` — acceptance probability
+falling with the offered volume share), and the Monte Carlo
 price sigmas, scenario count (`bm_mc_scenarios`) and seed. See
 [`docs/balancing_market_design.md`](docs/balancing_market_design.md)
 for the design document.
@@ -257,7 +322,26 @@ suspension clause), `ppa_baseload_mw`. Ships disabled: until the
 switch is set, outputs are bit-identical to a build without the PPA
 engine. See [`docs/ppa_design.md`](docs/ppa_design.md) for the design
 note (structures, settlements, dispatch treatment, fee and LCOE
-scope).
+scope). The state-support settlement engine also lives on this sheet
+(mutually exclusive with an active PPA): `support_scheme` ∈
+`none | sliding_fip | cfd_two_way`, `support_strike_eur_per_mwh`,
+`support_ref_period`, `support_term_years`, and
+`support_negative_hour_suspension`.
+
+### `intraday`
+
+The intraday venue (merchant-only): `id_enabled` master switch,
+`id_max_deviation_frac_of_cap` (the per-step deviation budget as a
+share of the export cap, default 0.25), `id_allow_purchases` (allow
+buy-backs of the committed position), `id_fee_eur_per_mwh` (venue fee
+on traded volume), and `id_inflation_pct` (margin indexation in the
+multi-year cashflow). Requires the `ida_price_eur_per_mwh` timeseries
+column, and in this release is mutually exclusive with balancing, the
+PPA engine, a support scheme, the imbalance settlement, and the
+mid-life re-solve. Ships disabled: until the switch is set, outputs
+are bit-identical to a build without the venue. See
+[`docs/intraday_design.md`](docs/intraday_design.md) for the design
+note.
 
 ### `sizing`
 
@@ -283,6 +367,21 @@ styled `scenario_comparison.xlsx` plus comparison plots.
 `--scenarios file.yaml` is the config equivalent. The `sizing` and
 `scenarios` sheets are mutually exclusive.
 
+### `trajectories`
+
+Optional per-year stream shaping, tidy / long (one row per
+`(stream, year)` multiplier; blank `stream` / `mode` cells inherit the
+row above), gated by an `enabled` TRUE / FALSE toggle in the first
+data row and shipped disabled with a worked example. It shapes a
+revenue or cost stream year by year instead of the flat
+`(1 + i)^(y-1)` compounding — a price-cannibalisation path, an
+ancillary-services price decay, a stepped OPEX profile. Each stream's
+`mode` is `replace` (the vector is the escalation index) or `overlay`
+(the vector multiplies the compounded index). Combine with the
+scenario price decks: the deck sets the Year-1 price level (dispatch
+re-solves), the trajectory sets the years-2+ shape. A YAML / JSON
+config expresses the same block as `trajectories:`.
+
 ## Output reference
 
 Each run writes a self-contained folder
@@ -301,9 +400,11 @@ Each run writes a self-contained folder
 04_financial_plots/  revenue stack, BESS waterfall/by-month/split,
                      balancing reservation + MC, lifetime cycles,
                      cumulative + monthly cashflow, payback, NPV/IRR
-                     tornados, NPV waterfall, LCOE/LCOS, SOH, and the
-                     24/7-CFE duration curve when emissions accounting
-                     is on (full list below)
+                     tornados, NPV waterfall, LCOE/LCOS, SOH, plus the
+                     DSCR profile (levered runs), the intraday venue
+                     figures (intraday runs), and the 24/7-CFE duration
+                     curve when emissions accounting is on (full list
+                     below)
 05_energy_plots/     Year-1 energy-flow diagram (every run) and the
                      lifetime summary chart, plus daily / monthly /
                      yearly dispatch views per year
@@ -364,6 +465,18 @@ number to quote in a publication). Balancing
 capacity / activation prices are perturbed separately by
 `pvbess_opt.rolling_horizon.monte_carlo_balancing`.
 
+Three opt-in extensions refine the ensemble. With
+`risk_metrics_enabled` the profit distribution is additionally
+summarised as VaR / CVaR at the `risk_alpha_pct` tail. With
+`imbalance_enabled` each seed's committed-vs-actual volume deviations
+settle at an imbalance price (single or dual pricing with long / short
+multipliers) instead of being valued at the DAM price. On intraday
+runs the ensemble is two-stage: every seed's committed schedule is
+re-dispatched once against the actual intraday prices, the benchmark
+becomes the two-stage perfect-foresight profit (so the foresight gap
+stays a like-for-like comparison), and a per-seed
+`id_net_revenue_eur` column reports the venue margin.
+
 ### PDF report
 
 Generated under `results/<run>/04_financial_plots/`:
@@ -391,9 +504,14 @@ Generated under `results/<run>/04_financial_plots/`:
   rate (NPV only), and PPA price when a contract is on.
 * NPV waterfall.
 * LCOE / LCOS summary with Lazard 2024 benchmark band.
+* Debt-service coverage profile over the tenor (levered runs only),
+  with the P90 lender-case line and the target-DSCR reference when
+  those are active.
 * Rolling-horizon Monte Carlo distribution.
 * Balancing reservation profile + Monte Carlo distribution per
   product.
+* Day-ahead vs intraday price duration curves and the per-step
+  intraday net position, emitted only when the intraday venue ran.
 * 24/7 carbon-free energy duration curve, emitted only when emissions
   accounting is on (`grid_co2_intensity_kg_per_mwh > 0`).
 
@@ -406,7 +524,7 @@ merchant trio when the mode is `merchant`.
 
 ## Results gallery
 
-Real output from two scenarios rendered on the shipped `inputs/input.xlsx`
+Real output from three scenarios rendered on the shipped `inputs/input.xlsx`
 (PV 15 MWp, BESS 15 MW / 30 MWh, 15 MW grid-export cap, 20-year
 horizon, 7 % discount, retail 120 EUR/MWh); the export script
 additionally enables BESS grid charging (`allow_bess_grid_charging =
@@ -567,6 +685,34 @@ the shipped no-grid-charging workbook, whose median gap is about half
 a percent). Produced by the gallery export script's rolling-horizon
 run (equivalent to `--rolling-horizon --monte-carlo 8`).*
 
+### Merchant + intraday venue (`--mode merchant`, `id_enabled = TRUE`)
+
+The two-stage re-dispatch on top of the committed day-ahead schedule.
+The shipped deck carries day-ahead prices only, so the export script
+derives an illustrative intraday deck from it — an evening scarcity
+premium (+15 EUR/MWh, 17:00-21:00) and a midday PV-glut discount
+(−12 EUR/MWh, 10:00-15:00) — and enables the venue with its default
+deviation budget (25 % of the export cap per step) and a 1 EUR/MWh
+venue fee. Balancing is off (the venue and balancing are mutually
+exclusive in this release).
+
+![merchant intraday price duration](docs/assets/merchant_intraday_price_duration.png)
+
+*Day-ahead vs intraday price duration curves, each sorted descending
+over the share of time: the venue spread that the second-stage
+re-dispatch monetises.*
+
+![merchant intraday net position](docs/assets/merchant_intraday_position.png)
+
+*Per-step intraday net position — sells positive, buys negative —
+bounded by the deviation budget on either side.*
+
+![merchant intraday revenue stack](docs/assets/merchant_intraday_revenue_stack.png)
+
+*Yearly revenue stack with the intraday margin stacked above zero and
+the venue fee among the deduction bands below zero; the day-ahead
+streams are unchanged by construction of the spread-form settlement.*
+
 
 ## Methodology & conventions
 
@@ -642,12 +788,16 @@ implementing symbol:
 * [`docs/ppa_design.md`](docs/ppa_design.md): the PPA engine.
   Settlements, the `(1-s)·DAM + s·strike` dispatch price, term and
   reversion.
+* [`docs/intraday_design.md`](docs/intraday_design.md): the intraday
+  venue. The committed day-ahead position, the deviation budget, the
+  origin split and anti-wash-trading rules, the spread-form margin,
+  the fee applicability matrix, and the two-stage Monte Carlo.
 * [`docs/economics_design.md`](docs/economics_design.md): year
   conventions, the nine revenue aggregates, fee clamp, degradation
   factors, debt, NPV/IRR/payback, LCOE/LCOS.
 * [`docs/uncertainty_design.md`](docs/uncertainty_design.md):
-  rolling-horizon MC, the foresight gap, balancing MC, sensitivity
-  drivers.
+  rolling-horizon MC, the foresight gap, balancing MC, imbalance
+  settlement, VaR / CVaR, sensitivity drivers.
 
 The Sphinx manual is published at
 [pv-bess-optimizer.readthedocs.io](https://pv-bess-optimizer.readthedocs.io/en/latest/)

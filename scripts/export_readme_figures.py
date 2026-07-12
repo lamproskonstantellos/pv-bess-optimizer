@@ -18,6 +18,12 @@ charging enabled):
   trajectory and the NPV tornado.
 * **Self-consumption** — retail-settled load coverage, no balancing;
   yields the daily dispatch + SOC trace and the revenue stack.
+* **Merchant + intraday venue** — the two-stage re-dispatch against an
+  illustrative intraday deck derived from the shipped day-ahead deck
+  (an evening scarcity premium and a midday PV-glut discount; the
+  shipped timeseries carries no ``ida_price_eur_per_mwh`` column);
+  yields the DA-vs-IDA price duration curves, the intraday net
+  position and the revenue stack with the intraday bands.
 
 The two foresight-gap distribution figures are produced here too:
 each mode's scenario is re-run through the pipeline with
@@ -42,6 +48,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+
+import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -91,6 +99,23 @@ _FORESIGHT_FIGURES = {
     "04_financial_plots/rolling_horizon_distribution.png":
         "foresight_distribution.png",
 }
+# The intraday-venue scenario carries its own curated set: the venue
+# figures plus the revenue stack showing the intraday bands.
+_INTRADAY_FIGURES = {
+    "04_financial_plots/da_ida_price_duration.png":
+        "merchant_intraday_price_duration.png",
+    "04_financial_plots/intraday_position.png":
+        "merchant_intraday_position.png",
+    "04_financial_plots/revenue_stack_yearly_*.png":
+        "merchant_intraday_revenue_stack.png",
+}
+
+# Illustrative intraday deck for the gallery: the shipped timeseries has
+# no ``ida_price_eur_per_mwh`` column, so the intraday scenario derives
+# one from the day-ahead deck with a deterministic hour-of-day spread —
+# an evening scarcity premium and a midday PV-glut discount (EUR/MWh).
+_IDA_EVENING_PREMIUM_EUR_PER_MWH = 15.0
+_IDA_MIDDAY_DISCOUNT_EUR_PER_MWH = -12.0
 
 # Seeds for the gallery's rolling-horizon Monte Carlo ensembles; matches
 # the documented ``--rolling-horizon --monte-carlo 8`` recipe.
@@ -118,6 +143,7 @@ def _build_workbook(
     balancing_aggregator_fee_pct: float = 0.0,
     route_to_market_fee_eur_per_mwh: float = 0.0,
     optimizer_revenue_share_pct: float = 0.0,
+    intraday: bool = False,
 ) -> Path:
     """Materialise a single-scenario workbook from the shipped input.
 
@@ -154,6 +180,26 @@ def _build_workbook(
         optimizer_revenue_share_pct
     )
     typed["ppa"]["ppa_enabled"] = False
+    if intraday:
+        # The venue is merchant-only and mutually exclusive with
+        # balancing; the caller passes balancing=False.  A representative
+        # non-zero venue fee makes the Intraday fee band render.
+        typed["intraday"]["id_enabled"] = True
+        typed["intraday"]["id_fee_eur_per_mwh"] = 1.0
+        ts = typed["ts"]
+        hour = ts["timestamp"].dt.hour
+        offset = np.where(
+            (hour >= 17) & (hour <= 21),
+            _IDA_EVENING_PREMIUM_EUR_PER_MWH,
+            np.where(
+                (hour >= 10) & (hour <= 15),
+                _IDA_MIDDAY_DISCOUNT_EUR_PER_MWH,
+                0.0,
+            ),
+        )
+        ts["ida_price_eur_per_mwh"] = (
+            ts["dam_price_eur_per_mwh"].to_numpy(dtype=float) + offset
+        )
     typed["simulation"]["uncertainty_enabled"] = False
     # The gallery uses none of the uncertainty diagnostic plots, which
     # render over the full series and dominate the wall-clock; skip them.
@@ -179,6 +225,7 @@ def _run(dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
          balancing_aggregator_fee_pct: float = 0.0,
          route_to_market_fee_eur_per_mwh: float = 0.0,
          optimizer_revenue_share_pct: float = 0.0,
+         intraday: bool = False,
          rolling_horizon: bool = False,
          monte_carlo: int | None = None) -> Path:
     wb = _build_workbook(
@@ -186,6 +233,7 @@ def _run(dst_dir: Path, *, mode: str, balancing: bool, one_day: bool,
         balancing_aggregator_fee_pct=balancing_aggregator_fee_pct,
         route_to_market_fee_eur_per_mwh=route_to_market_fee_eur_per_mwh,
         optimizer_revenue_share_pct=optimizer_revenue_share_pct,
+        intraday=intraday,
     )
     run(RunConfig(
         excel=wb, solver="highs", outdir=dst_dir / "out",
@@ -262,6 +310,14 @@ def main(argv: list[str] | None = None) -> int:
                 optimizer_revenue_share_pct=15.0,
             )
             written += _curate(sc_run, _SELF_CONSUMPTION_FINANCIAL_FIGURES)
+
+            logger.info("merchant + intraday venue — full-year two-stage ...")
+            id_run = _run(
+                tmp_dir / "merchant_id", mode="merchant", balancing=False,
+                one_day=False, mip_gap=args.mip_gap,
+                time_limit=args.time_limit, intraday=True,
+            )
+            written += _curate(id_run, _INTRADAY_FIGURES)
 
             logger.info("self-consumption — representative-day dispatch ...")
             sc_day_run = _run(

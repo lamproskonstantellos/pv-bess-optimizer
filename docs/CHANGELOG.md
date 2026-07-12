@@ -4,6 +4,25 @@
 
 Production release.
 
+### Changed (README)
+
+- The README now covers the full opt-in surface: the intraday venue
+  (What-it-does layer, `intraday` sheet reference, gallery scenario),
+  the sliding-FiP / two-way CfD support engine and
+  guarantees-of-origin revenue in the fiscal-landscape paragraph, the
+  dispatch/asset levers paragraph (grid import limit, curtailment
+  compensation, cycle caps, overbuild / augmentation, mid-life
+  re-solve), the imbalance / VaR-CVaR / two-stage Monte Carlo
+  extensions, the missing workbook keys on the `project` / `bess` /
+  `economics` / `simulation` / `ppa` / `balancing` sheet sections, and
+  the previously undocumented `trajectories` sheet.  The results
+  gallery gains a third scenario — merchant + intraday venue — with
+  the DA-vs-IDA price duration curves, the intraday net position and
+  the revenue stack carrying the intraday bands, rendered by
+  `scripts/export_readme_figures.py` from an illustrative intraday
+  deck derived from the shipped day-ahead deck (documented in the
+  script and the captions).
+
 ### Added (intraday figures)
 
 - Two IEEE-styled venue figures in `04_financial_plots/`, emitted only
