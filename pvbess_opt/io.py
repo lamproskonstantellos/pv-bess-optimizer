@@ -4672,6 +4672,10 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_go_revenue_eur_lifecycle", "Lifetime GO revenue [EUR]"),
     ("lifetime_support_settlement_eur",
      "Lifetime support settlement [EUR]"),
+    ("total_intraday_revenue_eur_lifecycle",
+     "Lifetime intraday revenue [EUR]"),
+    ("total_intraday_fee_eur_lifecycle",
+     "Lifetime intraday venue fee [EUR]"),
     # Post-tax family (Eq. E39): NaN while the tax layer is off, so the
     # non-zero/NaN-skipping renderer keeps zero-default digests
     # noise-free ('n/a' = tax not modelled, never a duplicate of the

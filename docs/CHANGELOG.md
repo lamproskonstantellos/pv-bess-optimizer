@@ -4,6 +4,35 @@
 
 Production release.
 
+### Added (intraday revenue stream)
+
+- The intraday margin as a first-class cashflow stream (Eqs. E58/E59):
+  `intraday_revenue_eur` (Year-1 gross spread margin, per-origin fade
+  on the sell-volume split, indexed by `id_inflation_pct`) and
+  `intraday_fee_eur` (flat venue rate on the per-origin fading traded
+  volume), both folded into `net_cashflow_eur`, reconciled exactly on
+  the monthly/quarterly frames (Year-1 margin and traded-volume
+  shapes from the Stage-2 dispatch), rolled up to two SUMMARY-optional
+  lifetime totals and excluded from LCOE/LCOS per the market-fee
+  convention.
+- Fee applicability matrix (Eq. I6): the energy-aggregator ad-valorem
+  fee does NOT charge the intraday margin (the venue fee already
+  prices the intermediation — the balancing/E13b precedent,
+  superseding the pre-merge design note); the route-to-market volume
+  bases follow the Stage-2 frame automatically; the optimizer revenue
+  share DOES charge the BESS-origin intraday margin in both variants
+  (still zero-clamped), which also joins the E25a netting base and is
+  zeroed in 'zeroed' toll years.
+- Surface wiring: the sensitivity net-component list gains both
+  columns (the Revenue driver scales the margin, not the volume-based
+  fee; the `_scale_revenue(cf, 1.0)` no-op stays exact); the
+  availability and curtailment derates scale the seven `id_*` KPI
+  keys; the cashflow figure families gain `Intraday revenue`
+  (`#26C6DA`) and `Intraday fee` (`#E91E63`) bands drawn only when
+  non-zero; the lifetime dispatch sheet scales the intraday trades
+  per origin and rebuilds the settlement columns from the scaled
+  flows.
+
 ### Added (two-stage intraday re-dispatch)
 
 - The intraday auction (IDA) as a second wholesale venue via two-stage

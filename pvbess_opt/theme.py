@@ -327,6 +327,13 @@ FINANCIAL_COLORS: dict[str, str] = {
     # olive band (administered support, distinct from the amber
     # state-support family and the purple netting).
     "support_settlement": "#9E9D24",  # Material lime 800
+    # Intraday venue (Eqs. E58/E59) — a light cyan margin band
+    # (second wholesale venue, adjacent to the DAM export blues but
+    # clearly lighter than the load_from_bess cyan) and a saturated
+    # pink venue fee joining the deduction family without colliding
+    # with any of its four existing shades.
+    "intraday_revenue": "#26C6DA",  # Material cyan 400
+    "intraday_fee":     "#E91E63",  # Material pink 500
     # Opt-in post-tax companion of the discounted cumulative line
     # (Eq. E39); rendered dashed, only while the tax layer is on.
     "cumulative_dcf_post_tax": "#5C6BC0",  # Material indigo 400
@@ -461,6 +468,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Curtailment compensation",
     "GO revenue",
     "Support settlement (FiP/CfD)",
+    "Intraday revenue",
     "Augmentation CAPEX",
     "Grid-charging cost",
     "Energy aggregator fee",
@@ -471,6 +479,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Revenue levy",
     "Grid-charging fee",
     "Imbalance cost",
+    "Intraday fee",
     # Balancing-product subcomponents (FCR / aFRR / mFRR)
     "FCR",
     "aFRR-up",
@@ -518,6 +527,8 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Curtailment compensation":         "curtailment_compensation",
     "GO revenue":                       "go_revenue",
     "Support settlement (FiP/CfD)":     "support_settlement",
+    "Intraday revenue":                 "intraday_revenue",
+    "Intraday fee":                     "intraday_fee",
     "Augmentation CAPEX":               "augmentation_capex",
     "Grid-charging cost":               "grid_charge_cost",
     "Energy aggregator fee":            "aggregator_fee",
@@ -568,6 +579,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Curtailment compensation",
     "GO revenue",
     "Support settlement (FiP/CfD)",
+    "Intraday revenue",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.
@@ -590,6 +602,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Revenue levy",
     "Grid-charging fee",
     "Imbalance cost",
+    "Intraday fee",
 )
 
 

@@ -322,6 +322,15 @@ def plot_revenue_stack_yearly(
         )
     else:
         support_settlement_arr = np.zeros_like(load_pv)
+    # Intraday venue (Eqs. E58/E59): margin band + venue fee.
+    if "intraday_revenue_eur" in op.columns:
+        intraday_arr = op["intraday_revenue_eur"].astype(float).to_numpy()
+    else:
+        intraday_arr = np.zeros_like(load_pv)
+    if "intraday_fee_eur" in op.columns:
+        intraday_fee_arr = op["intraday_fee_eur"].astype(float).to_numpy()
+    else:
+        intraday_fee_arr = np.zeros_like(load_pv)
     _toll_treatment = str(
         (econ or {}).get("bess_toll_merchant_treatment", "zeroed")
         or "zeroed"
@@ -559,6 +568,27 @@ def plot_revenue_stack_yearly(
             label="Support settlement (FiP/CfD)",
         )
         bottoms = bottoms + np.clip(support_settlement_arr, 0.0, None)
+    if np.any(np.abs(intraday_arr) > 1e-9):
+        # Intraday margin (Eq. E58): >= 0 by construction — a plain
+        # positive band next to the market streams.
+        ax.bar(
+            years, intraday_arr, bottom=bottoms,
+            color=financial_color("Intraday revenue"),
+            edgecolor="black", linewidth=0.4,
+            label="Intraday revenue",
+        )
+        bottoms = bottoms + np.clip(intraday_arr, 0.0, None)
+    if np.any(intraday_fee_arr < -1e-9):
+        # Venue fee (Eq. E59): its own deduction slot below the levy
+        # (the imbalance-cost pattern — explicit accumulated bottom).
+        ax.bar(
+            years, intraday_fee_arr,
+            bottom=cost + agg_fee + bal_agg_fee + rtm_fee + opt_fee
+            + gcf_fee + imb_cost + levy_arr,
+            color=financial_color("Intraday fee"),
+            edgecolor="black", linewidth=0.4,
+            label="Intraday fee",
+        )
     if np.any(np.abs(support_net_arr) > 1e-9):
         # Signed netting (Eq. E31a): compensation years stack with the
         # revenue components, clawback years below the fee stack (and
@@ -595,6 +625,7 @@ def plot_revenue_stack_yearly(
         net + toll_arr + floor_topup_arr + support_arr + support_net_arr
         + capacity_market_arr + levy_arr + curtailment_arr + go_arr
         + support_settlement_arr
+        + intraday_arr + intraday_fee_arr
     )
     if "ppa_revenue_eur" in op.columns:
         net = net + op["ppa_revenue_eur"].astype(float).to_numpy()

@@ -188,6 +188,36 @@ satisfied) whenever the Stage-2 block did not fire:
   kWh^2 product, strict-mode tolerance `tol^2` like invariant 5).
 * `invariant_i4_origin_split_kwh` — origin split (Eq. I4).
 
+## Settlement through the financial stack (Eqs. E58/E59, I6)
+
+The Year-1 KPI pair (`id_net_revenue_eur`, `id_venue_fee_eur`) and the
+per-origin volume split feed the multi-year cashflow rows
+`intraday_revenue_eur` / `intraday_fee_eur` — per-origin fade indexed
+by `id_inflation_pct`, flat venue rate on the fading traded volume;
+see the E58/E59 section of `docs/economics_design.md` for the full
+projection and monthly-reconciliation rules.
+
+### I6 — Fee applicability matrix (normative)
+
+| Fee surface | Applies to the intraday stream? |
+|---|---|
+| Energy-aggregator ad-valorem fee (E13) | **No** — intraday intermediation is priced by the explicit venue fee (E59); an ad-valorem share on top would double-charge it (the balancing/E13b precedent).  This supersedes the pre-merge design note that had the margin join the E13 base. |
+| Balancing-aggregator / BSP fee (E13b) | No — balancing-only by definition. |
+| Route-to-market per-MWh fee (E13c) | **Yes, automatically** — the volume bases (`pv_export_mwh` / `bess_export_mwh`) are computed from the Stage-2 frame, so ID sells raise and ID buys lower the charged export without a new term. |
+| Optimizer revenue share (E13d) | **Yes** — the BESS-origin ID margin joins the share base in both variants (optimizers charge on total trading margin), still zero-clamped; the same leg joins the E25a netting base. |
+
+Classification: EXCLUDED from LCOE/LCOS (revenue-agnostic metrics,
+market fees excluded); both lifetime totals are SUMMARY-optional
+rows; the availability and curtailment derates scale the seven
+`id_*` KPI keys; the Revenue tornado driver scales the margin (a
+price spread times volume) but not the venue fee (volume-based).
+Figures: an `Intraday revenue` band (cyan `#26C6DA`) joins the
+positive stack and an `Intraday fee` band (pink `#E91E63`) the
+deduction stack of the yearly/monthly/NPV/lifecycle cashflow plots,
+each drawn only when non-zero; the lifetime dispatch sheet rebuilds
+`id_revenue_eur` / `id_fee_eur` from the per-origin-scaled trades so
+the two sheets agree.
+
 ## Pipeline integration
 
 `pipeline._run_one` re-solves after the deterministic Stage-1 run via
@@ -209,6 +239,7 @@ economics layer; this document is extended in place as they ship.
 | (I3) | `optimization.build_model` (`intraday_margin_expr`, spread form + venue fee + wear on physical throughput) |
 | (I4) | `optimization.build_model` (`ID_LINK_PV` / `ID_LINK_BESS`); `kpis.compute_kpis` (`id_sell_pv_mwh` / `id_sell_bess_mwh`) |
 | (I5) | `optimization.build_model` (`y_id` complementarity binary, `ID_NO_BUY` purchases gate) |
+| (I6) | `economics.build_yearly_cashflow` (E13 exclusion, E13d/E25a base extensions, E13c via Stage-2 volume bases) |
 
 ## Verification log
 
@@ -231,3 +262,12 @@ economics layer; this document is extended in place as they ship.
   vacuously 0.0 when disabled; Stage-1 bit-identity of a two-stage
   run against a venue-off build; the config-resolver coercions and
   the day-ahead position extractor identity (Eq. I1).
+- `tests/test_intraday_cashflow.py` — zero-default cashflow
+  bit-identity; the E58 per-origin fade and E59 flat-rate rows; the
+  net-cashflow identity; the I6 decisions (E13 exclusion, E13d
+  extension + clamp, E25a membership); monthly/quarterly
+  reconciliation; lifetime totals + LCOE/LCOS invariance; SUMMARY
+  gating; the sensitivity component list, scaling decisions and the
+  `_scale_revenue(cf, 1.0)` no-op; the operating derates on the
+  `id_*` keys; the theme registrations; the lifetime per-origin
+  settlement recompute.
