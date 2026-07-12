@@ -41,10 +41,11 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_price_columns_contract():
-    """PRICE_COLUMNS must include DAM, retail, and every balancing price."""
+    """PRICE_COLUMNS must include DAM, retail, IDA and every balancing price."""
     expected_min = {
         "dam_price_eur_per_mwh",
         "retail_price_eur_per_mwh",
+        "ida_price_eur_per_mwh",
         "fcr_capacity_price_eur_per_mwh",
         "afrr_up_capacity_price_eur_per_mwh",
         "afrr_dn_capacity_price_eur_per_mwh",

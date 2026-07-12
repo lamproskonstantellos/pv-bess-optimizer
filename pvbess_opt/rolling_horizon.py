@@ -77,6 +77,10 @@ __all__ = [
 PRICE_COLUMNS: tuple[str, ...] = (
     "dam_price_eur_per_mwh",
     "retail_price_eur_per_mwh",
+    # Intraday auction price (Eq. I1): inert until the column exists;
+    # forecast noise arms via the uncertainty_sigma_ida machinery and
+    # the actuals-restore path picks the column up automatically.
+    "ida_price_eur_per_mwh",
     "fcr_capacity_price_eur_per_mwh",
     "afrr_up_capacity_price_eur_per_mwh",
     "afrr_dn_capacity_price_eur_per_mwh",

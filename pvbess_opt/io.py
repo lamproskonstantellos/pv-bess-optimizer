@@ -101,6 +101,7 @@ __all__ = [
     "BESS_SHEET_DEFAULTS",
     "ECONOMICS_SHEET_DEFAULTS",
     "FALSY",
+    "INTRADAY_SHEET_DEFAULTS",
     "LAYOUT_SUBDIRS",
     "PPA_SHEET_DEFAULTS",
     "PROJECT_SHEET_DEFAULTS",
@@ -449,6 +450,28 @@ PPA_SHEET_DEFAULTS: dict[str, Any] = {
     "support_negative_hour_suspension": False,
 }
 
+INTRADAY_SHEET_DEFAULTS: dict[str, Any] = {
+    # Master switch for intraday (IDA) participation as a second
+    # wholesale venue (two-stage re-dispatch, Eqs. I1-I5).  When False
+    # every output is bit-identical to a workbook without the sheet.
+    "id_enabled": False,
+    # Per-step cap on the intraday position change as a fraction of
+    # p_grid_export_max_kw x dt (liquidity / nomination-change proxy,
+    # Eq. I2).
+    "id_max_deviation_frac_of_cap": 0.25,
+    # Allow IDA buys (physical: reduce PV export or charge the BESS).
+    # BESS charging from IDA purchases additionally requires
+    # allow_bess_grid_charging = TRUE.
+    "id_allow_purchases": True,
+    # Exchange/venue trading fee per traded intraday MWh, charged on
+    # both buy and sell volume (Eq. E59).  Excluded from LCOE/LCOS per
+    # the market-fee convention.
+    "id_fee_eur_per_mwh": 0.0,
+    # Yearly indexation applied to the intraday margin in the
+    # multi-year cashflow (mirrors dam_inflation_pct).
+    "id_inflation_pct": 0.0,
+}
+
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_enabled": False,
     "uncertainty_compare_sources": False,
@@ -488,6 +511,7 @@ _SHEET_DEFAULTS: dict[str, dict[str, Any]] = {
     "simulation": SIMULATION_SHEET_DEFAULTS,
     "balancing": BALANCING_SHEET_DEFAULTS,
     "ppa": PPA_SHEET_DEFAULTS,
+    "intraday": INTRADAY_SHEET_DEFAULTS,
 }
 
 _KEY_TO_SHEET: dict[str, str] = {}
@@ -522,6 +546,8 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "bm_merit_order_enabled",
     "risk_metrics_enabled",
     "support_negative_hour_suspension",
+    "id_enabled",
+    "id_allow_purchases",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -1425,6 +1451,36 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "the PPA suspension clause."),
 )
 
+_INTRADAY_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("id_enabled", False, "bool",
+     "Master switch for intraday (IDA) participation as a second "
+     "wholesale venue: the committed day-ahead dispatch is "
+     "re-optimised against the ida_price_eur_per_mwh timeseries "
+     "column (two-stage re-dispatch, Eqs. I1-I5). Requires that "
+     "column and mode = 'merchant'. When FALSE the dispatch, KPIs "
+     "and outputs are bit-identical to a workbook without the "
+     "sheet."),
+    ("id_max_deviation_frac_of_cap", 0.25, "-",
+     "Per-step cap on the intraday position change as a fraction of "
+     "p_grid_export_max_kw x dt: bounds the total traded volume "
+     "|ID sell| + |ID buy| per settlement period (liquidity and "
+     "nomination-change proxy, Eq. I2). Range 0..1; 0 disables "
+     "trading."),
+    ("id_allow_purchases", True, "bool",
+     "Allow IDA buys - physical only: a purchase reduces the PV "
+     "export or charges the BESS in the same step (Eq. I5). BESS "
+     "charging from IDA purchases additionally requires "
+     "allow_bess_grid_charging = TRUE."),
+    ("id_fee_eur_per_mwh", 0.0, "EUR/MWh",
+     "Exchange/venue trading fee per traded intraday MWh, charged "
+     "on both buy and sell volume (Eq. E59). Excluded from "
+     "LCOE/LCOS per the market-fee convention."),
+    ("id_inflation_pct", 0.0, "%/yr",
+     "Yearly indexation applied to the intraday margin in the "
+     "multi-year cashflow ((1+i)^(y-1), mirrors dam_inflation_pct). "
+     "Default 0 keeps the margin on the exogenous price level."),
+)
+
 
 _SHEET_ROW_TEMPLATES: dict[
     str, tuple[tuple[str, object, str, str], ...]
@@ -1436,6 +1492,7 @@ _SHEET_ROW_TEMPLATES: dict[
     "simulation": _SIMULATION_ROWS,
     "balancing": _BALANCING_ROWS,
     "ppa": _PPA_ROWS,
+    "intraday": _INTRADAY_ROWS,
 }
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
@@ -1912,6 +1969,8 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     balancing_df = _build_kv_sheet(balancing_section, _BALANCING_ROWS)
     ppa_section = typed.get("ppa") or dict(PPA_SHEET_DEFAULTS)
     ppa_df = _build_kv_sheet(ppa_section, _PPA_ROWS)
+    intraday_section = typed.get("intraday") or dict(INTRADAY_SHEET_DEFAULTS)
+    intraday_df = _build_kv_sheet(intraday_section, _INTRADAY_ROWS)
 
     profile = typed.get("max_injection_profile")
     if profile is None:
@@ -1930,6 +1989,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         simulation_df.to_excel(writer, sheet_name="simulation", index=False)
         balancing_df.to_excel(writer, sheet_name="balancing", index=False)
         ppa_df.to_excel(writer, sheet_name="ppa", index=False)
+        intraday_df.to_excel(writer, sheet_name="intraday", index=False)
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
@@ -2591,6 +2651,7 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
 
     for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh",
                 "retail_price_eur_per_mwh",
+                "ida_price_eur_per_mwh",
                 "imbalance_price_eur_per_mwh",
                 "imbalance_price_short_eur_per_mwh",
                 "imbalance_price_long_eur_per_mwh"):
@@ -2752,6 +2813,9 @@ _BALANCING_TS_COLUMN_DEFAULTS: dict[str, str] = {
 PRICE_DECK_BASE_COLUMNS: tuple[str, ...] = (
     "dam_price_eur_per_mwh",
     "retail_price_eur_per_mwh",
+    # Intraday auction price (Eq. I1) — required when id_enabled; deck
+    # variants allowed like every other price column.
+    "ida_price_eur_per_mwh",
     *_BALANCING_TS_COLUMN_DEFAULTS.keys(),
     # Optional imbalance settlement price columns (Eqs. U7/U8) — deck
     # variants allowed like every other price column.
@@ -3201,6 +3265,27 @@ _CONTRACT_STACKING_RULES: tuple[tuple[str, Any, str, Any], ...] = (
 )
 
 
+def _validate_intraday_config(intraday: dict[str, Any]) -> None:
+    """Validate the ``intraday`` sheet ranges (Eqs. I1-I5, E58/E59).
+
+    The numeric ranges are checked whether or not ``id_enabled`` is set
+    so a typo cannot sit silently inert; the merchant-only mode gate
+    and the ``ida_price_eur_per_mwh`` column requirement live in the
+    workbook loader where mode and timeseries are in scope.
+    """
+    _dev = float(intraday.get("id_max_deviation_frac_of_cap", 0.25) or 0.0)
+    if not 0.0 <= _dev <= 1.0:
+        raise ValueError(
+            "id_max_deviation_frac_of_cap must lie in [0, 1] (fraction "
+            f"of p_grid_export_max_kw x dt per step); got {_dev!r}."
+        )
+    _fee = float(intraday.get("id_fee_eur_per_mwh", 0.0) or 0.0)
+    if _fee < 0.0:
+        raise ValueError(
+            f"id_fee_eur_per_mwh must be non-negative; got {_fee!r}."
+        )
+
+
 def validate_workbook_params(
     typed: dict[str, Any], *, dt_minutes: int | None = None,
 ) -> None:
@@ -3223,9 +3308,11 @@ def validate_workbook_params(
     economics = typed.get("economics") or {}
     balancing = typed.get("balancing") or {}
     ppa = typed.get("ppa") or {}
+    intraday = typed.get("intraday") or {}
 
     validate_pv_location_fields(pv)
     _validate_ppa_config(ppa)
+    _validate_intraday_config(intraday)
 
     def _require_non_negative(section: dict[str, Any], key: str) -> None:
         if key not in section:
@@ -3976,6 +4063,15 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     else:
         typed["ppa"] = dict(PPA_SHEET_DEFAULTS)
 
+    # Optional ``intraday`` sheet — same master-switch pattern: absent
+    # means the IDA venue is disabled and the run is bit-identical to
+    # before.
+    if "intraday" in sheets:
+        intraday_flat = _read_kv_flat(xlsx_path, "intraday")
+        typed["intraday"] = _parse_kv_sheet("intraday", intraday_flat)
+    else:
+        typed["intraday"] = dict(INTRADAY_SHEET_DEFAULTS)
+
     # Optional ``trajectories`` sheet — per-year stream multipliers
     # (Eq. E24).  Absent sheet, ``enabled`` = FALSE, or no data rows all
     # resolve to None and the run is bit-identical to before.
@@ -4142,6 +4238,29 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             "imbalance price cannot be proxied from the DAM); add the "
             "column or use imbalance_pricing = 'dual'."
         )
+    # Intraday venue (Eqs. I1-I5): the auction price column is
+    # mandatory when enabled — a scalar fallback (the balancing
+    # convention) would silently produce zero spread and misleading
+    # results, so it is deliberately NOT offered here.
+    _intraday = typed.get("intraday") or {}
+    if bool(_intraday.get("id_enabled", False)):
+        if "ida_price_eur_per_mwh" not in ts.columns:
+            raise ValueError(
+                "id_enabled = TRUE requires the ida_price_eur_per_mwh "
+                "timeseries column (the intraday auction price has no "
+                "meaningful scalar fallback); add the column or set "
+                "id_enabled = FALSE."
+            )
+        if dt_minutes >= 60:
+            logger.info(
+                "[intraday] the workbook runs at %d-minute cadence; "
+                "ida_price_eur_per_mwh is consumed as the "
+                "period-averaged intraday price, which averages away "
+                "sub-hourly spread. For 15-minute IDA granularity "
+                "resample the workbook via "
+                "scripts/resample_timeseries.py.",
+                dt_minutes,
+            )
     out: dict[str, Any] = {
         "ts": ts,
         "max_injection_profile": profile,
@@ -4295,6 +4414,10 @@ def _typed_to_flat(
         # PPA contract section — same nested-dict pattern; consumed by
         # the MILP objective and the per-step EUR columns.
         "ppa": dict(typed.get("ppa") or PPA_SHEET_DEFAULTS),
+        # Intraday venue section (Eqs. I1-I5) — same nested-dict
+        # pattern; consumed by the two-stage re-dispatch and the
+        # intraday cashflow columns.
+        "intraday": dict(typed.get("intraday") or INTRADAY_SHEET_DEFAULTS),
     }
     return params, ts
 

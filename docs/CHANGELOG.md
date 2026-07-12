@@ -4,6 +4,29 @@
 
 Production release.
 
+### Added (intraday venue input surface)
+
+- The optional `intraday` workbook sheet (5 keys, master-switch
+  pattern like `balancing`/`ppa`; absent sheet or `id_enabled =
+  FALSE` keeps every output bit-identical): `id_enabled`,
+  `id_max_deviation_frac_of_cap` (validated in `[0, 1]`),
+  `id_allow_purchases`, `id_fee_eur_per_mwh` (non-negative) and
+  `id_inflation_pct`.  YAML configs, the JSON schema and scenario
+  dotted-target overrides (`intraday.id_enabled`) inherit the sheet
+  automatically; `scripts/polish_input_workbook.py` materialises it
+  in existing workbooks.
+- The `ida_price_eur_per_mwh` timeseries column (intraday auction
+  price, Eq. I1): required when `id_enabled = TRUE` — deliberately no
+  scalar fallback, a constant IDA price would silently produce zero
+  spread — NaN-filled alongside the DAM price, deck-variant capable
+  (`ida_price_eur_per_mwh__<deck>`), and registered in
+  `rolling_horizon.PRICE_COLUMNS` so the Monte Carlo actuals-restore
+  picks it up.  An INFO log notes the hour-averaging on hourly
+  workbooks.
+- `docs/intraday_design.md` — the design note owning the I equation
+  namespace (I1 allocated; the registry row in
+  `docs/economics_design.md` now points at it).
+
 ### Added (structural market-access fees)
 
 - Two structural market-access fees, both default-off (results

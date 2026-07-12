@@ -1,9 +1,10 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook.  Nine core data sheets
+The optimiser consumes a single Excel workbook.  Ten core data sheets
 (``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
-``balancing``, ``ppa``, ``simulation``, ``max_injection_profile``)
+``balancing``, ``ppa``, ``intraday``, ``simulation``,
+``max_injection_profile``)
 carry the run, plus the optional per-source sub-cap sheets
 (``max_injection_profile_pv`` / ``max_injection_profile_bess``) and two
 optional opt-in sheets ``sizing``, ``scenarios`` and ``trajectories``
@@ -46,6 +47,18 @@ Balancing price columns         balancing only           Optional per-step balan
                                                          ``{afrr,mfrr}_{up,dn}_activation_price_eur_per_mwh``
                                                          (see the ``balancing`` sheet
                                                          reference below).
+``ida_price_eur_per_mwh``       intraday only            Intraday auction price per step.
+                                                         Required when ``id_enabled = TRUE``
+                                                         on the ``intraday`` sheet (there is
+                                                         deliberately no scalar fallback — a
+                                                         constant IDA price would produce
+                                                         zero spread and misleading
+                                                         results).  Consumed at the workbook
+                                                         cadence: on an hourly workbook it
+                                                         is the hour-averaged IDA price (an
+                                                         INFO log notes the averaging); for
+                                                         15-minute IDA granularity resample
+                                                         via ``scripts/resample_timeseries.py``.
 ``curtailment_signal``          no                       Per-step export-availability factor
                                                          in ``[0, 1]`` (0 = export fully
                                                          curtailed, 1 = unrestricted).
@@ -762,6 +775,35 @@ economics key adds a PPA-price tornado driver when the contract is on.
   The premium is a settlement overlay (dispatch still sells at the
   DAM); negative-DAM hours can be excluded from the eligible volume;
   mutually exclusive with ``ppa_enabled``.
+
+Sheet ``intraday``
+------------------
+
+Intraday (IDA) participation as a second wholesale venue (design
+note: ``docs/intraday_design.md``) — the committed day-ahead dispatch
+is re-optimised against the ``ida_price_eur_per_mwh`` timeseries
+column in a second solve with the day-ahead net position pinned.
+Master-switch pattern like the ``balancing`` sheet: disabled (the
+shipped default) leaves every output bit-identical to a build without
+the feature.
+
+* ``id_enabled``: master switch (default FALSE).  Requires the
+  ``ida_price_eur_per_mwh`` timeseries column and ``mode =
+  merchant``.
+* ``id_max_deviation_frac_of_cap`` (default 0.25, validated in
+  ``[0, 1]``): per-step bound on the total traded intraday volume as
+  a fraction of ``p_grid_export_max_kw`` x dt — a liquidity and
+  nomination-change proxy (Eq. I2).  ``0`` disables trading.
+* ``id_allow_purchases`` (default TRUE): allow IDA buys.  Purchases
+  are physical only — a buy reduces the PV export or charges the
+  BESS in the same step (Eq. I5); BESS charging from IDA purchases
+  additionally requires ``allow_bess_grid_charging = TRUE``.
+* ``id_fee_eur_per_mwh`` (default 0, non-negative): venue trading
+  fee per traded MWh, charged on both buy and sell volume (Eq. E59).
+  Excluded from LCOE/LCOS per the market-fee convention.
+* ``id_inflation_pct`` (default 0): yearly indexation of the
+  intraday margin in the multi-year cashflow (mirrors
+  ``dam_inflation_pct``).
 
 Sheet ``simulation``
 --------------------
