@@ -4,6 +4,32 @@
 
 Production release.
 
+### Added (two-stage intraday Monte Carlo)
+
+- The intraday venue inside the rolling-horizon Monte Carlo
+  (Eq. U12): Stage-1 windows commit day-ahead dispatch under noisy
+  forecasts, then a SINGLE annual Stage-2 pass per seed re-dispatches
+  the stitched committed schedule against the actual intraday prices
+  — one extra solve per seed, honouring the soft year-close SOC pin
+  and lifting the cycle caps to the committed day's throughput where
+  window seams exceed them (the re-dispatch never ADDS cycling beyond
+  the operational cap).  The Stage-2 timeseries carries the actual
+  prices on the COMMITTED physical envelope; residual volume error
+  stays the imbalance settlement's domain (now mutually exclusive
+  with the venue, replacing the interim uncertainty gate).
+- Simulation keys `uncertainty_ida_enabled` (default TRUE) and
+  `uncertainty_sigma_ida` (default 0.15, below the DAM's): sign-aware
+  log-normal noise on `ida_price_eur_per_mwh`, drawn from a SPAWNED
+  child generator so every pre-existing seed's DAM/PV/load
+  multipliers stay bit-identical; the flag is forced off when the
+  venue is off.
+- The foresight benchmark becomes the TWO-STAGE perfect-foresight
+  profit on intraday runs (threaded through `pipeline._run_one`,
+  including the benchmark-retightening guard, which now re-runs the
+  Stage-2 pass on each tighter incumbent); `monte_carlo_rolling`
+  appends an `id_net_revenue_eur` per-seed column on two-stage
+  ensembles only (the imbalance conditional-column pattern).
+
 ### Added (intraday revenue stream)
 
 - The intraday margin as a first-class cashflow stream (Eqs. E58/E59):

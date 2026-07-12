@@ -99,6 +99,54 @@ column (EQUAL WEIGHTS — a scenario list is not a probability
 distribution; documented caveat), leaving the comparison plots
 untouched.
 
+### Two-stage rolling horizon with the intraday venue (Eq. U12)
+
+With `id_enabled = TRUE` (`docs/intraday_design.md`) the rolling
+horizon models the real two-venue information structure: Stage-1
+windows commit the day-ahead dispatch under noisy forecasts exactly
+as today (with an optional sign-aware log-normal noise on the
+intraday auction price — `uncertainty_ida_enabled`,
+`uncertainty_sigma_ida`, default 0.15 BELOW $\sigma_{\mathrm{DAM}}$
+because intraday commitment happens closer to delivery), and then a
+SINGLE annual Stage-2 pass re-dispatches the stitched committed
+schedule against the actual (noise-free) intraday prices:
+
+$$\Pi_s = \Pi^{\mathrm{2stage}}\big(g^{DA}_s(\text{noisy}),
+\pi^{\mathrm{IDA}}(\text{actual})\big) \tag{U12}$$
+
+one extra solve per seed instead of one per window.  Implementation
+notes (all load-bearing):
+
+* the IDA noise draws come from a SPAWNED child generator, so runs
+  without the venue keep every DAM/PV/load multiplier bit-identical
+  at the same seed;
+* the Stage-2 timeseries carries the actual prices but the COMMITTED
+  physical envelope (the forecast PV/load the windows dispatched
+  against) — re-dispatching against actual PV would make an
+  over-forecast commitment physically infeasible, and the residual
+  volume error is the imbalance settlement's domain (mutually
+  exclusive with the venue in v1);
+* the pass honours the same soft year-close SOC pin the final window
+  carried, and the cycle caps lift to the committed day's throughput
+  where the window seams exceed them (the re-dispatch can never ADD
+  cycling beyond the operational cap);
+* the foresight benchmark is the TWO-STAGE perfect-foresight profit
+  (deterministic Stage 1 + Stage 2, threaded by
+  `pipeline._run_one` everywhere `pf_profit_eur` flows), so the U3
+  gap compares two-stage against two-stage.  The day-ahead-only
+  feasibility argument for a non-negative gap carries over
+  approximately: a pathological IDA/DAM divergence can in principle
+  reward a noisy commitment beyond the deterministic one because the
+  two venues price different commitments — the PF-bound guard's
+  tolerance absorbs the observed cases, and the bound is monitored
+  by the same strict-mode check;
+* `monte_carlo_rolling` appends an `id_net_revenue_eur` per-seed
+  column (the imbalance conditional-column pattern — absent without
+  the venue);
+* Stage-2 determinism against actual IDA prices slightly flatters
+  the intraday margin (documented limitation; per-window Stage-2
+  noise is a deferred refinement).
+
 ## Inputs
 
 | Sheet | Key | Default | Role |
@@ -110,6 +158,7 @@ untouched.
 | simulation | `uncertainty_commit_hours` | 24 | $C$ |
 | simulation | `uncertainty_dam_enabled` / `_pv_enabled` / `_load_enabled` | TRUE | per-source noise toggles |
 | simulation | `uncertainty_sigma_dam` / `_pv` / `_load` | 0.20 / 0.12 / 0.05 | $\sigma_{\mathrm{DAM}}, \sigma_{\mathrm{PV}}, \sigma_{L}$ |
+| simulation | `uncertainty_ida_enabled` / `uncertainty_sigma_ida` | TRUE / 0.15 | intraday-price noise toggle and $\sigma_{\mathrm{IDA}}$ (Eq. U12; meaningful only with `id_enabled`) |
 | simulation | `uncertainty_diagnostics_enabled` | TRUE | input-uncertainty diagnostic PDFs |
 | balancing | `bm_price_sigma_capacity_pct` / `bm_price_sigma_activation_pct` | 25 / 35 | $\sigma^{\mathrm{cap}}, \sigma^{\mathrm{act}}$ (percent → fraction) |
 | balancing | `bm_mc_scenarios` / `bm_random_seed` | 200 / 1729 | balancing MC size / seed |
@@ -341,6 +390,7 @@ parameters.
 | tornado drivers | `sensitivity.run_sensitivity_analysis`, `_scale_capex`, `_scale_opex`, `_scale_revenue`, `_infer_aggregator_fee_frac`, `_rebuild_with_discount_rate`, `variables_for_npv_sensitivity`, `variables_for_irr_sensitivity` |
 | CLI/workbook merge | `pipeline._resolve_uncertainty_config` |
 | (U10)-(U11) | `economics.var_cvar` + `economics.npv_for_year1_revenue`; `pipeline._compute_risk_metrics`; scenario-set rows in `scenarios.run_scenarios` |
+| (U12) | `rolling_horizon.add_forecast_noise` (spawned-rng IDA block); `rolling_horizon_dispatch` annual Stage-2 pass; two-stage benchmark threading in `pipeline._run_one`; `monte_carlo_rolling` id_net_revenue_eur column |
 | TaxRate driver | `sensitivity.variables_for_npv_sensitivity` + the full-rebuild branch in `run_sensitivity_analysis`; post-tax line in `plotting.financial.plot_cumulative_cashflow` |
 
 ## Validation & tests

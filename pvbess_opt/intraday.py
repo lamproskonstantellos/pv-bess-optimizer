@@ -125,6 +125,9 @@ def redispatch_intraday(
     mip_gap: float = 0.001,
     time_limit_seconds: int = 1800,
     tee: bool = False,
+    initial_soc_kwh: float | None = None,
+    terminal_soc_free: bool | None = None,
+    terminal_soc_target_kwh: float | None = None,
 ) -> tuple[pd.DataFrame, str, pd.DataFrame]:
     """Run the Stage-2 intraday re-dispatch against ``da_res``.
 
@@ -185,5 +188,8 @@ def redispatch_intraday(
         mip_gap=mip_gap,
         time_limit_seconds=time_limit_seconds,
         tee=tee,
+        initial_soc_kwh=initial_soc_kwh,
+        terminal_soc_free=terminal_soc_free,
+        terminal_soc_target_kwh=terminal_soc_target_kwh,
         return_unrounded=True,
     )

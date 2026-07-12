@@ -213,18 +213,28 @@ def test_id_enabled_excludes_ppa_and_support():
         validate_workbook_params(typed, dt_minutes=60)
 
 
-def test_id_enabled_excludes_uncertainty_and_midlife():
+def test_id_enabled_excludes_imbalance_and_midlife():
     typed = _enabled_typed()
     typed["simulation"] = dict(
         typed["simulation"], uncertainty_enabled=True,
+        imbalance_enabled=True,
     )
-    with pytest.raises(ValueError, match="uncertainty_enabled"):
+    with pytest.raises(ValueError, match="imbalance_enabled"):
         validate_workbook_params(typed, dt_minutes=60)
 
     typed = _enabled_typed()
     typed["simulation"] = dict(typed["simulation"], midlife_resolve_year=8)
     with pytest.raises(ValueError, match="midlife_resolve_year"):
         validate_workbook_params(typed, dt_minutes=60)
+
+
+def test_id_enabled_combines_with_uncertainty():
+    """The two-stage Monte Carlo (Eq. U12) lifts the uncertainty gate."""
+    typed = _enabled_typed()
+    typed["simulation"] = dict(
+        typed["simulation"], uncertainty_enabled=True,
+    )
+    validate_workbook_params(typed, dt_minutes=60)
 
 
 def test_ida_price_deck_variant_column_accepted(tmp_path):

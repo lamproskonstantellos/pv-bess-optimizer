@@ -484,6 +484,12 @@ SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_sigma_dam": 0.20,
     "uncertainty_sigma_pv": 0.12,
     "uncertainty_sigma_load": 0.05,
+    # Intraday auction price noise (Eq. U12): meaningful only when
+    # id_enabled and uncertainty_enabled are both TRUE.  Lower default
+    # sigma than the DAM — intraday commitment happens closer to
+    # delivery.
+    "uncertainty_ida_enabled": True,
+    "uncertainty_sigma_ida": 0.15,
     "uncertainty_diagnostics_enabled": True,
     # Ex-post imbalance settlement of forecast-error deviations
     # (Eqs. U6-U9); requires the rolling-horizon Monte Carlo.
@@ -536,6 +542,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "uncertainty_dam_enabled",
     "uncertainty_pv_enabled",
     "uncertainty_load_enabled",
+    "uncertainty_ida_enabled",
     "uncertainty_diagnostics_enabled",
     "imbalance_enabled",
     "balancing_enabled",
@@ -1205,6 +1212,14 @@ _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Log-normal sigma for PV. Default 0.12 (NREL day-ahead PV study)."),
     ("uncertainty_sigma_load", 0.05, "-",
      "Log-normal sigma for Load. Default 0.05 (predictable customer benchmark)."),
+    ("uncertainty_ida_enabled", True, "bool",
+     "Apply forecast noise to the intraday auction price within the "
+     "rolling-horizon Monte Carlo (Eq. U12). Meaningful only when "
+     "id_enabled and uncertainty_enabled are both TRUE."),
+    ("uncertainty_sigma_ida", 0.15, "-",
+     "Log-normal sigma for the intraday auction price beyond the "
+     "commit horizon. Default 0.15, below sigma_dam - intraday "
+     "commitment happens closer to delivery."),
     ("uncertainty_diagnostics_enabled", True, "bool",
      "Render the forecast-calibration diagnostic plots (coverage, PIT, "
      "CRPS, residual Q-Q) into 06_uncertainty_plots/. Default TRUE."),
@@ -3347,13 +3362,15 @@ def _validate_intraday_config(
                 "of the two."
             )
     if simulation is not None:
-        if bool(simulation.get("uncertainty_enabled", False)):
+        if bool(simulation.get("imbalance_enabled", False)):
             raise ValueError(
-                "id_enabled cannot combine with uncertainty_enabled = "
-                "TRUE yet: the rolling-horizon Monte Carlo runs "
-                "single-stage and its foresight benchmark would be "
-                "inconsistent with the two-stage headline results; "
-                "disable one of the two."
+                "id_enabled cannot combine with imbalance_enabled = "
+                "TRUE: the Stage-2 re-dispatch intentionally deviates "
+                "from the day-ahead nomination, so the imbalance "
+                "settlement would charge the intraday trades as "
+                "forecast error; disable one of the two (settling the "
+                "residual error after intraday trading is future "
+                "work)."
             )
         if int(simulation.get("midlife_resolve_year", 0) or 0) > 0:
             raise ValueError(

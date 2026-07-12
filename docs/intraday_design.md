@@ -55,14 +55,21 @@ availability-derate story exact.
 - Mutually exclusive with `balancing_enabled` (reservations commit
   day-ahead; a combined two-venue re-dispatch would re-decide them),
   with `ppa_enabled` and the support schemes (both settle volumes the
-  re-dispatch would move), with `uncertainty_enabled` (the
-  rolling-horizon Monte Carlo is single-stage until the two-stage
-  benchmark lands) and with `midlife_resolve_year` (the diagnostic
-  re-solves the day-ahead stage only).
+  re-dispatch would move), with `imbalance_enabled` (the Stage-2
+  re-dispatch intentionally deviates from the day-ahead nomination,
+  so the settlement would charge the trades as forecast error;
+  settling the residual error after intraday trading is future work)
+  and with `midlife_resolve_year` (the diagnostic re-solves the
+  day-ahead stage only).
+- The rolling-horizon Monte Carlo COMBINES with the venue as a
+  two-stage ensemble (Eq. U12, `docs/uncertainty_design.md`): noisy
+  Stage-1 windows plus one annual Stage-2 pass per seed against
+  actual intraday prices, compared against the two-stage
+  perfect-foresight benchmark.
 - Stage 2 runs deterministically against actual IDA prices, defensible
   because intraday trades commit close to delivery; forecast noise on
-  the IDA column is wired into the rolling-horizon machinery as mild
-  optimism is quantified there (`docs/uncertainty_design.md`).
+  the IDA column rides the rolling-horizon machinery and the residual
+  optimism is documented there (`docs/uncertainty_design.md`).
 - `id_max_deviation_frac_of_cap = 0` disables trading: the pipeline
   skips the Stage-2 solve (the committed dispatch is already the
   result) instead of pinning every flow to a zero-slack equality.

@@ -1435,6 +1435,13 @@ def _resolve_uncertainty_config(
             "merchant mode: ignoring uncertainty_load_enabled (no load to perturb)"
         )
         enable_load = False
+    # Intraday-price noise (Eq. U12) is meaningful only on two-stage
+    # runs: force the flag off when the venue is off so an idle
+    # ida_price column can never perturb the rng stream of a
+    # pre-existing seed.
+    enable_ida = bool(econ.get("uncertainty_ida_enabled", True)) and bool(
+        econ.get("id_enabled", False)
+    )
     return {
         "enabled": enabled,
         "compare_sources": compare,
@@ -1444,9 +1451,11 @@ def _resolve_uncertainty_config(
         "enable_dam": enable_dam,
         "enable_pv": enable_pv,
         "enable_load": enable_load,
+        "enable_ida": enable_ida,
         "sigma_dam": float(econ.get("uncertainty_sigma_dam", 0.20) or 0.20),
         "sigma_pv": float(econ.get("uncertainty_sigma_pv", 0.12) or 0.12),
         "sigma_load": float(econ.get("uncertainty_sigma_load", 0.05) or 0.05),
+        "sigma_ida": float(econ.get("uncertainty_sigma_ida", 0.15) or 0.15),
         # Ex-post imbalance settlement (Eqs. U6-U9); the loader has
         # already validated the coupling to the rolling-horizon MC.
         "imbalance_enabled": bool(econ.get("imbalance_enabled", False)),
@@ -1622,6 +1631,39 @@ def _run_one(
             _solve_perfect_foresight(config.mip_gap)
         )
 
+        # Intraday Stage-2 re-dispatch (Eqs. I1-I5): re-solve with the
+        # committed day-ahead position pinned; the Stage-2 frame and
+        # KPIs become the headline result so cycles, degradation, the
+        # financial stack AND the rolling-horizon foresight benchmark
+        # below all reflect the combined DA + ID operation (the
+        # two-stage seeds must compare against a two-stage benchmark,
+        # Eq. U12).  The loader gates guarantee merchant mode with
+        # balancing, PPA/support, imbalance and the mid-life diagnostic
+        # off.  A zero deviation fraction disables trading, so the
+        # committed dispatch is already the Stage-2 result.
+        _id_raw = params.get("intraday") or {}
+        _id_two_stage = bool(_id_raw.get("id_enabled", False)) and (
+            float(_id_raw.get("id_max_deviation_frac_of_cap", 0.25) or 0.0)
+            > 0.0
+        )
+        if bool(_id_raw.get("id_enabled", False)) and not _id_two_stage:
+            logger.info(
+                "[intraday] id_max_deviation_frac_of_cap = 0 disables "
+                "trading; the committed day-ahead dispatch is already "
+                "the Stage-2 result, so the re-solve is skipped."
+            )
+        if _id_two_stage:
+            _stage1_profit = float(kpis.get("profit_total_eur", 0.0))
+            # Pin the FULL-PRECISION Stage-1 dispatch: the linking
+            # constraints are equalities, and round(4) noise would
+            # have to be absorbed by spurious micro-trades.
+            res, resolved_solver, kpis, kpis_monthly = (
+                _run_intraday_stage2(params, ts, res_full, config)
+            )
+            # Stage-1 (day-ahead only) profit in the same derated
+            # scope, for the two-stage uplift audit in the KPI sheet.
+            kpis["id_stage1_profit_total_eur"] = round(_stage1_profit, 2)
+
         # Optional rolling-horizon run (writes its KPIs alongside the
         # perfect-foresight benchmark for comparison).
         rolling_mc_df: pd.DataFrame | None = None
@@ -1667,9 +1709,11 @@ def _run_one(
                         sigma_dam=unc_cfg["sigma_dam"],
                         sigma_pv=unc_cfg["sigma_pv"],
                         sigma_load=unc_cfg["sigma_load"],
+                        sigma_ida=unc_cfg["sigma_ida"],
                         enable_dam=en_dam,
                         enable_pv=en_pv,
                         enable_load=en_load,
+                        enable_ida=unc_cfg["enable_ida"],
                         window_hours=window_h,
                         commit_hours=commit_h,
                         solver_name=config.solver,
@@ -1695,9 +1739,11 @@ def _run_one(
                     sigma_dam=unc_cfg["sigma_dam"],
                     sigma_pv=unc_cfg["sigma_pv"],
                     sigma_load=unc_cfg["sigma_load"],
+                    sigma_ida=unc_cfg["sigma_ida"],
                     enable_dam=unc_cfg["enable_dam"],
                     enable_pv=unc_cfg["enable_pv"],
                     enable_load=unc_cfg["enable_load"],
+                    enable_ida=unc_cfg["enable_ida"],
                     window_hours=window_h,
                     commit_hours=commit_h,
                     imbalance_enabled=unc_cfg["imbalance_enabled"],
@@ -1773,6 +1819,19 @@ def _run_one(
                 c_res, c_solver, c_kpis, c_monthly, c_bm, c_full = (
                     _solve_perfect_foresight(next_gap)
                 )
+                if _id_two_stage:
+                    # Two-stage benchmark (Eq. U12): the retightened
+                    # Stage-1 incumbent re-dispatches intraday so the
+                    # comparison stays two-stage vs two-stage.
+                    _c_stage1_profit = float(
+                        c_kpis.get("profit_total_eur", 0.0)
+                    )
+                    c_res, c_solver, c_kpis, c_monthly = (
+                        _run_intraday_stage2(params, ts, c_full, config)
+                    )
+                    c_kpis["id_stage1_profit_total_eur"] = round(
+                        _c_stage1_profit, 2,
+                    )
                 new_pf = float(c_kpis.get("profit_total_eur", 0.0))
                 if new_pf <= pf_profit_eur + _PF_IMPROVEMENT_EPS_EUR:
                     print(
@@ -1863,40 +1922,6 @@ def _run_one(
                 kpis["mc_commit_hours"] = int(commit_h)
             if rh_det_profit is not None:
                 kpis["rolling_horizon_profit_eur"] = rh_det_profit
-
-        # Intraday Stage-2 re-dispatch (Eqs. I1-I5): re-solve with the
-        # committed day-ahead position pinned; the Stage-2 frame and
-        # KPIs become the headline result so cycles, degradation and
-        # the financial stack reflect the combined DA + ID operation.
-        # The loader gates guarantee merchant mode with balancing,
-        # PPA/support, uncertainty and the mid-life diagnostic off, so
-        # nothing downstream still points at the Stage-1 objects.
-        _id_raw = params.get("intraday") or {}
-        if bool(_id_raw.get("id_enabled", False)):
-            if (
-                float(_id_raw.get("id_max_deviation_frac_of_cap", 0.25) or 0.0)
-                <= 0.0
-            ):
-                logger.info(
-                    "[intraday] id_max_deviation_frac_of_cap = 0 "
-                    "disables trading; the committed day-ahead dispatch "
-                    "is already the Stage-2 result, so the re-solve is "
-                    "skipped."
-                )
-            else:
-                _stage1_profit = float(kpis.get("profit_total_eur", 0.0))
-                # Pin the FULL-PRECISION Stage-1 dispatch: the linking
-                # constraints are equalities, and round(4) noise would
-                # have to be absorbed by spurious micro-trades.
-                res, resolved_solver, kpis, kpis_monthly = (
-                    _run_intraday_stage2(params, ts, res_full, config)
-                )
-                # Stage-1 (day-ahead only) profit in the same derated
-                # scope, for the two-stage uplift audit in the KPI
-                # sheet.
-                kpis["id_stage1_profit_total_eur"] = round(
-                    _stage1_profit, 2,
-                )
 
         # Certified optimality gap the solver actually PROVED for the
         # (final) benchmark solve -- what a publication must quote,

@@ -185,6 +185,7 @@ def test_simulation_sheet_keys():
         "uncertainty_load_enabled",
         "uncertainty_sigma_dam", "uncertainty_sigma_pv",
         "uncertainty_sigma_load",
+        "uncertainty_ida_enabled", "uncertainty_sigma_ida",
         "uncertainty_diagnostics_enabled",
         "imbalance_enabled", "imbalance_pricing",
         "imbalance_price_mult_short", "imbalance_price_mult_long",

@@ -791,8 +791,9 @@ the feature.
   ``ida_price_eur_per_mwh`` timeseries column, ``mode = merchant``
   and a finite ``p_grid_export_max_kw``; mutually exclusive with
   ``balancing_enabled``, ``ppa_enabled``, the support schemes,
-  ``uncertainty_enabled`` and ``midlife_resolve_year`` (the v1 scope
-  gates — see ``docs/intraday_design.md``).
+  ``imbalance_enabled`` and ``midlife_resolve_year`` (the v1 scope
+  gates — see ``docs/intraday_design.md``).  Combines with the
+  rolling-horizon Monte Carlo as a two-stage ensemble (Eq. U12).
 * ``id_max_deviation_frac_of_cap`` (default 0.25, validated in
   ``[0, 1]``): per-step bound on the total traded intraday volume as
   a fraction of ``p_grid_export_max_kw`` x dt — a liquidity and
@@ -811,13 +812,17 @@ the feature.
 Sheet ``simulation``
 --------------------
 
-* The 12 ``uncertainty_*`` keys driving the rolling-horizon Monte
+* The 14 ``uncertainty_*`` keys driving the rolling-horizon Monte
   Carlo: ``uncertainty_enabled``, ``uncertainty_compare_sources``,
   ``uncertainty_n_seeds``, ``uncertainty_window_hours``,
   ``uncertainty_commit_hours``, ``uncertainty_dam_enabled``,
   ``uncertainty_pv_enabled``, ``uncertainty_load_enabled``,
   ``uncertainty_sigma_dam``, ``uncertainty_sigma_pv``,
-  ``uncertainty_sigma_load``, ``uncertainty_diagnostics_enabled``.
+  ``uncertainty_sigma_load``, ``uncertainty_ida_enabled``,
+  ``uncertainty_sigma_ida`` (intraday-price noise, Eq. U12 —
+  meaningful only with ``id_enabled``; default sigma 0.15, below the
+  DAM's because intraday commitment happens closer to delivery),
+  ``uncertainty_diagnostics_enabled``.
   Their defaults are tabulated in
   :doc:`/technical.documentation/uncertainty_modelling`.
 * ``plot_daily_scope`` / ``plot_monthly_scope`` /

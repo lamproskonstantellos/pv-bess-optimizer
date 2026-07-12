@@ -730,6 +730,13 @@ def build_model(
                 )
     big_m = derive_tight_big_m(params, ts, dt_h=dt_h, mode=mode)
 
+    # Intraday Stage-2 inputs (Eqs. I1-I5) — resolved up-front because
+    # the cycle caps below need the committed day-ahead discharge; the
+    # block's variables and constraints attach before the objective.
+    intraday_cfg, intraday_data, intraday_active = _resolve_intraday_inputs(
+        params, ts, mode=mode,
+    )
+
     m = pyo.ConcreteModel()
     m.T = pyo.RangeSet(0, n_steps - 1)
     m.mode = pyo.Param(initialize=mode, within=pyo.Any, mutable=False)
@@ -1110,10 +1117,28 @@ def build_model(
         )
 
         # --- Daily cycle limit ------------------------------------------------
+        # Stage-2 headroom: a stitched rolling-horizon commitment can
+        # exceed the daily cap across window seams (each window caps
+        # its OWN partial-day slice), so the pinned day-ahead discharge
+        # lifts the day's budget to the committed level — the
+        # re-dispatch can never ADD cycling beyond the operational cap,
+        # and the pinned schedule stays feasible.  Inactive venue (or a
+        # cap-respecting deterministic commitment) leaves the cap
+        # bit-identical.
         m.CYC = pyo.ConstraintList()
         for indices in day_to_idx.values():
             lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
-            m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * e_cap_param)
+            _cap_day = float(params["max_cycles_per_day"]) * e_cap_param
+            if intraday_active:
+                assert intraday_data is not None
+                _cap_day = max(
+                    _cap_day,
+                    sum(
+                        max(intraday_data["da_bess_export"][t], 0.0)
+                        for t in indices
+                    ),
+                )
+            m.CYC.add(lhs <= _cap_day)
 
         # --- Annual throughput cap (Eq. E46) ----------------------------------
         # Warranty limits are quoted in cycles per YEAR; the Year-1
@@ -1125,12 +1150,23 @@ def build_model(
             0.0 if raw_annual_cycles is None else float(raw_annual_cycles)
         )
         if max_cycles_per_year > 0.0:
+            _cap_annual = max_cycles_per_year * e_cap_param
+            if intraday_active:
+                # Same committed-schedule headroom as the daily cap.
+                assert intraday_data is not None
+                _cap_annual = max(
+                    _cap_annual,
+                    sum(
+                        max(intraday_data["da_bess_export"][t], 0.0)
+                        for t in range(n_steps)
+                    ),
+                )
             m.CYC_ANNUAL = pyo.Constraint(expr=(
                 sum(
                     m.bess_dis_load[t] + m.bess_dis_grid[t]
                     for t in range(n_steps)
                 )
-                <= max_cycles_per_year * e_cap_param
+                <= _cap_annual
             ))
 
     # --- Balancing-market constraints (gated) ---------------------------------
@@ -1345,9 +1381,6 @@ def build_model(
     # day-ahead leg plus the origin's intraday delta, so the unchanged
     # EXPORT_CAP / SOC / charge-limit families bound the combined
     # DA + ID operation (the S15/S16 basis is reused, Eq. I2).
-    intraday_cfg, intraday_data, intraday_active = _resolve_intraday_inputs(
-        params, ts, mode=mode,
-    )
     if intraday_active:
         assert intraday_data is not None
         if not np.isfinite(p_export) or p_export <= 0.0:
