@@ -79,6 +79,7 @@ from pvbess_opt.lifetime import (
 from pvbess_opt.modes import resolve_mode
 from pvbess_opt.optimization import (
     BALANCING_INVARIANT_KEYS,
+    INTRADAY_INVARIANT_KEYS,
     run_scenario,
     verify_dispatch_invariants,
 )
@@ -1038,6 +1039,53 @@ def _run_midlife_resolve(
     )
 
 
+def _run_intraday_stage2(
+    params: dict[str, Any],
+    ts: pd.DataFrame,
+    da_res: pd.DataFrame,
+    config: RunConfig,
+) -> tuple[pd.DataFrame, str, dict[str, Any], pd.DataFrame]:
+    """Run the intraday Stage-2 re-dispatch and its verification pass.
+
+    Mirrors the deterministic Stage-1 treatment exactly — energy
+    balance, dispatch invariants (incl. the INV-I family), KPIs with
+    the operating derates, monthly KPIs — so the Stage-2 frame can
+    replace the headline result with identical semantics
+    (Eqs. I1-I5; docs/intraday_design.md).
+    """
+    from .intraday import redispatch_intraday
+
+    res2, resolved2, res2_full = redispatch_intraday(
+        params, ts, da_res,
+        solver_name=config.solver,
+        mip_gap=config.mip_gap,
+        time_limit_seconds=config.time_limit,
+        tee=config.tee,
+    )
+    residuals = verify_energy_balance(
+        res2_full, params, raise_on_failure=False,
+    )
+    print(
+        "[verify:intraday] residuals(kWh): "
+        + ", ".join(f"{k}={v:.3g}" for k, v in residuals.items())
+    )
+    if config.strict:
+        _check_strict_energy_balance(residuals)
+    invariants = verify_dispatch_invariants(
+        res2_full, params, mode=resolve_mode(params),
+    )
+    print(
+        "[invariants:intraday] "
+        + ", ".join(f"{k}={v:.3g}" for k, v in invariants.items())
+    )
+    if config.strict:
+        _check_strict_invariants(invariants)
+    kpis2 = compute_kpis(res2, params, verify_balance=False)
+    kpis2 = apply_operating_derates(kpis2, params)
+    _emit_bess_utilisation_audit(kpis2, params)
+    kpis_monthly2 = compute_monthly_kpis(res2)
+    return res2, resolved2, kpis2, kpis_monthly2
+
 
 def _compute_risk_metrics(
     rolling_mc_df: pd.DataFrame | None,
@@ -1154,7 +1202,10 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
     # stay aligned with the loader's epsilon (_validate_balancing_config).
     bal_b1 = "invariant_b1_capacity_share_sum_pct_excess"
     bal_b2 = "invariant_b2_reservation_share_cap_excess_kw"
-    skip_keys = {"invariant_5_no_sim_grid_io_max_product_kwh2", bal_b1, bal_b2}
+    id_i3 = "invariant_i3_sell_buy_overlap_kwh2"
+    skip_keys = {
+        "invariant_5_no_sim_grid_io_max_product_kwh2", bal_b1, bal_b2, id_i3,
+    }
     offenders = {
         k: v for k, v in invariants.items()
         if v > tol and k not in skip_keys
@@ -1167,13 +1218,21 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
         offenders[bal_b1] = float(invariants[bal_b1])
     if invariants.get(bal_b2, 0.0) > tol:
         offenders[bal_b2] = float(invariants[bal_b2])
+    # Intraday overlap (Eq. I5) is a kWh^2 product like invariant 5.
+    if invariants.get(id_i3, 0.0) > tol ** 2:
+        offenders[id_i3] = float(invariants[id_i3])
     # Sanity guard against API drift — the verifier must always emit
-    # every balancing-invariant key, even when the block did not fire.
-    missing = [k for k in BALANCING_INVARIANT_KEYS if k not in invariants]
+    # every balancing- and intraday-invariant key, even when the block
+    # did not fire.
+    missing = [
+        k
+        for k in (*BALANCING_INVARIANT_KEYS, *INTRADAY_INVARIANT_KEYS)
+        if k not in invariants
+    ]
     if missing:
         raise AssertionError(
-            "verify_dispatch_invariants is missing balancing-invariant "
-            f"keys: {missing}"
+            "verify_dispatch_invariants is missing balancing/intraday "
+            f"invariant keys: {missing}"
         )
     if offenders:
         raise AssertionError(
@@ -1496,6 +1555,7 @@ def _run_one(
         # PF-feasible), and the benchmark must remain the best case.
         def _solve_perfect_foresight(mip_gap: float) -> tuple[
             pd.DataFrame, str, dict[str, Any], pd.DataFrame, dict[str, Any],
+            pd.DataFrame,
         ]:
             res, resolved_solver, res_full = run_scenario(
                 params, ts, solver_name=config.solver,
@@ -1552,9 +1612,13 @@ def _run_one(
                     key: value for key, value in bm_mc.items()
                     if key != "bm_mc_total_realised_eur"
                 })
-            return res, resolved_solver, kpis, kpis_monthly, bm_mc
+            # res_full rides along for consumers that need the
+            # unrounded dispatch (the intraday Stage-2 pins committed
+            # flows as equalities — round(4) noise there would have to
+            # be absorbed by spurious micro-trades).
+            return res, resolved_solver, kpis, kpis_monthly, bm_mc, res_full
 
-        res, resolved_solver, kpis, kpis_monthly, bm_mc = (
+        res, resolved_solver, kpis, kpis_monthly, bm_mc, res_full = (
             _solve_perfect_foresight(config.mip_gap)
         )
 
@@ -1706,7 +1770,7 @@ def _run_one(
                     f"model error) -- re-solving the benchmark at "
                     f"mip_gap={next_gap:g}"
                 )
-                c_res, c_solver, c_kpis, c_monthly, c_bm = (
+                c_res, c_solver, c_kpis, c_monthly, c_bm, c_full = (
                     _solve_perfect_foresight(next_gap)
                 )
                 new_pf = float(c_kpis.get("profit_total_eur", 0.0))
@@ -1723,8 +1787,8 @@ def _run_one(
                         f"gap."
                     )
                     break
-                res, resolved_solver, kpis, kpis_monthly, bm_mc = (
-                    c_res, c_solver, c_kpis, c_monthly, c_bm
+                res, resolved_solver, kpis, kpis_monthly, bm_mc, res_full = (
+                    c_res, c_solver, c_kpis, c_monthly, c_bm, c_full
                 )
                 pf_profit_eur = new_pf
                 pf_gap_used = next_gap
@@ -1799,6 +1863,40 @@ def _run_one(
                 kpis["mc_commit_hours"] = int(commit_h)
             if rh_det_profit is not None:
                 kpis["rolling_horizon_profit_eur"] = rh_det_profit
+
+        # Intraday Stage-2 re-dispatch (Eqs. I1-I5): re-solve with the
+        # committed day-ahead position pinned; the Stage-2 frame and
+        # KPIs become the headline result so cycles, degradation and
+        # the financial stack reflect the combined DA + ID operation.
+        # The loader gates guarantee merchant mode with balancing,
+        # PPA/support, uncertainty and the mid-life diagnostic off, so
+        # nothing downstream still points at the Stage-1 objects.
+        _id_raw = params.get("intraday") or {}
+        if bool(_id_raw.get("id_enabled", False)):
+            if (
+                float(_id_raw.get("id_max_deviation_frac_of_cap", 0.25) or 0.0)
+                <= 0.0
+            ):
+                logger.info(
+                    "[intraday] id_max_deviation_frac_of_cap = 0 "
+                    "disables trading; the committed day-ahead dispatch "
+                    "is already the Stage-2 result, so the re-solve is "
+                    "skipped."
+                )
+            else:
+                _stage1_profit = float(kpis.get("profit_total_eur", 0.0))
+                # Pin the FULL-PRECISION Stage-1 dispatch: the linking
+                # constraints are equalities, and round(4) noise would
+                # have to be absorbed by spurious micro-trades.
+                res, resolved_solver, kpis, kpis_monthly = (
+                    _run_intraday_stage2(params, ts, res_full, config)
+                )
+                # Stage-1 (day-ahead only) profit in the same derated
+                # scope, for the two-stage uplift audit in the KPI
+                # sheet.
+                kpis["id_stage1_profit_total_eur"] = round(
+                    _stage1_profit, 2,
+                )
 
         # Certified optimality gap the solver actually PROVED for the
         # (final) benchmark solve -- what a publication must quote,

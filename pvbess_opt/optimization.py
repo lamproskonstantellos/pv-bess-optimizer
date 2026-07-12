@@ -85,6 +85,11 @@ from .balancing import (
     resolve_balancing_timeseries,
 )
 from .constants import DEFAULT_MAX_INJECTION_PCT_HOURLY
+from .intraday import (
+    DA_POSITION_COLUMNS,
+    IntradayConfig,
+    resolve_intraday_config,
+)
 from .kpis import ENERGY_TOLERANCE, _balancing_soc_drift
 from .max_injection import build_per_step_max_injection_frac
 from .modes import resolve_mode
@@ -108,6 +113,13 @@ __all__ = [
 # Tiny tie-breaker on ``pv_curtail`` for determinism under degeneracy.
 # Set to 0.0 to disable.  NOT a constraint substitute.
 _WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH: float = 1.0e-5
+
+# Tiny tie-breaker on traded intraday volume so a zero-spread step
+# deterministically trades nothing (Eq. I3 gains 0 there and the
+# complementarity alone leaves one-sided volume degenerate).  An order
+# of magnitude below the curtail tie-break; a spread must exceed
+# ~0.001 EUR/MWh to beat it, far under any economic signal.
+_WEIGHT_ID_TIEBREAK_EUR_PER_KWH: float = 1.0e-6
 
 # Once-per-process latch for the merchant grid_cap_includes_load no-op
 # warning — build_model runs per rolling-horizon window, so an unlatched
@@ -401,6 +413,53 @@ def _resolve_balancing_inputs(
 def _alpha_beta(cfg: BalancingConfig, product: str) -> float:
     """Return alpha_k * beta_k for the expected-activation SOC drift."""
     return acceptance_probability(cfg, product) * activation_probability(cfg, product)
+
+
+def _resolve_intraday_inputs(
+    params: dict[str, Any],
+    ts: pd.DataFrame,
+    *,
+    mode: str,
+) -> tuple[IntradayConfig, dict[str, dict[int, float]] | None, bool]:
+    """Return the parsed intraday config, per-step data, and an active flag.
+
+    The intraday block attaches ONLY on the Stage-2 solve of a two-stage
+    run: ``id_enabled`` must be set, the mode merchant, and the four
+    committed day-ahead position columns (Eq. I1) plus the IDA price
+    present in the timeseries.  A Stage-1 solve of the same run carries
+    the price but not the position columns, so it builds the unchanged
+    day-ahead model — bit-identical topology.
+    """
+    cfg = resolve_intraday_config(params.get("intraday") or {})
+    if not cfg.id_enabled or mode != "merchant":
+        return cfg, None, False
+    if cfg.id_max_deviation_frac_of_cap <= 0.0:
+        # Zero deviation budget disables trading; the caller skips the
+        # Stage-2 solve (see intraday.redispatch_intraday), and a
+        # zero-slack equality block would only inject infeasibility.
+        return cfg, None, False
+    if "ida_price_eur_per_mwh" not in ts.columns:
+        return cfg, None, False
+    if any(col not in ts.columns for col in DA_POSITION_COLUMNS):
+        return cfg, None, False
+    time_index = range(len(ts))
+    data = {
+        "ida_price": {
+            t: float(ts.loc[t, "ida_price_eur_per_mwh"])
+            if pd.notna(ts.loc[t, "ida_price_eur_per_mwh"]) else 0.0
+            for t in time_index
+        },
+        "da_pv_export": {
+            t: float(ts.loc[t, "id_da_pv_export_kwh"]) for t in time_index
+        },
+        "da_bess_export": {
+            t: float(ts.loc[t, "id_da_bess_export_kwh"]) for t in time_index
+        },
+        "da_grid_charge": {
+            t: float(ts.loc[t, "id_da_grid_charge_kwh"]) for t in time_index
+        },
+    }
+    return cfg, data, True
 
 
 def derive_tight_big_m(
@@ -1277,6 +1336,97 @@ def build_model(
             rule=lambda m, t: pv[t] <= big_m["M_pv"] * m.z_pv_active[t],
         )
 
+    # --- Intraday re-dispatch block (Stage 2 only; Eqs. I1-I5) ------------
+    # Attaches only when the committed day-ahead position is pinned in
+    # the timeseries (see _resolve_intraday_inputs): the Stage-1 solve
+    # of a two-stage run builds the unchanged day-ahead model.  Every
+    # intraday trade is a physical flow change (Eq. I5): the linking
+    # constraints equate each origin's Stage-2 flow to its committed
+    # day-ahead leg plus the origin's intraday delta, so the unchanged
+    # EXPORT_CAP / SOC / charge-limit families bound the combined
+    # DA + ID operation (the S15/S16 basis is reused, Eq. I2).
+    intraday_cfg, intraday_data, intraday_active = _resolve_intraday_inputs(
+        params, ts, mode=mode,
+    )
+    if intraday_active:
+        assert intraday_data is not None
+        if not np.isfinite(p_export) or p_export <= 0.0:
+            # The loader rejects this combination; re-checked for
+            # direct build_model callers because the deviation cap is
+            # defined as a fraction of the export cap.
+            raise ValueError(
+                "id_enabled requires a finite positive "
+                "p_grid_export_max_kw (the intraday deviation cap is a "
+                "fraction of it)."
+            )
+        _ida_price = intraday_data["ida_price"]
+        _da_pv = intraday_data["da_pv_export"]
+        _da_bess = intraday_data["da_bess_export"]
+        _da_charge = intraday_data["da_grid_charge"]
+        # Per-step deviation budget (Eq. I2): a fraction of the
+        # connection-cap energy per step.  Also the tight big-M of the
+        # sell/buy gates below.
+        id_dev_cap_kwh = float(
+            intraday_cfg.id_max_deviation_frac_of_cap * p_export * dt_h
+        )
+        m.id_sell_pv = pyo.Var(
+            m.T, domain=pyo.NonNegativeReals, bounds=(0.0, id_dev_cap_kwh),
+        )
+        m.id_sell_bess = pyo.Var(
+            m.T, domain=pyo.NonNegativeReals, bounds=(0.0, id_dev_cap_kwh),
+        )
+        m.id_buy_pv = pyo.Var(
+            m.T, domain=pyo.NonNegativeReals, bounds=(0.0, id_dev_cap_kwh),
+        )
+        m.id_buy_bess = pyo.Var(
+            m.T, domain=pyo.NonNegativeReals, bounds=(0.0, id_dev_cap_kwh),
+        )
+        # Origin linking (Eqs. I1/I4): PV-origin export deviates from
+        # the committed PV leg by the PV-side trades; the BESS-origin
+        # net position (discharge minus grid charge) deviates from its
+        # committed net leg by the BESS-side trades.  Summing both
+        # recovers the net-position identity
+        # g_t - g_DA_t = id_sell_t - id_buy_t.
+        m.ID_LINK_PV = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.pv_to_grid[t]
+                == _da_pv[t] + m.id_sell_pv[t] - m.id_buy_pv[t]
+            ),
+        )
+        m.ID_LINK_BESS = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.bess_dis_grid[t] - m.grid_to_bess[t]
+                == (_da_bess[t] - _da_charge[t])
+                + m.id_sell_bess[t] - m.id_buy_bess[t]
+            ),
+        )
+        # Deviation cap + no-wash-trading complementarity (Eqs. I2/I5):
+        # one binary per step gates sells and buys to disjoint steps,
+        # and the shared big-M IS the deviation budget, so the pair
+        # jointly enforces id_sell_t + id_buy_t <= delta * P^G * dt.
+        m.y_id = pyo.Var(m.T, domain=pyo.Binary)
+        m.ID_SELL_GATE = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.id_sell_pv[t] + m.id_sell_bess[t]
+                <= id_dev_cap_kwh * m.y_id[t]
+            ),
+        )
+        m.ID_BUY_GATE = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.id_buy_pv[t] + m.id_buy_bess[t]
+                <= id_dev_cap_kwh * (1 - m.y_id[t])
+            ),
+        )
+        if not intraday_cfg.id_allow_purchases:
+            m.ID_NO_BUY = pyo.Constraint(
+                m.T,
+                rule=lambda m, t: m.id_buy_pv[t] + m.id_buy_bess[t] == 0,
+            )
+
     # --- Objective: profit -----------------------------------------------
     curtail_tiebreak_term = _WEIGHT_CURTAIL_TIEBREAK_EUR_PER_KWH * sum(
         m.pv_curtail[t] for t in time_index
@@ -1416,6 +1566,40 @@ def build_model(
             expr=sum(cap_terms) + sum(act_terms),
         )
         profit_eur = profit_eur + m.balancing_revenue_expr
+
+    if intraday_active:
+        # Stage-2 settlement in spread form (Eq. I3): the export /
+        # grid-charge terms above already price every PHYSICAL flow at
+        # the DAM, and dam*physical + (ida-dam)*(sell-buy) ==
+        # dam*g_DA + ida*(g - g_DA) — the committed position settles
+        # day-ahead, only the deviation trades at the IDA price.  The
+        # venue fee (Eq. E59) charges both trade directions; the wear
+        # term above already prices the INCREMENTAL Stage-2 throughput
+        # because it runs on physical discharge.
+        _id_fee = float(intraday_cfg.id_fee_eur_per_mwh)
+        m.intraday_margin_expr = pyo.Expression(
+            expr=(
+                sum(
+                    (float(_ida_price[t]) - float(dam_price[t]))
+                    * (
+                        m.id_sell_pv[t] + m.id_sell_bess[t]
+                        - m.id_buy_pv[t] - m.id_buy_bess[t]
+                    ) / 1000.0
+                    for t in time_index
+                )
+                - _id_fee * sum(
+                    m.id_sell_pv[t] + m.id_sell_bess[t]
+                    + m.id_buy_pv[t] + m.id_buy_bess[t]
+                    for t in time_index
+                ) / 1000.0
+            ),
+        )
+        id_tiebreak_term = _WEIGHT_ID_TIEBREAK_EUR_PER_KWH * sum(
+            m.id_sell_pv[t] + m.id_sell_bess[t]
+            + m.id_buy_pv[t] + m.id_buy_bess[t]
+            for t in time_index
+        )
+        profit_eur = profit_eur + m.intraday_margin_expr - id_tiebreak_term
 
     if hasattr(m, "year_close_shortfall"):
         # Missing the year-close SOC target costs far more than any
@@ -1650,6 +1834,34 @@ def model_to_dataframe(
     # CFE accounting. Absent unless the user supplies the time-series column.
     if "grid_co2_kg_per_mwh" in ts.columns:
         res["grid_co2_kg_per_mwh"] = ts["grid_co2_kg_per_mwh"].values
+    # Intraday auction price, echoed only when the venue's column exists
+    # so non-intraday dispatch frames stay bit-identical.
+    if "ida_price_eur_per_mwh" in ts.columns:
+        res["ida_price_eur_per_mwh"] = ts["ida_price_eur_per_mwh"].values
+
+    # Intraday trades (kWh per timestep, Eqs. I2-I5).  Only emitted when
+    # the MILP carried the Stage-2 intraday block; the committed
+    # day-ahead position columns (Eq. I1) are echoed alongside so the
+    # invariants and the settlement re-derivation are self-contained.
+    if hasattr(model, "id_sell_pv"):
+        res["id_sell_pv_kwh"] = [
+            pyo.value(model.id_sell_pv[t]) for t in time_index
+        ]
+        res["id_sell_bess_kwh"] = [
+            pyo.value(model.id_sell_bess[t]) for t in time_index
+        ]
+        res["id_buy_pv_kwh"] = [
+            pyo.value(model.id_buy_pv[t]) for t in time_index
+        ]
+        res["id_buy_bess_kwh"] = [
+            pyo.value(model.id_buy_bess[t]) for t in time_index
+        ]
+        res["id_buy_kwh"] = [
+            pyo.value(model.id_buy_pv[t]) + pyo.value(model.id_buy_bess[t])
+            for t in time_index
+        ]
+        for col in DA_POSITION_COLUMNS:
+            res[col] = ts[col].values
 
     # Balancing reservations (kW per timestep). Only emitted when the
     # MILP carried the balancing block — keeping the dispatch frame
@@ -1789,6 +2001,91 @@ BALANCING_INVARIANT_KEYS: tuple[str, ...] = (
     "invariant_b5_power_budget_excess_kwh",
     "invariant_b6_off_invariants_max_residual",
 )
+
+# Names of the four intraday-invariant residual keys (Eqs. I1-I5).
+# Reported as 0.0 (vacuously satisfied) whenever the Stage-2 intraday
+# block did not fire — the stable-contract convention of the balancing
+# family above.
+INTRADAY_INVARIANT_KEYS: tuple[str, ...] = (
+    "invariant_i1_position_link_kwh",
+    "invariant_i2_deviation_cap_excess_kwh",
+    "invariant_i3_sell_buy_overlap_kwh2",
+    "invariant_i4_origin_split_kwh",
+)
+
+
+def _intraday_invariants(
+    res: pd.DataFrame, params: dict[str, Any],
+) -> dict[str, float]:
+    """Compute the four INV-I1..INV-I4 intraday-invariant residuals.
+
+    * INV-I1 — net-position link (Eq. I1): the physical net grid
+      position deviates from the committed day-ahead position by
+      exactly ``id_sell - id_buy`` in every step.
+    * INV-I2 — deviation cap (Eq. I2): total traded volume per step
+      within ``id_max_deviation_frac_of_cap * p_grid_export_max_kw *
+      dt``.
+    * INV-I3 — no wash trading (Eq. I5): sells and buys never overlap
+      in a step (max of the per-step product, kWh^2 like invariant 5).
+    * INV-I4 — origin split (Eq. I4): each origin's Stage-2 flow equals
+      its committed day-ahead leg plus the origin's intraday delta.
+
+    Residuals are 0.0 when the dispatch frame carries no intraday
+    columns (venue off, or a Stage-1 frame of a two-stage run).
+    """
+    out: dict[str, float] = {k: 0.0 for k in INTRADAY_INVARIANT_KEYS}
+    needed = (
+        "id_sell_pv_kwh", "id_sell_bess_kwh",
+        "id_buy_pv_kwh", "id_buy_bess_kwh",
+        "id_da_position_kwh", "id_da_pv_export_kwh",
+        "id_da_bess_export_kwh", "id_da_grid_charge_kwh",
+    )
+    if any(col not in res.columns for col in needed):
+        return out
+
+    def _col(name: str) -> np.ndarray:
+        if name in res.columns:
+            return res[name].to_numpy(dtype=float)
+        return np.zeros(len(res), dtype=float)
+
+    sell = _col("id_sell_pv_kwh") + _col("id_sell_bess_kwh")
+    buy = _col("id_buy_pv_kwh") + _col("id_buy_bess_kwh")
+    physical_net = (
+        _col("pv_to_grid_kwh") + _col("bess_dis_grid_kwh")
+        - _col("bess_charge_grid_kwh")
+    )
+    da_pos = _col("id_da_position_kwh")
+
+    out["invariant_i1_position_link_kwh"] = float(
+        np.abs(physical_net - da_pos - (sell - buy)).max(initial=0.0)
+    )
+
+    cfg = resolve_intraday_config(params.get("intraday") or {})
+    p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
+    dt_h = dt_hours_from(params)
+    if np.isfinite(p_export) and p_export > 0.0:
+        dev_cap = float(cfg.id_max_deviation_frac_of_cap * p_export * dt_h)
+        out["invariant_i2_deviation_cap_excess_kwh"] = float(
+            np.maximum(0.0, sell + buy - dev_cap).max(initial=0.0)
+        )
+
+    out["invariant_i3_sell_buy_overlap_kwh2"] = float(
+        (sell * buy).max(initial=0.0)
+    )
+
+    pv_link = np.abs(
+        _col("pv_to_grid_kwh") - _col("id_da_pv_export_kwh")
+        - _col("id_sell_pv_kwh") + _col("id_buy_pv_kwh")
+    )
+    bess_link = np.abs(
+        (_col("bess_dis_grid_kwh") - _col("bess_charge_grid_kwh"))
+        - (_col("id_da_bess_export_kwh") - _col("id_da_grid_charge_kwh"))
+        - _col("id_sell_bess_kwh") + _col("id_buy_bess_kwh")
+    )
+    out["invariant_i4_origin_split_kwh"] = float(
+        max(pv_link.max(initial=0.0), bess_link.max(initial=0.0))
+    )
+    return out
 
 
 def _balancing_invariants(
@@ -2150,4 +2447,9 @@ def verify_dispatch_invariants(
         res, params,
         general_invariants=general_invariants,
     )
-    return {**general_invariants, **balancing_invariants}
+    intraday_invariants = _intraday_invariants(res, params)
+    return {
+        **general_invariants,
+        **balancing_invariants,
+        **intraday_invariants,
+    }

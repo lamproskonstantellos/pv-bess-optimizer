@@ -120,6 +120,8 @@ def test_params_carry_intraday_section(tmp_path):
 
 def test_id_enabled_requires_ida_price_column(tmp_path):
     typed = _minimal_typed()
+    typed["project"] = dict(typed["project"])
+    typed["project"]["mode"] = "merchant"
     typed["intraday"] = dict(INTRADAY_SHEET_DEFAULTS, id_enabled=True)
     dst = tmp_path / "missing_col.xlsx"
     write_workbook(typed, dst)
@@ -129,6 +131,8 @@ def test_id_enabled_requires_ida_price_column(tmp_path):
 
 def test_id_enabled_with_column_loads_and_logs_cadence(tmp_path, caplog):
     typed = _minimal_typed(with_ida_column=True)
+    typed["project"] = dict(typed["project"])
+    typed["project"]["mode"] = "merchant"
     typed["intraday"] = dict(INTRADAY_SHEET_DEFAULTS, id_enabled=True)
     dst = tmp_path / "hourly.xlsx"
     write_workbook(typed, dst)
@@ -155,6 +159,71 @@ def test_negative_fee_rejected():
     typed = _minimal_typed()
     typed["intraday"] = dict(INTRADAY_SHEET_DEFAULTS, id_fee_eur_per_mwh=-1.0)
     with pytest.raises(ValueError, match="id_fee_eur_per_mwh"):
+        validate_workbook_params(typed, dt_minutes=60)
+
+
+def _enabled_typed(**project_overrides) -> dict:
+    """Merchant typed dict with the venue armed (v1-gate fixtures)."""
+    typed = _minimal_typed(with_ida_column=True)
+    typed["project"] = dict(typed["project"])
+    typed["project"]["mode"] = "merchant"
+    typed["project"].update(project_overrides)
+    typed["intraday"] = dict(INTRADAY_SHEET_DEFAULTS, id_enabled=True)
+    return typed
+
+
+def test_id_enabled_requires_merchant_mode():
+    typed = _enabled_typed(mode="self_consumption")
+    with pytest.raises(ValueError, match="mode = 'merchant'"):
+        validate_workbook_params(typed, dt_minutes=60)
+
+
+def test_id_enabled_requires_finite_export_cap():
+    typed = _enabled_typed(p_grid_export_max_kw=float("inf"))
+    with pytest.raises(ValueError, match="finite positive"):
+        validate_workbook_params(typed, dt_minutes=60)
+
+
+def test_id_enabled_excludes_balancing():
+    typed = _enabled_typed()
+    from pvbess_opt.io import BALANCING_SHEET_DEFAULTS
+
+    typed["balancing"] = dict(
+        BALANCING_SHEET_DEFAULTS, balancing_enabled=True,
+    )
+    with pytest.raises(ValueError, match="balancing_enabled"):
+        validate_workbook_params(typed, dt_minutes=60)
+
+
+def test_id_enabled_excludes_ppa_and_support():
+    from pvbess_opt.io import PPA_SHEET_DEFAULTS
+
+    typed = _enabled_typed()
+    typed["ppa"] = dict(PPA_SHEET_DEFAULTS, ppa_enabled=True)
+    with pytest.raises(ValueError, match="ppa_enabled"):
+        validate_workbook_params(typed, dt_minutes=60)
+
+    typed = _enabled_typed()
+    typed["ppa"] = dict(
+        PPA_SHEET_DEFAULTS,
+        support_scheme="sliding_fip",
+        support_strike_eur_per_mwh=60.0,
+    )
+    with pytest.raises(ValueError, match="support_scheme"):
+        validate_workbook_params(typed, dt_minutes=60)
+
+
+def test_id_enabled_excludes_uncertainty_and_midlife():
+    typed = _enabled_typed()
+    typed["simulation"] = dict(
+        typed["simulation"], uncertainty_enabled=True,
+    )
+    with pytest.raises(ValueError, match="uncertainty_enabled"):
+        validate_workbook_params(typed, dt_minutes=60)
+
+    typed = _enabled_typed()
+    typed["simulation"] = dict(typed["simulation"], midlife_resolve_year=8)
+    with pytest.raises(ValueError, match="midlife_resolve_year"):
         validate_workbook_params(typed, dt_minutes=60)
 
 
@@ -196,6 +265,8 @@ def test_scenario_dotted_override_reaches_intraday_sheet(tmp_path):
 def test_yaml_round_trip_preserves_intraday_values(tmp_path):
     dst = tmp_path / "wb.xlsx"
     typed = _minimal_typed(with_ida_column=True)
+    typed["project"] = dict(typed["project"])
+    typed["project"]["mode"] = "merchant"
     typed["intraday"] = dict(
         INTRADAY_SHEET_DEFAULTS,
         id_enabled=True,

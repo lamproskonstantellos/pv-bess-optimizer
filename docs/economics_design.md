@@ -21,7 +21,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | `self_consumption_design.md` | system/dispatch constraints (shared with merchant mode) | S36 |
 | B | `balancing_market_design.md` | balancing product structure | B10 |
-| I | `intraday_design.md` | intraday venue (two-stage re-dispatch) | I1 |
+| I | `intraday_design.md` | intraday venue (two-stage re-dispatch) | I5 |
 
 New equations take the next free tag in their namespace at merge time
 and add a row to the owning document's implementation map.

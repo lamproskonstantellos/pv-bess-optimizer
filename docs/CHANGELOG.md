@@ -4,6 +4,37 @@
 
 Production release.
 
+### Added (two-stage intraday re-dispatch)
+
+- The intraday auction (IDA) as a second wholesale venue via two-stage
+  sequential re-dispatch (Eqs. I1-I5, `docs/intraday_design.md`):
+  Stage 1 is the unchanged day-ahead solve; Stage 2 re-solves the same
+  model with the committed day-ahead net position pinned as data
+  (`pvbess_opt/intraday.py`: config resolver, position extractor,
+  Stage-2 driver) and an intraday block added — per-origin IDA
+  sells/buys linked to physical flows, a deviation cap as a fraction
+  of the export cap, and a per-step complementarity binary excluding
+  wash trades.  The objective adds the spread margin net of the venue
+  fee, so the committed position settles day-ahead and only the
+  deviation trades at the IDA price; the wear-cost term prices the
+  incremental Stage-2 throughput automatically.
+- `pipeline._run_one` re-solves after the deterministic Stage-1 run
+  and the Stage-2 frame becomes the headline result (cycles,
+  degradation, KPIs and the financial stack see the combined DA + ID
+  operation); the Stage-1 profit is kept as
+  `id_stage1_profit_total_eur`.  New Year-1 KPI keys
+  (`id_net_revenue_eur`, `id_venue_fee_eur`, `id_sell_mwh`,
+  `id_buy_mwh`, `id_traded_volume_mwh`, `id_sell_pv_mwh`,
+  `id_sell_bess_mwh`) and per-step settlement columns
+  (`id_revenue_eur`, `id_fee_eur`) appear only on intraday runs.
+- `verify_dispatch_invariants` gains the INV-I1..INV-I4 family
+  (position link, deviation cap, sell/buy overlap, origin split),
+  reported as 0.0 when the venue is off; strict mode treats the
+  overlap product with the kWh^2 tolerance of invariant 5.
+- v1 scope gates at load time: merchant mode only, finite export cap,
+  and mutual exclusivity with balancing, PPA/support schemes, the
+  rolling-horizon Monte Carlo and the mid-life re-solve diagnostic.
+
 ### Added (intraday venue input surface)
 
 - The optional `intraday` workbook sheet (5 keys, master-switch

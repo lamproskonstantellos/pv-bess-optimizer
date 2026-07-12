@@ -788,8 +788,11 @@ shipped default) leaves every output bit-identical to a build without
 the feature.
 
 * ``id_enabled``: master switch (default FALSE).  Requires the
-  ``ida_price_eur_per_mwh`` timeseries column and ``mode =
-  merchant``.
+  ``ida_price_eur_per_mwh`` timeseries column, ``mode = merchant``
+  and a finite ``p_grid_export_max_kw``; mutually exclusive with
+  ``balancing_enabled``, ``ppa_enabled``, the support schemes,
+  ``uncertainty_enabled`` and ``midlife_resolve_year`` (the v1 scope
+  gates — see ``docs/intraday_design.md``).
 * ``id_max_deviation_frac_of_cap`` (default 0.25, validated in
   ``[0, 1]``): per-step bound on the total traded intraday volume as
   a fraction of ``p_grid_export_max_kw`` x dt — a liquidity and

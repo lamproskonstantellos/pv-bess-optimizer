@@ -3265,13 +3265,22 @@ _CONTRACT_STACKING_RULES: tuple[tuple[str, Any, str, Any], ...] = (
 )
 
 
-def _validate_intraday_config(intraday: dict[str, Any]) -> None:
-    """Validate the ``intraday`` sheet ranges (Eqs. I1-I5, E58/E59).
+def _validate_intraday_config(
+    intraday: dict[str, Any],
+    *,
+    project: dict[str, Any] | None = None,
+    balancing: dict[str, Any] | None = None,
+    ppa: dict[str, Any] | None = None,
+    simulation: dict[str, Any] | None = None,
+) -> None:
+    """Validate the ``intraday`` sheet (Eqs. I1-I5, E58/E59).
 
     The numeric ranges are checked whether or not ``id_enabled`` is set
-    so a typo cannot sit silently inert; the merchant-only mode gate
-    and the ``ida_price_eur_per_mwh`` column requirement live in the
-    workbook loader where mode and timeseries are in scope.
+    so a typo cannot sit silently inert.  The structural gates below
+    (merchant-only mode, finite export cap, contract exclusivities)
+    fire only when the venue is enabled and the corresponding section
+    was supplied; the ``ida_price_eur_per_mwh`` column requirement
+    lives in the workbook loader where the timeseries is in scope.
     """
     _dev = float(intraday.get("id_max_deviation_frac_of_cap", 0.25) or 0.0)
     if not 0.0 <= _dev <= 1.0:
@@ -3284,6 +3293,75 @@ def _validate_intraday_config(intraday: dict[str, Any]) -> None:
         raise ValueError(
             f"id_fee_eur_per_mwh must be non-negative; got {_fee!r}."
         )
+
+    if not bool(intraday.get("id_enabled", False)):
+        return
+
+    # v1 scope gates (docs/intraday_design.md): the two-stage
+    # re-dispatch is defined for a merchant plant trading DAM + IDA;
+    # the couplings below are rejected with guidance instead of
+    # silently producing questionable settlements.
+    if project is not None:
+        _mode = str(project.get("mode", "self_consumption") or "").lower()
+        if _mode != "merchant":
+            raise ValueError(
+                "id_enabled = TRUE requires mode = 'merchant': the "
+                "intraday re-dispatch interacts with the "
+                "self-consumption load-priority constraints and that "
+                "coupling is not modelled; disable the venue or switch "
+                "the mode."
+            )
+        _cap = project.get("p_grid_export_max_kw")
+        _cap_f = float("inf") if _cap is None else float(_cap)
+        if not np.isfinite(_cap_f) or _cap_f <= 0.0:
+            raise ValueError(
+                "id_enabled = TRUE requires a finite positive "
+                "p_grid_export_max_kw: the intraday deviation cap "
+                "(Eq. I2) is defined as a fraction of it."
+            )
+    if balancing is not None and bool(
+        balancing.get("balancing_enabled", False)
+    ):
+        raise ValueError(
+            "id_enabled cannot combine with balancing_enabled = TRUE: "
+            "balancing reservations commit day-ahead and the combined "
+            "two-venue re-dispatch is not modelled; disable one of the "
+            "two."
+        )
+    if ppa is not None:
+        if bool(ppa.get("ppa_enabled", False)):
+            raise ValueError(
+                "id_enabled cannot combine with ppa_enabled = TRUE: "
+                "the PPA settles the PV export against the day-ahead "
+                "dispatch and the intraday re-dispatch would move the "
+                "settled volume; disable one of the two."
+            )
+        _scheme = str(
+            ppa.get("support_scheme", "none") or "none",
+        ).strip().lower()
+        if _scheme != "none":
+            raise ValueError(
+                "id_enabled cannot combine with a support_scheme: the "
+                "reference-period settlement (Eqs. E55-E57) assumes "
+                "day-ahead sales of the eligible volume; disable one "
+                "of the two."
+            )
+    if simulation is not None:
+        if bool(simulation.get("uncertainty_enabled", False)):
+            raise ValueError(
+                "id_enabled cannot combine with uncertainty_enabled = "
+                "TRUE yet: the rolling-horizon Monte Carlo runs "
+                "single-stage and its foresight benchmark would be "
+                "inconsistent with the two-stage headline results; "
+                "disable one of the two."
+            )
+        if int(simulation.get("midlife_resolve_year", 0) or 0) > 0:
+            raise ValueError(
+                "id_enabled cannot combine with midlife_resolve_year: "
+                "the mid-life diagnostic re-solves the day-ahead stage "
+                "only and its delta table would compare against the "
+                "two-stage headline; disable one of the two."
+            )
 
 
 def validate_workbook_params(
@@ -3312,7 +3390,13 @@ def validate_workbook_params(
 
     validate_pv_location_fields(pv)
     _validate_ppa_config(ppa)
-    _validate_intraday_config(intraday)
+    _validate_intraday_config(
+        intraday,
+        project=project,
+        balancing=balancing,
+        ppa=ppa,
+        simulation=typed.get("simulation") or None,
+    )
 
     def _require_non_negative(section: dict[str, Any], key: str) -> None:
         if key not in section:

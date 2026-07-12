@@ -384,6 +384,38 @@ def add_economic_columns(
             * _grid_fee_wedge
         )
 
+    # Intraday venue settlement (Eqs. I3 / E58 / E59), written only
+    # when the Stage-2 columns are present so every other dispatch
+    # frame stays bit-identical.  The margin is the SPREAD settlement
+    # of the deviation: the profit_export_* columns above already price
+    # every PHYSICAL flow at the DAM, and
+    # dam*physical + (ida-dam)*(sell-buy) = dam*g_DA + ida*(g - g_DA)
+    # — the committed day-ahead position settles at the DAM, only the
+    # deviation trades at the IDA price.  Deriving from prices + kWh
+    # columns keeps the rolling-horizon actuals-restore re-derivation
+    # exact (the EUR columns are dropped and rebuilt there).
+    if (
+        "id_sell_pv_kwh" in res.columns
+        and "ida_price_eur_per_mwh" in res.columns
+    ):
+        ida_series = res["ida_price_eur_per_mwh"].fillna(0.0)
+        _id_sell = (
+            res["id_sell_pv_kwh"].fillna(0.0)
+            + res["id_sell_bess_kwh"].fillna(0.0)
+        )
+        _id_buy = res["id_buy_kwh"].fillna(0.0)
+        res["id_revenue_eur"] = (
+            (ida_series - dam_series) / 1000.0 * (_id_sell - _id_buy)
+        )
+        _id_fee_rate = float(
+            (params.get("intraday") or {}).get("id_fee_eur_per_mwh", 0.0)
+            or 0.0
+        )
+        if _id_fee_rate > 0.0:
+            res["id_fee_eur"] = (
+                _id_fee_rate / 1000.0 * (_id_sell + _id_buy)
+            )
+
     ppa_cfg = resolve_ppa_config(params.get("ppa"))
     if ppa_cfg.active and ppa_cfg.ppa_structure == "baseload":
         # Baseload financial settlement (Eqs. P9/P10): every in-term
@@ -486,6 +518,8 @@ ECONOMIC_COLUMNS: tuple[str, ...] = (
     "expense_grid_charging_fee_eur",
     "revenue_pv_ppa_eur",
     "ppa_covered_dam_value_eur",
+    "id_revenue_eur",
+    "id_fee_eur",
 )
 
 
@@ -694,6 +728,18 @@ def compute_kpis(
         + revenue_ppa
         - expense_grid_charging_fee
     )
+    # Intraday venue (Eqs. I3 / E58 / E59): the spread margin corrects
+    # the DAM-priced physical columns above to the two-stage settlement
+    # (DA position at DAM, deviation at IDA); the venue fee charges the
+    # traded volume.  Folded in only when the Stage-2 columns exist so
+    # every other run's profit_total stays bit-identical.
+    _id_on = "id_revenue_eur" in res.columns
+    id_revenue = float(res["id_revenue_eur"].sum()) if _id_on else 0.0
+    id_venue_fee = (
+        float(res["id_fee_eur"].sum()) if "id_fee_eur" in res.columns else 0.0
+    )
+    if _id_on:
+        profit_total = profit_total + id_revenue - id_venue_fee
 
     initial_soc_pct = params["initial_soc_frac"] * 100.0
 
@@ -770,6 +816,31 @@ def compute_kpis(
         # the dict shape stays stable for downstream consumers).
         "revenue_pv_ppa_eur": round(revenue_ppa, 2),
         "ppa_covered_dam_value_eur": round(ppa_covered_dam_value, 2),
+        # Intraday venue (Eqs. I2-I5 / E58 / E59): present only when the
+        # Stage-2 re-dispatch wrote its columns (bit-identity).  The net
+        # revenue is the spread margin minus the venue fee; the volume
+        # split feeds the per-origin fade and the route-to-market bases.
+        **(
+            {
+                "id_net_revenue_eur": round(id_revenue - id_venue_fee, 2),
+                "id_venue_fee_eur": round(id_venue_fee, 2),
+                "id_sell_mwh": round(
+                    _sum_mwh(res, "id_sell_pv_kwh")
+                    + _sum_mwh(res, "id_sell_bess_kwh"), 4,
+                ),
+                "id_buy_mwh": round(_sum_mwh(res, "id_buy_kwh"), 4),
+                "id_traded_volume_mwh": round(
+                    _sum_mwh(res, "id_sell_pv_kwh")
+                    + _sum_mwh(res, "id_sell_bess_kwh")
+                    + _sum_mwh(res, "id_buy_kwh"), 4,
+                ),
+                "id_sell_pv_mwh": round(_sum_mwh(res, "id_sell_pv_kwh"), 4),
+                "id_sell_bess_mwh": round(
+                    _sum_mwh(res, "id_sell_bess_kwh"), 4,
+                ),
+            }
+            if _id_on else {}
+        ),
         # Charging-side grid fee actually paid (Eq. E26; 0.0 when the
         # wedge is off — always emitted so the dict shape stays stable).
         "expense_grid_charging_fee_eur": round(expense_grid_charging_fee, 2),

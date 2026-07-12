@@ -45,15 +45,27 @@ flow change in the same settlement period; pure financial position
 closing is excluded (Eq. I5).  This keeps the energy balance and the
 availability-derate story exact.
 
-**v1 restrictions:**
+**v1 restrictions (loader-enforced, `io._validate_intraday_config`):**
 
 - Merchant mode only (`mode = merchant`); the load-priority constraint
   family of the self-consumption regime interacts with IDA buys and is
   deferred until that coupling is designed.
+- A finite positive `p_grid_export_max_kw` is required — the deviation
+  cap (Eq. I2) is defined as a fraction of it.
+- Mutually exclusive with `balancing_enabled` (reservations commit
+  day-ahead; a combined two-venue re-dispatch would re-decide them),
+  with `ppa_enabled` and the support schemes (both settle volumes the
+  re-dispatch would move), with `uncertainty_enabled` (the
+  rolling-horizon Monte Carlo is single-stage until the two-stage
+  benchmark lands) and with `midlife_resolve_year` (the diagnostic
+  re-solves the day-ahead stage only).
 - Stage 2 runs deterministically against actual IDA prices, defensible
   because intraday trades commit close to delivery; forecast noise on
   the IDA column is wired into the rolling-horizon machinery as mild
   optimism is quantified there (`docs/uncertainty_design.md`).
+- `id_max_deviation_frac_of_cap = 0` disables trading: the pipeline
+  skips the Stage-2 solve (the committed dispatch is already the
+  result) instead of pinning every flow to a zero-slack equality.
 
 ## Inputs
 
@@ -101,16 +113,102 @@ a fixed data column.  Stage 2 settles the day-ahead position at the DAM
 price regardless of the re-dispatch; only deviations from `g_DA_t`
 trade at the IDA price.
 
-The I2-I5 dispatch equations (deviation cap, Stage-2 objective, origin
-split, physical-trade restriction) and the E58/E59 settlement rows land
-with the dispatch and economics layers; this document is extended in
-place as they ship.
+### I2 — Deviation cap
+
+Per step, the total traded intraday volume is bounded by a fraction of
+the connection-cap energy:
+
+```
+id_sell_pv_t + id_sell_bess_t + id_buy_t <= delta * P_G * dt,
+delta = id_max_deviation_frac_of_cap
+```
+
+a liquidity and TSO nomination-change proxy.  The combined physical
+injection additionally honours the unchanged per-step injection cap
+(the S15/S16 basis): because every trade is a physical flow change
+(Eq. I5), `g_DA_t + id_sell_t - id_buy_t` IS the plant injection and
+the existing `EXPORT_CAP` family bounds it — no second cap constraint
+is needed.
+
+### I3 — Stage-2 objective increment
+
+The Stage-2 solve maximises the day-ahead objective plus the intraday
+margin in **spread form**:
+
+```
+Pi_ID = sum_t [ (pi_IDA_t - pi_DAM_t) * (id_sell_t - id_buy_t)
+                - phi_id * (id_sell_t + id_buy_t) ] / 1000
+```
+
+Because the model prices every physical flow at the DAM and
+`dam*physical + (ida-dam)*(sell-buy) = dam*g_DA + ida*(g - g_DA)`, the
+committed position settles day-ahead and only the deviation trades at
+the IDA price — the day-ahead revenue terms stay structurally
+untouched.  The existing `bess_wear_cost_eur_per_mwh` term runs on
+physical discharge, so it automatically prices the INCREMENTAL Stage-2
+throughput: thin spreads do not re-cycle the battery.  A tie-break
+penalty (1e-6 EUR/kWh on traded volume, an order below the curtailment
+tie-break) makes zero-spread steps deterministically trade nothing.
+
+### I4 — Origin split
+
+Each origin's Stage-2 flow equals its committed day-ahead leg plus the
+origin's intraday delta:
+
+```
+x_pg_t                = x_pg_t^DA + id_sell_pv_t  - id_buy_pv_t
+x_bg_t - x_gb_t       = (x_bg_t^DA - x_gb_t^DA) + id_sell_bess_t - id_buy_bess_t
+```
+
+Summing both recovers the net-position identity of Eq. I1.  The split
+feeds the route-to-market volume bases and the per-origin degradation
+indexing of the multi-year cashflow.
+
+### I5 — Physical-only trading
+
+Every intraday trade maps to a physical flow change in the same step;
+pure financial position closing (sell-then-buy-back with no dispatch
+change) is excluded by a per-step complementarity binary:
+`id_sell_t <= delta*P_G*dt * y_t` and `id_buy_t <= delta*P_G*dt *
+(1 - y_t)`, whose shared big-M is the deviation budget — the pair
+jointly enforces Eqs. I2 and I5.  IDA buys are gated by
+`id_allow_purchases`; BESS charging from buys additionally requires
+`allow_bess_grid_charging` (otherwise a buy can only reduce committed
+discharge).
+
+## Dispatch invariants (INV-I1..INV-I4)
+
+`optimization.verify_dispatch_invariants` extends its report with four
+intraday residuals (`INTRADAY_INVARIANT_KEYS`), 0.0 (vacuously
+satisfied) whenever the Stage-2 block did not fire:
+
+* `invariant_i1_position_link_kwh` — net-position link (Eq. I1).
+* `invariant_i2_deviation_cap_excess_kwh` — deviation cap (Eq. I2).
+* `invariant_i3_sell_buy_overlap_kwh2` — no wash trading (Eq. I5;
+  kWh^2 product, strict-mode tolerance `tol^2` like invariant 5).
+* `invariant_i4_origin_split_kwh` — origin split (Eq. I4).
+
+## Pipeline integration
+
+`pipeline._run_one` re-solves after the deterministic Stage-1 run via
+`intraday.redispatch_intraday` (the FULL-PRECISION Stage-1 frame is
+pinned — a round(4) frame would force spurious micro-trades to absorb
+the rounding noise) and the Stage-2 frame becomes the headline result:
+cycles, degradation, KPIs and the financial stack reflect the combined
+DA + ID operation.  The Stage-1 profit is kept as
+`id_stage1_profit_total_eur` for the two-stage uplift audit.  The
+E58/E59 settlement rows of the multi-year cashflow land with the
+economics layer; this document is extended in place as they ship.
 
 ## Implementation map
 
 | Equation | Implementing symbol |
 |---|---|
-| (I1) | `io.read_workbook` / `io._typed_to_flat` (input surface: `intraday` sheet, `ida_price_eur_per_mwh` column, `rolling_horizon.PRICE_COLUMNS` registration) |
+| (I1) | `intraday.extract_da_position` / `io.read_workbook` (input surface: `intraday` sheet, `ida_price_eur_per_mwh` column, `rolling_horizon.PRICE_COLUMNS` registration) |
+| (I2) | `optimization.build_model` (`ID_SELL_GATE` / `ID_BUY_GATE`, shared deviation big-M; `EXPORT_CAP` reused for the combined injection) |
+| (I3) | `optimization.build_model` (`intraday_margin_expr`, spread form + venue fee + wear on physical throughput) |
+| (I4) | `optimization.build_model` (`ID_LINK_PV` / `ID_LINK_BESS`); `kpis.compute_kpis` (`id_sell_pv_mwh` / `id_sell_bess_mwh`) |
+| (I5) | `optimization.build_model` (`y_id` complementarity binary, `ID_NO_BUY` purchases gate) |
 
 ## Verification log
 
@@ -125,3 +223,11 @@ place as they ship.
 - `tests/test_rolling_horizon_price_restore.py` — the actuals-restore
   contract covers `ida_price_eur_per_mwh` via the `PRICE_COLUMNS`
   sweep.
+- `tests/test_intraday_dispatch.py` — zero-spread/zero-fee Stage-1
+  identity; spread monotonicity; two-stage uplift with consistent
+  settlement columns; deviation-budget and export-cap safety;
+  purchases gate; curtailed-PV re-sale; wear-cost coupling on thin
+  spreads; INV-I residuals within tolerance on the Stage-2 frame and
+  vacuously 0.0 when disabled; Stage-1 bit-identity of a two-stage
+  run against a venue-off build; the config-resolver coercions and
+  the day-ahead position extractor identity (Eq. I1).
