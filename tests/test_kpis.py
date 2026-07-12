@@ -20,6 +20,12 @@ def _solved_self_consumption_short(short_params, short_ts):
         short_params, short_ts, solver_name="highs",
         mip_gap=0.01, time_limit_seconds=30,
     )
+    # Materialise the derived columns (green split, per-step EUR) here
+    # so every test in the module sees the same frame regardless of
+    # execution order — compute_kpis mutates res in place, and without
+    # this the monthly test only passed when a compute_kpis test
+    # happened to run first (a -k selection broke it).
+    compute_kpis(res, short_params, verify_balance=False)
     return res
 
 

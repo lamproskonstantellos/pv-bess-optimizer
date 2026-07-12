@@ -34,6 +34,7 @@ from .availability import availability_factor
 from .constants import (
     DEFAULT_SENSITIVITY_DELTA_PCT,
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+    DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
 )
 from .economics import (
     TAX_LAYER_COLUMNS,
@@ -77,6 +78,10 @@ _DRIVER_TYPE_BY_VARIABLE: dict[str, str] = {
     "Revenue": "revenue",
     "DiscountRate": "discount_rate",
     "PpaPrice": "ppa_price",
+    # Same EUR/MWh strike semantics as the PPA driver.
+    "SupportStrike": "ppa_price",
+    # Absolute percentage-point semantics like the discount rate.
+    "TaxRate": "discount_rate",
 }
 
 
@@ -124,6 +129,41 @@ def variables_for_npv_sensitivity(
         raw.append(
             {"name": "PpaPrice", "kind": "relative", "delta": ppa_d,
              "label": "PPA price"},
+        )
+    # Support-scheme strike driver (Eqs. E55-E57): the cashflow
+    # rebuilds the settlement from the strike-independent Year-1
+    # monthly detail, so a full rebuild at the perturbed strike is
+    # EXACT (including the sliding one-way clamp).  Shares the PPA
+    # delta knob — both are EUR/MWh strike perturbations.
+    if str(
+        econ.get("support_scheme", "none") or "none"
+    ).strip().lower() in ("sliding_fip", "cfd_two_way"):
+        sup_d = float(
+            econ.get(
+                "sensitivity_ppa_price_delta_pct",
+                DEFAULT_SENSITIVITY_DELTA_PCT,
+            )
+        ) / 100.0
+        raw.append(
+            {"name": "SupportStrike", "kind": "relative", "delta": sup_d,
+             "label": "Support strike"},
+        )
+    # TaxRate driver (Eqs. E34-E38 downstream): active only while the
+    # tax layer is on.  Taxes are NONLINEAR (taxable-base clamp, loss
+    # carry-forward), so each leg is a full cashflow + tax-layer
+    # rebuild and the driver reports POST-TAX deltas in dedicated
+    # columns — the pre-tax metric columns stay NaN on its rows, so
+    # the pre-tax tornado layouts skip it.
+    if float(econ.get("corporate_tax_rate_pct", 0.0) or 0.0) > 0.0:
+        tax_d = float(
+            econ.get(
+                "sensitivity_tax_rate_delta_pp",
+                DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
+            )
+        )
+        raw.append(
+            {"name": "TaxRate", "kind": "absolute", "delta": tax_d,
+             "label": "Corporate tax rate"},
         )
     return [v for v in raw if float(v["delta"]) > 0.0]  # type: ignore[arg-type]
 
@@ -190,6 +230,14 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("capacity_market_revenue_eur")
     if "revenue_levy_eur" in df.columns:
         components.append("revenue_levy_eur")
+    if "curtailment_compensation_eur" in df.columns:
+        components.append("curtailment_compensation_eur")
+    if "augmentation_capex_eur" in df.columns:
+        components.append("augmentation_capex_eur")
+    if "go_revenue_eur" in df.columns:
+        components.append("go_revenue_eur")
+    if "support_settlement_eur" in df.columns:
+        components.append("support_settlement_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -213,13 +261,21 @@ def _scale_capex(yearly_cf: pd.DataFrame, factor: float) -> pd.DataFrame:
     (per-asset CAPEX + per-asset DEVEX + the site-wide lump sum) and any
     BESS replacement CAPEX in its scheduled year — the replacement is a
     percentage of the same unit cost, so a +/-X % CAPEX world moves it
-    by the same factor.  The driver VALUE reported on the tornado is the
-    Year-0 outlay only (see ``run_sensitivity_analysis``).
+    by the same factor.  Augmentation events (Eq. E51) are priced off
+    the same unit cost too (``capex_bess_eur_per_kwh`` on the declining
+    curve), so their column scales with the driver; the Revenue driver
+    leaves it untouched (an investment outflow has no price component).
+    The driver VALUE reported on the tornado is the Year-0 outlay only
+    (see ``run_sensitivity_analysis``).
     """
     df = yearly_cf.copy()
     df["capex_eur"] = df["capex_eur"].astype(float) * float(factor)
     if "devex_eur" in df.columns:
         df["devex_eur"] = df["devex_eur"].astype(float) * float(factor)
+    if "augmentation_capex_eur" in df.columns:
+        df["augmentation_capex_eur"] = (
+            df["augmentation_capex_eur"].astype(float) * float(factor)
+        )
     return _recompute_net(df)
 
 
@@ -328,9 +384,23 @@ def _scale_revenue(
         # zero-turnover clamp (max(f*base, 0) == f*max(base, 0)), so
         # the constant scale is exact.
         "revenue_levy_eur",
+        # Curtailment compensation (Eq. E49): the compensated volume
+        # is paid at an administered price that regimes typically link
+        # to the market value of the curtailed energy — classified
+        # price-linked, so it scales with the Revenue driver.
+        "curtailment_compensation_eur",
+        # GO revenue (Eq. E54): certificate prices move with the
+        # renewables market, so the driver scales it.
+        "go_revenue_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)
+    # support_settlement_eur (Eqs. E55-E57) does NOT scale with the
+    # Revenue driver either: the strike leg is an administered tariff
+    # and only the reference leg co-moves with prices — a constant
+    # scale would be wrong on the mixed column, so the dedicated
+    # SupportStrike driver perturbs the strike via a full rebuild
+    # instead (the optimizer-fee vs route-to-market-fee precedent).
     # toll_revenue_eur (Eq. E29) does NOT scale with the Revenue driver:
     # it is a fixed contractual EUR/MW payment — the driver perturbs
     # market prices, which a toll is by construction insulated from
@@ -759,6 +829,99 @@ def run_sensitivity_analysis(
                 name, label, "high", +delta,
                 base_strike * (1.0 + delta), high_kpis,
             )
+            continue
+
+        if name == "SupportStrike":
+            base_strike = float(
+                econ.get("support_strike_eur_per_mwh", 0.0) or 0.0
+            )
+            if base_strike <= 0.0:
+                continue
+            low_kpis = compute_financial_kpis(
+                build_yearly_cashflow(
+                    year1_kpis,
+                    {**econ, "support_strike_eur_per_mwh":
+                     base_strike * (1.0 - delta)},
+                    capacities,
+                ),
+                econ,
+            )
+            high_kpis = compute_financial_kpis(
+                build_yearly_cashflow(
+                    year1_kpis,
+                    {**econ, "support_strike_eur_per_mwh":
+                     base_strike * (1.0 + delta)},
+                    capacities,
+                ),
+                econ,
+            )
+            _record(name, label, "base", 0.0, base_strike, base_kpis)
+            _record(
+                name, label, "low", -delta,
+                base_strike * (1.0 - delta), low_kpis,
+            )
+            _record(
+                name, label, "high", +delta,
+                base_strike * (1.0 + delta), high_kpis,
+            )
+            continue
+
+        if name == "TaxRate":
+            base_rate = float(
+                econ.get("corporate_tax_rate_pct", 0.0) or 0.0
+            )
+            if base_rate <= 0.0:
+                continue
+            low_rate = max(base_rate - delta, 0.0)
+            high_rate = min(base_rate + delta, 100.0)
+
+            def _post_tax_kpis_at(rate_pct: float) -> dict[str, float]:
+                econ_r = {**econ, "corporate_tax_rate_pct": rate_pct}
+                return compute_financial_kpis(
+                    build_yearly_cashflow(year1_kpis, econ_r, capacities),
+                    econ_r,
+                )
+
+            base_npv_pt = float(
+                base_kpis.get("npv_post_tax_eur", float("nan"))
+            )
+            base_irr_pt = float(
+                base_kpis.get("irr_post_tax_pct", float("nan"))
+            )
+
+            def _post_tax_fields(
+                k: dict[str, float],
+                *,
+                _base_npv_pt: float = base_npv_pt,
+                _base_irr_pt: float = base_irr_pt,
+            ) -> dict[str, float]:
+                npv_pt = float(k.get("npv_post_tax_eur", float("nan")))
+                irr_pt = float(k.get("irr_post_tax_pct", float("nan")))
+                d_npv = (
+                    float("nan")
+                    if (np.isnan(npv_pt) or np.isnan(_base_npv_pt))
+                    else npv_pt - _base_npv_pt
+                )
+                d_irr = (
+                    float("nan")
+                    if (np.isnan(irr_pt) or np.isnan(_base_irr_pt))
+                    else irr_pt - _base_irr_pt
+                )
+                return {
+                    "npv_post_tax_eur": npv_pt,
+                    "irr_post_tax_pct": irr_pt,
+                    "delta_npv_post_tax_eur": d_npv,
+                    "delta_irr_post_tax_pp": d_irr,
+                }
+
+            # Pre-tax metric columns stay NaN (kpis=None) — the driver
+            # moves only the post-tax family by construction.
+            _record(name, label, "base", 0.0, base_rate, None)
+            rows[-1].update(_post_tax_fields(base_kpis))
+            _record(name, label, "low", -delta, low_rate, None)
+            rows[-1].update(_post_tax_fields(_post_tax_kpis_at(low_rate)))
+            _record(name, label, "high", +delta, high_rate, None)
+            rows[-1].update(_post_tax_fields(_post_tax_kpis_at(high_rate)))
             continue
 
         if name == "DiscountRate":

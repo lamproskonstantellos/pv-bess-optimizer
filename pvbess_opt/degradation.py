@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .lifetime import bess_capacity_factors
+from .lifetime import bess_capacity_factors_pooled, warranty_cycle_utilisation
 
 
 def _reversals(series: Any) -> list[float]:
@@ -109,6 +109,12 @@ def build_degradation_report(
     degradation_annual_pct: float = 0.0,
     year1_discharge_mwh: float | None = None,
     replacement_year: int = 0,
+    max_cycles_per_year: float = 0.0,
+    cycle_cap_basis: str = "nameplate",
+    overbuild_pct: float = 0.0,
+    augmentation_years: tuple[int, ...] = (),
+    augmentation_mode: str = "top_up",
+    augmentation_kwh: float = 0.0,
 ) -> pd.DataFrame:
     """Project the SOH / capacity-fade trajectory and replacement schedule.
 
@@ -152,30 +158,71 @@ def build_degradation_report(
     else:
         throughput_mwh = float(year1_discharge_mwh)
 
-    factors = bess_capacity_factors(
+    # Pooled engine (Eqs. E50-E52): the SOH curve reflects overbuild
+    # headroom and top-up resets exactly as the finance layer prices
+    # them; inactive inputs delegate to the single-pool engine.
+    factors, added_mwh = bess_capacity_factors_pooled(
         max(int(project_years), 0),
         d_bess_annual=d_annual,
         d_bess_per_cycle=d_cycle,
         year1_discharge_mwh=throughput_mwh,
         capacity_mwh=capacity_mwh,
         replacement_year=effective_year,
+        overbuild_frac=max(0.0, float(overbuild_pct or 0.0) / 100.0),
+        augmentation_years=tuple(augmentation_years or ()),
+        augmentation_mode=augmentation_mode,
+        augmentation_kwh=float(augmentation_kwh or 0.0),
     )
+    # Warranty utilisation columns (Eq. E47): written ONLY when the
+    # annual cycle cap is set, so cap-off degradation sheets stay
+    # bit-identical.
+    cap = float(max_cycles_per_year or 0.0)
+    if cap > 0.0:
+        # The exceeds mask is not consumed here: the pipeline derives
+        # its reset warning from the utilisation column itself.
+        cycles_on_basis, _ = warranty_cycle_utilisation(
+            max(int(project_years), 0),
+            year1_discharge_mwh=throughput_mwh,
+            capacity_mwh=capacity_mwh,
+            factors=factors,
+            basis=cycle_cap_basis,
+            max_cycles_per_year=cap,
+        )
+    else:
+        cycles_on_basis = []
+
+    # Augmentation column (Eq. E51): written ONLY when events are
+    # configured, so augmentation-off degradation sheets stay
+    # bit-identical (the warranty-column precedent above).
+    _aug_on = bool(tuple(augmentation_years or ()))
     rows: list[dict[str, Any]] = []
     for i, factor in enumerate(factors):
         year = i + 1
         soh = factor * 100.0
-        rows.append({
+        row: dict[str, Any] = {
             "project_year": year,
             "calendar_year": int(start_year) + i,
             "equivalent_full_cycles": round(efc_year, 4),
             "soh_pct": round(soh, 4),
             "capacity_fade_pct": round(100.0 - soh, 4),
             "replacement": bool(year == effective_year),
-        })
-    return pd.DataFrame(
-        rows,
-        columns=[
-            "project_year", "calendar_year", "equivalent_full_cycles",
-            "soh_pct", "capacity_fade_pct", "replacement",
-        ],
-    )
+        }
+        if cap > 0.0:
+            row["cycles_on_basis"] = round(cycles_on_basis[i], 4)
+            row["warranty_utilisation_pct"] = round(
+                100.0 * cycles_on_basis[i] / cap, 4,
+            )
+        if _aug_on:
+            row["augmentation_added_kwh"] = round(
+                added_mwh.get(year, 0.0) * 1000.0, 4,
+            )
+        rows.append(row)
+    columns = [
+        "project_year", "calendar_year", "equivalent_full_cycles",
+        "soh_pct", "capacity_fade_pct", "replacement",
+    ]
+    if cap > 0.0:
+        columns += ["cycles_on_basis", "warranty_utilisation_pct"]
+    if _aug_on:
+        columns += ["augmentation_added_kwh"]
+    return pd.DataFrame(rows, columns=columns)

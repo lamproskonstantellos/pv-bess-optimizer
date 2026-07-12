@@ -114,6 +114,30 @@ fade curve, indexed by `bm_inflation_pct`:
 
 $$R^{\mathrm{bm,cap/act}}_y = R^{\mathrm{bm,cap/act}}_1\, f^{B}_y\, (1+i_{\mathrm{bm}})^{y-1} \tag{B8}$$
 
+### Reservation blocks (Eq. B9; `bm_block_hours`)
+
+European capacity auctions clear in multi-hour blocks (4 h in common
+HEnEx / regelleistung practice) rather than per settlement period.
+With `bm_block_hours` $= H > 0$ every per-product reservation is
+pinned to its block-anchor value:
+
+$$r_{k,t} = r_{k,\,a(b(t))} \quad \forall t, \qquad
+b(t) = \left\lfloor h(t) / H \right\rfloor \tag{B9}$$
+
+where $h(t)$ is the step's hour-of-year and $a(b)$ the first step of
+block $b$ in the solve window.  Implemented as a gated
+`ConstraintList` (`BM_BLOCK_LINK`) after the `r_balancing`
+declaration; 0 (the default) keeps per-settlement-period reservations
+and attaches nothing — bit-identical.  The blocked solution is a pure
+RESTRICTION of the per-step feasible set, so every B1-B8 constraint,
+the objective and the audit invariants apply unchanged (the blocked
+objective can never exceed the per-step one).  Anchoring on
+hour-of-year (not the window-local index) keeps rolling-horizon
+windows that bisect a block aligned with the year grid — the
+committed prefix fixes the block level.  Validation requires the
+block to be a whole multiple of the dispatch step and to divide 24
+evenly.
+
 The yearly cashflow carries three gross balancing columns
 (`balancing_capacity_revenue_eur`, `balancing_activation_revenue_eur`,
 `balancing_revenue_eur`) plus an optional fee column
@@ -159,6 +183,8 @@ histogram.  Financial lifecycle totals:
 | (B6) | `soc_dynamics` drift terms; KPI mirror `kpis._balancing_soc_drift` |
 | (B7) | `build_model` → `m.balancing_revenue_expr` (`balancing.acceptance_probability`, `activation_probability`); KPI mirror `kpis._compute_balancing_kpis` |
 | (B8) | `economics.build_yearly_cashflow` balancing rows; `lifetime._BALANCING_RESERVATION_COLUMNS` |
+| (B9) | `build_model` → `BM_BLOCK_LINK` (gated on `bm_block_hours`); validator `io._validate_balancing_config` |
+| (B10) | `balancing.activation_probability_curve`; `build_model` per-step branch; `kpis` (revenue, drift mirror, expected energies); `rolling_horizon.realise_balancing_scenario`; parser `io.parse_merit_order_sheet` |
 | MC realisation | `rolling_horizon.realise_balancing_scenario`, `monte_carlo_balancing` |
 | config / prices | `balancing.resolve_balancing_config`, `resolve_balancing_timeseries`; validators `io._validate_balancing_config` |
 | plots | `plotting.balancing.plot_balancing_reservation_profile`, `plot_balancing_mc_distribution` (both return None without balancing columns) |
@@ -237,6 +263,31 @@ named symbols are pinned by
 against a built model, so this log cannot silently drift from the
 code.  (`file.py:NN` references are indicative of the audited
 revision; the symbols are the stable anchors.)
+
+### Merit-order activation curve (Eq. B10; `bm_merit_order_enabled`)
+
+The scalar per-product activation probability $\beta_k$ generalises
+to an optional piecewise price-to-probability curve read from the
+`bm_merit_order` sheet (columns: `product`, `price_eur_per_mwh`,
+`activation_probability_pct`; aFRR/mFRR products only — FCR is
+capacity-only; validated monotone NON-INCREASING in price):
+
+$$\beta_k(t) = \mathrm{interp}\big(\mathrm{curve}_k,\,
+p^{\mathrm{act}}_k(t)\big) \tag{B10}$$
+
+capturing that expensive bids activate less.  The coefficients are
+deterministic per step, so the MILP stays LINEAR: the B7/B8
+expected-value forms generalise with $\beta_k \to \beta_k(t)$ in
+the objective's activation term
+($\alpha_k \beta_k(t)\, p^{\mathrm{act}}_k(t)\, r_{k,t}\,
+\Delta t / 1000$), the SOC drift, the expected-activation KPIs, the
+SOC-dynamics audit mirror and the Monte Carlo realisation — one
+per-step $\beta$ array feeds all five consumers.  The curve applies
+to the INPUT activation price, not an endogenous bid price (bids are
+assumed at the input price level; documented assumption).  `FALSE`
+(default) keeps the constant-$\beta$ code path — not just the same
+values — so disabled runs stay bit-identical (a distributed per-step
+coefficient would change floating-point association).
 
 ### 1. Product taxonomy: PASS
 

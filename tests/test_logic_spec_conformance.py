@@ -10,7 +10,7 @@ Three checks:
 
 * Self-consumption constraints listed under "Hard constraints"
   (``### NAME(t)``) exist on a ``mode = self_consumption`` model.
-* Audit invariants under "Nine audit invariants" appear in
+* Audit invariants under "Ten audit invariants" appear in
   :func:`pvbess_opt.optimization.verify_dispatch_invariants` output
   and stay within :data:`pvbess_opt.kpis.ENERGY_TOLERANCE`.
 * Symbols claimed PASS in the verification appendix of the balancing
@@ -37,10 +37,10 @@ BALANCING_VERIFICATION = ROOT / "docs" / "balancing_market_design.md"
 
 # Sections in the self-consumption spec are organised under H2 anchors;
 # the constraint names live as H3s ("### NAME(t)" or "### NAME, ...") and
-# the invariant names live as H3s under the "Nine audit invariants"
+# the invariant names live as H3s under the "Ten audit invariants"
 # section.
 _CONSTRAINT_SECTION_HEADING = "Hard constraints: formal statements"
-_INVARIANT_SECTION_HEADING = "Nine audit invariants"
+_INVARIANT_SECTION_HEADING = "Ten audit invariants"
 
 _BALANCING_SYMBOLS = (
     "BM_POWER_DN", "BM_POWER_UP", "BM_SOC_UP", "BM_SOC_DN", "r_balancing",
@@ -148,6 +148,9 @@ def _self_consumption_params() -> dict:
         # §3 of the spec are attached to the built model; the regex
         # parses every documented name unconditionally.
         "allow_bess_grid_charging": True,
+        # Same opt-in for IMPORT_CAP (Eq. S35): a generous finite cap
+        # attaches the constraint without ever binding.
+        "p_grid_import_max_kw": 100_000.0,
         "show_titles": False,
     }
 
@@ -186,9 +189,9 @@ def test_self_consumption_invariants_within_tolerance(short_ts):
     """Every documented audit invariant is reported within tolerance."""
     body = _section_body(_read(SELF_CONSUMPTION_SPEC), _INVARIANT_SECTION_HEADING)
     expected = _h3_invariant_names(body)
-    assert len(expected) == 9, (
+    assert len(expected) == 10, (
         f"parsed {len(expected)} invariant names from the spec; "
-        "expected exactly 9."
+        "expected exactly 10."
     )
 
     params = _self_consumption_params()

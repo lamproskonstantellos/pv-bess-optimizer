@@ -35,10 +35,19 @@ ATB 2024 reports ~99 % availability for fixed-tilt PV).
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from .balancing import PRODUCTS_ALL, PRODUCTS_WITH_ACTIVATION
 
+#: KPI keys holding per-month lists that scale with the same factors
+#: as their scalar totals (the support settlement's monthly
+#: eligible-volume detail feeds the cashflow projection, so it must
+#: carry the identical derates or the Year-1 rows would diverge).
+_DERATED_LIST_KEYS: tuple[str, ...] = ("support_monthly_eligible_mwh",)
+
 __all__ = [
+    "apply_curtailment_derate",
+    "apply_operating_derates",
     "apply_unavailability_derate",
     "availability_factor",
 ]
@@ -121,6 +130,12 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     # reservation throughput which the derate applies to.
     "bm_expected_activation_energy_up_kwh",
     "bm_expected_activation_energy_dn_kwh",
+    # Reference-period support settlement (Eqs. E55-E57): both ride
+    # the eligible PV EXPORT volume, so they derate with the export
+    # energies (the settlement may be negative under cfd_two_way — a
+    # linear scale keeps the sign).
+    "support_settlement_eur",
+    "support_eligible_export_mwh",
 )
 
 
@@ -158,11 +173,11 @@ def _default_derated_keys() -> tuple[str, ...]:
 
 
 def apply_unavailability_derate(
-    kpis: dict[str, float],
+    kpis: dict[str, Any],
     unavailability_pct: float,
     *,
     derated_keys: Iterable[str] | None = None,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Return ``kpis`` with every revenue-bearing key scaled by availability.
 
     Post-condition: every revenue-bearing top-level EUR key is scaled by
@@ -223,6 +238,14 @@ def apply_unavailability_derate(
     for key in derated_keys:
         if key in out and isinstance(out[key], (int, float)):
             out[key] = float(out[key]) * factor
+    # Per-month list keys scale element-wise with the same factor so
+    # the cashflow projection they feed matches the scalar totals.
+    for key in _DERATED_LIST_KEYS:
+        _lst = out.get(key)
+        if isinstance(_lst, list):
+            # The KPI dict is float-typed for the scalar contract; the
+            # monthly-detail lists are a documented exception.
+            out[key] = [float(v) * factor for v in _lst]
     # Grid import is the one energy flow that must NOT simply scale down with
     # availability.  During plant downtime the grid covers the full load the
     # offline plant would otherwise have served, so annual import RISES rather
@@ -246,3 +269,150 @@ def apply_unavailability_derate(
     out["availability_factor"] = float(factor)
     out["unavailability_pct"] = float(unavailability_pct)
     return out
+
+
+# Export-side keys scaled by the exogenous-curtailment quota (Eq. E48).
+# The quota models system-operator curtailment of grid INJECTION, so
+# only metered-export volumes and the EUR streams they earn scale;
+# per-key reasoning for what stays untouched:
+#
+# * load-side flows / self-consumption savings — behind the meter, the
+#   operator curtails injection, not on-site consumption;
+# * grid import, expense_charge_bess_grid_eur,
+#   expense_grid_charging_fee_eur — withdrawals, not injections;
+# * balancing bm_* keys — reservations are committed CAPACITY, not
+#   scheduled injection (activation settles through the TSO);
+# * pv_generation_mwh / bess_total_discharge_mwh — the plant still
+#   generates for load and charging in curtailed hours (quota mode is
+#   a post-solve convention; the signal mode re-dispatches instead);
+# * imbalance keys — deviations settle on the nominated schedule, and
+#   the quota is not a forecast error.
+_CURTAILMENT_DERATED_KEYS: tuple[str, ...] = (
+    "system_total_export_mwh",
+    "pv_export_mwh",
+    "bess_export_mwh",
+    # Fee-exempt covered export (Eqs. P6/P7): a metered-export volume —
+    # falls with the export it refines.
+    "ppa_fee_exempt_export_mwh",
+    "profit_export_from_pv_eur",
+    "profit_export_from_bess_eur",
+    "revenue_pv_dam_eur",
+    "revenue_bess_dam_eur",
+    # Pay-as-produced PPA settles on metered export, so the generator
+    # bears curtailment (documented assumption); the baseload fixed
+    # leg is exempted below via the P10 marker.
+    "revenue_pv_ppa_eur",
+    "ppa_covered_dam_value_eur",
+    # Reference-period support settlement (Eqs. E55-E57): settles on
+    # the metered eligible PV export, so the operator's curtailment
+    # cuts the settled volume like the DAM revenue it tops up.
+    "support_settlement_eur",
+    "support_eligible_export_mwh",
+)
+
+# The scaled keys that are algebraic components of profit_total_eur
+# (kpis.compute_kpis): the headline profit is recomposed from their
+# deltas plus the compensation line.
+_CURTAILMENT_PROFIT_COMPONENTS: tuple[str, ...] = (
+    "profit_export_from_pv_eur",
+    "profit_export_from_bess_eur",
+    "revenue_pv_ppa_eur",
+)
+
+
+def apply_curtailment_derate(
+    kpis: dict[str, Any],
+    curtailment_pct: float,
+    *,
+    compensated_pct: float = 0.0,
+    compensation_price_eur_per_mwh: float = 0.0,
+) -> dict[str, float]:
+    """Scale export-side KPIs by the exogenous-curtailment quota (E48).
+
+    Mirrors :func:`apply_unavailability_derate` and runs AFTER it, so
+    the combined scaling is ``availability x curtailment`` — two
+    multiplicative factors whose order cannot matter.  Every key in
+    :data:`_CURTAILMENT_DERATED_KEYS` scales by ``1 - q``; the
+    compensated share of the curtailed export volume earns the
+    administered price (Eq. E49, on the availability-derated Year-1
+    export base BEFORE the quota scaling)::
+
+        R_curt = q x E_export x c x p_comp
+
+    recorded under ``curtailment_compensation_eur``;
+    ``profit_total_eur`` is recomposed from the deltas of its scaled
+    components plus the compensation.  With ``curtailment_pct = 0``
+    the dict is returned unchanged (no new keys — bit-identity).
+    Under the baseload PPA structure the contract's fixed-volume leg
+    is exempt exactly as in the availability derate (the P10 marker).
+    """
+    q = max(0.0, min(1.0, float(curtailment_pct or 0.0) / 100.0))
+    out = dict(kpis)
+    if q <= 0.0:
+        return out
+    keys: tuple[str, ...] = _CURTAILMENT_DERATED_KEYS
+    if "ppa_baseload_shortfall_mwh" in out:
+        keys = tuple(
+            k for k in keys
+            if k not in ("revenue_pv_ppa_eur", "ppa_covered_dam_value_eur")
+        )
+    factor = 1.0 - q
+    curtailed_export_mwh = q * float(
+        out.get("system_total_export_mwh", 0.0) or 0.0
+    )
+    profit_delta = 0.0
+    for key in keys:
+        if key in out and isinstance(out[key], (int, float)):
+            old = float(out[key])
+            out[key] = old * factor
+            if key in _CURTAILMENT_PROFIT_COMPONENTS:
+                profit_delta += out[key] - old
+    # Per-month list keys scale with the same factor (see the
+    # unavailability derate for the reasoning).
+    for key in _DERATED_LIST_KEYS:
+        _lst = out.get(key)
+        if isinstance(_lst, list):
+            # The KPI dict is float-typed for the scalar contract; the
+            # monthly-detail lists are a documented exception.
+            out[key] = [float(v) * factor for v in _lst]
+    compensation = (
+        curtailed_export_mwh
+        * max(0.0, min(1.0, float(compensated_pct or 0.0) / 100.0))
+        * max(0.0, float(compensation_price_eur_per_mwh or 0.0))
+    )
+    out["curtailment_compensation_eur"] = float(compensation)
+    if "profit_total_eur" in out:
+        out["profit_total_eur"] = (
+            float(out["profit_total_eur"]) + profit_delta + compensation
+        )
+    out["curtailment_factor"] = float(factor)
+    out["curtailment_pct"] = float(q * 100.0)
+    return out
+
+
+def apply_operating_derates(
+    kpis: dict[str, Any], params: dict[str, Any],
+) -> dict[str, Any]:
+    """Availability then curtailment, both read from ``params``.
+
+    The single post-solve derate entry point every caller uses, so the
+    two factors can never be applied in different combinations across
+    the pipeline, the scenario batch, the sizing sweep and the
+    rolling-horizon seeds.  Both features off (the defaults) returns
+    the availability behaviour bit-identically.
+    """
+    out = apply_unavailability_derate(
+        kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
+    )
+    return apply_curtailment_derate(
+        out,
+        float(params.get("curtailment_pct", 0.0) or 0.0),
+        compensated_pct=float(
+            params.get("curtailment_compensated_pct", 0.0) or 0.0
+        ),
+        compensation_price_eur_per_mwh=float(
+            params.get(
+                "curtailment_compensation_price_eur_per_mwh", 0.0,
+            ) or 0.0
+        ),
+    )

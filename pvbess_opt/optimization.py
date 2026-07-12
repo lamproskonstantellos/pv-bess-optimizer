@@ -29,7 +29,9 @@ Tight big-M values
 Big-Ms are derived per-instance using the symmetric ``bess_power_kw``
 limit (the asymmetric p_charge_max / p_dis_max pair is not supported):
 
-* ``M_imp = (load_max + bess_power_kw × dt_h) × 1.001``
+* ``M_imp = (load_max + bess_power_kw × dt_h) × 1.001`` (tightened to
+  the finite grid-import cap ``p_grid_import_max_kw × dt_h × 1.001``
+  when that is smaller — Eq. S35)
 * ``M_exp = p_grid_export_max × dt_h × max_injection_frac × 1.001``
   (gates the no-simultaneous grid-export binary only; the per-step
   injection cap is a direct ``<=`` to a constant and needs no big-M)
@@ -77,6 +79,7 @@ from .balancing import (
     BalancingTimeseries,
     acceptance_probability,
     activation_probability,
+    activation_probability_curve,
     capacity_share_kw,
     resolve_balancing_config,
     resolve_balancing_timeseries,
@@ -424,8 +427,20 @@ def derive_tight_big_m(
         load_max = 0.0
     pv_max = float(ts["pv_kwh"].max()) if "pv_kwh" in ts.columns else 0.0
 
+    # A finite import cap (Eq. S35) is a valid upper bound on the
+    # NO_SIM_GRID_IMPORT left-hand side (exactly the capped sum), so it
+    # tightens M_imp; with the cap unlimited the expression is untouched
+    # (bit-identity for cap-absent runs).
+    m_imp = (load_max + p_bess * dt_h) * 1.001
+    raw_import_cap = params.get("p_grid_import_max_kw")
+    p_import = (
+        float("inf") if raw_import_cap is None else float(raw_import_cap)
+    )
+    if np.isfinite(p_import):
+        m_imp = min(m_imp, p_import * dt_h * 1.001)
+
     return {
-        "M_imp": (load_max + p_bess * dt_h) * 1.001,
+        "M_imp": m_imp,
         "M_exp": p_export * dt_h * tightest_max_inj_frac * 1.001,
         "M_charge": p_bess * dt_h * 1.001,
         "M_pv": pv_max * 1.001,
@@ -597,6 +612,30 @@ def build_model(
         {t: float(p_export * dt_h * max_injection_bess_per_step[t]) for t in time_index}
         if max_injection_bess_per_step is not None else None
     )
+    # Per-step exogenous-curtailment signal (Eq. E48 companion, the
+    # re-dispatch mode): a [0, 1] share multiplying the export caps so
+    # the MILP charges or curtails around operator curtailment instead
+    # of spilling at the derate stage.  Absent column = factor 1
+    # everywhere (bit-identical); mutual exclusivity with the quota
+    # keys is enforced by the loader.
+    if "curtailment_signal" in ts.columns:
+        _signal = {
+            t: min(1.0, max(0.0, float(ts.loc[t, "curtailment_signal"])))
+            for t in time_index
+        }
+        export_cap_kwh_per_step = {
+            t: export_cap_kwh_per_step[t] * _signal[t] for t in time_index
+        }
+        if export_cap_pv_kwh_per_step is not None:
+            export_cap_pv_kwh_per_step = {
+                t: export_cap_pv_kwh_per_step[t] * _signal[t]
+                for t in time_index
+            }
+        if export_cap_bess_kwh_per_step is not None:
+            export_cap_bess_kwh_per_step = {
+                t: export_cap_bess_kwh_per_step[t] * _signal[t]
+                for t in time_index
+            }
     # In strict mode the PV load-serving flow is bounded by BOTH the combined
     # cap and (when present) the PV sub-cap, so the load-priority floor uses
     # the tighter of the two.
@@ -607,6 +646,29 @@ def build_model(
         }
     else:
         strict_floor_cap_kwh_per_step = export_cap_kwh_per_step
+
+    # Connection-point import cap (Eq. S35): inf / absent = unlimited
+    # (no constraint attached below — model topology unchanged).
+    raw_import_cap = params.get("p_grid_import_max_kw")
+    p_import = (
+        float("inf") if raw_import_cap is None else float(raw_import_cap)
+    )
+    if np.isfinite(p_import) and mode == "self_consumption":
+        # Defense-in-depth re-check of the loader's infeasibility
+        # certificate (io.read_workbook) for direct build_model callers:
+        # a step whose load exceeds PV + BESS power + the cap makes
+        # LOAD_BAL infeasible for every state of charge.
+        p_bess_cert = float(params.get("bess_power_kw", 0.0) or 0.0)
+        for t in time_index:
+            if load[t] > pv[t] + (p_bess_cert + p_import) * dt_h + 1e-9:
+                raise ValueError(
+                    "p_grid_import_max_kw makes the load balance "
+                    f"infeasible at step {t}: load {load[t]:.1f} kWh "
+                    f"exceeds PV {pv[t]:.1f} kWh + BESS power "
+                    f"{p_bess_cert:.0f} kW + import cap {p_import:.0f} "
+                    "kW for the step regardless of the battery state "
+                    "of charge."
+                )
     big_m = derive_tight_big_m(params, ts, dt_h=dt_h, mode=mode)
 
     m = pyo.ConcreteModel()
@@ -778,6 +840,31 @@ def build_model(
     balancing_cfg, balancing_ts, balancing_active = _resolve_balancing_inputs(
         params, ts, n_steps=n_steps, bess_present=bess_present,
     )
+    # Merit-order activation curve (Eq. B10): per-step deterministic
+    # beta_k(t) coefficients keep the MILP linear.  None (default)
+    # keeps the CONSTANT-beta code path at every consumer below, so a
+    # disabled curve is bit-identical (the constant form multiplies
+    # the summed expression once; distributing a per-step coefficient
+    # would change floating-point association).
+    _beta_merit: dict[str, Any] | None = None
+    if balancing_active and getattr(
+        balancing_cfg, "bm_merit_order_enabled", False,
+    ):
+        _merit_curve = (
+            (params.get("balancing") or {}).get("bm_merit_order_curve")
+            or None
+        )
+        if _merit_curve:
+            _beta_merit = {
+                k: activation_probability_curve(
+                    balancing_cfg, _merit_curve, k,
+                    getattr(
+                        balancing_ts,
+                        f"{k}_activation_price_eur_per_mwh",
+                    ),
+                )
+                for k in PRODUCTS_WITH_ACTIVATION
+            }
     if balancing_active:
         product_caps = {
             k: capacity_share_kw(balancing_cfg, k, p_bess)
@@ -788,6 +875,41 @@ def build_model(
             m.BALANCING_PRODUCTS, m.T, domain=pyo.NonNegativeReals,
             bounds=lambda _m, k, _t: (0.0, product_caps[k]),
         )
+        # Multi-hour reservation blocks (Eq. B9): European capacity
+        # auctions clear in blocks (e.g. 4 h), so every per-product
+        # reservation is pinned to its block-anchor value — a pure
+        # restriction of the per-step feasible set; the power-budget,
+        # SOC-headroom constraints and the objective are untouched.
+        # Blocks anchor on the hour-of-year of the step's timestamp, so
+        # rolling-horizon windows that bisect a block stay aligned with
+        # the year grid instead of drifting per window (the committed
+        # prefix fixes the block level).
+        block_hours = int(
+            getattr(balancing_cfg, "bm_block_hours", 0) or 0
+        )
+        if block_hours > 0:
+            if pd.api.types.is_datetime64_any_dtype(ts["timestamp"]):
+                _stamps = pd.to_datetime(ts["timestamp"])
+                _hours = (
+                    (_stamps.dt.dayofyear - 1) * 24
+                    + _stamps.dt.hour
+                    + _stamps.dt.minute / 60.0
+                ).to_numpy(dtype=float)
+            else:
+                _hours = np.arange(n_steps, dtype=float) * dt_h
+            _block_ids = np.floor(_hours / block_hours + 1e-9).astype(int)
+            _anchor_of_block: dict[int, int] = {}
+            for _t in range(n_steps):
+                _anchor_of_block.setdefault(int(_block_ids[_t]), _t)
+            m.BM_BLOCK_LINK = pyo.ConstraintList()
+            for _t in range(n_steps):
+                _a = _anchor_of_block[int(_block_ids[_t])]
+                if _a == _t:
+                    continue
+                for k in PRODUCTS_ALL:
+                    m.BM_BLOCK_LINK.add(
+                        m.r_balancing[k, _t] == m.r_balancing[k, _a]
+                    )
 
     # --- SOC dynamics ----------------------------------------------------
     def soc_dynamics(m, t):
@@ -798,7 +920,18 @@ def build_model(
         # Expected-value activation drifts in kWh, deterministic from the
         # solver's point of view. FCR is symmetric in expectation so it
         # contributes zero net energy.
-        if balancing_active:
+        if balancing_active and _beta_merit is not None:
+            act_charge = eta_c * dt_h * sum(
+                acceptance_probability(balancing_cfg, k)
+                * float(_beta_merit[k][t]) * m.r_balancing[k, t]
+                for k in PRODUCTS_DN
+            )
+            act_discharge = (dt_h / eta_d) * sum(
+                acceptance_probability(balancing_cfg, k)
+                * float(_beta_merit[k][t]) * m.r_balancing[k, t]
+                for k in PRODUCTS_UP
+            )
+        elif balancing_active:
             act_charge = eta_c * dt_h * sum(
                 _alpha_beta(balancing_cfg, k) * m.r_balancing[k, t]
                 for k in PRODUCTS_DN
@@ -840,7 +973,19 @@ def build_model(
         final_discharge = (
             m.bess_dis_load[n_steps - 1] + m.bess_dis_grid[n_steps - 1]
         ) / eta_d
-        if balancing_active:
+        if balancing_active and _beta_merit is not None:
+            t_final = n_steps - 1
+            final_act_charge = eta_c * dt_h * sum(
+                acceptance_probability(balancing_cfg, k)
+                * float(_beta_merit[k][t_final]) * m.r_balancing[k, t_final]
+                for k in PRODUCTS_DN
+            )
+            final_act_discharge = (dt_h / eta_d) * sum(
+                acceptance_probability(balancing_cfg, k)
+                * float(_beta_merit[k][t_final]) * m.r_balancing[k, t_final]
+                for k in PRODUCTS_UP
+            )
+        elif balancing_active:
             t_final = n_steps - 1
             final_act_charge = eta_c * dt_h * sum(
                 _alpha_beta(balancing_cfg, k) * m.r_balancing[k, t_final]
@@ -910,6 +1055,24 @@ def build_model(
         for indices in day_to_idx.values():
             lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
             m.CYC.add(lhs <= float(params["max_cycles_per_day"]) * e_cap_param)
+
+        # --- Annual throughput cap (Eq. E46) ----------------------------------
+        # Warranty limits are quoted in cycles per YEAR; the Year-1
+        # constraint is sufficient because nameplate- and faded-basis
+        # coincide at the Year-1 factor of 1 and the projected years
+        # are checked analytically (Eq. E47, degradation report).
+        raw_annual_cycles = params.get("max_cycles_per_year")
+        max_cycles_per_year = (
+            0.0 if raw_annual_cycles is None else float(raw_annual_cycles)
+        )
+        if max_cycles_per_year > 0.0:
+            m.CYC_ANNUAL = pyo.Constraint(expr=(
+                sum(
+                    m.bess_dis_load[t] + m.bess_dis_grid[t]
+                    for t in range(n_steps)
+                )
+                <= max_cycles_per_year * e_cap_param
+            ))
 
     # --- Balancing-market constraints (gated) ---------------------------------
     if balancing_active:
@@ -1035,6 +1198,22 @@ def build_model(
             m.T,
             rule=lambda m, t: (
                 m.bess_injection_total[t] <= export_cap_bess_kwh_per_step[t]
+            ),
+        )
+
+    # Connection-point import cap (Eq. S35): grid-to-load plus
+    # grid-to-BESS charging per step.  A direct <= to a constant like
+    # EXPORT_CAP (no big-M); attached ONLY when the cap is finite, so an
+    # absent / unlimited key leaves the model topology bit-identical.
+    # Merchant mode pins grid_to_load to zero, so the cap collapses to a
+    # grid-charging power limit there (inert without
+    # allow_bess_grid_charging).
+    if np.isfinite(p_import):
+        import_cap_kwh = float(p_import * dt_h)
+        m.IMPORT_CAP = pyo.Constraint(
+            m.T,
+            rule=lambda m, t: (
+                m.grid_to_load[t] + m.grid_to_bess[t] <= import_cap_kwh
             ),
         )
 
@@ -1211,16 +1390,28 @@ def build_model(
         # the input prices.
         act_terms = []
         for k in PRODUCTS_WITH_ACTIVATION:
-            alpha_beta = _alpha_beta(balancing_cfg, k)
             price_col = getattr(
                 balancing_ts, f"{k}_activation_price_eur_per_mwh",
             )
-            act_terms.append(
-                alpha_beta * dt_h * sum(
-                    float(price_col[t]) * m.r_balancing[k, t]
-                    for t in time_index
-                ) / 1000.0
-            )
+            if _beta_merit is not None:
+                # Eq. B10: the B7/B8 constant beta generalises to the
+                # per-step merit-order coefficient beta_k(t).
+                _alpha_k = acceptance_probability(balancing_cfg, k)
+                act_terms.append(
+                    _alpha_k * dt_h * sum(
+                        float(_beta_merit[k][t]) * float(price_col[t])
+                        * m.r_balancing[k, t]
+                        for t in time_index
+                    ) / 1000.0
+                )
+            else:
+                alpha_beta = _alpha_beta(balancing_cfg, k)
+                act_terms.append(
+                    alpha_beta * dt_h * sum(
+                        float(price_col[t]) * m.r_balancing[k, t]
+                        for t in time_index
+                    ) / 1000.0
+                )
         m.balancing_revenue_expr = pyo.Expression(
             expr=sum(cap_terms) + sum(act_terms),
         )
@@ -1373,6 +1564,13 @@ def model_to_dataframe(
     export_cap_kwh_per_step = (
         p_export * dt_h * max_injection_per_step
     )
+    # Mirror the build_model signal composition (re-dispatch curtailment
+    # mode) so the reported cap column — and invariant_7's headroom test
+    # on it — sees the cap the solver actually faced.
+    if "curtailment_signal" in ts.columns:
+        export_cap_kwh_per_step = export_cap_kwh_per_step * np.clip(
+            ts["curtailment_signal"].to_numpy(dtype=float), 0.0, 1.0,
+        )
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
 
     pv_present = float(params.get("pv_nameplate_kwp", 0.0) or 0.0) > 0.0
@@ -1399,6 +1597,15 @@ def model_to_dataframe(
         pyo.value(model.grid_export_total[t]) for t in time_index
     ]
     res["grid_export_cap_kwh"] = export_cap_kwh_per_step
+    # Import cap (Eq. S35): written ONLY when the cap is finite, so
+    # cap-absent dispatch frames stay bit-identical (contrast the export
+    # cap column, unconditional because that cap always exists).
+    raw_import_cap = params.get("p_grid_import_max_kw")
+    p_import = (
+        float("inf") if raw_import_cap is None else float(raw_import_cap)
+    )
+    if np.isfinite(p_import):
+        res["grid_import_cap_kwh"] = float(p_import * dt_h)
     # Actual quantity the EXPORT_CAP binds on.  Equals grid_export_total_kwh in
     # the default mode; equals total plant injection (load-serving flows plus
     # surplus export) under grid_cap_includes_load in self_consumption mode.
@@ -1412,12 +1619,22 @@ def model_to_dataframe(
         params, ts, "max_injection_profile_pv",
     )
     if mi_pv is not None:
-        res["grid_export_cap_pv_kwh"] = p_export * dt_h * mi_pv
+        cap_pv = p_export * dt_h * mi_pv
+        if "curtailment_signal" in ts.columns:
+            cap_pv = cap_pv * np.clip(
+                ts["curtailment_signal"].to_numpy(dtype=float), 0.0, 1.0,
+            )
+        res["grid_export_cap_pv_kwh"] = cap_pv
     mi_bess = _resolve_optional_max_injection_per_step(
         params, ts, "max_injection_profile_bess",
     )
     if mi_bess is not None:
-        res["grid_export_cap_bess_kwh"] = p_export * dt_h * mi_bess
+        cap_bess = p_export * dt_h * mi_bess
+        if "curtailment_signal" in ts.columns:
+            cap_bess = cap_bess * np.clip(
+                ts["curtailment_signal"].to_numpy(dtype=float), 0.0, 1.0,
+            )
+        res["grid_export_cap_bess_kwh"] = cap_bess
 
     res["soc_kwh"] = [pyo.value(model.soc[t]) for t in time_index]
     if bess_capacity_kwh > 1e-9:
@@ -1709,7 +1926,7 @@ def verify_dispatch_invariants(
 ) -> dict[str, float]:
     """Check the dispatch invariants on a solved dispatch.
 
-    Verifies the nine general-dispatch invariants plus, when the
+    Verifies the ten general-dispatch invariants plus, when the
     balancing block fired, the six INV-B1..INV-B6 balancing-market
     invariants.  Returns a dict of named residuals; the pipeline's
     ``--strict`` mode rejects any residual above the energy tolerance.
@@ -1717,7 +1934,7 @@ def verify_dispatch_invariants(
     Returns
     -------
     dict[str, float]
-        Nine general-dispatch keys:
+        Ten general-dispatch keys:
 
         * ``invariant_1_pv_balance_kwh``
         * ``invariant_2_load_balance_kwh`` (self_consumption only; 0.0 in merchant)
@@ -1728,6 +1945,8 @@ def verify_dispatch_invariants(
         * ``invariant_7_curtail_behavior_count`` (BOTH modes)
         * ``invariant_8_soc_closed_cycle_kwh`` (when terminal_soc_equal)
         * ``invariant_9_pv_load_priority_kwh`` (self_consumption only; Section 2)
+        * ``invariant_10_import_cap_excess_kwh`` (Eq. S35; 0.0
+          vacuously when the cap is unlimited)
 
         Plus six balancing-invariant keys (always present; zero when the
         balancing block did not fire):
@@ -1901,6 +2120,20 @@ def verify_dispatch_invariants(
     else:
         inv_9 = 0.0
 
+    # Invariant 10 — import cap (Eq. S35): per-step grid-to-load plus
+    # grid-to-BESS never exceeds the cap.  Vacuously 0.0 when the cap
+    # column is absent (cap unlimited) — a stable-contract key like the
+    # balancing residuals.
+    if "grid_import_cap_kwh" in res.columns:
+        import_cap = res["grid_import_cap_kwh"].to_numpy(dtype=float)
+        inv_10 = float(
+            np.maximum(
+                0.0, grid_to_load + grid_to_bess - import_cap,
+            ).max() if len(import_cap) else 0.0
+        )
+    else:
+        inv_10 = 0.0
+
     general_invariants: dict[str, float] = {
         "invariant_1_pv_balance_kwh": inv_1,
         "invariant_2_load_balance_kwh": inv_2,
@@ -1911,6 +2144,7 @@ def verify_dispatch_invariants(
         "invariant_7_curtail_behavior_count": inv_7,
         "invariant_8_soc_closed_cycle_kwh": inv_8,
         "invariant_9_pv_load_priority_kwh": inv_9,
+        "invariant_10_import_cap_excess_kwh": inv_10,
     }
     balancing_invariants = _balancing_invariants(
         res, params,

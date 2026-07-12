@@ -313,6 +313,23 @@ FINANCIAL_COLORS: dict[str, str] = {
     # Revenue levy on gross market turnover (Eq. E33) — a free shade of
     # the pink deduction family.
     "revenue_levy":            "#EC407A",  # Material pink 400
+    # Curtailment compensation (Eq. E49) — a lighter amber next to the
+    # state-support band (both administered payments).
+    "curtailment_compensation": "#FFB300",  # Material amber 600
+    # Augmentation CAPEX events (Eq. E51) — a lighter shade of the
+    # CAPEX red family: an investment outflow, not a fee, so it stays
+    # out of the pink deduction shades.
+    "augmentation_capex": "#E57373",  # Material red 300
+    # Guarantees-of-origin revenue (Eq. E54) — a light green next to
+    # the Revenue base (certificate income on the PV injection).
+    "go_revenue": "#7CB342",  # Material light green 600
+    # Reference-period support settlement (Eqs. E55-E57) — a signed
+    # olive band (administered support, distinct from the amber
+    # state-support family and the purple netting).
+    "support_settlement": "#9E9D24",  # Material lime 800
+    # Opt-in post-tax companion of the discounted cumulative line
+    # (Eq. E39); rendered dashed, only while the tax layer is on.
+    "cumulative_dcf_post_tax": "#5C6BC0",  # Material indigo 400
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
     # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
     "ppa_revenue":      "#5D4037",  # Material brown 700
@@ -417,6 +434,7 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
+    "Cumulative discounted cash-flow (post-tax)",
     "Net revenue",
     "Real net revenue",
     "Simple payback",
@@ -440,6 +458,10 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "State support",
     "State-support netting",
     "Capacity-market revenue",
+    "Curtailment compensation",
+    "GO revenue",
+    "Support settlement (FiP/CfD)",
+    "Augmentation CAPEX",
     "Grid-charging cost",
     "Energy aggregator fee",
     "Balancing aggregator fee",
@@ -470,6 +492,8 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Net cash-flow (discounted)":       "net_revenue_line",
     "Cumulative cash-flow":             "net_revenue_line",
     "Cumulative discounted cash-flow":  "net",
+    "Cumulative discounted cash-flow (post-tax)":
+        "cumulative_dcf_post_tax",
     "Net revenue":                      "net_revenue_line",
     "Real net revenue":                 "net_revenue_line",
     "Simple payback":                   "net_revenue_line",
@@ -491,6 +515,10 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "State support":                    "state_support",
     "State-support netting":            "state_support_clawback",
     "Capacity-market revenue":          "capacity_market_revenue",
+    "Curtailment compensation":         "curtailment_compensation",
+    "GO revenue":                       "go_revenue",
+    "Support settlement (FiP/CfD)":     "support_settlement",
+    "Augmentation CAPEX":               "augmentation_capex",
     "Grid-charging cost":               "grid_charge_cost",
     "Energy aggregator fee":            "aggregator_fee",
     "Balancing aggregator fee":         "balancing_aggregator_fee",
@@ -517,6 +545,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Net cash-flow (discounted)",
     "Cumulative cash-flow",
     "Cumulative discounted cash-flow",
+    "Cumulative discounted cash-flow (post-tax)",
     "Net revenue",
     "Real net revenue",
     "Simple payback",
@@ -536,6 +565,9 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "State support",
     "State-support netting",
     "Capacity-market revenue",
+    "Curtailment compensation",
+    "GO revenue",
+    "Support settlement (FiP/CfD)",
     # Balancing-product segments (after DAM/retail stack components,
     # before negative flows).  Per-product palette ordering mirrors
     # the canonical PRODUCTS_ALL ordering in pvbess_opt.balancing.
@@ -548,6 +580,7 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "OPEX",
     "DEVEX",
     "CAPEX",
+    "Augmentation CAPEX",
     "Grid-charging cost",
     "Energy aggregator fee",
     "Balancing aggregator fee",

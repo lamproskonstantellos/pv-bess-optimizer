@@ -34,7 +34,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .availability import apply_unavailability_derate
+from .availability import apply_operating_derates
 from .balancing import (
     PRODUCTS_ALL,
     PRODUCTS_DN,
@@ -42,7 +42,7 @@ from .balancing import (
     PRODUCTS_WITH_ACTIVATION,
     BalancingConfig,
     acceptance_probability,
-    activation_probability,
+    activation_probability_curve,
     resolve_balancing_config,
 )
 from .kpis import add_economic_columns, compute_kpis, final_soc_after_last_step
@@ -714,9 +714,7 @@ def rolling_horizon_dispatch(
     # Identical scope to the pipeline's headline Year-1 KPIs: the same
     # post-solve unavailability derate is applied here so the foresight
     # gap compares derated-vs-derated (the factor cancels in the ratio).
-    kpis = apply_unavailability_derate(
-        kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
-    )
+    kpis = apply_operating_derates(kpis, params)
     kpis["year_close_soc_shortfall_kwh"] = round(year_close_shortfall_kwh, 4)
     return full, kpis
 
@@ -935,6 +933,7 @@ def realise_balancing_scenario(
     soc_max_kwh: float | None = None,
     eta_charge: float = 1.0,
     eta_discharge: float = 1.0,
+    merit_curve: dict[str, list[tuple[float, float]]] | None = None,
 ) -> dict[str, Any]:
     """Realise one Monte Carlo scenario of balancing revenue.
 
@@ -1001,11 +1000,18 @@ def realise_balancing_scenario(
         # Activation realisation, conditional on being cleared.
         if product not in PRODUCTS_WITH_ACTIVATION:
             continue
-        beta = activation_probability(cfg, product)
-        activated = cleared & (rng.random(n) < beta)
-        activated_by_product[product] = activated
         act_price_col = f"{product}_activation_price_eur_per_mwh"
         act_price = np.asarray(prices[act_price_col], dtype=float)
+        # Merit-order curve (Eq. B10): the Bernoulli activation
+        # probability follows the same per-step beta the MILP expected;
+        # the curve reads the UN-noised input price (bids are assumed
+        # at the input price level).  A None curve reproduces the
+        # scalar path draw-for-draw.
+        beta_t = activation_probability_curve(
+            cfg, merit_curve, product, act_price,
+        )
+        activated = cleared & (rng.random(n) < beta_t)
+        activated_by_product[product] = activated
         act_noise = _lognormal_unit_mean(rng, sigma_act, (n,))
         act_revenue = float(
             (
@@ -1081,6 +1087,12 @@ def monte_carlo_balancing(
     cfg = resolve_balancing_config(raw_cfg)
     if not cfg.balancing_enabled:
         return {}
+    # Merit-order curve (Eq. B10): the realisation draws activation
+    # events with the same per-step beta the MILP expected.
+    merit_curve = (
+        raw_cfg.get("bm_merit_order_curve")
+        if getattr(cfg, "bm_merit_order_enabled", False) else None
+    ) or None
 
     missing = [
         f"bm_reservation_{p}_kw" for p in PRODUCTS_ALL
@@ -1152,6 +1164,7 @@ def monte_carlo_balancing(
             soc_min_kwh=soc_min if bess_capacity_kwh > 0.0 else None,
             soc_max_kwh=soc_max if bess_capacity_kwh > 0.0 else None,
             eta_charge=eta_c, eta_discharge=eta_d,
+            merit_curve=merit_curve,
         )
         totals[s] = outcome["total_balancing_revenue_eur"]
         for p, val in outcome["per_product_capacity_revenue_eur"].items():

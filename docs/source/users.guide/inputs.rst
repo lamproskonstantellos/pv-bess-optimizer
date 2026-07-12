@@ -46,6 +46,14 @@ Balancing price columns         balancing only           Optional per-step balan
                                                          ``{afrr,mfrr}_{up,dn}_activation_price_eur_per_mwh``
                                                          (see the ``balancing`` sheet
                                                          reference below).
+``curtailment_signal``          no                       Per-step export-availability factor
+                                                         in ``[0, 1]`` (0 = export fully
+                                                         curtailed, 1 = unrestricted).
+                                                         Multiplies the export cap inside the
+                                                         optimizer so dispatch adapts to the
+                                                         restriction.  Mutually exclusive
+                                                         with ``curtailment_pct`` on the
+                                                         ``project`` sheet.
 ==============================  =======================  ====================================
 
 Sheet ``project``
@@ -67,6 +75,17 @@ High-level run configuration:
   Big-M is substituted for the disabled cap so the MILP stays
   solver-agnostic (HiGHS, Gurobi, CBC); the constraint itself is never
   removed.  A negative number or ``0`` remains a validation error.
+* ``p_grid_import_max_kw``: grid-connection import limit (kW),
+  capping grid-to-load plus grid-to-BESS charging per step (the
+  export cap's mirror; same empty / ``inf`` / ``unlimited`` /
+  ``disabled`` token semantics, default unlimited).  Unlike the
+  export cap the constraint is attached only when the value is
+  finite, so an unlimited cap leaves results bit-identical.  In
+  merchant mode it collapses to a grid-charging power limit.  A
+  workbook whose load exceeds every possible supply (PV + BESS power
+  + this cap) in some step is rejected before the solve with the
+  worst timestamp named; load above the cap alone only warns
+  (PV/battery state of charge may still bridge it).
 * ``retail_tariff_eur_per_mwh``: retail tariff used in self_consumption mode.
 * ``allow_bess_grid_charging``: TRUE → BESS may charge from grid in
   PV-zero periods.
@@ -96,6 +115,19 @@ High-level run configuration:
 * ``unavailability_pct``: annual outage / maintenance factor
   (default 1 %).  Applied as a post-solve derate on PV generation,
   BESS discharge, and revenue.
+* ``curtailment_pct`` (default 0): expected grid-operator curtailment
+  of **exported** energy, in percent.  Applied as a post-solve derate
+  on the export-side energies and revenues only (after the
+  availability derate); self-consumption, load and grid import are
+  unaffected.  Mutually exclusive with the ``curtailment_signal``
+  timeseries column below — setting both is an error.
+* ``curtailment_compensated_pct`` (default 0): share of the curtailed
+  energy that is financially compensated, in percent.
+* ``curtailment_compensation_price_eur_per_mwh`` (default 0):
+  administered compensation price for the compensated curtailed
+  energy.  The product of the three keys produces the
+  ``curtailment_compensation_eur`` cashflow column, indexed on DAM
+  inflation, and the ``lifetime_curtailment_compensation_eur`` KPI.
 * ``site_capex_eur`` (default 0): site-wide lump-sum CAPEX in
   absolute EUR for items that are not naturally per-kWp / per-kW
   (substation construction, MV/HV grid upgrades, interconnection
@@ -158,6 +190,17 @@ Sheet ``bess``
 * ``soc_min_frac`` / ``soc_max_frac`` / ``initial_soc_frac`` /
   ``terminal_soc_equal`` / ``max_cycles_per_day``: operating
   envelope.
+* ``max_cycles_per_year`` (default 0 = off) /
+  ``cycle_cap_basis`` (``nameplate`` default | ``faded``): annual
+  full-equivalent-cycle warranty cap, enforced in the Year-1
+  dispatch as one year-long constraint and checked analytically for
+  the projected years (degradation sheet ``cycles_on_basis`` /
+  ``warranty_utilisation_pct`` columns).  The basis only changes the
+  projected-year accounting — Year-1 dispatch is identical under
+  both.  A warning flags a daily cap that already binds tighter, a
+  replacement reset projecting above 100 %, or the combination with
+  rolling-horizon dispatch (the annual cap binds the deterministic
+  solve only).
 * ``capex_bess_eur_per_kwh`` (default 250 EUR/kWh): full installed
   BESS CAPEX per kWh of nameplate energy capacity (cells + PCS + BOP
   + EPC; Lazard band 215-315 EUR/kWh).  Set 0 for an existing BESS.
@@ -173,6 +216,27 @@ Sheet ``bess``
   replacement CAPEX charged in the cashflow in that year; ``0`` never
   replaces.  Only one replacement is ever charged; if the fresh pack
   would cross the threshold again the run log warns.
+* ``bess_overbuild_pct`` (default 0): day-1 DC overbuild.  Installs
+  ``(1 + pct/100) x bess_capacity_kwh`` charged in Year-0 CAPEX, with
+  usable capacity clamped at nameplate so fade consumes the overbuilt
+  margin first.  Dispatch always solves at nameplate.  Cannot combine
+  with ``bess_replacement_year``.
+* ``bess_augmentation_years`` (default empty): comma-separated project
+  years of staged augmentation events, e.g. ``8,15``.  Each event adds
+  a fresh pool of cells; every pool fades on its own calendar + cycle
+  curve and the plant capacity is the nameplate-clamped pool sum.  The
+  event CAPEX books as its own ``augmentation_capex_eur`` cashflow
+  column (month 12, like the replacement) and joins the LCOS
+  numerator.  Supersedes — and cannot combine with — the single
+  replacement.
+* ``bess_augmentation_mode`` (``top_up`` default | ``fixed_kwh``):
+  ``top_up`` restores usable capacity to nameplate at each event;
+  ``fixed_kwh`` adds ``bess_augmentation_kwh`` per event (required
+  > 0 in that mode).
+* ``bess_cost_decline_pct_per_year`` (default 0, range 0-30): annual
+  decline of the BESS unit cost applied to augmentation events — the
+  event-year unit cost is ``capex_bess_eur_per_kwh x
+  (1 - pct/100)^year``.
 * ``bess_degradation_annual_pct``: linear calendar BESS capacity fade.
 * ``bess_degradation_pct_per_cycle``: cycle-based capacity fade per
   full equivalent cycle, in percent (LFP default 0.008, range
@@ -302,6 +366,18 @@ Sheet ``economics``
   from LCOE/LCOS; the gross support is not scaled by the Revenue
   tornado driver while the netting is recomputed against the un-scaled
   threshold (revenue-stabilising).
+* ``sensitivity_tax_rate_delta_pp`` (default 5): TaxRate tornado
+  driver +/- in percentage points, active only while
+  ``corporate_tax_rate_pct`` > 0.  Each leg is a full cashflow +
+  tax-layer rebuild (taxes are nonlinear) and the driver reports
+  POST-TAX deltas in dedicated sensitivity columns; the pre-tax
+  tornado is untouched.  The cumulative-cashflow figure gains a
+  dashed post-tax line while the rate is on.
+* ``go_price_eur_per_mwh`` (default 0 = off): guarantees-of-origin
+  sale price applied to the PV grid-export volume (the eligible
+  renewable injection; BESS discharge and self-consumed energy
+  excluded).  Flat over the horizon; the eligible MWh fade on the PV
+  degradation curve.  Fee-exempt and excluded from LCOE.
 * ``revenue_levy_pct`` (default 0, off): levy on gross MARKET
   turnover (Eq. E33) - wholesale DAM export revenue gross of the
   aggregator fee, balancing capacity + activation revenue and the PPA
@@ -572,6 +648,23 @@ The 34 keys (defaults in the design doc's Inputs table):
 * ``fcr_required_duration_hours``: FCR sustained-output requirement.
 * ``bm_settlement_minutes``: must equal the timeseries cadence
   (validated; the runtime uses the auto-detected ``dt_minutes``).
+* ``bm_merit_order_enabled`` (default ``FALSE``): enable the
+  merit-order activation-probability curve read from the optional
+  ``bm_merit_order`` sheet (columns ``product``,
+  ``price_eur_per_mwh``, ``activation_probability_pct``; aFRR/mFRR
+  products only, monotone non-increasing in price).  The per-step
+  activation probability is then interpolated at each step's
+  activation price — expensive bids activate less.  ``FALSE`` keeps
+  the scalar ``*_activation_probability_pct`` path, bit-identical.
+* ``bm_block_hours``: reservation block length in hours (default 0 =
+  reservations may vary per settlement period, bit-identical).  With
+  a positive value (e.g. 4, the common European capacity-auction
+  block) the reserved capacity per product is held constant across
+  each block, anchored on hour-of-year multiples so rolling-horizon
+  windows stay aligned; must be a whole multiple of the dispatch
+  step and divide 24 evenly.  Blocking restricts the solver's
+  choices, so expected balancing revenue can only stay equal or
+  fall — the realistic auction granularity avoids overstating it.
 * ``bm_soc_headroom_pct``: SOC safety buffer on the worst-case
   activation reservation.
 * ``bm_inflation_pct``: yearly indexation of the balancing revenue
@@ -657,6 +750,19 @@ While under contract the PPA stream carries **no aggregator fee**
 stays out of LCOE/LCOS.  The ``sensitivity_ppa_price_delta_pct``
 economics key adds a PPA-price tornado driver when the contract is on.
 
+* ``support_scheme`` (default ``none``) /
+  ``support_strike_eur_per_mwh`` / ``support_term_years`` (default
+  20) / ``support_ref_period`` (``monthly`` default | ``hourly``) /
+  ``support_negative_hour_suspension`` (default ``FALSE``):
+  reference-period state-support settlement on the eligible PV
+  export — ``sliding_fip`` pays ``max(strike - reference, 0)`` per
+  month on the volume-weighted monthly DAM reference price (the
+  Greek DAPEEP sliding Feed-in-Premium; the strike is the reference
+  tariff), ``cfd_two_way`` settles ``strike - reference`` both ways.
+  The premium is a settlement overlay (dispatch still sells at the
+  DAM); negative-DAM hours can be excluded from the eligible volume;
+  mutually exclusive with ``ppa_enabled``.
+
 Sheet ``simulation``
 --------------------
 
@@ -677,6 +783,23 @@ Sheet ``simulation``
   into ``06_uncertainty_plots/`` alongside the input forecast bands.
   Set ``FALSE`` to emit only the per-source
   ``inputs_forecast_band_*.pdf`` and the seasonal / heatmap figures.
+* ``risk_metrics_enabled`` (default ``FALSE``) / ``risk_alpha_pct``
+  (default 5, range (0, 50]): VaR/CVaR of NPV over the rolling-horizon
+  Monte Carlo seeds.  Each seed's realised Year-1 profit maps onto an
+  NPV by a pro-rata rescale of the Year-1 revenue base (documented
+  approximation); the empirical alpha-quantile and its tail mean land
+  in the ``risk_metrics`` results sheet and the SUMMARY rolling
+  section.  Requires ``uncertainty_enabled`` with seeds; with a
+  scenario deck the same estimators are appended to the comparison
+  workbook (equal-weight scenarios).
+* ``midlife_resolve_year`` (default 0 = off): re-solve the dispatch
+  at the given project year with degraded parameters (BESS energy
+  scaled by its capacity factor, PV by its production factor, power
+  and prices at Year-1 levels) to validate the analytic lifetime
+  scaling.  Must lie in ``2..project_lifecycle_years``.  Adds one
+  extra solve; the scaled-vs-resolved delta table is diagnostic only
+  (results-workbook sheet ``midlife_resolve`` and a ``SUMMARY.md``
+  section) and never alters any financial output.
 
 Sheet ``max_injection_profile``
 -------------------------------

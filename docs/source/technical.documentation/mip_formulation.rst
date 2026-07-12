@@ -221,7 +221,7 @@ Audit invariants
 ----------------
 
 After every solve :func:`pvbess_opt.optimization.verify_dispatch_invariants`
-checks nine invariants:
+checks ten invariants:
 
 1. **PV balance**: ``pv = pv_to_load + pv_to_bess + pv_to_grid + pv_curtail``.
 2. **Load balance**: self_consumption only; 0 in merchant.
@@ -239,5 +239,9 @@ checks nine invariants:
    = soc[0]``.
 9. **PV→Load priority (Section 2)**: self_consumption only; max absolute deviation
    of ``pv_to_load[t]`` from ``min(pv[t], load[t])``.
+10. **Import cap (Eq. S35)**: both modes; per-step
+    ``grid_to_load + grid_to_bess`` never exceeds
+    ``p_grid_import_max_kw × dt``; vacuously 0 when the cap is
+    unlimited.
 
 The ``--strict`` CLI flag turns invariant violations into errors.

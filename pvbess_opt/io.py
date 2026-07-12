@@ -71,6 +71,7 @@ Mode-specific timeseries semantics
 
 from __future__ import annotations
 
+import itertools
 import logging
 import re
 from pathlib import Path
@@ -88,8 +89,10 @@ from .constants import (
     DEFAULT_MAX_INJECTION_PCT_HOURLY,
     DEFAULT_SENSITIVITY_DELTA_PCT,
     DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
+    DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
 )
 from .io_style import style_workbook
+from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +142,10 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "project_start_year": 2026,
     "mode": "self_consumption",
     "p_grid_export_max_kw": 5000.0,
+    # Connection-point import limit (Eq. S35).  None parses to inf =
+    # unlimited (the default; results bit-identical to a run without
+    # the key — no IMPORT_CAP constraint is attached).
+    "p_grid_import_max_kw": None,
     "retail_tariff_eur_per_mwh": 120.0,
     "allow_bess_grid_charging": False,
     # Regulated charging-side wedge (EUR/MWh) on grid-charged BESS
@@ -148,6 +155,14 @@ PROJECT_SHEET_DEFAULTS: dict[str, Any] = {
     "grid_charging_fee_exempt": False,
     "grid_cap_includes_load": False,
     "unavailability_pct": 1.0,
+    # Exogenous system-operator curtailment (Eqs. E48/E49): quota mode,
+    # off by default (bit-identical).  Mutually exclusive with a
+    # per-step curtailment_signal timeseries column (the MILP
+    # re-dispatch mode).  Project sheet so the keys reach both the
+    # MILP params and the economics merge with zero extra plumbing.
+    "curtailment_pct": 0.0,
+    "curtailment_compensated_pct": 0.0,
+    "curtailment_compensation_price_eur_per_mwh": 0.0,
     "site_capex_eur": 0.0,
     "site_devex_eur": 0.0,
     "currency_format": "auto",
@@ -186,6 +201,10 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "initial_soc_frac": 0.50,
     "terminal_soc_equal": True,
     "max_cycles_per_day": 1.0,
+    # Annual warranty throughput cap (Eqs. E46/E47): 0 = off (default,
+    # bit-identical); basis nameplate keeps current cycle accounting.
+    "max_cycles_per_year": 0.0,
+    "cycle_cap_basis": "nameplate",
     # Full installed BESS cost per kWh of nameplate energy capacity
     # (Lazard-style band 215-315 EUR/kWh).
     "capex_bess_eur_per_kwh": 250.0,
@@ -193,6 +212,14 @@ BESS_SHEET_DEFAULTS: dict[str, Any] = {
     "opex_bess_eur_per_kw": 14.0,
     "bess_replacement_year": 0,
     "bess_replacement_cost_pct": 50.0,
+    # Staged augmentation + day-1 DC overbuild (Eqs. E50-E52), all
+    # default-off / bit-identical.  A non-empty events CSV supersedes
+    # the single replacement (mutually exclusive at load time).
+    "bess_overbuild_pct": 0.0,
+    "bess_augmentation_years": None,
+    "bess_augmentation_mode": "top_up",
+    "bess_augmentation_kwh": 0.0,
+    "bess_cost_decline_pct_per_year": 0.0,
     "bess_degradation_annual_pct": 2.0,
     # LFP cycle-fade default (matches the canonical workbook row in
     # _BESS_ROWS and the schema default); range 0.005-0.010.
@@ -268,6 +295,9 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     # Revenue levy on gross market turnover (Eq. E33), e.g. the 3 %
     # special RES turnover levy applied in Greece.  Default-off.
     "revenue_levy_pct": 0.0,
+    # Guarantees-of-origin sale price (Eq. E54) on the PV grid-export
+    # volume.  Default-off.
+    "go_price_eur_per_mwh": 0.0,
     # Depreciation + corporate tax layer (Eqs. E34-E38): post-tax
     # cashflow columns appended by economics.apply_tax_layer.  The
     # rate default of 0 keeps every existing result bit-identical
@@ -288,6 +318,7 @@ ECONOMICS_SHEET_DEFAULTS: dict[str, Any] = {
     "sensitivity_discount_rate_delta_pp": DEFAULT_SENSITIVITY_DISCOUNT_RATE_DELTA_PP,
     # PPA-strike tornado driver (active only when a PPA contract is on).
     "sensitivity_ppa_price_delta_pct": DEFAULT_SENSITIVITY_DELTA_PCT,
+    "sensitivity_tax_rate_delta_pp": DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
     # Project-finance debt layer (all-equity by default: gearing 0).
     "gearing_pct": 0.0,
     "debt_interest_rate_pct": 5.0,
@@ -356,6 +387,13 @@ BALANCING_SHEET_DEFAULTS: dict[str, Any] = {
     # Settlement period (minutes); must equal 60 * dt_hours when
     # balancing_enabled.
     "bm_settlement_minutes": 15,
+    # Multi-hour reservation blocks (Eq. B9): 0 = per-settlement-period
+    # reservations (default, bit-identical).
+    "bm_block_hours": 0,
+    # Merit-order activation curve (Eq. B10): read from the optional
+    # 'bm_merit_order' sheet.  False keeps the scalar
+    # *_activation_probability_pct path, bit-identical.
+    "bm_merit_order_enabled": False,
     # Extra SOC safety buffer applied on top of the worst-case
     # activation reservation (percent of activation energy).
     "bm_soc_headroom_pct": 10.0,
@@ -400,6 +438,15 @@ PPA_SHEET_DEFAULTS: dict[str, Any] = {
     # Baseload band (MW) for ppa_structure='baseload'; 0 keeps the
     # structure inert (must be > 0 when baseload is enabled).
     "ppa_baseload_mw": 0.0,
+    # Reference-period support settlement (Eqs. E55-E57): the Greek
+    # DAPEEP sliding Feed-in-Premium or a two-way CfD on the eligible
+    # PV export.  'none' (default) is bit-identical; mutually
+    # exclusive with ppa_enabled.
+    "support_scheme": "none",
+    "support_strike_eur_per_mwh": 0.0,
+    "support_term_years": 20,
+    "support_ref_period": "monthly",
+    "support_negative_hour_suspension": False,
 }
 
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
@@ -421,6 +468,12 @@ SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "imbalance_pricing": "dual",
     "imbalance_price_mult_short": 1.25,
     "imbalance_price_mult_long": 0.75,
+    # Mid-life re-solve validation (Eq. E53): 0 = off (default,
+    # bit-identical — no extra solve, no workbook sheet).
+    "midlife_resolve_year": 0,
+    # NPV tail risk over Monte Carlo seeds (Eqs. U10/U11); default-off.
+    "risk_metrics_enabled": False,
+    "risk_alpha_pct": 5.0,
     "plot_daily_scope": "year1_only",
     "plot_monthly_scope": "all",
     "plot_yearly_scope": "all",
@@ -466,6 +519,9 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "optimizer_floor_enabled",
     "lender_cases_enabled",
     "plot_dscr_profile",
+    "bm_merit_order_enabled",
+    "risk_metrics_enabled",
+    "support_negative_hour_suspension",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -475,7 +531,9 @@ _INT_KEYS: frozenset[str] = frozenset({
     "uncertainty_n_seeds",
     "uncertainty_window_hours",
     "uncertainty_commit_hours",
+    "midlife_resolve_year",
     "bm_settlement_minutes",
+    "bm_block_hours",
     "bm_mc_scenarios",
     "bm_random_seed",
     "ppa_term_years",
@@ -491,6 +549,7 @@ _INT_KEYS: frozenset[str] = frozenset({
     "depreciation_years_bess",
     "depreciation_years_site",
     "tax_loss_carryforward_years",
+    "support_term_years",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -499,6 +558,8 @@ _STR_KEYS: frozenset[str] = frozenset({
     "plot_monthly_scope",
     "plot_yearly_scope",
     "pv_source",
+    "cycle_cap_basis",
+    "bess_augmentation_mode",
     "debt_repayment",
     "debt_sizing_mode",
     "debt_sizing_case",
@@ -508,6 +569,8 @@ _STR_KEYS: frozenset[str] = frozenset({
     "imbalance_pricing",
     "bess_toll_merchant_treatment",
     "optimizer_margin_basis",
+    "support_scheme",
+    "support_ref_period",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -516,6 +579,8 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "plot_monthly_scope": frozenset({"none", "year1_only", "all"}),
     "plot_yearly_scope": frozenset({"none", "year1_only", "all"}),
     "pv_source": frozenset({"auto", "file", "pvgis"}),
+    "cycle_cap_basis": frozenset({"nameplate", "faded"}),
+    "bess_augmentation_mode": frozenset({"top_up", "fixed_kwh"}),
     "debt_repayment": frozenset({"annuity", "linear", "sculpted"}),
     "debt_sizing_mode": frozenset({"manual", "target_dscr"}),
     # 'p90' and 'low_price' parse (the key surface is stable) but
@@ -528,6 +593,8 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "imbalance_pricing": frozenset({"single", "dual"}),
     "bess_toll_merchant_treatment": frozenset({"zeroed", "retained"}),
     "optimizer_margin_basis": frozenset({"dam", "dam_plus_balancing"}),
+    "support_scheme": frozenset({"none", "sliding_fip", "cfd_two_way"}),
+    "support_ref_period": frozenset({"monthly", "hourly"}),
 }
 
 
@@ -553,6 +620,16 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("p_grid_export_max_kw", 5000, "kW",
      "Max grid export (kW). Leave empty or use 'inf' / 'unlimited' / "
      "'disabled' to remove cap; no injection limit is applied."),
+    ("p_grid_import_max_kw", None, "kW",
+     "Max grid import (kW) at the connection point, capping "
+     "grid-to-load plus grid-to-BESS charging per step (Eq. S35). "
+     "Leave empty or use 'inf' / 'unlimited' / 'disabled' to remove "
+     "the cap (default). Must be strictly positive when set. In "
+     "merchant mode the cap collapses to a grid-charging power limit. "
+     "If a timestep's load exceeds every possible supply (PV + BESS "
+     "power + this cap) the workbook is rejected before the solve; "
+     "if the load merely exceeds the cap alone, a warning notes that "
+     "feasibility then depends on PV and battery state of charge."),
     ("retail_tariff_eur_per_mwh", 120, "EUR/MWh",
      "Retail tariff used in self_consumption mode for load coverage."),
     ("allow_bess_grid_charging", False, "bool",
@@ -588,6 +665,22 @@ _PROJECT_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("unavailability_pct", 1.0, "%",
      "Annual unavailability (outages / scheduled maintenance) applied as "
      "a post-solve derate on PV generation, BESS discharge, and revenue."),
+    ("curtailment_pct", 0.0, "%",
+     "Expected share of annual grid export curtailed by the system "
+     "operator (exogenous quota, Eq. E48). Applied post-solve as a "
+     "second derate on export volumes and export revenue only, after "
+     "the unavailability derate. 0 = off (default, bit-identical). "
+     "Mutually exclusive with a curtailment_signal timeseries column "
+     "(the per-step re-dispatch mode)."),
+    ("curtailment_compensated_pct", 0.0, "%",
+     "Share of the curtailed export volume that is financially "
+     "compensated (redispatch-compensation regimes, Eq. E49). Quota "
+     "mode only; rejected when a curtailment_signal column is present "
+     "(the dispatch already monetises the response)."),
+    ("curtailment_compensation_price_eur_per_mwh", 0.0, "EUR/MWh",
+     "Price paid on the compensated curtailed volume. 0 (default) "
+     "keeps the compensation line all-zero even when the shares are "
+     "set. Non-negative."),
     ("site_capex_eur", 0.0, "EUR",
      "Site-wide lump-sum CAPEX in absolute EUR for items that are not "
      "naturally per-kWp/per-kW (substation construction, MV/HV grid "
@@ -667,6 +760,19 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "If TRUE, force final SOC == initial SOC (closed cycle)."),
     ("max_cycles_per_day", 1.0, "-",
      "Daily equivalent-cycle cap (sum of discharge / capacity)."),
+    ("max_cycles_per_year", 0.0, "cycles/year",
+     "Annual full-equivalent-cycle cap (warranty throughput limit, "
+     "Eq. E46). 0 disables (default). Enforced in the Year-1 dispatch "
+     "as total discharge <= cap x capacity; projected years are "
+     "checked analytically (Eq. E47) and reported in the degradation "
+     "sheet. A warning flags a daily cap that already binds tighter "
+     "(max_cycles_per_day x 365 < max_cycles_per_year)."),
+    ("cycle_cap_basis", "nameplate", "nameplate | faded",
+     "Capacity basis for the annual cycle cap accounting (Eq. E47): "
+     "nameplate (installed kWh, default) or faded (SOH-adjusted kWh "
+     "per year, the common warranty convention). Year-1 dispatch is "
+     "identical under both (the Year-1 factor is 1); the switch "
+     "changes the projected-year utilisation report."),
     ("bess_wear_cost_eur_per_mwh", 10.0, "EUR/MWh",
      "Cycle wear cost penalised per MWh discharged in the dispatch "
      "objective (default 10; 0 = off). A dispatch shadow price only: "
@@ -700,6 +806,34 @@ _BESS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("bess_replacement_cost_pct", 50, "%",
      "Replacement cost as percent of original BESS CAPEX. Charged in "
      "the effective replacement year (scheduled or auto)."),
+    ("bess_overbuild_pct", 0.0, "%",
+     "Day-1 DC overbuild: installs (1 + pct/100) x bess_capacity_kwh, "
+     "charged in Year-0 CAPEX at capex_bess_eur_per_kwh, with usable "
+     "capacity clamped at nameplate (AC / warranty limit) so fade "
+     "consumes the overbuilt margin first. Dispatch always solves at "
+     "nameplate; the overbuild only changes the capacity-factor curve "
+     "and Year-0 CAPEX. 0 = off (default). Cannot combine with "
+     "bess_replacement_year."),
+    ("bess_augmentation_years", None, "years (CSV)",
+     "Comma-separated project years of staged augmentation events, "
+     "e.g. '8,15'. Empty = no augmentation (default). Each event adds "
+     "a fresh pool of cells priced on the declining cost curve "
+     "(bess_cost_decline_pct_per_year); every pool fades on its own "
+     "calendar + cycle curve and the plant capacity is the "
+     "nameplate-clamped pool sum. Supersedes the single replacement: "
+     "cannot combine with bess_replacement_year != 0 or 'auto'."),
+    ("bess_augmentation_mode", "top_up", "enum",
+     "Accepted values: 'top_up' (default) restores usable capacity to "
+     "nameplate at each event year; 'fixed_kwh' adds "
+     "bess_augmentation_kwh at every event."),
+    ("bess_augmentation_kwh", 0.0, "kWh",
+     "Energy added per event in 'fixed_kwh' mode; must be > 0 when "
+     "that mode is active with events scheduled. Ignored in 'top_up' "
+     "mode (a warning notes a non-zero leftover value)."),
+    ("bess_cost_decline_pct_per_year", 0.0, "%/year",
+     "Annual decline of the BESS unit cost applied to augmentation "
+     "events: the event-year unit cost is capex_bess_eur_per_kwh x "
+     "(1 - pct/100)^year. 0 = flat cost (default); range 0-30."),
     ("bess_degradation_annual_pct", 2.0, "%",
      "Linear BESS capacity fade. Approximate Tier-1 LFP cell warranty."),
     ("bess_degradation_pct_per_cycle", 0.008, "%",
@@ -888,6 +1022,16 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "column inside net_cashflow_eur (clamped: negative turnover never "
      "yields a rebate). Excluded from LCOE/LCOS. Validated in "
      "[0, 100]."),
+    ("go_price_eur_per_mwh", 0.0, "EUR/MWh",
+     "Guarantees-of-origin (GO) sale price applied to the PV "
+     "grid-export volume - the eligible renewable injection (BESS "
+     "discharge and self-consumed energy excluded: GOs are issued on "
+     "metered renewable injection; export basis stated explicitly as "
+     "the eligibility definition is jurisdiction-dependent). Flat "
+     "over the horizon (GO prices are contracted, not CPI-indexed); "
+     "the eligible MWh fade on the PV degradation curve. Fee-exempt "
+     "(certificates settle outside the power market) and excluded "
+     "from LCOE (revenue-agnostic metric). 0 = off (default)."),
     ("corporate_tax_rate_pct", 0.0, "%",
      "Corporate income tax rate applied to taxable income = EBITDA - "
      "straight-line depreciation - debt interest, with loss "
@@ -944,6 +1088,13 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Symmetric +/- delta on the PPA strike. The driver appears in the "
      "tornado only when the ppa sheet's contract is enabled and the "
      "Year-1 PPA stream is non-zero."),
+    ("sensitivity_tax_rate_delta_pp", DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
+     "pp",
+     "TaxRate tornado driver +/- in percentage points. Active only "
+     "while the tax layer is on (corporate_tax_rate_pct > 0); each "
+     "leg is a full cashflow + tax-layer rebuild (taxes are "
+     "nonlinear), and the driver reports POST-TAX deltas in "
+     "dedicated columns - the pre-tax tornado is untouched."),
     ("gearing_pct", 0.0, "%",
      "Debt fraction of the initial investment (0 = all-equity, the "
      "default; unlevered results are unchanged)."),
@@ -1053,6 +1204,29 @@ _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "DAM-proxy multiplier for the LONG imbalance price when the "
      "imbalance_price_long_eur_per_mwh column is absent (dual regime). "
      "Sign-aware like the short-side proxy."),
+    ("midlife_resolve_year", 0, "year",
+     "Project year at which to re-solve the dispatch with degraded "
+     "capacities (BESS energy x its capacity factor, PV column x its "
+     "production factor, power and prices at Year-1 levels) as a "
+     "validation of the analytic lifetime scaling. 0 = off (default); "
+     "otherwise must lie in 2..project_lifecycle_years. Adds one extra "
+     "solve; the delta table is diagnostic only (results-workbook "
+     "sheet 'midlife_resolve' + a SUMMARY section) and never alters "
+     "any financial output."),
+    ("risk_metrics_enabled", False, "bool",
+     "Compute VaR/CVaR of NPV over the rolling-horizon Monte Carlo "
+     "seeds (Eqs. U10/U11): each seed's realised Year-1 profit maps "
+     "onto an NPV by rescaling the Year-1 revenue base pro-rata and "
+     "re-running the analytic cashflow (documented approximation). "
+     "Requires uncertainty_enabled with uncertainty_n_seeds > 0 (a "
+     "warning fires otherwise, and nothing is computed). FALSE "
+     "(default) adds nothing anywhere - bit-identical outputs."),
+    ("risk_alpha_pct", 5.0, "%",
+     "Tail level alpha for VaR/CVaR (5 = worst-5% tail; the "
+     "empirical linear-interpolated quantile). Range (0, 50]. Inert "
+     "while risk_metrics_enabled is FALSE. Note the default 30 "
+     "Monte Carlo seeds give noisy 5% tails - raise "
+     "uncertainty_n_seeds for stable estimates."),
     ("plot_daily_scope", "year1_only", "scope",
      "none | year1_only | all. 'all' produces ~365 * N_years * 3 daily PDFs."),
     ("plot_monthly_scope", "all", "scope",
@@ -1131,6 +1305,24 @@ _BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("bm_settlement_minutes", 15, "int",
      "Balancing-market settlement period in minutes. Must equal "
      "60 * dt_hours when balancing_enabled is TRUE."),
+    ("bm_block_hours", 0, "hours",
+     "Reservation block length for balancing capacity products "
+     "(Eq. B9). 0 = reservations may vary per settlement period "
+     "(default). When > 0 (e.g. 4, the common European auction "
+     "block), reserved capacity per product is held constant across "
+     "each block, anchored on hour-of-year multiples; must be a "
+     "positive multiple of the dispatch step and divide 24 evenly."),
+    ("bm_merit_order_enabled", False, "bool",
+     "Enable the merit-order activation-probability curve (Eq. B10) "
+     "read from the optional 'bm_merit_order' sheet (columns: "
+     "product, price_eur_per_mwh, activation_probability_pct; "
+     "monotone non-increasing in price per product; aFRR/mFRR "
+     "products only - FCR is capacity-only). beta_k(t) is then the "
+     "piecewise-linear interpolation of the curve at the step's "
+     "activation price, capturing that expensive bids activate less; "
+     "bids are assumed at the input price level. FALSE (default) "
+     "keeps the scalar *_activation_probability_pct path, "
+     "bit-identical."),
     ("bm_soc_headroom_pct", 10.0, "%",
      "Extra SOC safety buffer applied to the worst-case activation "
      "reservation in both directions."),
@@ -1203,6 +1395,34 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "bought at the DAM price, excess sells at the DAM price "
      "(financial settlement, Eq. P9). Must be > 0 when the baseload "
      "structure is enabled; ignored for pay_as_produced."),
+    ("support_scheme", "none", "enum",
+     "State-support settlement on the eligible PV export: 'none' "
+     "(default, bit-identical), 'sliding_fip' (one-way sliding "
+     "premium - the Greek DAPEEP convention: the plant receives "
+     "max(strike - reference price, 0) per month) or 'cfd_two_way' "
+     "(strike - reference, both signs). The premium is a settlement "
+     "overlay - dispatch still sells at the DAM. Mutually exclusive "
+     "with ppa_enabled = TRUE (a plant settles under a corporate PPA "
+     "or a support scheme, not both)."),
+    ("support_strike_eur_per_mwh", 0.0, "EUR/MWh",
+     "Reference tariff (strike) of the support scheme (the Greek "
+     "Timi Anaforas). Must be > 0 when support_scheme is not "
+     "'none'."),
+    ("support_term_years", 20, "years",
+     "Support duration in operating years (1..project_lifecycle_"
+     "years); settlement is zero after the term. Inert while "
+     "support_scheme = 'none'."),
+    ("support_ref_period", "monthly", "enum",
+     "Reference-price averaging period: 'monthly' (volume-weighted "
+     "mean DAM price over the month, the Greek settlement "
+     "convention, Eq. E55) or 'hourly' (degenerates to the per-step "
+     "CfD algebra - a cross-check mode; the multi-year cashflow "
+     "still projects on the monthly detail)."),
+    ("support_negative_hour_suspension", False, "bool",
+     "Exclude negative-DAM-price hours from the eligible settlement "
+     "volume (the EU market-design rule adopted in the Greek "
+     "scheme, Eq. E57). Uses the same strict DAM < 0 classifier as "
+     "the PPA suspension clause."),
 )
 
 
@@ -1721,6 +1941,28 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
                     sheet_name=f"max_injection_profile_{_src}",
                     index=False,
                 )
+        # Optional merit-order curve sheet (Eq. B10): written from a
+        # raw frame (typed['bm_merit_order']) or rebuilt from the
+        # parsed curve dict so read -> write round-trips.
+        _merit_frame = typed.get("bm_merit_order")
+        if _merit_frame is None:
+            _parsed_curve = balancing_section.get("bm_merit_order_curve")
+            if _parsed_curve:
+                _merit_frame = pd.DataFrame(
+                    [
+                        {
+                            "product": product,
+                            "price_eur_per_mwh": price,
+                            "activation_probability_pct": prob,
+                        }
+                        for product, points in _parsed_curve.items()
+                        for price, prob in points
+                    ],
+                )
+        if _merit_frame is not None:
+            _merit_frame.to_excel(
+                writer, sheet_name="bm_merit_order", index=False,
+            )
         sizing_df.to_excel(writer, sheet_name="sizing", index=False)
         scenarios_df.to_excel(writer, sheet_name="scenarios", index=False)
         trajectories_df.to_excel(
@@ -1884,6 +2126,17 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
             return default
         token = str(raw).strip().lower()
         return token if token else default
+    if key == "bess_augmentation_years":
+        # Free-form CSV of event years ('8,15'); a blank cell keeps the
+        # default (None = no events).  Numeric single-year cells arrive
+        # as floats from openpyxl, so normalise through str.  Content
+        # validation (integers, 1..lifecycle) is the validator's job.
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+            return default
+        if isinstance(raw, float) and raw == int(raw):
+            raw = int(raw)
+        token = str(raw).strip()
+        return token if token else default
     if key == "bess_replacement_year":
         return _parse_bess_replacement_year(raw, default)
     # A boolean in a numeric field is always an input mistake, and Python
@@ -1917,15 +2170,20 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
     return coerced
 
 
-def _parse_grid_export_max(raw: Any, default: Any) -> float:
-    """Parse ``p_grid_export_max_kw``.
+def _parse_grid_export_max(
+    raw: Any, default: Any, key: str = "p_grid_export_max_kw",
+) -> float:
+    """Parse the grid-cap keys (``p_grid_export_max_kw`` and, with the
+    same token semantics, ``p_grid_import_max_kw``).
 
     Returns ``float('inf')`` when the cap is disabled (empty cell, or one
     of the ``_GRID_EXPORT_UNLIMITED_TOKENS`` strings, case-insensitive).
     A finite positive float is returned unchanged.  Negative or zero
     values are returned as-is so the loader can raise a validation error;
-    unparseable values fall back to ``default`` with a warning.
+    unparseable values fall back to ``default`` with a warning (a None
+    default means unlimited).
     """
+    fallback = float("inf") if default is None else float(default)
     if raw is None:
         return float("inf")
     if isinstance(raw, float) and np.isnan(raw):
@@ -1938,19 +2196,19 @@ def _parse_grid_export_max(raw: Any, default: Any) -> float:
             value = float(raw)
         except ValueError:
             logger.warning(
-                "Workbook value for 'p_grid_export_max_kw' could not be "
-                "parsed (got %r); using default %r.", raw, default,
+                "Workbook value for %r could not be "
+                "parsed (got %r); using default %r.", key, raw, default,
             )
-            return float(default)
+            return fallback
     else:
         try:
             value = float(raw)
         except (TypeError, ValueError):
             logger.warning(
-                "Workbook value for 'p_grid_export_max_kw' could not be "
-                "parsed (got %r); using default %r.", raw, default,
+                "Workbook value for %r could not be "
+                "parsed (got %r); using default %r.", key, raw, default,
             )
-            return float(default)
+            return fallback
     if np.isinf(value):
         return float("inf")
     return value
@@ -1986,6 +2244,120 @@ def reject_legacy_bess_capex_key(keys: Any, *, source: str) -> None:
 
 #: Sentinel value for the SOH-threshold automatic BESS replacement.
 BESS_REPLACEMENT_AUTO = "auto"
+
+
+#: Products a merit-order activation curve may target (Eq. B10):
+#: FCR is capacity-only, so it carries no activation curve.
+_MERIT_ORDER_PRODUCTS: frozenset[str] = frozenset({
+    "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn",
+})
+
+
+def parse_merit_order_sheet(
+    df: pd.DataFrame,
+) -> dict[str, list[tuple[float, float]]]:
+    """Parse and validate the ``bm_merit_order`` sheet (Eq. B10).
+
+    Returns ``{product: [(price_eur_per_mwh,
+    activation_probability_pct), ...]}`` sorted by price per product.
+    Validation raises with guidance: required columns, known
+    aFRR/mFRR products only, probabilities in [0, 100], no duplicate
+    prices, and a monotone NON-INCREASING probability in price
+    (expensive bids activate less — an increasing segment almost
+    always means swapped columns).
+    """
+    required = {"product", "price_eur_per_mwh", "activation_probability_pct"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            "bm_merit_order sheet is missing column(s) "
+            f"{sorted(missing)}; expected exactly {sorted(required)}."
+        )
+    curve: dict[str, list[tuple[float, float]]] = {}
+    for product, grp in df.groupby("product"):
+        name = str(product).strip().lower()
+        if name not in _MERIT_ORDER_PRODUCTS:
+            raise ValueError(
+                f"bm_merit_order: unknown product {name!r}; expected "
+                f"one of {sorted(_MERIT_ORDER_PRODUCTS)} (FCR is "
+                "capacity-only and carries no activation curve)."
+            )
+        pairs = sorted(
+            (
+                float(row["price_eur_per_mwh"]),
+                float(row["activation_probability_pct"]),
+            )
+            for _, row in grp.iterrows()
+        )
+        prices = [p for p, _ in pairs]
+        if len(set(prices)) != len(prices):
+            raise ValueError(
+                f"bm_merit_order: product {name!r} has duplicate "
+                "price points; each price may appear once."
+            )
+        for _, prob in pairs:
+            if not (0.0 <= prob <= 100.0):
+                raise ValueError(
+                    f"bm_merit_order: product {name!r} has an "
+                    f"activation probability of {prob!r} %; values "
+                    "must lie in [0, 100]."
+                )
+        probs = [q for _, q in pairs]
+        if any(b > a + 1e-9 for a, b in itertools.pairwise(probs)):
+            raise ValueError(
+                f"bm_merit_order: product {name!r} must be monotone "
+                "NON-INCREASING in price (expensive bids activate "
+                "less); an increasing segment usually means the "
+                "price / probability columns are swapped."
+            )
+        curve[name] = pairs
+    if not curve:
+        raise ValueError(
+            "bm_merit_order sheet contains no data rows; add at least "
+            "one product curve or set bm_merit_order_enabled = FALSE."
+        )
+    return curve
+
+
+def parse_augmentation_years(raw: Any) -> tuple[int, ...]:
+    """Parse ``bess_augmentation_years`` into a sorted year tuple.
+
+    Accepts the CSV string surface (``'8,15'``), a bare number, or an
+    already-structured list/tuple (the YAML surface).  Blank / None
+    disables augmentation (``()``).  Raises ``ValueError`` on
+    non-integer entries — a mistyped events list must never silently
+    drop an investment event.  Range checks (1..lifecycle, exclusivity
+    with the replacement) live in ``validate_workbook_params``.
+    """
+    if raw is None:
+        return ()
+    if isinstance(raw, float) and np.isnan(raw):
+        return ()
+    if isinstance(raw, (list, tuple)):
+        tokens = [str(v) for v in raw]
+    else:
+        if isinstance(raw, float) and raw == int(raw):
+            raw = int(raw)
+        tokens = str(raw).strip().split(",")
+    years: set[int] = set()
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            value = float(token)
+        except ValueError:
+            raise ValueError(
+                "bess_augmentation_years must be a comma-separated list "
+                f"of project years (e.g. '8,15'); got {token!r}."
+            ) from None
+        if value != int(value):
+            raise ValueError(
+                "bess_augmentation_years entries must be whole project "
+                f"years; got {token!r}."
+            )
+        years.add(int(value))
+    return tuple(sorted(years))
 
 
 def _parse_bess_replacement_year(raw: Any, default: Any) -> int | str:
@@ -2057,8 +2429,8 @@ def _parse_kv_sheet(
                     f"boolean {bool(raw)!r}; write a numeric value instead "
                     "(e.g. 1 for 1 %)."
                 )
-            if key == "p_grid_export_max_kw":
-                out[key] = _parse_grid_export_max(raw, defaults[key])
+            if key in ("p_grid_export_max_kw", "p_grid_import_max_kw"):
+                out[key] = _parse_grid_export_max(raw, defaults[key], key)
             else:
                 out[key] = _parse_value(key, raw, defaults[key])
             continue
@@ -2475,6 +2847,30 @@ def _validate_balancing_config(
             f"[0, 50]; got {headroom!r}."
         )
 
+    # Reservation block length (Eq. B9): blocks must sit on the dispatch
+    # grid and tile the day exactly, or the hour-of-year anchoring would
+    # drift across days.
+    raw_block = balancing.get("bm_block_hours")
+    block_hours = 0 if raw_block is None else int(raw_block)
+    if block_hours < 0:
+        raise ValueError(
+            "balancing sheet key 'bm_block_hours' must be >= 0 "
+            f"(0 = per-settlement-period reservations); got {block_hours!r}."
+        )
+    if block_hours > 0:
+        if (block_hours * 60) % int(dt_minutes) != 0:
+            raise ValueError(
+                f"balancing sheet key 'bm_block_hours' = {block_hours} h "
+                "must be a whole multiple of the dispatch step "
+                f"({int(dt_minutes)} min)."
+            )
+        if 24 % block_hours != 0:
+            raise ValueError(
+                f"balancing sheet key 'bm_block_hours' = {block_hours} h "
+                "must divide 24 evenly (e.g. 1, 2, 3, 4, 6, 8, 12, 24) "
+                "so blocks stay aligned day to day."
+            )
+
     mc_scenarios = int(balancing.get("bm_mc_scenarios", 200) or 0)
     if mc_scenarios < 1:
         raise ValueError(
@@ -2493,6 +2889,38 @@ def _validate_ppa_config(ppa: dict[str, Any]) -> None:
     the flow attribution — rejected with that guidance until the flow
     attribution work lands.
     """
+    # Support scheme (Eqs. E55-E57): validated whether or not the
+    # corporate PPA is enabled — the two surfaces are mutually
+    # exclusive, and the scheme's own ranges hold on their own.
+    _scheme = str(ppa.get("support_scheme", "none") or "none").strip().lower()
+    if _scheme not in ("none", "sliding_fip", "cfd_two_way"):
+        raise ValueError(
+            "support_scheme must be 'none', 'sliding_fip' or "
+            f"'cfd_two_way'; got {_scheme!r}."
+        )
+    if _scheme != "none":
+        if bool(ppa.get("ppa_enabled", False)):
+            raise ValueError(
+                "support_scheme cannot combine with ppa_enabled = TRUE: "
+                "a plant settles under a corporate PPA or a state "
+                "support scheme, not both; disable one of the two."
+            )
+        _strike = float(
+            ppa.get("support_strike_eur_per_mwh", 0.0) or 0.0
+        )
+        if _strike <= 0.0:
+            raise ValueError(
+                "support_scheme requires support_strike_eur_per_mwh "
+                f"> 0 (the reference tariff); got {_strike!r}."
+            )
+        _term_raw = ppa.get("support_term_years", 20)
+        _term = int(20 if _term_raw is None else _term_raw)
+        if _term < 1:
+            raise ValueError(
+                "support_term_years must be >= 1; got "
+                f"{_term!r}."
+            )
+
     if not bool(ppa.get("ppa_enabled", False)):
         return
 
@@ -2835,6 +3263,7 @@ def validate_workbook_params(
         "bess_power_kw",
         "bess_capacity_kwh",
         "max_cycles_per_day",
+        "max_cycles_per_year",
         "capex_bess_eur_per_kwh",
         "devex_bess_eur_per_kw",
         "opex_bess_eur_per_kw",
@@ -2844,6 +3273,87 @@ def validate_workbook_params(
         "bess_replacement_year",
     ):
         _require_non_negative(bess, key)
+
+    # Annual cycle cap (Eq. E46): flag a daily cap that already binds
+    # tighter than the requested annual one — the annual key would then
+    # never be the active constraint.
+    raw_annual_cycles = bess.get("max_cycles_per_year")
+    annual_cycles = (
+        0.0 if raw_annual_cycles is None else float(raw_annual_cycles)
+    )
+    if annual_cycles > 0.0:
+        raw_daily = bess.get("max_cycles_per_day")
+        daily = 1.0 if raw_daily is None else float(raw_daily)
+        if daily * 365.0 < annual_cycles:
+            logger.warning(
+                "max_cycles_per_day = %.4g caps the year at %.4g "
+                "equivalent cycles, tighter than max_cycles_per_year "
+                "= %.4g - the annual cap will never bind.",
+                daily, daily * 365.0, annual_cycles,
+            )
+
+    # Augmentation + overbuild (Eqs. E50-E52): parse the events CSV
+    # loudly, range-check the percentage knobs, require the fixed-kwh
+    # size when that mode is armed, and reject the combination with
+    # the single replacement — the pooled capacity engine supersedes
+    # it, and a silent precedence would change which CAPEX is charged.
+    aug_years = parse_augmentation_years(bess.get("bess_augmentation_years"))
+    overbuild = float(bess.get("bess_overbuild_pct", 0.0) or 0.0)
+    if not (0.0 <= overbuild <= 100.0):
+        raise ValueError(
+            f"'bess_overbuild_pct' must be in [0, 100]; got {overbuild!r}."
+        )
+    cost_decline = float(
+        bess.get("bess_cost_decline_pct_per_year", 0.0) or 0.0
+    )
+    if not (0.0 <= cost_decline <= 30.0):
+        raise ValueError(
+            "'bess_cost_decline_pct_per_year' must be in [0, 30]; "
+            f"got {cost_decline!r}."
+        )
+    _require_non_negative(bess, "bess_augmentation_kwh")
+    if aug_years:
+        _aug_lifecycle = int(
+            project.get("project_lifecycle_years", 20) or 20
+        )
+        for year in aug_years:
+            if not (1 <= year <= _aug_lifecycle):
+                raise ValueError(
+                    "bess_augmentation_years entries must lie in "
+                    f"1..project_lifecycle_years ({_aug_lifecycle}); "
+                    f"got {year}."
+                )
+        aug_mode = str(
+            bess.get("bess_augmentation_mode", "top_up") or "top_up"
+        ).strip().lower()
+        aug_kwh = float(bess.get("bess_augmentation_kwh", 0.0) or 0.0)
+        if aug_mode == "fixed_kwh" and aug_kwh <= 0.0:
+            raise ValueError(
+                "bess_augmentation_mode = 'fixed_kwh' with scheduled "
+                "events requires bess_augmentation_kwh > 0; got "
+                f"{aug_kwh!r}."
+            )
+        if aug_mode == "top_up" and aug_kwh > 0.0:
+            logger.warning(
+                "bess_augmentation_kwh = %.4g is ignored in 'top_up' "
+                "mode (each event restores the plant to nameplate).",
+                aug_kwh,
+            )
+    if aug_years or overbuild > 0.0:
+        raw_repl = bess.get("bess_replacement_year", 0)
+        if isinstance(raw_repl, str):
+            repl_set = raw_repl.strip().lower() == BESS_REPLACEMENT_AUTO
+        else:
+            repl_set = bool(int(raw_repl or 0))
+        if repl_set:
+            raise ValueError(
+                "bess_augmentation_years / bess_overbuild_pct cannot "
+                "combine with bess_replacement_year (the staged "
+                "pooled-capacity engine supersedes the single "
+                "replacement, Eqs. E50-E52); set bess_replacement_year "
+                "= 0 and model the mid-life investment as an "
+                "augmentation event instead."
+            )
     for key in (
         "site_capex_eur",
         "site_devex_eur",
@@ -2858,6 +3368,20 @@ def validate_workbook_params(
         raise ValueError(
             f"'gearing_pct' must be in [0, 100]; got {gearing!r}."
         )
+
+    # Exogenous curtailment quota (Eqs. E48/E49): percent shares live
+    # in [0, 100], the administered price is non-negative.  The
+    # quota-vs-signal exclusivity is checked in read_workbook, where
+    # the timeseries is in scope.
+    for key in ("curtailment_pct", "curtailment_compensated_pct"):
+        value = float(project.get(key, 0.0) or 0.0)
+        if not (0.0 <= value <= 100.0):
+            raise ValueError(
+                f"{key!r} must be in [0, 100]; got {value!r}."
+            )
+    _require_non_negative(
+        project, "curtailment_compensation_price_eur_per_mwh",
+    )
 
     # Target-DSCR debt sizing (Eqs. E41-E43): the keys are inert in
     # manual mode; in target_dscr mode the target must be a real
@@ -2953,6 +3477,7 @@ def validate_workbook_params(
     # The per-MWh route-to-market fee is a non-negative charge on exported
     # energy (a negative value would be a rebate, never a fee).
     _require_non_negative(economics, "route_to_market_fee_eur_per_mwh")
+    _require_non_negative(economics, "go_price_eur_per_mwh")
 
     # Tax + depreciation layer (Eqs. E34-E38): the rate lives in
     # [0, 100]; the straight-line lives and the carry-forward window
@@ -3210,6 +3735,45 @@ def validate_workbook_params(
                 m_short, m_long,
             )
 
+    # Mid-life re-solve validation (Eq. E53): year 1 IS the solved
+    # dispatch (the delta would be identically zero by construction),
+    # so a meaningful validation year starts at 2.
+    _midlife = int(simulation_cfg.get("midlife_resolve_year", 0) or 0)
+    if _midlife != 0:
+        _ml_lifecycle = int(
+            project.get("project_lifecycle_years", 20) or 20
+        )
+        if not (2 <= _midlife <= _ml_lifecycle):
+            raise ValueError(
+                "midlife_resolve_year must be 0 (off) or lie in "
+                f"2..project_lifecycle_years ({_ml_lifecycle}); got "
+                f"{_midlife}."
+            )
+        if bool(simulation_cfg.get("uncertainty_enabled", False)):
+            logger.warning(
+                "[midlife] midlife_resolve_year validates the "
+                "DETERMINISTIC dispatch path only; the rolling-horizon "
+                "Monte Carlo is not re-run at year %d.",
+                _midlife,
+            )
+
+    # NPV tail risk (Eqs. U10/U11): the tail level must be a real
+    # left-tail; the seed requirement is a load-time warning (the deck
+    # path cannot be known here).
+    if bool(simulation_cfg.get("risk_metrics_enabled", False)):
+        _alpha_raw = simulation_cfg.get("risk_alpha_pct", 5.0)
+        _alpha = 5.0 if _alpha_raw is None else float(_alpha_raw)
+        if not (0.0 < _alpha <= 50.0):
+            raise ValueError(
+                f"'risk_alpha_pct' must lie in (0, 50]; got {_alpha!r}."
+            )
+        if not bool(simulation_cfg.get("uncertainty_enabled", False)):
+            logger.warning(
+                "[risk] risk_metrics_enabled without uncertainty_enabled: "
+                "the NPV distribution needs the rolling-horizon Monte "
+                "Carlo seeds; VaR/CVaR will be skipped at run time."
+            )
+
     # Per-year trajectory vectors (Eq. E24): structural checks live in the
     # parser / normaliser; here the lifecycle-aware invariants are
     # enforced — full coverage of the project life, the Year-1 anchor
@@ -3380,6 +3944,30 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     else:
         typed["balancing"] = dict(BALANCING_SHEET_DEFAULTS)
 
+    # Optional ``bm_merit_order`` sheet (Eq. B10): parsed and validated
+    # only when the switch is armed; a stray sheet with the switch off
+    # is inert (an INFO note records this), so the constant-beta path
+    # stays bit-identical.
+    if bool(typed["balancing"].get("bm_merit_order_enabled", False)):
+        if "bm_merit_order" not in sheets:
+            raise ValueError(
+                "bm_merit_order_enabled = TRUE requires the "
+                "'bm_merit_order' sheet (columns: product, "
+                "price_eur_per_mwh, activation_probability_pct); add "
+                "the sheet or set the switch to FALSE."
+            )
+        typed["balancing"]["bm_merit_order_curve"] = (
+            parse_merit_order_sheet(
+                pd.read_excel(xlsx_path, sheet_name="bm_merit_order"),
+            )
+        )
+    elif "bm_merit_order" in sheets:
+        logger.info(
+            "[balancing] a 'bm_merit_order' sheet is present but "
+            "bm_merit_order_enabled = FALSE; the merit-order curve is "
+            "inert and the scalar activation probabilities apply."
+        )
+
     # Optional ``ppa`` sheet — same master-switch pattern: absent means
     # the contract is disabled and the run is bit-identical to before.
     if "ppa" in sheets:
@@ -3409,6 +3997,16 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             "p_grid_export_max_kw must be a positive number, or empty / "
             "'inf' / 'unlimited' / 'disabled' to remove the cap; got "
             f"{grid_cap!r}."
+        )
+    # Same contract for the import cap (Eq. S35).
+    import_cap = typed["project"].get(
+        "p_grid_import_max_kw", float("inf"),
+    )
+    if not np.isinf(import_cap) and float(import_cap) <= 0.0:
+        raise ValueError(
+            "p_grid_import_max_kw must be a positive number, or empty / "
+            "'inf' / 'unlimited' / 'disabled' to remove the cap; got "
+            f"{import_cap!r}."
         )
 
     if "max_injection_profile" in sheets:
@@ -3450,6 +4048,84 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     ts = typed.pop("ts")
     dt_minutes = detect_timestep_minutes(ts)
     validate_workbook_params(typed, dt_minutes=dt_minutes)
+    # Two-tier feasibility guard for a finite grid-import cap (Eq. S35),
+    # here because ts and dt_minutes are both in scope.  Tier 1 is a
+    # certificate: a step whose load exceeds PV + BESS power + the cap
+    # makes LOAD_BAL infeasible for EVERY state of charge, so the
+    # workbook is rejected before any solver time.  Tier 2 only warns:
+    # load above the cap alone can still be served from PV/BESS, so
+    # feasibility depends on the SOC trajectory the solver finds.
+    _import_cap_kw = float(
+        typed["project"].get("p_grid_import_max_kw", float("inf"))
+    )
+    if (
+        not np.isinf(_import_cap_kw)
+        and str(typed["project"].get("mode", "")).lower()
+        == "self_consumption"
+        and "load_kwh" in ts.columns
+    ):
+        _dt_h = dt_hours_from({"dt_minutes": dt_minutes})
+        _load = ts["load_kwh"].to_numpy(dtype=float)
+        _pv_sup = (
+            ts["pv_kwh"].to_numpy(dtype=float)
+            if "pv_kwh" in ts.columns else np.zeros_like(_load)
+        )
+        _bess_kw = float(typed["bess"].get("bess_power_kw", 0.0) or 0.0)
+        _deficit = _load - (
+            _pv_sup + (_bess_kw + _import_cap_kw) * _dt_h
+        )
+        _worst = int(np.argmax(_deficit)) if len(_deficit) else 0
+        if len(_deficit) and float(_deficit[_worst]) > 1e-9:
+            raise ValueError(
+                "p_grid_import_max_kw makes the load balance infeasible: "
+                f"at {ts['timestamp'].iloc[_worst]} the load "
+                f"({_load[_worst]:.1f} kWh) exceeds the maximum possible "
+                f"supply of PV ({_pv_sup[_worst]:.1f} kWh) + BESS power "
+                f"({_bess_kw:.0f} kW x {_dt_h:g} h) + import cap "
+                f"({_import_cap_kw:.0f} kW x {_dt_h:g} h) regardless of "
+                "the battery state of charge. Raise p_grid_import_max_kw "
+                "or bess_power_kw, or fix the load data."
+            )
+        if len(_load) and float(
+            (_load - _import_cap_kw * _dt_h).max()
+        ) > 1e-9:
+            logger.warning(
+                "p_grid_import_max_kw = %.0f kW is below the load in "
+                "some steps: the grid alone cannot serve those hours, "
+                "so feasibility depends on PV output and the battery "
+                "state of charge; the solver may still report the "
+                "problem infeasible.",
+                _import_cap_kw,
+            )
+    # Exogenous curtailment (Eqs. E48/E49): the per-step signal column
+    # and the quota keys answer different questions (re-dispatch vs
+    # post-solve derate) and combining them would double-count — hard
+    # error.  The signal itself must be a [0, 1] share per step.
+    if "curtailment_signal" in ts.columns:
+        _quota = float(
+            typed["project"].get("curtailment_pct", 0.0) or 0.0
+        )
+        _comp_share = float(
+            typed["project"].get("curtailment_compensated_pct", 0.0)
+            or 0.0
+        )
+        if _quota > 0.0 or _comp_share > 0.0:
+            raise ValueError(
+                "The timeseries carries a curtailment_signal column "
+                "AND the project sheet sets curtailment_pct / "
+                "curtailment_compensated_pct: the per-step signal "
+                "re-dispatches around the curtailment inside the MILP, "
+                "while the quota is a post-solve derate - combining "
+                "them double-counts. Clear the quota keys or drop the "
+                "column."
+            )
+        _sig = ts["curtailment_signal"].to_numpy(dtype=float)
+        if np.isnan(_sig).any() or (_sig < 0.0).any() or (_sig > 1.0).any():
+            raise ValueError(
+                "curtailment_signal values must lie in [0, 1] with no "
+                "blanks (the per-step share of the export cap that "
+                "remains available)."
+            )
     ts = _apply_balancing_timeseries_fallback(ts, typed["balancing"])
     # Single-price imbalance settlement has no canonical DAM
     # relationship to proxy, so the column is mandatory (the dual
@@ -3509,6 +4185,21 @@ def _typed_to_flat(
     else:
         p_grid_export_cap_milp = raw_grid_cap
 
+    # The import cap (Eq. S35) passes float('inf') through unchanged:
+    # build_model attaches the IMPORT_CAP constraint only when the value
+    # is finite, so an unlimited cap leaves the model topology (and every
+    # result) bit-identical to a workbook without the key.
+    raw_import_cap = float(
+        project.get("p_grid_import_max_kw", float("inf"))
+    )
+    grid_import_unlimited = bool(np.isinf(raw_import_cap))
+    if not grid_import_unlimited:
+        logger.info(
+            "[simulation] Grid import cap: %.0f kW at the connection "
+            "point (grid-to-load + grid-to-BESS per step).",
+            raw_import_cap,
+        )
+
     params: dict[str, Any] = {
         "dt_minutes": int(typed["dt_minutes"]),
         # bess
@@ -3519,10 +4210,32 @@ def _typed_to_flat(
         "initial_soc_frac": float(bess["initial_soc_frac"]),
         "terminal_soc_equal": bool(bess["terminal_soc_equal"]),
         "max_cycles_per_day": float(bess["max_cycles_per_day"]),
+        # Annual warranty throughput cap (Eqs. E46/E47).
+        "max_cycles_per_year": float(
+            bess.get("max_cycles_per_year", 0.0) or 0.0
+        ),
+        "cycle_cap_basis": str(
+            bess.get("cycle_cap_basis", "nameplate") or "nameplate"
+        ),
         "bess_power_kw": bess_power_kw,
         "bess_capacity_kwh": bess_capacity_kwh,
         "bess_wear_cost_eur_per_mwh": float(
             bess.get("bess_wear_cost_eur_per_mwh", 0.0) or 0.0
+        ),
+        # Augmentation + overbuild (Eqs. E50-E52): consumed by the
+        # pooled capacity engine (lifetime.resolve_augmentation_config).
+        "bess_overbuild_pct": float(
+            bess.get("bess_overbuild_pct", 0.0) or 0.0
+        ),
+        "bess_augmentation_years": bess.get("bess_augmentation_years"),
+        "bess_augmentation_mode": str(
+            bess.get("bess_augmentation_mode", "top_up") or "top_up"
+        ),
+        "bess_augmentation_kwh": float(
+            bess.get("bess_augmentation_kwh", 0.0) or 0.0
+        ),
+        "bess_cost_decline_pct_per_year": float(
+            bess.get("bess_cost_decline_pct_per_year", 0.0) or 0.0
         ),
         # pv
         "pv_nameplate_kwp": pv_nameplate_kwp,
@@ -3532,6 +4245,9 @@ def _typed_to_flat(
         # the published params schema (asserted by the test suite / available
         # to API consumers), so they are retained intentionally.
         "grid_export_unlimited": grid_export_unlimited,
+        # Import cap (Eq. S35): inf = unlimited (no constraint attached).
+        "p_grid_import_max_kw": raw_import_cap,
+        "grid_import_unlimited": grid_import_unlimited,
         "retail_tariff_eur_per_mwh": float(project["retail_tariff_eur_per_mwh"]),
         "mode": str(project["mode"]),
         "allow_bess_grid_charging": bool(project["allow_bess_grid_charging"]),
@@ -3545,6 +4261,19 @@ def _typed_to_flat(
         ),
         "grid_cap_includes_load": bool(project["grid_cap_includes_load"]),
         "unavailability_pct": float(project["unavailability_pct"]),
+        # Exogenous curtailment (Eqs. E48/E49): consumed by the shared
+        # post-solve derate entry point (availability.apply_operating_derates).
+        "curtailment_pct": float(
+            project.get("curtailment_pct", 0.0) or 0.0
+        ),
+        "curtailment_compensated_pct": float(
+            project.get("curtailment_compensated_pct", 0.0) or 0.0
+        ),
+        "curtailment_compensation_price_eur_per_mwh": float(
+            project.get(
+                "curtailment_compensation_price_eur_per_mwh", 0.0,
+            ) or 0.0
+        ),
         "site_capex_eur": float(project.get("site_capex_eur", 0.0) or 0.0),
         "site_devex_eur": float(project.get("site_devex_eur", 0.0) or 0.0),
         "show_titles": bool(project["show_titles"]),
@@ -3729,6 +4458,13 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_capacity_market_revenue_eur_lifecycle",
      "Lifetime capacity-market revenue [EUR]"),
     ("total_revenue_levy_eur_lifecycle", "Lifetime revenue levy [EUR]"),
+    ("lifetime_curtailment_compensation_eur",
+     "Lifetime curtailment compensation [EUR]"),
+    ("total_augmentation_capex_eur_lifecycle",
+     "Lifetime augmentation CAPEX [EUR]"),
+    ("total_go_revenue_eur_lifecycle", "Lifetime GO revenue [EUR]"),
+    ("lifetime_support_settlement_eur",
+     "Lifetime support settlement [EUR]"),
     # Post-tax family (Eq. E39): NaN while the tax layer is off, so the
     # non-zero/NaN-skipping renderer keeps zero-default digests
     # noise-free ('n/a' = tax not modelled, never a duplicate of the
@@ -3782,6 +4518,12 @@ _SUMMARY_ROLLING_KEYS: tuple[tuple[str, str], ...] = (
     ("imbalance_cost_p90_eur", "Imbalance cost P90 [EUR]"),
     ("bess_imbalance_hedge_value_mean_eur",
      "BESS imbalance hedge value, mean [EUR]"),
+    # NPV tail risk (Eqs. U10/U11) — rendered only when the risk block
+    # ran; read next to 'Monte Carlo seeds' (small ensembles give
+    # noisy tails).
+    ("risk_alpha_pct", "Risk tail level alpha [%]"),
+    ("npv_var_eur", "NPV VaR [EUR]"),
+    ("npv_cvar_eur", "NPV CVaR [EUR]"),
 )
 
 
@@ -3805,6 +4547,7 @@ def write_summary_md(
     solver_name: str | None = None,
     replacement_note: str | None = None,
     lender_cases: pd.DataFrame | None = None,
+    midlife_resolve: pd.DataFrame | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -3919,6 +4662,43 @@ def write_summary_md(
                 f"| {_summary_fmt(row['equity_irr_pct'])} "
                 f"| {_summary_fmt(row['npv_eur'])} "
                 f"| {_summary_fmt(row['debt_capacity_eur'])} |"
+            )
+        lines.append("")
+
+    # Mid-life re-solve validation (Eq. E53): present only when
+    # midlife_resolve_year produced the delta table, so default digests
+    # stay byte-identical.  Deltas at or below the requested MIP gap
+    # are solver noise, not scaling bias — say so next to the table.
+    if midlife_resolve is not None and not midlife_resolve.empty:
+        _gap_rows = midlife_resolve.loc[
+            midlife_resolve["kpi"] == "requested_mip_gap", "scaled",
+        ]
+        lines.append("## Mid-life re-solve validation")
+        lines.append("")
+        lines.append(
+            "Scaled (analytic lifetime recipe) vs re-solved (fresh "
+            "dispatch at faded capacities) year-level KPIs. Diagnostic "
+            "only - the cashflow and every financial KPI use the "
+            "scaled path."
+        )
+        if not _gap_rows.empty:
+            lines.append(
+                f"Deltas within the requested MIP gap "
+                f"({float(_gap_rows.iloc[0]):g}) are solver noise, not "
+                "scaling bias."
+            )
+        lines.append("")
+        lines.append("| KPI | Scaled | Re-solved | Delta | Delta [%] |")
+        lines.append("| --- | ---: | ---: | ---: | ---: |")
+        for _, row in midlife_resolve.iterrows():
+            if str(row["kpi"]) == "requested_mip_gap":
+                continue
+            lines.append(
+                f"| {row['kpi']} "
+                f"| {_summary_fmt(row['scaled'])} "
+                f"| {_summary_fmt(row['resolved'])} "
+                f"| {_summary_fmt(row['delta'])} "
+                f"| {_summary_fmt(row['delta_pct'])} |"
             )
         lines.append("")
 
@@ -4042,6 +4822,8 @@ def write_results_workbook(
     debt_schedule: pd.DataFrame | None = None,
     emissions: pd.DataFrame | None = None,
     lender_cases: pd.DataFrame | None = None,
+    midlife_resolve: pd.DataFrame | None = None,
+    risk_metrics: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -4099,6 +4881,14 @@ def write_results_workbook(
         if lender_cases is not None and not lender_cases.empty:
             lender_cases.to_excel(
                 writer, sheet_name="lender_cases", index=False,
+            )
+        if midlife_resolve is not None and not midlife_resolve.empty:
+            midlife_resolve.to_excel(
+                writer, sheet_name="midlife_resolve", index=False,
+            )
+        if risk_metrics is not None and not risk_metrics.empty:
+            risk_metrics.to_excel(
+                writer, sheet_name="risk_metrics", index=False,
             )
         if emissions is not None and not emissions.empty:
             emissions.to_excel(writer, sheet_name="emissions", index=False)

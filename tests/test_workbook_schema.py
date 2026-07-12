@@ -41,10 +41,14 @@ def test_project_sheet_keys():
     expected = {
         "project_lifecycle_years", "project_start_year", "mode",
         "p_grid_export_max_kw",
+        "p_grid_import_max_kw",
         "retail_tariff_eur_per_mwh", "allow_bess_grid_charging",
         "grid_charging_fee_eur_per_mwh", "grid_charging_fee_exempt",
         "grid_cap_includes_load",
-        "unavailability_pct", "site_capex_eur", "site_devex_eur",
+        "unavailability_pct",
+        "curtailment_pct", "curtailment_compensated_pct",
+        "curtailment_compensation_price_eur_per_mwh",
+        "site_capex_eur", "site_devex_eur",
         "currency_format", "show_titles",
     }
     assert set(PROJECT_SHEET_DEFAULTS) == expected
@@ -69,9 +73,13 @@ def test_bess_sheet_keys():
         "efficiency_charge", "efficiency_discharge",
         "soc_min_frac", "soc_max_frac", "initial_soc_frac",
         "terminal_soc_equal", "max_cycles_per_day",
+        "max_cycles_per_year", "cycle_cap_basis",
         "capex_bess_eur_per_kwh", "devex_bess_eur_per_kw",
         "opex_bess_eur_per_kw",
         "bess_replacement_year", "bess_replacement_cost_pct",
+        "bess_overbuild_pct", "bess_augmentation_years",
+        "bess_augmentation_mode", "bess_augmentation_kwh",
+        "bess_cost_decline_pct_per_year",
         "bess_degradation_annual_pct", "bess_degradation_pct_per_cycle",
         "bess_eol_soh_pct",
         "bess_wear_cost_eur_per_mwh",
@@ -101,6 +109,7 @@ def test_economics_sheet_keys():
         "capacity_market_year_from", "capacity_market_year_to",
         "capacity_market_indexation_pct",
         "revenue_levy_pct",
+        "go_price_eur_per_mwh",
         "corporate_tax_rate_pct", "depreciation_years_pv",
         "depreciation_years_bess", "depreciation_years_site",
         "tax_loss_carryforward_years",
@@ -112,6 +121,7 @@ def test_economics_sheet_keys():
         "sensitivity_opex_delta_pct", "sensitivity_revenue_delta_pct",
         "sensitivity_discount_rate_delta_pp",
         "sensitivity_ppa_price_delta_pct",
+        "sensitivity_tax_rate_delta_pp",
         "gearing_pct", "debt_interest_rate_pct", "debt_tenor_years",
         "debt_repayment",
         "debt_sizing_mode", "target_dscr", "debt_sizing_case",
@@ -135,7 +145,9 @@ def test_balancing_sheet_keys():
             for p in products if p != "fcr"
         ),
         "fcr_required_duration_hours",
-        "bm_settlement_minutes", "bm_soc_headroom_pct", "bm_inflation_pct",
+        "bm_settlement_minutes", "bm_block_hours",
+        "bm_merit_order_enabled",
+        "bm_soc_headroom_pct", "bm_inflation_pct",
         "bm_price_sigma_capacity_pct", "bm_price_sigma_activation_pct",
         "bm_mc_scenarios", "bm_random_seed",
     }
@@ -148,6 +160,9 @@ def test_ppa_sheet_keys():
         "ppa_price_eur_per_mwh", "ppa_volume_share_pct",
         "ppa_term_years", "ppa_inflation_pct",
         "ppa_negative_price_rule", "ppa_baseload_mw",
+        "support_scheme", "support_strike_eur_per_mwh",
+        "support_term_years", "support_ref_period",
+        "support_negative_hour_suspension",
     }
     assert set(PPA_SHEET_DEFAULTS) == expected
 
@@ -164,6 +179,8 @@ def test_simulation_sheet_keys():
         "uncertainty_diagnostics_enabled",
         "imbalance_enabled", "imbalance_pricing",
         "imbalance_price_mult_short", "imbalance_price_mult_long",
+        "midlife_resolve_year",
+        "risk_metrics_enabled", "risk_alpha_pct",
         "plot_daily_scope", "plot_monthly_scope", "plot_yearly_scope",
     }
     assert set(SIMULATION_SHEET_DEFAULTS) == expected
@@ -249,6 +266,13 @@ def test_round_trip(tmp_path):
     out = read_workbook(dst)
     for section in ("project", "pv", "bess", "economics", "simulation"):
         for key in typed[section]:
+            if key == "p_grid_import_max_kw":
+                # Deliberate asymmetry: the template default is None
+                # (an EMPTY cell in the shipped workbook), which the
+                # reader materialises as float('inf') = cap disabled
+                # (Eq. S35), mirroring the export cap's token rule.
+                assert out[section][key] == float("inf")
+                continue
             assert out[section][key] == typed[section][key], (
                 f"section={section} key={key}"
             )

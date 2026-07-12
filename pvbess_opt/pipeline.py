@@ -20,6 +20,7 @@ Output layout — written to ``results/<input>_<scenario>_<timestamp>/``::
 
 from __future__ import annotations
 
+import copy
 import logging
 import sys
 import tempfile
@@ -30,9 +31,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
-from pvbess_opt.availability import apply_unavailability_derate, availability_factor
+from pvbess_opt.availability import apply_operating_derates, availability_factor
 from pvbess_opt.balancing import resolve_balancing_config
 from pvbess_opt.degradation import build_degradation_report
 from pvbess_opt.economics import (
@@ -42,8 +44,10 @@ from pvbess_opt.economics import (
     compute_financial_kpis,
     derive_asset_capacities,
     derive_monthly_cashflow,
+    npv_for_year1_revenue,
     read_economic_params,
     resolve_debt_sizing,
+    var_cvar,
 )
 from pvbess_opt.emissions import build_emissions_report
 from pvbess_opt.io import (
@@ -68,6 +72,8 @@ from pvbess_opt.lifetime import (
     aggregate_lifetime_to_yearly,
     build_lifetime_dispatch,
     effective_bess_replacement_year,
+    factors_for_year,
+    resolve_augmentation_config,
     resolve_bess_replacement_year,
 )
 from pvbess_opt.modes import resolve_mode
@@ -671,10 +677,7 @@ def _low_price_sizing_cashflow(
         **(solver_opts or {}),
     )
     deck_kpis = compute_kpis(res, deck_params, verify_balance=False)
-    deck_kpis = apply_unavailability_derate(
-        deck_kpis,
-        float(deck_params.get("unavailability_pct", 0.0) or 0.0),
-    )
+    deck_kpis = apply_operating_derates(deck_kpis, deck_params)
     bundle = _build_financials(
         deck_xlsx, deck_params, deck_ts, deck_kpis, res,
         solver_opts=solver_opts,
@@ -890,7 +893,217 @@ def _build_degradation_report(
         # auto, or 0 = never) — set by _build_financials, which runs
         # before this report in the pipeline.
         replacement_year=effective_bess_replacement_year(econ),
+        # Warranty utilisation columns (Eq. E47) join only when the
+        # annual cycle cap is set.
+        max_cycles_per_year=float(
+            params.get("max_cycles_per_year", 0.0) or 0.0
+        ),
+        cycle_cap_basis=str(
+            params.get("cycle_cap_basis", "nameplate") or "nameplate"
+        ),
+        # Pooled capacity surface (Eqs. E50-E52): the SOH plot then
+        # shows the overbuild headroom and top-up resets the finance
+        # layer prices.
+        overbuild_pct=float(params.get("bess_overbuild_pct", 0.0) or 0.0),
+        augmentation_years=resolve_augmentation_config(params)[1],
+        augmentation_mode=str(
+            params.get("bess_augmentation_mode", "top_up") or "top_up"
+        ),
+        augmentation_kwh=float(
+            params.get("bess_augmentation_kwh", 0.0) or 0.0
+        ),
     )
+
+
+#: Lifetime-yearly columns compared by the mid-life re-solve (Eq. E53)
+#: and, identically, availability-derated on both sides.
+_MIDLIFE_COMPARE_COLUMNS: tuple[str, ...] = (
+    "pv_generation_mwh", "pv_to_load_mwh", "pv_to_grid_mwh",
+    "bess_charge_mwh", "bess_discharge_mwh",
+    "import_to_load_mwh", "export_total_mwh",
+    "revenue_eur_dam_retail",
+)
+
+
+def _run_midlife_resolve(
+    params: dict[str, Any],
+    ts: pd.DataFrame,
+    econ: dict[str, Any],
+    kpis: dict[str, Any],
+    lifetime_yearly: pd.DataFrame | None,
+    *,
+    solver_opts: dict[str, Any] | None = None,
+) -> pd.DataFrame | None:
+    """Diagnostic mid-life re-solve of the dispatch (Eq. E53).
+
+    Re-solves the MILP at project year ``k`` with degraded parameters
+    — BESS energy capacity scaled by its year-``k`` capacity factor
+    (power kept at nameplate: the fade model degrades energy, not the
+    converter), the PV column scaled by the year-``k`` production
+    factor, prices held at Year-1 levels — so the delta against the
+    analytic lifetime-scaling recipe isolates degradation
+    nonlinearity (SOC-headroom effects, cycle-cap interaction, binary
+    commitment).  The resolved side is aggregated and
+    availability-derated EXACTLY the way ``_build_financials`` builds
+    the scaled side, and the comparison joins the year-``k`` row of
+    ``lifetime_yearly``.  Purely diagnostic: runs after the financial
+    bundle and feeds only the results workbook and ``SUMMARY.md``;
+    the inputs are deep-copied so nothing upstream mutates.  The
+    terminal-SOC fractions are capacity-relative, so the faded solve
+    keeps the same SOC conventions by construction.
+    """
+    k = int(econ.get("midlife_resolve_year", 0) or 0)
+    if k <= 0:
+        return None
+    if lifetime_yearly is None or lifetime_yearly.empty:
+        return None
+    scaled_rows = lifetime_yearly.loc[lifetime_yearly["project_year"] == k]
+    if scaled_rows.empty:
+        logger.warning(
+            "[midlife] project year %d not present in the lifetime "
+            "projection; skipping the re-solve validation.", k,
+        )
+        return None
+    capacity_mwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0) / 1000.0
+    pv_f, bess_f = factors_for_year(
+        econ,
+        year=k,
+        year1_discharge_mwh=float(
+            kpis.get("bess_total_discharge_mwh", 0.0) or 0.0
+        ),
+        capacity_mwh=capacity_mwh,
+    )
+    logger.info(
+        "[midlife] re-solving project year %d with faded parameters: "
+        "pv_factor=%.4f, bess_factor=%.4f (BESS power kept at "
+        "nameplate; Year-1 prices).", k, pv_f, bess_f,
+    )
+    params_k = copy.deepcopy(params)
+    params_k["bess_capacity_kwh"] = (
+        float(params.get("bess_capacity_kwh", 0.0) or 0.0) * bess_f
+    )
+    ts_k = ts.copy(deep=True)
+    if "pv_kwh" in ts_k.columns:
+        ts_k["pv_kwh"] = ts_k["pv_kwh"].astype(float) * pv_f
+    res_k, _solver_k, _full_k = run_scenario(
+        params_k, ts_k, return_unrounded=True, **(solver_opts or {}),
+    )
+    # Materialise the per-step EUR columns; the KPI dict itself is not
+    # consumed — the resolved side is aggregated below with the exact
+    # constructor the scaled side used.
+    compute_kpis(res_k, params_k, verify_balance=False)
+    res_k["project_year"] = int(k)
+    _start = int(
+        econ.get("project_start_year",
+                 PROJECT_SHEET_DEFAULTS["project_start_year"])
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
+    res_k["calendar_year"] = _start + k - 1
+    resolved = aggregate_lifetime_to_yearly(res_k)
+    avail_factor = availability_factor(
+        float(econ.get("unavailability_pct", 0.0) or 0.0)
+    )
+    if avail_factor < 1.0 and not resolved.empty:
+        for col in _MIDLIFE_COMPARE_COLUMNS:
+            if col in resolved.columns:
+                resolved[col] = resolved[col].astype(float) * avail_factor
+
+    eps = 1e-9
+    rows: list[dict[str, Any]] = []
+    for col in _MIDLIFE_COMPARE_COLUMNS:
+        if col not in scaled_rows.columns or col not in resolved.columns:
+            continue
+        scaled_v = float(scaled_rows[col].iloc[0])
+        resolved_v = float(resolved[col].iloc[0])
+        delta = resolved_v - scaled_v
+        rows.append({
+            "kpi": col,
+            "scaled": round(scaled_v, 6),
+            "resolved": round(resolved_v, 6),
+            "delta": round(delta, 6),
+            "delta_pct": round(
+                100.0 * delta / max(abs(scaled_v), eps), 4,
+            ),
+        })
+    # The requested optimality gap bounds the smallest meaningful
+    # delta; carried as its own row so the workbook sheet is
+    # self-describing (SUMMARY repeats the caveat in prose).
+    gap = float((solver_opts or {}).get("mip_gap", 0.001) or 0.001)
+    rows.append({
+        "kpi": "requested_mip_gap",
+        "scaled": gap, "resolved": gap, "delta": 0.0, "delta_pct": 0.0,
+    })
+    return pd.DataFrame(
+        rows, columns=["kpi", "scaled", "resolved", "delta", "delta_pct"],
+    )
+
+
+
+def _compute_risk_metrics(
+    rolling_mc_df: pd.DataFrame | None,
+    kpis: dict[str, Any],
+    econ: dict[str, Any],
+    capacities: dict[str, float] | None,
+) -> pd.DataFrame | None:
+    """VaR/CVaR of NPV over the Monte Carlo seeds (Eqs. U10/U11).
+
+    Maps each seed's realised (derated) Year-1 profit onto an NPV via
+    the pro-rata revenue rescale
+    (:func:`pvbess_opt.economics.npv_for_year1_revenue`), then reports
+    the empirical tail statistics.  Returns None — and adds nothing
+    anywhere — unless ``risk_metrics_enabled`` is set and the MC frame
+    carries seeds; the KPI dict gains ``npv_var_eur`` /
+    ``npv_cvar_eur`` (+ the echoed tail level) so the SUMMARY rolling
+    section can render them next to ``mc_n_seeds`` (a 30-seed default
+    gives noisy 5 % tails — the seed count is the caveat).
+    """
+    if not bool(econ.get("risk_metrics_enabled", False)):
+        return None
+    if (
+        rolling_mc_df is None or rolling_mc_df.empty
+        or "profit_total_eur" not in rolling_mc_df.columns
+    ):
+        logger.warning(
+            "[risk] risk_metrics_enabled is set but no rolling-horizon "
+            "Monte Carlo seeds are available (uncertainty_enabled with "
+            "n_seeds > 0 required); skipping VaR/CVaR."
+        )
+        return None
+    base_profit = float(kpis.get("profit_total_eur", 0.0) or 0.0)
+    if abs(base_profit) <= 1e-9 or capacities is None:
+        logger.warning(
+            "[risk] Year-1 profit base is ~0; the pro-rata seed-to-NPV "
+            "mapping is undefined — skipping VaR/CVaR."
+        )
+        return None
+    _alpha_raw = econ.get("risk_alpha_pct", 5.0)
+    alpha_pct = 5.0 if _alpha_raw is None else float(_alpha_raw)
+    seed_profits = rolling_mc_df["profit_total_eur"].astype(float)
+    npvs = [
+        npv_for_year1_revenue(
+            kpis, econ, capacities, profit_total_eur=float(p),
+        )
+        for p in seed_profits
+    ]
+    var, cvar = var_cvar(npvs, alpha_pct)
+    finite = [v for v in npvs if np.isfinite(v)]
+    kpis["npv_var_eur"] = float(round(var, 2))
+    kpis["npv_cvar_eur"] = float(round(cvar, 2))
+    kpis["risk_alpha_pct"] = float(round(alpha_pct, 4))
+    logger.info(
+        "[risk] NPV over %d seeds: VaR_%.3g%% = %.0f EUR, "
+        "CVaR_%.3g%% = %.0f EUR.",
+        len(finite), alpha_pct, var, alpha_pct, cvar,
+    )
+    rows = [
+        {"metric": "n_seeds", "value": float(len(finite))},
+        {"metric": "risk_alpha_pct", "value": alpha_pct},
+        {"metric": "npv_mean_eur", "value": float(np.mean(finite))},
+        {"metric": "npv_min_eur", "value": float(np.min(finite))},
+        {"metric": "npv_var_eur", "value": var},
+        {"metric": "npv_cvar_eur", "value": cvar},
+    ]
+    return pd.DataFrame(rows, columns=["metric", "value"])
 
 
 def _build_emissions_report(
@@ -1130,6 +1343,15 @@ def _resolve_uncertainty_config(
 ) -> dict[str, Any]:
     """Merge CLI overrides on top of the workbook ``# uncertainty`` group."""
     enabled = bool(config.rolling_horizon) or bool(econ.get("uncertainty_enabled", False))
+    if enabled and float(econ.get("max_cycles_per_year", 0.0) or 0.0) > 0.0:
+        # Eq. E46 is a year-long constraint; rolling-horizon windows
+        # solve sub-year horizons, so the annual cap binds only in the
+        # deterministic Year-1 solve (documented design choice).
+        logger.warning(
+            "[cycles] max_cycles_per_year is enforced in the "
+            "deterministic Year-1 solve only; rolling-horizon windows "
+            "solve sub-year horizons and carry the daily cap alone."
+        )
     compare = (
         bool(config.compare_uncertainty_sources)
         or bool(econ.get("uncertainty_compare_sources", False))
@@ -1306,9 +1528,7 @@ def _run_one(
             kpis = compute_kpis(res, params, verify_balance=False)
             # Post-solve unavailability derate.  Multiplies a
             # curated set of MWh / EUR keys by (1 - unavailability_pct/100).
-            kpis = apply_unavailability_derate(
-                kpis, float(params.get("unavailability_pct", 0.0) or 0.0),
-            )
+            kpis = apply_operating_derates(kpis, params)
             _emit_bess_utilisation_audit(kpis, params)
             kpis_monthly = compute_monthly_kpis(res)
 
@@ -1620,7 +1840,45 @@ def _run_one(
         )
 
         degradation_df = _build_degradation_report(res, params, econ, kpis)
+        if (
+            degradation_df is not None
+            and "warranty_utilisation_pct" in degradation_df.columns
+        ):
+            # Eq. E47: >100 % can only occur via a replacement /
+            # augmentation reset on the nameplate basis — the Year-1
+            # MILP cap (Eq. E46) holds Year 1 itself.
+            _over = degradation_df.loc[
+                degradation_df["warranty_utilisation_pct"] > 100.0 + 1e-6,
+                "project_year",
+            ].astype(int).tolist()
+            if _over:
+                logger.warning(
+                    "[cycles] projected warranty utilisation exceeds "
+                    "100 %% of max_cycles_per_year in project years %s "
+                    "(see the degradation sheet's "
+                    "warranty_utilisation_pct column).",
+                    _over,
+                )
         emissions_df = _build_emissions_report(res, econ)
+
+        # Mid-life re-solve validation (Eq. E53): strictly AFTER the
+        # financial bundle — its delta table is diagnostic and can
+        # never feed the cashflow.
+        midlife_df = _run_midlife_resolve(
+            params, ts, econ, kpis, bundle.get("lifetime_yearly"),
+            solver_opts={
+                "solver_name": config.solver,
+                "mip_gap": config.mip_gap,
+                "time_limit_seconds": config.time_limit,
+                "tee": config.tee,
+            },
+        )
+
+        # NPV tail risk over the Monte Carlo seeds (Eqs. U10/U11):
+        # adds KPI rows + a results sheet only when armed and seeded.
+        risk_df = _compute_risk_metrics(
+            rolling_mc_df, kpis, econ, bundle.get("capacities"),
+        )
 
         write_results_workbook(
             out_dir / "03_results.xlsx",
@@ -1640,6 +1898,8 @@ def _run_one(
             debt_schedule=bundle.get("debt_schedule"),
             emissions=emissions_df,
             lender_cases=bundle.get("lender_cases"),
+            midlife_resolve=midlife_df,
+            risk_metrics=risk_df,
         )
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
@@ -1649,6 +1909,7 @@ def _run_one(
             solver_name=resolved_solver,
             replacement_note=_format_replacement_note(econ),
             lender_cases=bundle.get("lender_cases"),
+            midlife_resolve=midlife_df,
         )
 
         # Balancing plot pair promised by the README's report list; both

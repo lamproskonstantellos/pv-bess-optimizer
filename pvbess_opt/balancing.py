@@ -54,6 +54,7 @@ __all__ = [
     "BalancingTimeseries",
     "acceptance_probability",
     "activation_probability",
+    "activation_probability_curve",
     "capacity_share_kw",
     "expected_activation_revenue_per_kw_per_step",
     "expected_capacity_revenue_per_kw_per_step",
@@ -129,8 +130,14 @@ class BalancingConfig:
     mfrr_up_default_activation_price_eur_per_mwh: float = 180.0
     mfrr_dn_default_activation_price_eur_per_mwh: float = 20.0
 
+    # Merit-order activation curve (Eq. B10); False keeps the scalar
+    # *_activation_probability_pct path, bit-identical.
+    bm_merit_order_enabled: bool = False
+
     fcr_required_duration_hours: float = 0.5
     bm_settlement_minutes: int = 15
+    # Multi-hour reservation blocks (Eq. B9); 0 = per-settlement-period.
+    bm_block_hours: int = 0
     bm_soc_headroom_pct: float = 10.0
     bm_inflation_pct: float = 2.0
     bm_price_sigma_capacity_pct: float = 25.0
@@ -193,9 +200,14 @@ def resolve_balancing_config(raw: dict[str, Any]) -> BalancingConfig:
         if name not in raw:
             continue
         value = raw[name]
-        if fld.type is bool or name == "balancing_enabled":
+        if fld.type is bool or name in (
+            "balancing_enabled", "bm_merit_order_enabled",
+        ):
             kwargs[name] = bool(value)
-        elif name in {"bm_settlement_minutes", "bm_mc_scenarios", "bm_random_seed"}:
+        elif name in {
+            "bm_settlement_minutes", "bm_block_hours",
+            "bm_mc_scenarios", "bm_random_seed",
+        }:
             kwargs[name] = int(value)
         else:
             kwargs[name] = float(value)
@@ -327,6 +339,38 @@ def activation_probability(cfg: BalancingConfig, product: str) -> float:
     """Return beta_k in [0, 1] — P(activated | cleared)."""
     _check_product(product)
     return float(getattr(cfg, _ACTIVATION_PROB_KEYS[product])) / 100.0
+
+
+def activation_probability_curve(
+    cfg: BalancingConfig,
+    curve: dict[str, list[tuple[float, float]]] | None,
+    product: str,
+    prices: Any,
+) -> np.ndarray:
+    """Per-step ``beta_k(t)`` from the merit-order curve (Eq. B10).
+
+    Piecewise-linear interpolation of activation probability against
+    the input activation price (bids are assumed AT the input price
+    level — the curve maps price to P(activated | cleared), it does
+    not model an endogenous bid), clamped at the curve ends via
+    ``np.interp``.  ``curve`` maps product -> [(price_eur_per_mwh,
+    activation_probability_pct), ...] sorted by price and validated
+    monotone non-increasing at load time.  A missing / None curve (or
+    a product without an entry) falls back to a flat array at the
+    scalar :func:`activation_probability`, which reproduces the
+    constant-beta path exactly.
+    """
+    _check_product(product)
+    price_arr = np.asarray(prices, dtype=float)
+    if not curve or product not in curve:
+        return np.full(
+            price_arr.shape[0], activation_probability(cfg, product),
+            dtype=float,
+        )
+    points = curve[product]
+    xs = np.asarray([float(p) for p, _ in points], dtype=float)
+    ys = np.asarray([float(q) / 100.0 for _, q in points], dtype=float)
+    return np.interp(price_arr, xs, ys)
 
 
 def expected_capacity_revenue_per_kw_per_step(

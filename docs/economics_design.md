@@ -16,11 +16,11 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E45 (+ suffixed E8a, E13a-E13d, E40a) |
-| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U9 (+ suffixed U8a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E57 (+ suffixed E8a, E13a-E13d, E40a) |
+| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U11 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
-| S | (reserved) | system/dispatch constraints outside the MILP docs' local numbering | — |
-| B | (reserved) | balancing product structure | — |
+| S | `self_consumption_design.md` | system/dispatch constraints (shared with merchant mode) | S36 |
+| B | `balancing_market_design.md` | balancing product structure | B10 |
 | I | (reserved) | intraday venue | — |
 
 New equations take the next free tag in their namespace at merge time
@@ -155,7 +155,67 @@ Only the FIRST threshold crossing is charged.  If the fresh pack would
 cross the threshold again within the remaining horizon the run log
 carries a prominent warning and `SUMMARY.md` notes it, but the model
 does not charge a second replacement.  Projects whose battery wears
-through two packs need an explicit scheduled strategy.
+through two packs need an explicit scheduled strategy — or the staged
+augmentation surface below, which supersedes the single replacement.
+
+### Augmentation and overbuild (Eqs. E50-E52)
+
+Staged capacity additions and a day-1 DC overbuild generalise the
+single replacement into a **pooled capacity engine**
+(`lifetime.bess_capacity_factors_pooled`).  The plant is a set of
+installed pools; pool $i$ of size $E_i$ installed in project year
+$a_i$ fades on its own calendar-plus-cycle curve, and the plant
+factor is the nameplate-clamped pool sum:
+
+$$f_y = \min\!\left(1,\; \frac{\sum_i E_i\, \varphi_i(y)}{E_N}\right),
+\qquad
+\varphi_i(y) = \max\!\left(0,\, (1-d_{\mathrm{cal}})^{\,y-a_i}
+- d_{\mathrm{cyc}} K_i(y)\right) \tag{E50}$$
+
+where $K_i$ accumulates each pool's **pro-rata** share of the plant
+throughput (apportioned by surviving pool capacity, cycled over the
+pool's nameplate size — a documented modelling choice; FIFO
+apportionment would differ only when fade rates diverge, and the two
+coincide at equal rates).  With no events and no overbuild the engine
+delegates to the single-pool `bess_capacity_factors` (bit-identity,
+including the replacement reset).
+
+**Augmentation events (`bess_augmentation_years`, CSV).**  Each event
+year $a$ installs a fresh pool: `top_up` mode restores the plant to
+exactly nameplate ($\Delta E_a = \max(0, E_N - \sum_i E_i
+\varphi_i(a))$), `fixed_kwh` adds `bess_augmentation_kwh`.  The event
+is priced on the declining unit-cost curve and books as its own
+signed cashflow column:
+
+$$X_a = -\Delta E_a \cdot c_{\mathrm{bess}}
+\cdot (1 - d_{\mathrm{cost}})^{a} \tag{E51}$$
+
+(`augmentation_capex_eur`; month-12 booking in the monthly frame —
+the replacement-CAPEX convention; a matching depreciation tranche
+enters service the year after).  The lifetime total is
+`total_augmentation_capex_eur_lifecycle` (SUMMARY-optional), the
+events join the **LCOS numerator** (storage cost, same class as
+replacement CAPEX; market fees stay excluded), the CAPEX sensitivity
+driver scales the column (unit-cost-linked) while the Revenue driver
+leaves it fixed, and the cashflow figures draw an "Augmentation
+CAPEX" bar only when non-zero.  Augmentation is **mutually exclusive
+with `bess_replacement_year`** (scheduled or `auto`): the loader
+rejects the combination rather than applying a silent precedence.
+
+**Day-1 DC overbuild (`bess_overbuild_pct`).**  Installs
+$(1 + ob)\,E_N$ at Year-0 prices with usable capacity clamped at
+nameplate, so fade consumes the overbuilt margin first:
+
+$$\mathrm{capex}^{\mathrm{BESS}}_0 = -c_{\mathrm{bess}}
+(1 + ob)\, E_N \tag{E52}$$
+
+Dispatch always solves at nameplate — the overbuild changes only the
+factor curve (through the E50 clamp), Year-0 CAPEX, the depreciation
+base and the LCOS numerator.  Zero defaults are bit-identical for
+both surfaces.  Note for sizing sweeps: `sizing.py` re-runs the
+Year-1 dispatch only, so augmentation affects the frontier ranking
+solely through the NPV of the factor curve and event CAPEX (no code
+interaction; recorded here).
 
 ### Wear cost vs replacement cost (no double counting)
 
@@ -214,6 +274,66 @@ component $1-(1-d_B)^{Y-y_0}$ and the cycle component $d_c K_Y$
 `bess_total_fade_pct_y_final`); calendar + cycle = total whenever the
 $\max(0,\cdot)$ floor is inactive.
 
+**Annual throughput cap (Eqs. E46/E47; `max_cycles_per_year`).**
+Warranties are quoted in cycles per year — sometimes on remaining
+(faded) capacity — while the only dispatch cap today is daily.  With
+`max_cycles_per_year` $= C_{yr} > 0$ the Year-1 MILP adds one
+year-long constraint (`CYC_ANNUAL`; a plain linear sum, no big-M):
+
+$$\sum_t \left(x^{bl}_t + x^{bg}_t\right) \le C_{yr}\, E^{\mathrm{cap}} \tag{E46}$$
+
+Both `cycle_cap_basis` settings coincide in Year 1 (the Year-1 factor
+is 1), so one constraint serves both.  The projected years need no
+constraint — under the analytic scaling recipe the year-$y$ discharge
+is $D_1 f^{B}_y$ against capacity $E^{\mathrm{cap}}$ (nameplate) or
+$E^{\mathrm{cap}} f^{B}_y$ (faded), so the utilisation
+
+$$\mathrm{FEC}_y = \frac{D_1 f^{B}_y}{E^{\mathrm{cap}}}
+\;\; (\text{nameplate}) \qquad \text{or} \qquad
+\mathrm{FEC}_y = \frac{D_1}{E^{\mathrm{cap}}}
+\;\; (\text{faded}) \tag{E47}$$
+
+is constant on the faded basis and maximal in Year 1 (or a
+replacement reset year) on nameplate — the Year-1 constraint is
+sufficient and `lifetime.warranty_cycle_utilisation` proves it per
+year in the degradation sheet (`cycles_on_basis`,
+`warranty_utilisation_pct`, written only when the cap is set); the
+pipeline warns when a reset year projects above 100 %.  The cap is a
+constraint, not a cost line — LCOE / LCOS classification is
+unaffected.  Under rolling-horizon dispatch the annual cap applies
+only to the deterministic Year-1 solve (windows cover sub-year
+horizons; a warning notes this).
+
+### Mid-life re-solve validation (Eq. E53)
+
+The analytic lifetime-scaling recipe (the `lifetime.py` header;
+reconciliation invariant within 0.1 % in
+`docs/source/technical.documentation/lifetime_scaling.rst`) can be
+validated against a fresh dispatch: `midlife_resolve_year` = $k$ (a
+`simulation`-sheet key; 0 = off, default) re-solves the MILP with
+degraded parameters — BESS energy capacity $E_N f_k$ with **power
+kept at nameplate** (the fade model degrades energy, not the
+converter), the PV column scaled by $\mathrm{pv\_factor}(k)$, prices
+held at Year-1 levels — and reports, per lifetime-yearly KPI $X$:
+
+$$\Delta_k(X) = \frac{X^{\mathrm{resolve}}_k - X^{\mathrm{scaled}}_k}
+{\max(|X^{\mathrm{scaled}}_k|,\, \varepsilon)} \tag{E53}$$
+
+The resolved side is aggregated and availability-derated exactly the
+way the scaled side was built (`lifetime.factors_for_year` feeds the
+faded parameters through the same resolution path the projection
+uses), so the delta isolates degradation NONLINEARITY: SOC-headroom
+effects, cycle-cap interaction and binary commitment — the
+mechanisms a linear per-year scaling cannot see.  The table
+(results-workbook sheet `midlife_resolve` + a `SUMMARY.md` section,
+both absent when off) carries the requested MIP gap as its own row:
+deltas at or below the gap are solver noise, not scaling bias.
+Strictly diagnostic — the re-solve runs AFTER the financial bundle
+and never feeds the cashflow, NPV or any KPI; under a
+rolling-horizon run it validates the deterministic path only (the
+loader warns).  Terminal-SOC fractions are capacity-relative, so the
+faded solve keeps the same SOC conventions by construction.
+
 ### Availability
 
 The MILP assumes the plant is online every step.  A single post-solve
@@ -246,6 +366,128 @@ node stays at the true demand and its ribbons conserve energy.  Because
 grid import is not a monetised stream — the self-consumption savings,
 which *are* derated, already carry the downtime cost — Eq. E8a leaves
 every financial KPI unchanged.
+
+### Exogenous curtailment
+
+Two mutually exclusive input surfaces model grid-operator curtailment
+(`read_workbook` raises if both are set, since a quota on top of a
+signal would double-count the same lost energy).
+
+**Expected-quota derate (Eqs. E48/E49; `curtailment_pct`).**  A flat
+expected curtailment share $q = \texttt{curtailment\_pct}/100$ scales
+the **export-side** KPIs only, after the availability derate:
+
+$$X^{\mathrm{curt}} = (1 - q)\, X^{\mathrm{avail}} \tag{E48}$$
+
+(`availability.apply_curtailment_derate`; the derated list spans the
+export energies, the per-origin export profits, the DAM revenues and
+the PPA contract leg — self-consumption, load and grid import are
+untouched because curtailment binds the grid connection, not the
+plant, and the baseload-shortfall marker keys are exempt since a
+baseload PPA settles financially regardless of physical delivery).
+`profit_total_eur` is recomposed from the deltas of its constituent
+streams so the scope identity above survives the derate.  A share
+$c = \texttt{curtailment\_compensated\_pct}/100$ of the curtailed
+energy is reimbursed at the administered price
+$p = \texttt{curtailment\_compensation\_price\_eur\_per\_mwh}$:
+
+$$K^{\mathrm{curt}} = q \cdot c \cdot p \cdot E^{\mathrm{export,avail}}_1 \tag{E49}$$
+
+which enters the cashflow as its own column
+(`curtailment_compensation_eur`, revenue-classified for LCOE), fades
+on the blended PV/BESS export mix, indexes on the DAM inflation rate
+(administered prices track the market index, not a trajectory), and
+totals into `lifetime_curtailment_compensation_eur`.  Both derates
+share one entry point — `availability.apply_operating_derates`
+(availability first, then curtailment) — so every KPI path composes
+them identically.
+
+**Hour-resolved signal (`curtailment_signal` timeseries column).**  A
+per-step factor in $[0,1]$ multiplies the export cap *inside the
+MILP* (`optimization.build_model`), so the optimizer re-dispatches
+around the restriction (e.g. charging the BESS instead of spilling).
+This is a physical constraint, not a KPI derate: no post-solve
+scaling occurs, and audit invariant 7 sees the composed cap.  Use the
+quota for lifecycle economics, the signal for operational studies.
+
+### Guarantees-of-origin revenue (Eq. E54)
+
+`go_price_eur_per_mwh` (economics sheet; 0 = off, default,
+bit-identical) sells guarantees of origin on the **eligible renewable
+injection** — the availability- and curtailment-derated PV grid
+export.  BESS discharge and self-consumed energy are excluded: GOs
+are issued on metered renewable injection, and the export basis is
+stated explicitly because the eligibility definition is
+jurisdiction-dependent.
+
+$$R^{\mathrm{GO}}_y = p_{\mathrm{GO}} \cdot E^{\mathrm{PV,exp}}_1
+\cdot f^{PV}_y \qquad (y \ge 1) \tag{E54}$$
+
+The price is flat over the horizon (GO prices are contracted, not
+CPI-indexed) while the eligible MWh fade on the PV degradation curve.
+Classification: **fee-exempt** (certificates settle outside the power
+market, so neither the aggregator fee nor the route-to-market fee
+touches the stream) and **excluded from LCOE/LCOS** (revenue-agnostic
+metrics).  Its own cashflow column (`go_revenue_eur`, monthly on the
+PV production shape with exact reconciliation), a lifetime total
+(`total_go_revenue_eur_lifecycle`, SUMMARY-optional), a "GO revenue"
+band in the revenue stack / yearly bars / NPV waterfall drawn only
+when non-zero, and Revenue-driver membership in the sensitivity
+tornado (certificate prices move with the renewables market).
+
+### Reference-period support settlement (Eqs. E55-E57)
+
+`support_scheme` on the ppa sheet ('none' = off, default,
+bit-identical) settles state support on the **eligible PV export** —
+the Greek DAPEEP sliding Feed-in-Premium ('sliding_fip') or a
+two-way CfD ('cfd_two_way').  The premium is a settlement OVERLAY:
+dispatch still sells at the DAM (the per-step CfD philosophy), and a
+plant settles under a corporate PPA **or** a support scheme, never
+both (the loader rejects the combination).  Per month $m$ the
+volume-weighted reference price over eligible steps is
+
+$$P^{\mathrm{ref}}_m = \frac{\sum_{t \in m,\ \mathrm{elig}}
+p^{\mathrm{DAM}}_t\, e^{\mathrm{exp}}_t}
+{\sum_{t \in m,\ \mathrm{elig}} e^{\mathrm{exp}}_t} \tag{E55}$$
+
+and the settlement premium (with $K$ =
+`support_strike_eur_per_mwh`, the reference tariff — Timi Anaforas):
+
+$$R^{\mathrm{sup}}_m = E^{\mathrm{elig}}_m \cdot
+\begin{cases}
+\max(K - P^{\mathrm{ref}}_m,\, 0) & \text{sliding\_fip} \\
+K - P^{\mathrm{ref}}_m & \text{cfd\_two\_way}
+\end{cases} \tag{E56}$$
+
+zero after `support_term_years`.  `support_negative_hour_suspension`
+removes the negative-DAM steps from BOTH sides of Eq. E55 (the EU
+market-design rule adopted in the Greek scheme):
+
+$$\mathrm{elig} = \{t : p^{\mathrm{DAM}}_t \ge 0\}
+\quad\text{(else all steps)} \tag{E57}$$
+
+reusing the strict $p < 0$ classifier the PPA suspension clause
+defined (`ppa.negative_price_mask` — one definition, two consumers).
+`support_ref_period = 'hourly'` degenerates Eq. E56 to the per-step
+CfD algebra as a cross-check mode.  The Year-1 KPI pair
+(`support_settlement_eur`, `support_eligible_export_mwh`) carries
+both operating derates (availability and curtailment — the
+settlement rides metered export), as does the per-month detail the
+cashflow consumes.  Projection: the strike leg is FLAT (an
+administered tariff), the reference leg rides `dam_inflation_pct`,
+the volume rides the PV fade, and the sliding clamp re-applies per
+month per year — so a rising reference can extinguish the premium
+mid-life.  Real reference-price dynamics differ from the flat-index
+projection (a documented limitation of the same class as the DAM
+curve assumption).  Classification: no aggregator fee (settles with
+the market operator) and EXCLUDED from LCOE/LCOS.  The signed
+cashflow column (`support_settlement_eur`; two-way years can be
+NEGATIVE and net_cf carries the sign), monthly on the Year-1
+settlement shape (exact reconciliation), a lifetime SUMMARY row, a
+signed figure band, and a dedicated `SupportStrike` tornado driver
+(a full rebuild at the perturbed strike is exact, including the
+clamp; the Revenue driver deliberately leaves the mixed column
+untouched).
 
 ### Year-1 revenue bases and the nine canonical aggregates
 
@@ -1264,6 +1506,18 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E43) | `economics.size_debt` outlay cap + `resolve_debt_sizing` frozen-debt resolution; sizing KPI family in `compute_financial_kpis` |
 | (E44) | `lender.apply_production_case` per-column haircut + `lender.build_lender_cases` case table |
 | (E45) | `economics.build_yearly_cashflow` baseload PPA no-fade / no-reversion branch |
+| (E46) | `optimization.build_model` → `CYC_ANNUAL` (Year-1 basis) |
+| (E47) | `lifetime.warranty_cycle_utilisation`; degradation-sheet columns + pipeline reset warning |
+| (E48) | `availability.apply_curtailment_derate` (export-side scaling; composed via `apply_operating_derates`) |
+| (E49) | `apply_curtailment_derate` compensation term + `build_yearly_cashflow` curtailment_compensation_eur column |
+| (E50) | `lifetime.bess_capacity_factors_pooled` (per-pool fade + nameplate clamp; delegates when inactive) |
+| (E51) | `build_yearly_cashflow` augmentation_capex_eur column + LCOS numerator events + `apply_tax_layer` tranches |
+| (E52) | `build_yearly_cashflow` Year-0 BESS CAPEX x (1 + ob); LCOS / depreciation bases |
+| (E53) | `pipeline._run_midlife_resolve` (+ `lifetime.factors_for_year`); io writers' conditional sheet/section |
+| (E54) | `build_yearly_cashflow` go_revenue_eur column (PV-fade volume, flat price); fee-exempt / LCOE-excluded |
+| (E55) | `ppa.compute_support_settlement` volume-weighted monthly reference price |
+| (E56) | `ppa.compute_support_settlement` premium; `build_yearly_cashflow` support_settlement_eur projection; `sensitivity` SupportStrike driver |
+| (E57) | eligibility via `ppa.negative_price_mask` (shared strict p < 0 classifier) |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

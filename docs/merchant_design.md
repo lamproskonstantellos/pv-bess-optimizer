@@ -71,7 +71,11 @@ big-M pair is omitted for model size.
 `PV_SPLIT` (S5), `SOC_DYN`/`SOC_MIN`/`SOC_MAX` (S10),
 `SOC_INIT`/`SOC_TERM`[`_MIN`/`_MAX`] (S11-S13),
 `CH_LIM`/`DIS_LIM`/`MODE_LINK` (S14), `EXPORT_CAP` (S15) and the
-optional `EXPORT_CAP_PV`/`EXPORT_CAP_BESS` sub-caps (S16), `CYC`
+optional `EXPORT_CAP_PV`/`EXPORT_CAP_BESS` sub-caps (S16),
+`IMPORT_CAP` (S35, only when `p_grid_import_max_kw` is finite — with
+$x^{gl}_t$ pinned by (M1) the cap binds on grid-to-BESS charging
+alone, a grid-charging power limit, inert without
+`allow_bess_grid_charging`), `CYC`
 (S19), `GRID_CHARGE_GATE`/`GRID_CHG_PV_GATE` (S20, only when grid
 charging is enabled; the PV-zero gating keeps grid charging out of
 PV-producing steps in both modes), the asset-pinning families

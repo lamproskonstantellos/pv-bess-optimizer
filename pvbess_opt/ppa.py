@@ -40,16 +40,18 @@ reversion), and the availability derate list.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    import pandas as pd
+import pandas as pd
 
 __all__ = [
     "PPA_NEGATIVE_PRICE_RULES",
     "PPA_SETTLEMENTS",
     "PPA_STRUCTURES",
+    "SUPPORT_REF_PERIODS",
+    "SUPPORT_SCHEMES",
     "PpaConfig",
+    "compute_support_settlement",
     "negative_price_mask",
     "resolve_ppa_config",
 ]
@@ -57,6 +59,11 @@ __all__ = [
 PPA_STRUCTURES: tuple[str, ...] = ("pay_as_produced", "baseload")
 PPA_SETTLEMENTS: tuple[str, ...] = ("physical", "cfd")
 PPA_NEGATIVE_PRICE_RULES: tuple[str, ...] = ("none", "suspend")
+#: Reference-period support settlement (Eqs. E55-E57 in
+#: docs/economics_design.md): none (off), the Greek DAPEEP one-way
+#: sliding Feed-in-Premium, or a two-way CfD.
+SUPPORT_SCHEMES: tuple[str, ...] = ("none", "sliding_fip", "cfd_two_way")
+SUPPORT_REF_PERIODS: tuple[str, ...] = ("monthly", "hourly")
 
 
 def negative_price_mask(dam_series: pd.Series) -> pd.Series:
@@ -160,3 +167,95 @@ def resolve_ppa_config(raw: dict[str, Any] | None) -> PpaConfig:
         else:
             kwargs[fld.name] = float(value)
     return PpaConfig(**kwargs)
+
+
+def compute_support_settlement(
+    res: pd.DataFrame,
+    *,
+    scheme: str,
+    strike_eur_per_mwh: float,
+    ref_period: str = "monthly",
+    suspend_negative: bool = False,
+) -> dict[str, Any]:
+    """Reference-period support settlement on PV export (Eqs. E55-E57).
+
+    The plant still sells at the DAM — the premium is a settlement
+    OVERLAY on the eligible PV-export volume, mirroring the CfD-leg
+    philosophy (dispatch is never modified).  Per month ``m`` the
+    volume-weighted reference price over eligible steps is
+
+        P_ref_m = sum(p_t * e_t) / sum(e_t)              (Eq. E55)
+
+    and the premium settles as ``E_m * max(K - P_ref_m, 0)`` under
+    ``sliding_fip`` (the Greek DAPEEP convention; ``K`` is the
+    reference tariff, Timi Anaforas) or ``E_m * (K - P_ref_m)`` under
+    ``cfd_two_way`` (Eq. E56).  ``suspend_negative`` removes the
+    negative-DAM steps from BOTH the volume and the reference-price
+    weighting (Eq. E57; the strict ``p < 0`` classifier is
+    :func:`negative_price_mask`, shared with the PPA suspension
+    clause).  ``ref_period='hourly'`` degenerates to the per-step CfD
+    algebra ``sum(e_t * prem(K - p_t))`` for cross-checks.
+
+    Returns the Year-1 settlement EUR, the eligible export MWh, and
+    the per-calendar-month detail (eligible MWh, reference price,
+    settlement) the cashflow projection consumes.
+    """
+    scheme = str(scheme or "none").strip().lower()
+    if scheme not in SUPPORT_SCHEMES:
+        raise ValueError(
+            f"unknown support_scheme {scheme!r}; expected one of "
+            f"{SUPPORT_SCHEMES}."
+        )
+    ref_period = str(ref_period or "monthly").strip().lower()
+    if ref_period not in SUPPORT_REF_PERIODS:
+        raise ValueError(
+            f"unknown support_ref_period {ref_period!r}; expected one "
+            f"of {SUPPORT_REF_PERIODS}."
+        )
+    for col in ("timestamp", "pv_to_grid_kwh", "dam_price_eur_per_mwh"):
+        if col not in res.columns:
+            raise ValueError(
+                f"compute_support_settlement requires the {col!r} "
+                "column on the dispatch frame."
+            )
+    strike = float(strike_eur_per_mwh)
+    prices = res["dam_price_eur_per_mwh"].astype(float)
+    export_mwh = res["pv_to_grid_kwh"].astype(float) / 1000.0
+    eligible = (
+        ~negative_price_mask(prices) if suspend_negative
+        else pd.Series(True, index=res.index)
+    )
+    e = export_mwh.where(eligible, 0.0)
+    months = pd.to_datetime(res["timestamp"]).dt.month
+
+    monthly_e = [0.0] * 12
+    monthly_ref = [0.0] * 12
+    monthly_settlement = [0.0] * 12
+
+    def _prem(diff: float) -> float:
+        return max(diff, 0.0) if scheme == "sliding_fip" else diff
+
+    total = 0.0
+    for m in range(1, 13):
+        mask = months == m
+        e_m = float(e[mask].sum())
+        monthly_e[m - 1] = e_m
+        if e_m <= 1e-12:
+            continue
+        p_ref = float((prices[mask] * e[mask]).sum()) / e_m
+        monthly_ref[m - 1] = p_ref
+        if ref_period == "hourly":
+            r_m = float(
+                (e[mask] * (strike - prices[mask]).apply(_prem)).sum()
+            )
+        else:
+            r_m = e_m * _prem(strike - p_ref)
+        monthly_settlement[m - 1] = r_m
+        total += r_m
+    return {
+        "support_settlement_eur": float(total),
+        "support_eligible_export_mwh": float(sum(monthly_e)),
+        "support_monthly_eligible_mwh": monthly_e,
+        "support_monthly_ref_price_eur_per_mwh": monthly_ref,
+        "support_monthly_settlement_eur": monthly_settlement,
+    }
