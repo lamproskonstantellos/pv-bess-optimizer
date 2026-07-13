@@ -37,7 +37,9 @@ flat band settled financially against the plant's total export
 ## Inputs
 
 A dedicated `ppa` sheet mirrors the `balancing` master-switch
-pattern (9 keys; shipped disabled):
+pattern (14 keys — the nine `ppa_*` contract keys below plus the
+five `support_*` keys of the state-support settlement engine, each
+block shipped disabled):
 
 | Key | Default | Role |
 |---|---|---|

@@ -35,7 +35,7 @@ Five products (`pvbess_opt/balancing.py` canonical tuples:
 
 ## Inputs
 
-The optional `balancing` sheet carries **34 keys** (kv structure like
+The optional `balancing` sheet carries **36 keys** (kv structure like
 every parameter sheet; the shipped workbook keeps the master switch
 off):
 
@@ -51,6 +51,8 @@ off):
 | settlement period | `bm_settlement_minutes` (validated == `dt_minutes`) | 15 |
 | SOC safety buffer | `bm_soc_headroom_pct` | 10 |
 | indexation | `bm_inflation_pct` | 2.0 |
+| reservation blocks (Eq. B9) | `bm_block_hours` | 0 (per-period reservations) |
+| merit-order curve (Eq. B10) | `bm_merit_order_enabled` | FALSE |
 | MC price sigmas (%) | `bm_price_sigma_capacity_pct`, `bm_price_sigma_activation_pct` | 25 / 35 |
 | MC size / seed | `bm_mc_scenarios`, `bm_random_seed` | 200 / 1729 |
 

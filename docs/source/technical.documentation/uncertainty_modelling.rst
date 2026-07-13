@@ -6,10 +6,11 @@ The annual MILP solved by ``pvbess_opt.optimization.run_scenario`` is a
 output, and load and produces an upper bound on achievable profit.
 Real operators never have that visibility.  The package supplies a
 workbook-driven rolling-horizon Monte Carlo so the foresight gap is
-quantifiable.  The authoritative formulation (equations U1-U5, noise
-construction, foresight gap, balancing Monte Carlo, sensitivity
-drivers) is ``docs/uncertainty_design.md``; this page matches it and
-adds the workbook/CLI plumbing.
+quantifiable.  The authoritative formulation (equations U1-U12, noise
+construction, foresight gap, balancing Monte Carlo, imbalance
+settlement, VaR/CVaR tail metrics, the two-stage intraday ensemble,
+sensitivity drivers) is ``docs/uncertainty_design.md``; this page
+matches it and adds the workbook/CLI plumbing.
 
 Sources of uncertainty
 ----------------------

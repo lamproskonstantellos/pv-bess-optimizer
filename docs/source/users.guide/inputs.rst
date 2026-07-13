@@ -630,7 +630,7 @@ regardless of PV nameplate or load profile.  See
 :mod:`pvbess_opt.balancing` for the per-product configuration and
 ``docs/balancing_market_design.md`` for the formal contract.
 
-The 34 keys (defaults in the design doc's Inputs table):
+The 36 keys (defaults in the design doc's Inputs table):
 
 * ``balancing_enabled``: master switch (FALSE).
 * Capacity shares, % of ``bess_power_kw``, sum across all six ≤ 100:
