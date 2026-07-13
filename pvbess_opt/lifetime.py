@@ -73,6 +73,9 @@ _PV_ORIGIN_COLUMNS: tuple[str, ...] = (
     "pv_to_grid_kwh",
     "pv_curtail_kwh",
     "pv_to_bess_kwh",
+    # PV-side intraday trades (Eq. I4): deltas on the PV export leg.
+    "id_sell_pv_kwh",
+    "id_buy_pv_kwh",
 )
 
 # Columns scaled by the BESS capacity-fade curve.
@@ -84,6 +87,9 @@ _BESS_ORIGIN_COLUMNS: tuple[str, ...] = (
     "bess_dis_grid_green_kwh",
     "soc_kwh",
     "soc_green_kwh",
+    # BESS-side intraday trades (Eq. I4): deltas on the BESS net leg.
+    "id_sell_bess_kwh",
+    "id_buy_bess_kwh",
 )
 
 # Mixed totals rebuilt from their scaled components after the per-origin
@@ -91,6 +97,8 @@ _BESS_ORIGIN_COLUMNS: tuple[str, ...] = (
 # two fade curves diverge).  Maps total -> component columns.
 _RECOMPUTED_TOTAL_COLUMNS: dict[str, tuple[str, ...]] = {
     "grid_export_total_kwh": ("pv_to_grid_kwh", "bess_dis_grid_kwh"),
+    # Total IDA buys across both origins (Eq. I4).
+    "id_buy_kwh": ("id_buy_pv_kwh", "id_buy_bess_kwh"),
 }
 
 # EUR-per-step columns added by :func:`pvbess_opt.kpis.add_economic_columns`.
@@ -697,6 +705,37 @@ def build_lifetime_dispatch(
                 )
             else:
                 chunk["grid_injection_total_kwh"] = surplus
+        # Intraday settlement columns (Eqs. E58/E59): mixed-origin EUR
+        # sums that a single factor cannot scale — rebuild them from
+        # the per-origin-scaled kWh columns and the frame's own price
+        # columns, exactly as add_economic_columns derived them (the
+        # prices are constant per step across projected years, so the
+        # recompute is the exact per-origin-faded settlement).
+        if (
+            "id_revenue_eur" in chunk.columns
+            and "ida_price_eur_per_mwh" in chunk.columns
+            and "dam_price_eur_per_mwh" in chunk.columns
+        ):
+            _id_spread = (
+                chunk["ida_price_eur_per_mwh"].astype(float).fillna(0.0)
+                - chunk["dam_price_eur_per_mwh"].astype(float).fillna(0.0)
+            )
+            _id_net_trade = (
+                chunk["id_sell_pv_kwh"].astype(float).fillna(0.0)
+                + chunk["id_sell_bess_kwh"].astype(float).fillna(0.0)
+                - chunk["id_buy_kwh"].astype(float).fillna(0.0)
+            )
+            chunk["id_revenue_eur"] = _id_spread / 1000.0 * _id_net_trade
+            if "id_fee_eur" in chunk.columns:
+                _id_fee_rate = float(
+                    econ.get("id_fee_eur_per_mwh", 0.0) or 0.0
+                )
+                _id_volume = (
+                    chunk["id_sell_pv_kwh"].astype(float).fillna(0.0)
+                    + chunk["id_sell_bess_kwh"].astype(float).fillna(0.0)
+                    + chunk["id_buy_kwh"].astype(float).fillna(0.0)
+                )
+                chunk["id_fee_eur"] = _id_fee_rate / 1000.0 * _id_volume
         # soc_pct stays unchanged: SOC and E_cap both scale by bess_factor.
         chunks.append(chunk)
 

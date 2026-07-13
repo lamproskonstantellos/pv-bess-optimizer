@@ -16,12 +16,12 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E57 (+ suffixed E8a, E13a-E13d, E40a) |
-| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U11 (+ suffixed U8a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E59 (+ suffixed E8a, E13a-E13d, E40a) |
+| U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U12 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | `self_consumption_design.md` | system/dispatch constraints (shared with merchant mode) | S36 |
 | B | `balancing_market_design.md` | balancing product structure | B10 |
-| I | (reserved) | intraday venue | — |
+| I | `intraday_design.md` | intraday venue (two-stage re-dispatch) | I5 |
 
 New equations take the next free tag in their namespace at merge time
 and add a row to the owning document's implementation map.
@@ -488,6 +488,56 @@ signed figure band, and a dedicated `SupportStrike` tornado driver
 (a full rebuild at the perturbed strike is exact, including the
 clamp; the Revenue driver deliberately leaves the mixed column
 untouched).
+
+### Intraday venue rows (Eqs. E58/E59)
+
+The two-stage intraday re-dispatch (`docs/intraday_design.md`,
+Eqs. I1-I5) delivers a Year-1 GROSS spread margin
+$R^{\mathrm{ID}}_1$ (the KPI pair `id_net_revenue_eur` +
+`id_venue_fee_eur`) and a Year-1 traded volume $V^{\mathrm{ID}}_1$
+(`id_traded_volume_mwh`).  Both are apportioned per origin on the
+Year-1 SELL volumes (`id_sell_pv_mwh` / `id_sell_bess_mwh`; a
+buy-only year books BESS-origin — buys are a storage action), each
+leg fading on its own curve:
+
+$$R^{\mathrm{ID}}_y = \left( R^{\mathrm{ID,PV}}_1 f^{PV}_y
++ R^{\mathrm{ID,B}}_1 f^{B}_y \right) (1+i_{\mathrm{id}})^{y-1}
+\tag{E58}$$
+
+$$F^{\mathrm{ID}}_y = -\varphi_{\mathrm{id}} \left(
+V^{\mathrm{ID,PV}}_1 f^{PV}_y + V^{\mathrm{ID,B}}_1 f^{B}_y \right)
+\tag{E59}$$
+
+with $i_{\mathrm{id}}$ = `id_inflation_pct` on the margin and the
+venue fee rate $\varphi_{\mathrm{id}}$ = `id_fee_eur_per_mwh` FLAT on
+the fading volume (the route-to-market convention: per-MWh charges
+are quoted flat, the charged MWh fade).  Both columns join $CF_y$
+(Eq. E15 amended); the margin is $\ge 0$ by construction (the Stage-2
+solve only trades profitably net of the fee and wear).  Fee
+applicability (Eq. I6, normative): the energy-aggregator ad-valorem
+fee (Eq. E13) does NOT charge the ID margin — intraday intermediation
+is priced by the explicit venue fee, and an ad-valorem share on top
+would double-charge it (the balancing/E13b precedent); the
+route-to-market fee (Eq. E13c) needs no new term — its volume bases
+(`pv_export_mwh` / `bess_export_mwh`) are computed from the Stage-2
+frame, so ID sells raise and ID buys lower the charged export
+automatically; the optimizer revenue share (Eq. E13d) DOES charge the
+BESS-origin ID margin (optimizers price total trading margin) — the
+base extends by $R^{\mathrm{ID,B}}_1 f^B_y (1+i_{\mathrm{id}})^{y-1}$
+in both the plain-share and floor+share variants, still zero-clamped,
+and the same leg joins the E25a netting base; the
+balancing-aggregator fee (Eq. E13b) does not apply by definition.  In
+'zeroed' toll years the BESS-origin leg is zeroed like every other
+BESS merchant base (Eq. E29a).  Monthly: the margin rides its Year-1
+monthly |margin| shape recomputed from the Stage-2 frame, the fee its
+Year-1 monthly traded-volume shape (flat 1/12 fallbacks; shares sum
+to one — exact yearly reconciliation).  Classification: EXCLUDED from
+LCOE/LCOS (revenue-agnostic metrics, market fees excluded); both
+lifetime totals are SUMMARY-optional rows; the availability AND
+curtailment derates scale the seven `id_*` KPI keys (physical trading
+stops when the plant is offline and rides the restricted connection).
+Sensitivity: the margin scales with the Revenue driver (a price
+spread times volume); the venue fee does not (volume-based).
 
 ### Year-1 revenue bases and the nine canonical aggregates
 
@@ -1518,6 +1568,8 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E55) | `ppa.compute_support_settlement` volume-weighted monthly reference price |
 | (E56) | `ppa.compute_support_settlement` premium; `build_yearly_cashflow` support_settlement_eur projection; `sensitivity` SupportStrike driver |
 | (E57) | eligibility via `ppa.negative_price_mask` (shared strict p < 0 classifier) |
+| (E58) | `build_yearly_cashflow` intraday_revenue_eur row (per-origin fade x id_inflation_pct; E13d base extension; E25a membership) |
+| (E59) | `build_yearly_cashflow` intraday_fee_eur row (flat venue rate on per-origin fading volume); `sensitivity._scale_revenue` no-scale decision |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests

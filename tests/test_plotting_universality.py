@@ -48,6 +48,8 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     "plot_uncertainty_crps_timeline", "plot_uncertainty_residual_qq",
     # Balancing market
     "plot_balancing_reservation_profile", "plot_balancing_mc_distribution",
+    # Intraday venue
+    "plot_da_ida_price_duration", "plot_intraday_position",
     # BESS revenue decomposition
     "plot_bess_revenue_waterfall", "plot_bess_capacity_vs_activation_split",
     "plot_bess_revenue_by_month",

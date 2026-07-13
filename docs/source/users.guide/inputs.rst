@@ -1,9 +1,10 @@
 Input workbook
 ==============
 
-The optimiser consumes a single Excel workbook.  Nine core data sheets
+The optimiser consumes a single Excel workbook.  Ten core data sheets
 (``timeseries``, ``project``, ``pv``, ``bess``, ``economics``,
-``balancing``, ``ppa``, ``simulation``, ``max_injection_profile``)
+``balancing``, ``ppa``, ``intraday``, ``simulation``,
+``max_injection_profile``)
 carry the run, plus the optional per-source sub-cap sheets
 (``max_injection_profile_pv`` / ``max_injection_profile_bess``) and two
 optional opt-in sheets ``sizing``, ``scenarios`` and ``trajectories``
@@ -46,6 +47,18 @@ Balancing price columns         balancing only           Optional per-step balan
                                                          ``{afrr,mfrr}_{up,dn}_activation_price_eur_per_mwh``
                                                          (see the ``balancing`` sheet
                                                          reference below).
+``ida_price_eur_per_mwh``       intraday only            Intraday auction price per step.
+                                                         Required when ``id_enabled = TRUE``
+                                                         on the ``intraday`` sheet (there is
+                                                         deliberately no scalar fallback — a
+                                                         constant IDA price would produce
+                                                         zero spread and misleading
+                                                         results).  Consumed at the workbook
+                                                         cadence: on an hourly workbook it
+                                                         is the hour-averaged IDA price (an
+                                                         INFO log notes the averaging); for
+                                                         15-minute IDA granularity resample
+                                                         via ``scripts/resample_timeseries.py``.
 ``curtailment_signal``          no                       Per-step export-availability factor
                                                          in ``[0, 1]`` (0 = export fully
                                                          curtailed, 1 = unrestricted).
@@ -763,16 +776,53 @@ economics key adds a PPA-price tornado driver when the contract is on.
   DAM); negative-DAM hours can be excluded from the eligible volume;
   mutually exclusive with ``ppa_enabled``.
 
+Sheet ``intraday``
+------------------
+
+Intraday (IDA) participation as a second wholesale venue (design
+note: ``docs/intraday_design.md``) — the committed day-ahead dispatch
+is re-optimised against the ``ida_price_eur_per_mwh`` timeseries
+column in a second solve with the day-ahead net position pinned.
+Master-switch pattern like the ``balancing`` sheet: disabled (the
+shipped default) leaves every output bit-identical to a build without
+the feature.
+
+* ``id_enabled``: master switch (default FALSE).  Requires the
+  ``ida_price_eur_per_mwh`` timeseries column, ``mode = merchant``
+  and a finite ``p_grid_export_max_kw``; mutually exclusive with
+  ``balancing_enabled``, ``ppa_enabled``, the support schemes,
+  ``imbalance_enabled`` and ``midlife_resolve_year`` (the v1 scope
+  gates — see ``docs/intraday_design.md``).  Combines with the
+  rolling-horizon Monte Carlo as a two-stage ensemble (Eq. U12).
+* ``id_max_deviation_frac_of_cap`` (default 0.25, validated in
+  ``[0, 1]``): per-step bound on the total traded intraday volume as
+  a fraction of ``p_grid_export_max_kw`` x dt — a liquidity and
+  nomination-change proxy (Eq. I2).  ``0`` disables trading.
+* ``id_allow_purchases`` (default TRUE): allow IDA buys.  Purchases
+  are physical only — a buy reduces the PV export or charges the
+  BESS in the same step (Eq. I5); BESS charging from IDA purchases
+  additionally requires ``allow_bess_grid_charging = TRUE``.
+* ``id_fee_eur_per_mwh`` (default 0, non-negative): venue trading
+  fee per traded MWh, charged on both buy and sell volume (Eq. E59).
+  Excluded from LCOE/LCOS per the market-fee convention.
+* ``id_inflation_pct`` (default 0): yearly indexation of the
+  intraday margin in the multi-year cashflow (mirrors
+  ``dam_inflation_pct``).
+
 Sheet ``simulation``
 --------------------
 
-* The 12 ``uncertainty_*`` keys driving the rolling-horizon Monte
+* The 14 ``uncertainty_*`` keys driving the rolling-horizon Monte
   Carlo: ``uncertainty_enabled``, ``uncertainty_compare_sources``,
   ``uncertainty_n_seeds``, ``uncertainty_window_hours``,
   ``uncertainty_commit_hours``, ``uncertainty_dam_enabled``,
   ``uncertainty_pv_enabled``, ``uncertainty_load_enabled``,
   ``uncertainty_sigma_dam``, ``uncertainty_sigma_pv``,
-  ``uncertainty_sigma_load``, ``uncertainty_diagnostics_enabled``.
+  ``uncertainty_sigma_load``, ``uncertainty_ida_enabled``,
+  ``uncertainty_sigma_ida`` (intraday-price noise, Eq. U12 —
+  meaningful only with ``id_enabled``; default sigma 0.15, below the
+  DAM's because intraday commitment happens closer to delivery),
+  ``uncertainty_diagnostics_enabled``.
   Their defaults are tabulated in
   :doc:`/technical.documentation/uncertainty_modelling`.
 * ``plot_daily_scope`` / ``plot_monthly_scope`` /

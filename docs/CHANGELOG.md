@@ -4,6 +4,146 @@
 
 Production release.
 
+### Changed (README)
+
+- The README now covers the full opt-in surface: the intraday venue
+  (What-it-does layer, `intraday` sheet reference, gallery scenario),
+  the sliding-FiP / two-way CfD support engine and
+  guarantees-of-origin revenue in the fiscal-landscape paragraph, the
+  dispatch/asset levers paragraph (grid import limit, curtailment
+  compensation, cycle caps, overbuild / augmentation, mid-life
+  re-solve), the imbalance / VaR-CVaR / two-stage Monte Carlo
+  extensions, the missing workbook keys on the `project` / `bess` /
+  `economics` / `simulation` / `ppa` / `balancing` sheet sections, and
+  the previously undocumented `trajectories` sheet.  The results
+  gallery gains a third scenario — merchant + intraday venue — with
+  the DA-vs-IDA price duration curves, the intraday net position and
+  the revenue stack carrying the intraday bands, rendered by
+  `scripts/export_readme_figures.py` from an illustrative intraday
+  deck derived from the shipped day-ahead deck (documented in the
+  script and the captions).
+
+### Added (intraday figures)
+
+- Two IEEE-styled venue figures in `04_financial_plots/`, emitted only
+  when the two-stage re-dispatch ran (default figure set unchanged):
+  `da_ida_price_duration.pdf` — DAM vs IDA price duration curves, each
+  sorted descending over the share of time (`Day-ahead price`
+  `#1E88E5`, `Intraday price` `#8E24AA`) — and `intraday_position.pdf`
+  — the per-step intraday net position (sells positive, buys negative)
+  as a step line (`Intraday net position` `#00897B`).  Both follow the
+  house figure contract (7x4 in canvas, registered labels, legend
+  below the axes, `empty_placeholder` gating).
+
+### Added (two-stage intraday Monte Carlo)
+
+- The intraday venue inside the rolling-horizon Monte Carlo
+  (Eq. U12): Stage-1 windows commit day-ahead dispatch under noisy
+  forecasts, then a SINGLE annual Stage-2 pass per seed re-dispatches
+  the stitched committed schedule against the actual intraday prices
+  — one extra solve per seed, honouring the soft year-close SOC pin
+  and lifting the cycle caps to the committed day's throughput where
+  window seams exceed them (the re-dispatch never ADDS cycling beyond
+  the operational cap).  The Stage-2 timeseries carries the actual
+  prices on the COMMITTED physical envelope; residual volume error
+  stays the imbalance settlement's domain (now mutually exclusive
+  with the venue, replacing the interim uncertainty gate).
+- Simulation keys `uncertainty_ida_enabled` (default TRUE) and
+  `uncertainty_sigma_ida` (default 0.15, below the DAM's): sign-aware
+  log-normal noise on `ida_price_eur_per_mwh`, drawn from a SPAWNED
+  child generator so every pre-existing seed's DAM/PV/load
+  multipliers stay bit-identical; the flag is forced off when the
+  venue is off.
+- The foresight benchmark becomes the TWO-STAGE perfect-foresight
+  profit on intraday runs (threaded through `pipeline._run_one`,
+  including the benchmark-retightening guard, which now re-runs the
+  Stage-2 pass on each tighter incumbent); `monte_carlo_rolling`
+  appends an `id_net_revenue_eur` per-seed column on two-stage
+  ensembles only (the imbalance conditional-column pattern).
+
+### Added (intraday revenue stream)
+
+- The intraday margin as a first-class cashflow stream (Eqs. E58/E59):
+  `intraday_revenue_eur` (Year-1 gross spread margin, per-origin fade
+  on the sell-volume split, indexed by `id_inflation_pct`) and
+  `intraday_fee_eur` (flat venue rate on the per-origin fading traded
+  volume), both folded into `net_cashflow_eur`, reconciled exactly on
+  the monthly/quarterly frames (Year-1 margin and traded-volume
+  shapes from the Stage-2 dispatch), rolled up to two SUMMARY-optional
+  lifetime totals and excluded from LCOE/LCOS per the market-fee
+  convention.
+- Fee applicability matrix (Eq. I6): the energy-aggregator ad-valorem
+  fee does NOT charge the intraday margin (the venue fee already
+  prices the intermediation — the balancing/E13b precedent,
+  superseding the pre-merge design note); the route-to-market volume
+  bases follow the Stage-2 frame automatically; the optimizer revenue
+  share DOES charge the BESS-origin intraday margin in both variants
+  (still zero-clamped), which also joins the E25a netting base and is
+  zeroed in 'zeroed' toll years.
+- Surface wiring: the sensitivity net-component list gains both
+  columns (the Revenue driver scales the margin, not the volume-based
+  fee; the `_scale_revenue(cf, 1.0)` no-op stays exact); the
+  availability and curtailment derates scale the seven `id_*` KPI
+  keys; the cashflow figure families gain `Intraday revenue`
+  (`#26C6DA`) and `Intraday fee` (`#E91E63`) bands drawn only when
+  non-zero; the lifetime dispatch sheet scales the intraday trades
+  per origin and rebuilds the settlement columns from the scaled
+  flows.
+
+### Added (two-stage intraday re-dispatch)
+
+- The intraday auction (IDA) as a second wholesale venue via two-stage
+  sequential re-dispatch (Eqs. I1-I5, `docs/intraday_design.md`):
+  Stage 1 is the unchanged day-ahead solve; Stage 2 re-solves the same
+  model with the committed day-ahead net position pinned as data
+  (`pvbess_opt/intraday.py`: config resolver, position extractor,
+  Stage-2 driver) and an intraday block added — per-origin IDA
+  sells/buys linked to physical flows, a deviation cap as a fraction
+  of the export cap, and a per-step complementarity binary excluding
+  wash trades.  The objective adds the spread margin net of the venue
+  fee, so the committed position settles day-ahead and only the
+  deviation trades at the IDA price; the wear-cost term prices the
+  incremental Stage-2 throughput automatically.
+- `pipeline._run_one` re-solves after the deterministic Stage-1 run
+  and the Stage-2 frame becomes the headline result (cycles,
+  degradation, KPIs and the financial stack see the combined DA + ID
+  operation); the Stage-1 profit is kept as
+  `id_stage1_profit_total_eur`.  New Year-1 KPI keys
+  (`id_net_revenue_eur`, `id_venue_fee_eur`, `id_sell_mwh`,
+  `id_buy_mwh`, `id_traded_volume_mwh`, `id_sell_pv_mwh`,
+  `id_sell_bess_mwh`) and per-step settlement columns
+  (`id_revenue_eur`, `id_fee_eur`) appear only on intraday runs.
+- `verify_dispatch_invariants` gains the INV-I1..INV-I4 family
+  (position link, deviation cap, sell/buy overlap, origin split),
+  reported as 0.0 when the venue is off; strict mode treats the
+  overlap product with the kWh^2 tolerance of invariant 5.
+- v1 scope gates at load time: merchant mode only, finite export cap,
+  and mutual exclusivity with balancing, PPA/support schemes, the
+  rolling-horizon Monte Carlo and the mid-life re-solve diagnostic.
+
+### Added (intraday venue input surface)
+
+- The optional `intraday` workbook sheet (5 keys, master-switch
+  pattern like `balancing`/`ppa`; absent sheet or `id_enabled =
+  FALSE` keeps every output bit-identical): `id_enabled`,
+  `id_max_deviation_frac_of_cap` (validated in `[0, 1]`),
+  `id_allow_purchases`, `id_fee_eur_per_mwh` (non-negative) and
+  `id_inflation_pct`.  YAML configs, the JSON schema and scenario
+  dotted-target overrides (`intraday.id_enabled`) inherit the sheet
+  automatically; `scripts/polish_input_workbook.py` materialises it
+  in existing workbooks.
+- The `ida_price_eur_per_mwh` timeseries column (intraday auction
+  price, Eq. I1): required when `id_enabled = TRUE` — deliberately no
+  scalar fallback, a constant IDA price would silently produce zero
+  spread — NaN-filled alongside the DAM price, deck-variant capable
+  (`ida_price_eur_per_mwh__<deck>`), and registered in
+  `rolling_horizon.PRICE_COLUMNS` so the Monte Carlo actuals-restore
+  picks it up.  An INFO log notes the hour-averaging on hourly
+  workbooks.
+- `docs/intraday_design.md` — the design note owning the I equation
+  namespace (I1 allocated; the registry row in
+  `docs/economics_design.md` now points at it).
+
 ### Added (structural market-access fees)
 
 - Two structural market-access fees, both default-off (results

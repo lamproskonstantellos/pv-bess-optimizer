@@ -238,6 +238,10 @@ def _recompute_net(df: pd.DataFrame) -> pd.DataFrame:
         components.append("go_revenue_eur")
     if "support_settlement_eur" in df.columns:
         components.append("support_settlement_eur")
+    if "intraday_revenue_eur" in df.columns:
+        components.append("intraday_revenue_eur")
+    if "intraday_fee_eur" in df.columns:
+        components.append("intraday_fee_eur")
     if "ppa_revenue_eur" in df.columns:
         components.append("ppa_revenue_eur")
     # bess_market_revenue_eur (Eq. E25a) is deliberately NOT a net
@@ -392,9 +396,18 @@ def _scale_revenue(
         # GO revenue (Eq. E54): certificate prices move with the
         # renewables market, so the driver scales it.
         "go_revenue_eur",
+        # Intraday margin (Eq. E58): a price SPREAD times traded
+        # volume — price-proportional like the imbalance settlement,
+        # so it scales with the Revenue driver.  Its venue fee does
+        # NOT (see below).
+        "intraday_revenue_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * float(factor)
+    # intraday_fee_eur (Eq. E59) does NOT scale with the Revenue
+    # driver: it is EUR/MWh on traded VOLUME — the exact
+    # route_to_market_fee_eur rationale (the driver perturbs prices,
+    # not energy).
     # support_settlement_eur (Eqs. E55-E57) does NOT scale with the
     # Revenue driver either: the strike leg is an administered tariff
     # and only the reference leg co-moves with prices — a constant

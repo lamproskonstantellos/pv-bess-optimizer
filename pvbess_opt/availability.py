@@ -136,6 +136,18 @@ _BASE_DERATED_KEYS: tuple[str, ...] = (
     # linear scale keeps the sign).
     "support_settlement_eur",
     "support_eligible_export_mwh",
+    # Intraday venue (Eqs. E58/E59): DERATE — physical trading stops
+    # when the plant is offline, so the margin and the traded volumes
+    # scale with availability; the venue fee derates with the volume
+    # it charges.  The linear scale preserves the algebraic identity
+    # id_net = margin - fee.
+    "id_net_revenue_eur",
+    "id_venue_fee_eur",
+    "id_sell_mwh",
+    "id_buy_mwh",
+    "id_traded_volume_mwh",
+    "id_sell_pv_mwh",
+    "id_sell_bess_mwh",
 )
 
 
@@ -308,6 +320,17 @@ _CURTAILMENT_DERATED_KEYS: tuple[str, ...] = (
     # cuts the settled volume like the DAM revenue it tops up.
     "support_settlement_eur",
     "support_eligible_export_mwh",
+    # Intraday venue (Eqs. E58/E59): the trades ride the same grid
+    # connection the quota restricts, so the margin, fee and volumes
+    # scale with the export they deviate from (the generator bears
+    # curtailment, as for the DAM streams).
+    "id_net_revenue_eur",
+    "id_venue_fee_eur",
+    "id_sell_mwh",
+    "id_buy_mwh",
+    "id_traded_volume_mwh",
+    "id_sell_pv_mwh",
+    "id_sell_bess_mwh",
 )
 
 # The scaled keys that are algebraic components of profit_total_eur
@@ -317,6 +340,10 @@ _CURTAILMENT_PROFIT_COMPONENTS: tuple[str, ...] = (
     "profit_export_from_pv_eur",
     "profit_export_from_bess_eur",
     "revenue_pv_ppa_eur",
+    # Net intraday margin (margin minus venue fee) — already the net
+    # contribution to profit_total_eur, so its delta recomposes the
+    # headline exactly.
+    "id_net_revenue_eur",
 )
 
 

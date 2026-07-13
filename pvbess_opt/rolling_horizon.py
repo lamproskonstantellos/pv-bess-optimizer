@@ -45,6 +45,7 @@ from .balancing import (
     activation_probability_curve,
     resolve_balancing_config,
 )
+from .intraday import redispatch_intraday, resolve_intraday_config
 from .kpis import add_economic_columns, compute_kpis, final_soc_after_last_step
 from .optimization import run_scenario
 from .timeutils import dt_hours_from
@@ -77,6 +78,10 @@ __all__ = [
 PRICE_COLUMNS: tuple[str, ...] = (
     "dam_price_eur_per_mwh",
     "retail_price_eur_per_mwh",
+    # Intraday auction price (Eq. I1): inert until the column exists;
+    # forecast noise arms via the uncertainty_sigma_ida machinery and
+    # the actuals-restore path picks the column up automatically.
+    "ida_price_eur_per_mwh",
     "fcr_capacity_price_eur_per_mwh",
     "afrr_up_capacity_price_eur_per_mwh",
     "afrr_dn_capacity_price_eur_per_mwh",
@@ -278,9 +283,11 @@ def add_forecast_noise(
     sigma_dam: float = 0.20,
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
+    sigma_ida: float = 0.15,
     enable_dam: bool = True,
     enable_pv: bool = True,
     enable_load: bool = True,
+    enable_ida: bool = True,
     pv_nameplate_kwh_per_step: float | None = None,
 ) -> pd.DataFrame:
     """Apply log-normal multiplicative noise BEYOND the commit horizon.
@@ -321,6 +328,7 @@ def add_forecast_noise(
     eff_sigma_dam = sigma_dam if enable_dam else 0.0
     eff_sigma_pv = sigma_pv if enable_pv else 0.0
     eff_sigma_load = sigma_load if enable_load else 0.0
+    eff_sigma_ida = sigma_ida if enable_ida else 0.0
 
     if "dam_price_eur_per_mwh" in out.columns:
         prices = out["dam_price_eur_per_mwh"].to_numpy(dtype=float).copy()
@@ -358,6 +366,21 @@ def add_forecast_noise(
         load[commit_steps:] = np.maximum(load[commit_steps:] * mult, 0.0)
         out["load_kwh"] = load
 
+    # Intraday auction price (Eq. U12): sign-aware like the DAM.  The
+    # draws come from a SPAWNED child generator so the shared stream is
+    # untouched — the rolling horizon reuses one rng across windows,
+    # and consuming extra draws here would shift the DAM/PV/load
+    # multipliers of every subsequent window (breaking the seed-level
+    # bit-identity of runs without the venue).
+    if "ida_price_eur_per_mwh" in out.columns and eff_sigma_ida > 0.0:
+        rng_ida = rng.spawn(1)[0]
+        prices = out["ida_price_eur_per_mwh"].to_numpy(dtype=float).copy()
+        sign = np.where(prices < 0, -1.0, 1.0)
+        magnitude = np.abs(prices)
+        mult = _lognormal_multiplier(rng_ida, eff_sigma_ida, n_perturb)
+        magnitude[commit_steps:] = magnitude[commit_steps:] * mult
+        out["ida_price_eur_per_mwh"] = sign * magnitude
+
     return out
 
 
@@ -381,9 +404,11 @@ def rolling_horizon_dispatch(
     sigma_dam: float = 0.20,
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
+    sigma_ida: float = 0.15,
     enable_dam: bool = True,
     enable_pv: bool = True,
     enable_load: bool = True,
+    enable_ida: bool = True,
     evaluate_with_actuals: bool = True,
     imbalance_enabled: bool = False,
     imbalance_pricing: str = "dual",
@@ -527,9 +552,11 @@ def rolling_horizon_dispatch(
                 sigma_dam=sigma_dam,
                 sigma_pv=sigma_pv,
                 sigma_load=sigma_load,
+                sigma_ida=sigma_ida,
                 enable_dam=enable_dam,
                 enable_pv=enable_pv,
                 enable_load=enable_load,
+                enable_ida=enable_ida,
                 pv_nameplate_kwh_per_step=pv_nameplate_kwh_per_step,
             )
         else:
@@ -630,6 +657,34 @@ def rolling_horizon_dispatch(
                 "by up to the shortfall's energy value.",
                 float(year_close_soc_kwh), year_close_shortfall_kwh,
             )
+
+    # Two-stage annual pass (Eq. U12): when the intraday venue is on,
+    # the stitched committed day-ahead schedule re-dispatches ONCE
+    # against the actual (noise-free) intraday prices — the real
+    # information structure (day-ahead decided under uncertainty,
+    # intraday corrects near delivery) at one extra solve per seed.
+    # The Stage-2 timeseries carries the ACTUAL prices but the
+    # COMMITTED physical envelope (the noisy-forecast PV/load the
+    # windows dispatched against): re-dispatching against actual PV
+    # would make an over-forecast commitment physically infeasible,
+    # and the residual volume error is the imbalance settlement's
+    # domain (mutually exclusive with the venue in v1).  The pass runs
+    # BEFORE the actuals restore so the Stage-2 frame flows through
+    # the identical restore + KPI re-derivation, and it honours the
+    # same soft year-close SOC pin the final window carried.
+    _id_cfg = resolve_intraday_config(params.get("intraday") or {})
+    if _id_cfg.id_enabled and _id_cfg.id_max_deviation_frac_of_cap > 0.0:
+        _ts_stage2 = ts.iloc[: len(full)].reset_index(drop=True).copy()
+        for _col in ("pv_kwh", "load_kwh"):
+            if _col in _ts_stage2.columns and _col in full.columns:
+                _ts_stage2[_col] = full[_col].to_numpy(dtype=float)
+        full, _stage2_solver, _stage2_full = redispatch_intraday(
+            params, _ts_stage2, full,
+            solver_name=solver_name,
+            terminal_soc_free=True,
+            terminal_soc_target_kwh=year_close_soc_kwh,
+            **solve_kwargs,
+        )
 
     if evaluate_with_actuals:
         # Restore every noise-free price column from the original
@@ -734,9 +789,11 @@ def monte_carlo_rolling(
     sigma_dam: float = 0.20,
     sigma_pv: float = 0.12,
     sigma_load: float = 0.05,
+    sigma_ida: float = 0.15,
     enable_dam: bool = True,
     enable_pv: bool = True,
     enable_load: bool = True,
+    enable_ida: bool = True,
     window_hours: int = 48,
     commit_hours: int = 24,
     imbalance_enabled: bool = False,
@@ -812,9 +869,11 @@ def monte_carlo_rolling(
             sigma_dam=sigma_dam,
             sigma_pv=sigma_pv,
             sigma_load=sigma_load,
+            sigma_ida=sigma_ida,
             enable_dam=enable_dam,
             enable_pv=enable_pv,
             enable_load=enable_load,
+            enable_ida=enable_ida,
             evaluate_with_actuals=True,
             imbalance_enabled=imbalance_enabled,
             imbalance_pricing=imbalance_pricing,
@@ -891,6 +950,12 @@ def monte_carlo_rolling(
                 "bess_imbalance_hedge_value_eur",
             ):
                 row[k] = float(kpis.get(k, 0.0))
+        if "id_net_revenue_eur" in kpis:
+            # Intraday venue (Eq. U12): same conditional-column pattern
+            # — present only on two-stage ensembles.
+            row["id_net_revenue_eur"] = float(
+                kpis.get("id_net_revenue_eur", 0.0) or 0.0
+            )
         rows.append(row)
         elapsed = time.perf_counter() - t_start
         done = len(rows)

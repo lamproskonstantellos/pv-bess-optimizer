@@ -21,7 +21,9 @@ A run produces a single result directory under ``results/``.
   capacity-vs-activation split / by-month chart, lifetime cycles,
   LCOE / LCOS benchmark strips, the battery SOH trajectory (BESS
   projects), the balancing reservation profile and Monte Carlo
-  distribution (balancing on), the 24/7-CFE duration curve (emissions
+  distribution (balancing on), the DSCR profile (levered runs), the
+  DA-vs-intraday price duration curves and the intraday net position
+  (intraday venue on), the 24/7-CFE duration curve (emissions
   accounting on) and the rolling-horizon distribution (when active).
 * ``05_energy_plots/``: the Year-1 energy-flow diagram
   (``energy_sankey.pdf``, every run) and the lifetime summary chart

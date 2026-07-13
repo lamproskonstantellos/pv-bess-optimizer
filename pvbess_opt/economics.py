@@ -547,9 +547,9 @@ def resolve_debt_sizing(
 
 def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the project / pv / bess / economics / simulation / balancing
-    / ppa sheets.
+    / ppa / intraday sheets.
 
-    Returns a single flat dict combining every key from the seven
+    Returns a single flat dict combining every key from the eight
     parameter sheets — the financial helpers downstream expect a flat
     mapping (e.g. ``econ['discount_rate_pct']``,
     ``econ['capex_pv_eur_per_kw']``, ``econ['ppa_term_years']``).
@@ -560,7 +560,7 @@ def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     for section in (
         "project", "pv", "bess", "economics", "simulation", "balancing",
-        "ppa",
+        "ppa", "intraday",
     ):
         merged.update(typed[section])
     # The per-year trajectory block (Eq. E24) rides along under a
@@ -990,11 +990,15 @@ def build_yearly_cashflow(
         if "profit_total_eur" in year1_kpis:
             profit_total = float(year1_kpis["profit_total_eur"] or 0.0)
             # profit_total also nets the charging-side grid fee
-            # (Eq. E26), which is NOT part of the revenue streams.
+            # (Eq. E26), which is NOT part of the revenue streams, and
+            # folds in the intraday net margin (Eqs. E58/E59) on
+            # two-stage runs — carried through its own columns here.
             split_total = revenue_1_gross + float(
                 year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0
             ) - float(
                 year1_kpis.get("expense_grid_charging_fee_eur", 0.0) or 0.0
+            ) + float(
+                year1_kpis.get("id_net_revenue_eur", 0.0) or 0.0
             )
             if abs(profit_total - split_total) > max(
                 1.0, abs(profit_total) * 1e-6,
@@ -1108,6 +1112,37 @@ def build_yearly_cashflow(
         year1_kpis.get("bm_total_activation_revenue_eur", 0.0) or 0.0
     )
 
+    # Intraday venue (Eqs. E58/E59, docs/intraday_design.md): the
+    # Year-1 GROSS spread margin and the venue fee come from the KPI
+    # dict (id_net_revenue_eur is net of the fee, so the gross base
+    # reconstructs as net + fee).  Origin split for the fade curves
+    # (Eq. I4): the margin and the traded volume are apportioned on the
+    # Year-1 SELL volumes by origin — IDA buys are a storage action
+    # (charge more / discharge less), so a buy-only year books BESS-
+    # origin by convention (the documented pro-rata rule).  The margin
+    # is indexed by id_inflation_pct; the fee is a flat EUR/MWh rate on
+    # the fading traded volume (the route-to-market convention).
+    id_net_1 = float(year1_kpis.get("id_net_revenue_eur", 0.0) or 0.0)
+    id_fee_1 = float(year1_kpis.get("id_venue_fee_eur", 0.0) or 0.0)
+    id_margin_1 = id_net_1 + id_fee_1
+    id_volume_1 = float(year1_kpis.get("id_traded_volume_mwh", 0.0) or 0.0)
+    _id_sell_pv_1 = float(year1_kpis.get("id_sell_pv_mwh", 0.0) or 0.0)
+    _id_sell_bess_1 = float(year1_kpis.get("id_sell_bess_mwh", 0.0) or 0.0)
+    _id_sell_total_1 = _id_sell_pv_1 + _id_sell_bess_1
+    if _id_sell_total_1 > 1e-9:
+        _id_pv_share = _id_sell_pv_1 / _id_sell_total_1
+    else:
+        _id_pv_share = 0.0
+    rev1_id_pv = id_margin_1 * _id_pv_share
+    rev1_id_bess = id_margin_1 * (1.0 - _id_pv_share)
+    id_volume_pv_1 = id_volume_1 * _id_pv_share
+    id_volume_bess_1 = id_volume_1 * (1.0 - _id_pv_share)
+    id_infl = float(econ.get("id_inflation_pct", 0.0) or 0.0) / 100.0
+    id_fee_rate = max(0.0, float(econ.get("id_fee_eur_per_mwh", 0.0) or 0.0))
+    g_id = _escalation_series(
+        "revenue_intraday", id_infl, n_years, trajectories,
+    )
+
     # PPA stream (docs/ppa_design.md).  Year-1 bases come from the KPI
     # dict (already availability-derated): the contract leg
     # ``revenue_pv_ppa_eur`` and the covered volume's counterfactual DAM
@@ -1213,6 +1248,8 @@ def build_yearly_cashflow(
             go_revenue_y = 0.0
             support_settlement_y = 0.0
             augmentation_capex_y = 0.0
+            intraday_revenue_y = 0.0
+            intraday_fee_y = 0.0
         else:
             if y == 1:
                 pv_factor = 1.0
@@ -1251,12 +1288,16 @@ def build_yearly_cashflow(
                 _bm_act_y1_y = 0.0
                 _bess_export_mwh_1_y = 0.0
                 _grid_charging_fee_1_y = 0.0
+                _rev1_id_bess_y = 0.0
+                _id_volume_bess_1_y = 0.0
             else:
                 _rev1_dam_bess_y = rev1_dam_bess
                 _bm_cap_y1_y = bm_cap_y1
                 _bm_act_y1_y = bm_act_y1
                 _bess_export_mwh_1_y = bess_export_mwh_1
                 _grid_charging_fee_1_y = grid_charging_fee_1
+                _rev1_id_bess_y = rev1_id_bess
+                _id_volume_bess_1_y = id_volume_bess_1
             # Degrade PV-origin revenue on pv_factor and BESS-origin
             # revenue on bess_factor, mirroring build_lifetime_dispatch's
             # per-year factor loop so the
@@ -1268,6 +1309,22 @@ def build_yearly_cashflow(
             revenue_dam_y = (
                 rev1_dam_pv * pv_factor + _rev1_dam_bess_y * bess_factor
             ) * g_dam[y - 1]
+            # Intraday margin row (Eq. E58): the Year-1 gross spread
+            # margin, each origin fading on its own curve (Eq. I4),
+            # indexed by id_inflation_pct.  The BESS-origin leg is
+            # zeroed in 'zeroed' toll years like every other BESS
+            # merchant base (the toller holds the dispatch rights).
+            _id_bess_margin_y = _rev1_id_bess_y * bess_factor * g_id[y - 1]
+            intraday_revenue_y = (
+                rev1_id_pv * pv_factor * g_id[y - 1] + _id_bess_margin_y
+            )
+            # Venue fee row (Eq. E59): flat EUR/MWh rate on the traded
+            # volume fading per origin — the route-to-market convention
+            # (per-MWh charges are quoted flat, the charged MWh fade).
+            intraday_fee_y = -id_fee_rate * (
+                id_volume_pv_1 * pv_factor
+                + _id_volume_bess_1_y * bess_factor
+            )
             # PPA stream: in-term contract leg, or the post-term
             # physical reversion of the covered volume to the DAM
             # stream (where the fee below applies to it).
@@ -1301,6 +1358,12 @@ def build_yearly_cashflow(
                     revenue_dam_y += (
                         ppa_covered_dam_1 * pv_factor * g_dam[y - 1]
                     )
+            # Energy-aggregator fee base (Eq. E13; intraday treatment
+            # per Eq. I6): the intraday margin does NOT join this base
+            # — intraday intermediation is priced by its own explicit
+            # venue fee (Eq. E59), so an ad-valorem share on top would
+            # double-charge it; the balancing stream sets the precedent
+            # (its own E13b fee, excluded here).
             revenue_gross_y = revenue_retail_y + revenue_dam_y
             # The aggregator fee is by spec a non-negative deduction
             # (BSPs charge a positive fraction of gross revenue, never
@@ -1405,15 +1468,21 @@ def build_yearly_cashflow(
                 # full E25a base when the optimizer also manages the
                 # ancillary revenue (share after the BSP fee — fees
                 # never compound).
+                # The optimizer charges on the battery's TOTAL trading
+                # margin (Eq. I6 / E13d amendment): the BESS-origin
+                # intraday margin joins each basis, appended LAST so a
+                # venue-off run adds an exact 0.0 (bit-identity).
                 if optimizer_margin_basis == "dam_plus_balancing":
                     _opt_margin = (
                         _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
                         + balancing_capacity_y + balancing_activation_y
                         + balancing_aggregator_fee_y
+                        + _id_bess_margin_y
                     )
                 else:
                     _opt_margin = (
                         _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                        + _id_bess_margin_y
                     )
                 optimizer_fee_y = -optimizer_share_frac * max(
                     _opt_margin - optimizer_floor_level, 0.0,
@@ -1423,7 +1492,8 @@ def build_yearly_cashflow(
                 ) + 0.0
             else:
                 optimizer_fee_y = -optimizer_share_frac * max(
-                    _rev1_dam_bess_y * bess_factor * g_dam[y - 1],
+                    _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                    + _id_bess_margin_y,
                     0.0,
                 ) + 0.0
                 optimizer_floor_topup_y = 0.0
@@ -1442,10 +1512,14 @@ def build_yearly_cashflow(
             # (tolling / floor+share / state-support clawback) read; it
             # is NOT summed into net_cashflow_eur.  Availability-derated
             # by construction (every input already carries A per E8).
+            # The BESS-origin intraday margin joins the netting base
+            # (Eq. I6): it is battery trading revenue like the DAM
+            # margin.  Appended last for venue-off bit-identity.
             bess_market_rev_y = (
                 _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
                 + balancing_capacity_y + balancing_activation_y
                 + balancing_aggregator_fee_y
+                + _id_bess_margin_y
             )
             # Capacity-market payment (Eq. E32) — computed BEFORE the
             # state-support netting because the capacity revenue counts
@@ -1582,6 +1656,7 @@ def build_yearly_cashflow(
             + support_settlement_y
             + ppa_y + opex_y + capex_y + devex_y
             + augmentation_capex_y
+            + intraday_revenue_y + intraday_fee_y
         )
         discount_factor = 1.0 / (1.0 + discount_rate) ** y
         rows.append(
@@ -1616,6 +1691,8 @@ def build_yearly_cashflow(
                 "curtailment_compensation_eur": float(curtailment_comp_y),
                 "go_revenue_eur": float(go_revenue_y),
                 "support_settlement_eur": float(support_settlement_y),
+                "intraday_revenue_eur": float(intraday_revenue_y),
+                "intraday_fee_eur": float(intraday_fee_y),
                 "ppa_revenue_eur": float(ppa_y),
                 "opex_eur": float(opex_y),
                 "capex_eur": float(capex_y),
@@ -2171,6 +2248,43 @@ def derive_monthly_cashflow(
     has_capex_col = "capex_eur" in yearly_cf.columns
     has_devex_col = "devex_eur" in yearly_cf.columns
     has_aug_col = "augmentation_capex_eur" in yearly_cf.columns
+    has_id_col = "intraday_revenue_eur" in yearly_cf.columns
+    has_id_fee_col = "intraday_fee_eur" in yearly_cf.columns
+    # Intraday monthly weights (Eqs. E58/E59): the Year-1 per-month
+    # margin magnitudes from the Stage-2 dispatch frame allocate each
+    # projected year (fee_share class — the Year-1 shape is the
+    # documented approximation); the venue fee rides the Year-1
+    # monthly traded-volume shape.  Both share vectors sum to one, so
+    # yearly reconciliation is exact; flat 1/12 is the fallback when
+    # the frame carries no intraday columns.
+    id_share = pd.Series(1.0 / 12.0, index=range(1, 13))
+    id_fee_share = pd.Series(1.0 / 12.0, index=range(1, 13))
+    if (
+        has_id_col
+        and "id_revenue_eur" in res.columns
+        and "timestamp" in res.columns
+    ):
+        _id_month = pd.to_datetime(res["timestamp"]).dt.month
+        _id_m = (
+            res["id_revenue_eur"].astype(float).abs()
+            .groupby(_id_month).sum()
+            .reindex(range(1, 13), fill_value=0.0)
+        )
+        if float(_id_m.sum()) > 1e-9:
+            id_share = _id_m / float(_id_m.sum())
+        _id_vol_cols = [
+            c for c in
+            ("id_sell_pv_kwh", "id_sell_bess_kwh", "id_buy_kwh")
+            if c in res.columns
+        ]
+        if _id_vol_cols:
+            _id_vol_total = res[_id_vol_cols].astype(float).sum(axis=1)
+            _id_v = (
+                _id_vol_total.groupby(_id_month).sum()
+                .reindex(range(1, 13), fill_value=0.0)
+            )
+            if float(_id_v.sum()) > 1e-9:
+                id_fee_share = _id_v / float(_id_v.sum())
 
     rows: list[dict[str, Any]] = []
     yearly_indexed = yearly_cf.set_index("project_year")
@@ -2263,6 +2377,14 @@ def derive_monthly_cashflow(
             float(yearly_indexed.loc[y, "augmentation_capex_eur"])
             if has_aug_col else 0.0
         )
+        id_y = (
+            float(yearly_indexed.loc[y, "intraday_revenue_eur"])
+            if has_id_col else 0.0
+        )
+        id_fee_y = (
+            float(yearly_indexed.loc[y, "intraday_fee_eur"])
+            if has_id_fee_col else 0.0
+        )
 
         if abs(yearly_y1_revenue) > 1e-9:
             rev_scale = rev_y / yearly_y1_revenue
@@ -2349,6 +2471,11 @@ def derive_monthly_cashflow(
                 go_m = go_y / 12.0
             # Support settlement rides its Year-1 monthly shape.
             sup_m = float(sup_share.loc[m]) * sup_y
+            # Intraday margin rides its Year-1 monthly shape; the
+            # venue fee rides the Year-1 traded-volume shape (both
+            # share vectors sum to one — exact yearly reconciliation).
+            id_m = float(id_share.loc[m]) * id_y
+            id_fee_m = float(id_fee_share.loc[m]) * id_fee_y
             # Corporate tax (Eq. E37) settles annually, so it books in
             # month 12 — the December factor equals the yearly
             # 1/(1+r)^y factor (Eq. E4), keeping the monthly and yearly
@@ -2379,6 +2506,7 @@ def derive_monthly_cashflow(
                 + sup_m
                 + ppa_m + opex_m + capex_m + devex_m
                 + aug_m
+                + id_m + id_fee_m
             )
             # End-of-month discounting: month m of year y lands at
             # (y - 1) + m/12, so December of year y discounts exactly like
@@ -2410,6 +2538,8 @@ def derive_monthly_cashflow(
                     "curtailment_compensation_eur": float(curt_m),
                     "go_revenue_eur": float(go_m),
                     "support_settlement_eur": float(sup_m),
+                    "intraday_revenue_eur": float(id_m),
+                    "intraday_fee_eur": float(id_fee_m),
                     "ppa_revenue_eur": float(ppa_m),
                     "aggregator_fee_eur": float(fee_m),
                     "opex_eur": float(opex_m),
@@ -2442,6 +2572,7 @@ def derive_monthly_cashflow(
         "curtailment_compensation_eur",
         "go_revenue_eur",
         "support_settlement_eur",
+        "intraday_revenue_eur", "intraday_fee_eur",
         "ppa_revenue_eur", "aggregator_fee_eur",
         "opex_eur", "capex_eur", "devex_eur",
         "augmentation_capex_eur",
@@ -2472,6 +2603,7 @@ def derive_monthly_cashflow(
                     "curtailment_compensation_eur",
                     "go_revenue_eur",
                     "support_settlement_eur",
+                    "intraday_revenue_eur", "intraday_fee_eur",
                     "ppa_revenue_eur", "aggregator_fee_eur",
                     "opex_eur", "capex_eur", "devex_eur",
                     "augmentation_capex_eur",
@@ -2845,6 +2977,14 @@ def compute_financial_kpis(
         float(df.loc[after_y0_mask, "support_settlement_eur"].sum())
         if "support_settlement_eur" in df.columns else 0.0
     )
+    total_intraday_revenue_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "intraday_revenue_eur"].sum())
+        if "intraday_revenue_eur" in df.columns else 0.0
+    )
+    total_intraday_fee_eur_lifecycle = (
+        float(df.loc[after_y0_mask, "intraday_fee_eur"].sum())
+        if "intraday_fee_eur" in df.columns else 0.0
+    )
 
     if "calendar_year" in df.columns and (df["project_year"] >= 1).any():
         first_op_year_row = df.loc[df["project_year"] == 1].iloc[0]
@@ -2882,7 +3022,9 @@ def compute_financial_kpis(
     # or LCOS — both metrics measure cost per delivered MWh, and the
     # balancing streams are revenue (not cost) and do not produce DAM
     # discharge MWh (the LCOS denominator).  They flow into NPV/IRR/payback
-    # via build_yearly_cashflow but are deliberately excluded here.
+    # via build_yearly_cashflow but are deliberately excluded here.  The
+    # intraday margin and its venue fee (Eqs. E58/E59) follow the same
+    # convention: revenue-agnostic metrics, market fees excluded.
     extras: dict[str, float] = {
         "lcoe_eur_per_mwh": float("nan"),
         "lcos_eur_per_mwh": float("nan"),
@@ -3244,6 +3386,14 @@ def compute_financial_kpis(
         # Support settlement (Eqs. E55-E57); signed, SUMMARY-optional.
         "lifetime_support_settlement_eur": float(round(
             lifetime_support_settlement_eur, 2,
+        )),
+        # Intraday venue (Eqs. E58/E59); margin >= 0 by construction,
+        # fee <= 0; both SUMMARY-optional.
+        "total_intraday_revenue_eur_lifecycle": float(round(
+            total_intraday_revenue_eur_lifecycle, 2,
+        )),
+        "total_intraday_fee_eur_lifecycle": float(round(
+            total_intraday_fee_eur_lifecycle, 2,
         )),
         # Post-tax KPI family (Eq. E39) — additive to the pre-tax
         # baseline; all NaN while corporate_tax_rate_pct = 0.

@@ -86,6 +86,7 @@ def _as_bool(value: Any) -> bool:
 # specials that live next to them in a scenario spec.
 _OVERRIDE_SECTIONS: tuple[str, ...] = (
     "project", "pv", "bess", "economics", "simulation", "balancing", "ppa",
+    "intraday",
 )
 _BARE_SPECIALS: frozenset[str] = frozenset({
     "name", "inherits", "capex_multiplier", "price_deck",
@@ -285,7 +286,7 @@ def _apply_scenario_overrides(
         typed["pv"][_PV_ALIASES.get(key, key)] = value
     for key, value in (scenario.get("bess") or {}).items():
         typed["bess"][_BESS_ALIASES.get(key, key)] = value
-    for section in ("project", "economics", "simulation", "ppa"):
+    for section in ("project", "economics", "simulation", "ppa", "intraday"):
         for key, value in (scenario.get(section) or {}).items():
             typed[section][key] = value
 

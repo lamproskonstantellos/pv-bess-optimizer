@@ -101,6 +101,7 @@ __all__ = [
     "BESS_SHEET_DEFAULTS",
     "ECONOMICS_SHEET_DEFAULTS",
     "FALSY",
+    "INTRADAY_SHEET_DEFAULTS",
     "LAYOUT_SUBDIRS",
     "PPA_SHEET_DEFAULTS",
     "PROJECT_SHEET_DEFAULTS",
@@ -449,6 +450,28 @@ PPA_SHEET_DEFAULTS: dict[str, Any] = {
     "support_negative_hour_suspension": False,
 }
 
+INTRADAY_SHEET_DEFAULTS: dict[str, Any] = {
+    # Master switch for intraday (IDA) participation as a second
+    # wholesale venue (two-stage re-dispatch, Eqs. I1-I5).  When False
+    # every output is bit-identical to a workbook without the sheet.
+    "id_enabled": False,
+    # Per-step cap on the intraday position change as a fraction of
+    # p_grid_export_max_kw x dt (liquidity / nomination-change proxy,
+    # Eq. I2).
+    "id_max_deviation_frac_of_cap": 0.25,
+    # Allow IDA buys (physical: reduce PV export or charge the BESS).
+    # BESS charging from IDA purchases additionally requires
+    # allow_bess_grid_charging = TRUE.
+    "id_allow_purchases": True,
+    # Exchange/venue trading fee per traded intraday MWh, charged on
+    # both buy and sell volume (Eq. E59).  Excluded from LCOE/LCOS per
+    # the market-fee convention.
+    "id_fee_eur_per_mwh": 0.0,
+    # Yearly indexation applied to the intraday margin in the
+    # multi-year cashflow (mirrors dam_inflation_pct).
+    "id_inflation_pct": 0.0,
+}
+
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_enabled": False,
     "uncertainty_compare_sources": False,
@@ -461,6 +484,12 @@ SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_sigma_dam": 0.20,
     "uncertainty_sigma_pv": 0.12,
     "uncertainty_sigma_load": 0.05,
+    # Intraday auction price noise (Eq. U12): meaningful only when
+    # id_enabled and uncertainty_enabled are both TRUE.  Lower default
+    # sigma than the DAM — intraday commitment happens closer to
+    # delivery.
+    "uncertainty_ida_enabled": True,
+    "uncertainty_sigma_ida": 0.15,
     "uncertainty_diagnostics_enabled": True,
     # Ex-post imbalance settlement of forecast-error deviations
     # (Eqs. U6-U9); requires the rolling-horizon Monte Carlo.
@@ -488,6 +517,7 @@ _SHEET_DEFAULTS: dict[str, dict[str, Any]] = {
     "simulation": SIMULATION_SHEET_DEFAULTS,
     "balancing": BALANCING_SHEET_DEFAULTS,
     "ppa": PPA_SHEET_DEFAULTS,
+    "intraday": INTRADAY_SHEET_DEFAULTS,
 }
 
 _KEY_TO_SHEET: dict[str, str] = {}
@@ -512,6 +542,7 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "uncertainty_dam_enabled",
     "uncertainty_pv_enabled",
     "uncertainty_load_enabled",
+    "uncertainty_ida_enabled",
     "uncertainty_diagnostics_enabled",
     "imbalance_enabled",
     "balancing_enabled",
@@ -522,6 +553,8 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "bm_merit_order_enabled",
     "risk_metrics_enabled",
     "support_negative_hour_suspension",
+    "id_enabled",
+    "id_allow_purchases",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -1179,6 +1212,14 @@ _SIMULATION_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Log-normal sigma for PV. Default 0.12 (NREL day-ahead PV study)."),
     ("uncertainty_sigma_load", 0.05, "-",
      "Log-normal sigma for Load. Default 0.05 (predictable customer benchmark)."),
+    ("uncertainty_ida_enabled", True, "bool",
+     "Apply forecast noise to the intraday auction price within the "
+     "rolling-horizon Monte Carlo (Eq. U12). Meaningful only when "
+     "id_enabled and uncertainty_enabled are both TRUE."),
+    ("uncertainty_sigma_ida", 0.15, "-",
+     "Log-normal sigma for the intraday auction price beyond the "
+     "commit horizon. Default 0.15, below sigma_dam - intraday "
+     "commitment happens closer to delivery."),
     ("uncertainty_diagnostics_enabled", True, "bool",
      "Render the forecast-calibration diagnostic plots (coverage, PIT, "
      "CRPS, residual Q-Q) into 06_uncertainty_plots/. Default TRUE."),
@@ -1425,6 +1466,36 @@ _PPA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "the PPA suspension clause."),
 )
 
+_INTRADAY_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("id_enabled", False, "bool",
+     "Master switch for intraday (IDA) participation as a second "
+     "wholesale venue: the committed day-ahead dispatch is "
+     "re-optimised against the ida_price_eur_per_mwh timeseries "
+     "column (two-stage re-dispatch, Eqs. I1-I5). Requires that "
+     "column and mode = 'merchant'. When FALSE the dispatch, KPIs "
+     "and outputs are bit-identical to a workbook without the "
+     "sheet."),
+    ("id_max_deviation_frac_of_cap", 0.25, "-",
+     "Per-step cap on the intraday position change as a fraction of "
+     "p_grid_export_max_kw x dt: bounds the total traded volume "
+     "|ID sell| + |ID buy| per settlement period (liquidity and "
+     "nomination-change proxy, Eq. I2). Range 0..1; 0 disables "
+     "trading."),
+    ("id_allow_purchases", True, "bool",
+     "Allow IDA buys - physical only: a purchase reduces the PV "
+     "export or charges the BESS in the same step (Eq. I5). BESS "
+     "charging from IDA purchases additionally requires "
+     "allow_bess_grid_charging = TRUE."),
+    ("id_fee_eur_per_mwh", 0.0, "EUR/MWh",
+     "Exchange/venue trading fee per traded intraday MWh, charged "
+     "on both buy and sell volume (Eq. E59). Excluded from "
+     "LCOE/LCOS per the market-fee convention."),
+    ("id_inflation_pct", 0.0, "%/yr",
+     "Yearly indexation applied to the intraday margin in the "
+     "multi-year cashflow ((1+i)^(y-1), mirrors dam_inflation_pct). "
+     "Default 0 keeps the margin on the exogenous price level."),
+)
+
 
 _SHEET_ROW_TEMPLATES: dict[
     str, tuple[tuple[str, object, str, str], ...]
@@ -1436,6 +1507,7 @@ _SHEET_ROW_TEMPLATES: dict[
     "simulation": _SIMULATION_ROWS,
     "balancing": _BALANCING_ROWS,
     "ppa": _PPA_ROWS,
+    "intraday": _INTRADAY_ROWS,
 }
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
@@ -1912,6 +1984,8 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     balancing_df = _build_kv_sheet(balancing_section, _BALANCING_ROWS)
     ppa_section = typed.get("ppa") or dict(PPA_SHEET_DEFAULTS)
     ppa_df = _build_kv_sheet(ppa_section, _PPA_ROWS)
+    intraday_section = typed.get("intraday") or dict(INTRADAY_SHEET_DEFAULTS)
+    intraday_df = _build_kv_sheet(intraday_section, _INTRADAY_ROWS)
 
     profile = typed.get("max_injection_profile")
     if profile is None:
@@ -1930,6 +2004,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         simulation_df.to_excel(writer, sheet_name="simulation", index=False)
         balancing_df.to_excel(writer, sheet_name="balancing", index=False)
         ppa_df.to_excel(writer, sheet_name="ppa", index=False)
+        intraday_df.to_excel(writer, sheet_name="intraday", index=False)
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
@@ -2591,6 +2666,7 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
 
     for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh",
                 "retail_price_eur_per_mwh",
+                "ida_price_eur_per_mwh",
                 "imbalance_price_eur_per_mwh",
                 "imbalance_price_short_eur_per_mwh",
                 "imbalance_price_long_eur_per_mwh"):
@@ -2752,6 +2828,9 @@ _BALANCING_TS_COLUMN_DEFAULTS: dict[str, str] = {
 PRICE_DECK_BASE_COLUMNS: tuple[str, ...] = (
     "dam_price_eur_per_mwh",
     "retail_price_eur_per_mwh",
+    # Intraday auction price (Eq. I1) — required when id_enabled; deck
+    # variants allowed like every other price column.
+    "ida_price_eur_per_mwh",
     *_BALANCING_TS_COLUMN_DEFAULTS.keys(),
     # Optional imbalance settlement price columns (Eqs. U7/U8) — deck
     # variants allowed like every other price column.
@@ -3201,6 +3280,107 @@ _CONTRACT_STACKING_RULES: tuple[tuple[str, Any, str, Any], ...] = (
 )
 
 
+def _validate_intraday_config(
+    intraday: dict[str, Any],
+    *,
+    project: dict[str, Any] | None = None,
+    balancing: dict[str, Any] | None = None,
+    ppa: dict[str, Any] | None = None,
+    simulation: dict[str, Any] | None = None,
+) -> None:
+    """Validate the ``intraday`` sheet (Eqs. I1-I5, E58/E59).
+
+    The numeric ranges are checked whether or not ``id_enabled`` is set
+    so a typo cannot sit silently inert.  The structural gates below
+    (merchant-only mode, finite export cap, contract exclusivities)
+    fire only when the venue is enabled and the corresponding section
+    was supplied; the ``ida_price_eur_per_mwh`` column requirement
+    lives in the workbook loader where the timeseries is in scope.
+    """
+    _dev = float(intraday.get("id_max_deviation_frac_of_cap", 0.25) or 0.0)
+    if not 0.0 <= _dev <= 1.0:
+        raise ValueError(
+            "id_max_deviation_frac_of_cap must lie in [0, 1] (fraction "
+            f"of p_grid_export_max_kw x dt per step); got {_dev!r}."
+        )
+    _fee = float(intraday.get("id_fee_eur_per_mwh", 0.0) or 0.0)
+    if _fee < 0.0:
+        raise ValueError(
+            f"id_fee_eur_per_mwh must be non-negative; got {_fee!r}."
+        )
+
+    if not bool(intraday.get("id_enabled", False)):
+        return
+
+    # v1 scope gates (docs/intraday_design.md): the two-stage
+    # re-dispatch is defined for a merchant plant trading DAM + IDA;
+    # the couplings below are rejected with guidance instead of
+    # silently producing questionable settlements.
+    if project is not None:
+        _mode = str(project.get("mode", "self_consumption") or "").lower()
+        if _mode != "merchant":
+            raise ValueError(
+                "id_enabled = TRUE requires mode = 'merchant': the "
+                "intraday re-dispatch interacts with the "
+                "self-consumption load-priority constraints and that "
+                "coupling is not modelled; disable the venue or switch "
+                "the mode."
+            )
+        _cap = project.get("p_grid_export_max_kw")
+        _cap_f = float("inf") if _cap is None else float(_cap)
+        if not np.isfinite(_cap_f) or _cap_f <= 0.0:
+            raise ValueError(
+                "id_enabled = TRUE requires a finite positive "
+                "p_grid_export_max_kw: the intraday deviation cap "
+                "(Eq. I2) is defined as a fraction of it."
+            )
+    if balancing is not None and bool(
+        balancing.get("balancing_enabled", False)
+    ):
+        raise ValueError(
+            "id_enabled cannot combine with balancing_enabled = TRUE: "
+            "balancing reservations commit day-ahead and the combined "
+            "two-venue re-dispatch is not modelled; disable one of the "
+            "two."
+        )
+    if ppa is not None:
+        if bool(ppa.get("ppa_enabled", False)):
+            raise ValueError(
+                "id_enabled cannot combine with ppa_enabled = TRUE: "
+                "the PPA settles the PV export against the day-ahead "
+                "dispatch and the intraday re-dispatch would move the "
+                "settled volume; disable one of the two."
+            )
+        _scheme = str(
+            ppa.get("support_scheme", "none") or "none",
+        ).strip().lower()
+        if _scheme != "none":
+            raise ValueError(
+                "id_enabled cannot combine with a support_scheme: the "
+                "reference-period settlement (Eqs. E55-E57) assumes "
+                "day-ahead sales of the eligible volume; disable one "
+                "of the two."
+            )
+    if simulation is not None:
+        if bool(simulation.get("imbalance_enabled", False)):
+            raise ValueError(
+                "id_enabled cannot combine with imbalance_enabled = "
+                "TRUE: the Stage-2 re-dispatch intentionally deviates "
+                "from the day-ahead nomination, so the imbalance "
+                "settlement would charge the intraday trades as "
+                "forecast error; disable one of the two (settling the "
+                "residual error after intraday trading is future "
+                "work)."
+            )
+        if int(simulation.get("midlife_resolve_year", 0) or 0) > 0:
+            raise ValueError(
+                "id_enabled cannot combine with midlife_resolve_year: "
+                "the mid-life diagnostic re-solves the day-ahead stage "
+                "only and its delta table would compare against the "
+                "two-stage headline; disable one of the two."
+            )
+
+
 def validate_workbook_params(
     typed: dict[str, Any], *, dt_minutes: int | None = None,
 ) -> None:
@@ -3223,9 +3403,17 @@ def validate_workbook_params(
     economics = typed.get("economics") or {}
     balancing = typed.get("balancing") or {}
     ppa = typed.get("ppa") or {}
+    intraday = typed.get("intraday") or {}
 
     validate_pv_location_fields(pv)
     _validate_ppa_config(ppa)
+    _validate_intraday_config(
+        intraday,
+        project=project,
+        balancing=balancing,
+        ppa=ppa,
+        simulation=typed.get("simulation") or None,
+    )
 
     def _require_non_negative(section: dict[str, Any], key: str) -> None:
         if key not in section:
@@ -3976,6 +4164,15 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     else:
         typed["ppa"] = dict(PPA_SHEET_DEFAULTS)
 
+    # Optional ``intraday`` sheet — same master-switch pattern: absent
+    # means the IDA venue is disabled and the run is bit-identical to
+    # before.
+    if "intraday" in sheets:
+        intraday_flat = _read_kv_flat(xlsx_path, "intraday")
+        typed["intraday"] = _parse_kv_sheet("intraday", intraday_flat)
+    else:
+        typed["intraday"] = dict(INTRADAY_SHEET_DEFAULTS)
+
     # Optional ``trajectories`` sheet — per-year stream multipliers
     # (Eq. E24).  Absent sheet, ``enabled`` = FALSE, or no data rows all
     # resolve to None and the run is bit-identical to before.
@@ -4142,6 +4339,29 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
             "imbalance price cannot be proxied from the DAM); add the "
             "column or use imbalance_pricing = 'dual'."
         )
+    # Intraday venue (Eqs. I1-I5): the auction price column is
+    # mandatory when enabled — a scalar fallback (the balancing
+    # convention) would silently produce zero spread and misleading
+    # results, so it is deliberately NOT offered here.
+    _intraday = typed.get("intraday") or {}
+    if bool(_intraday.get("id_enabled", False)):
+        if "ida_price_eur_per_mwh" not in ts.columns:
+            raise ValueError(
+                "id_enabled = TRUE requires the ida_price_eur_per_mwh "
+                "timeseries column (the intraday auction price has no "
+                "meaningful scalar fallback); add the column or set "
+                "id_enabled = FALSE."
+            )
+        if dt_minutes >= 60:
+            logger.info(
+                "[intraday] the workbook runs at %d-minute cadence; "
+                "ida_price_eur_per_mwh is consumed as the "
+                "period-averaged intraday price, which averages away "
+                "sub-hourly spread. For 15-minute IDA granularity "
+                "resample the workbook via "
+                "scripts/resample_timeseries.py.",
+                dt_minutes,
+            )
     out: dict[str, Any] = {
         "ts": ts,
         "max_injection_profile": profile,
@@ -4295,6 +4515,10 @@ def _typed_to_flat(
         # PPA contract section — same nested-dict pattern; consumed by
         # the MILP objective and the per-step EUR columns.
         "ppa": dict(typed.get("ppa") or PPA_SHEET_DEFAULTS),
+        # Intraday venue section (Eqs. I1-I5) — same nested-dict
+        # pattern; consumed by the two-stage re-dispatch and the
+        # intraday cashflow columns.
+        "intraday": dict(typed.get("intraday") or INTRADAY_SHEET_DEFAULTS),
     }
     return params, ts
 
@@ -4465,6 +4689,10 @@ _SUMMARY_OPTIONAL_FINANCIAL_KEYS: tuple[tuple[str, str], ...] = (
     ("total_go_revenue_eur_lifecycle", "Lifetime GO revenue [EUR]"),
     ("lifetime_support_settlement_eur",
      "Lifetime support settlement [EUR]"),
+    ("total_intraday_revenue_eur_lifecycle",
+     "Lifetime intraday revenue [EUR]"),
+    ("total_intraday_fee_eur_lifecycle",
+     "Lifetime intraday venue fee [EUR]"),
     # Post-tax family (Eq. E39): NaN while the tax layer is off, so the
     # non-zero/NaN-skipping renderer keeps zero-default digests
     # noise-free ('n/a' = tax not modelled, never a duplicate of the

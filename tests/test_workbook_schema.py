@@ -23,6 +23,7 @@ from pvbess_opt.io import (
     BALANCING_SHEET_DEFAULTS,
     BESS_SHEET_DEFAULTS,
     ECONOMICS_SHEET_DEFAULTS,
+    INTRADAY_SHEET_DEFAULTS,
     PPA_SHEET_DEFAULTS,
     PROJECT_SHEET_DEFAULTS,
     PV_SHEET_DEFAULTS,
@@ -167,6 +168,14 @@ def test_ppa_sheet_keys():
     assert set(PPA_SHEET_DEFAULTS) == expected
 
 
+def test_intraday_sheet_keys():
+    expected = {
+        "id_enabled", "id_max_deviation_frac_of_cap",
+        "id_allow_purchases", "id_fee_eur_per_mwh", "id_inflation_pct",
+    }
+    assert set(INTRADAY_SHEET_DEFAULTS) == expected
+
+
 def test_simulation_sheet_keys():
     expected = {
         "uncertainty_enabled", "uncertainty_compare_sources",
@@ -176,6 +185,7 @@ def test_simulation_sheet_keys():
         "uncertainty_load_enabled",
         "uncertainty_sigma_dam", "uncertainty_sigma_pv",
         "uncertainty_sigma_load",
+        "uncertainty_ida_enabled", "uncertainty_sigma_ida",
         "uncertainty_diagnostics_enabled",
         "imbalance_enabled", "imbalance_pricing",
         "imbalance_price_mult_short", "imbalance_price_mult_long",
@@ -195,7 +205,8 @@ def test_all_sheets_present(repo_input_xlsx):
     sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "balancing", "ppa", "max_injection_profile",
+        "simulation", "balancing", "ppa", "intraday",
+        "max_injection_profile",
         "max_injection_profile_pv", "max_injection_profile_bess",
         "sizing", "scenarios", "trajectories",
     }
@@ -210,6 +221,7 @@ def test_repo_workbook_kv_sheets_match_schema(repo_input_xlsx):
         "economics": ECONOMICS_SHEET_DEFAULTS,
         "balancing": BALANCING_SHEET_DEFAULTS,
         "ppa": PPA_SHEET_DEFAULTS,
+        "intraday": INTRADAY_SHEET_DEFAULTS,
         "simulation": SIMULATION_SHEET_DEFAULTS,
     }
     for sheet, schema in defaults.items():

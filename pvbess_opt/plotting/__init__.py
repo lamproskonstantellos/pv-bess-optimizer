@@ -62,6 +62,10 @@ from .inputs_uncertainty import (
     plot_uncertainty_pit_histogram,
     plot_uncertainty_residual_qq,
 )
+from .intraday import (
+    plot_da_ida_price_duration,
+    plot_intraday_position,
+)
 from .lifecycle import (
     plot_lcoe_summary,
     plot_lcos_summary,
@@ -116,6 +120,7 @@ __all__ = [
     "plot_bess_revenue_waterfall",
     "plot_cfe_duration_curve",
     "plot_cumulative_cashflow",
+    "plot_da_ida_price_duration",
     "plot_daily_combined",
     "plot_daily_combined_merchant",
     "plot_daily_combined_merchant_with_soc",
@@ -132,6 +137,7 @@ __all__ = [
     "plot_foresight_gap_comparison",
     "plot_input_forecast_band",
     "plot_input_seasonal_boxplot",
+    "plot_intraday_position",
     "plot_irr_tornado",
     "plot_lcoe_summary",
     "plot_lcos_summary",

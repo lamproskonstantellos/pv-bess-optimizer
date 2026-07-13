@@ -79,6 +79,7 @@ from pvbess_opt.lifetime import (
 from pvbess_opt.modes import resolve_mode
 from pvbess_opt.optimization import (
     BALANCING_INVARIANT_KEYS,
+    INTRADAY_INVARIANT_KEYS,
     run_scenario,
     verify_dispatch_invariants,
 )
@@ -91,6 +92,7 @@ from pvbess_opt.plotting import (
     plot_bess_revenue_waterfall,
     plot_cfe_duration_curve,
     plot_cumulative_cashflow,
+    plot_da_ida_price_duration,
     plot_daily_combined,
     plot_daily_combined_merchant,
     plot_daily_combined_merchant_with_soc,
@@ -102,6 +104,7 @@ from pvbess_opt.plotting import (
     plot_daily_surplus,
     plot_dscr_profile,
     plot_energy_sankey,
+    plot_intraday_position,
     plot_irr_tornado,
     plot_lcoe_summary,
     plot_lcos_summary,
@@ -1038,6 +1041,53 @@ def _run_midlife_resolve(
     )
 
 
+def _run_intraday_stage2(
+    params: dict[str, Any],
+    ts: pd.DataFrame,
+    da_res: pd.DataFrame,
+    config: RunConfig,
+) -> tuple[pd.DataFrame, str, dict[str, Any], pd.DataFrame]:
+    """Run the intraday Stage-2 re-dispatch and its verification pass.
+
+    Mirrors the deterministic Stage-1 treatment exactly — energy
+    balance, dispatch invariants (incl. the INV-I family), KPIs with
+    the operating derates, monthly KPIs — so the Stage-2 frame can
+    replace the headline result with identical semantics
+    (Eqs. I1-I5; docs/intraday_design.md).
+    """
+    from .intraday import redispatch_intraday
+
+    res2, resolved2, res2_full = redispatch_intraday(
+        params, ts, da_res,
+        solver_name=config.solver,
+        mip_gap=config.mip_gap,
+        time_limit_seconds=config.time_limit,
+        tee=config.tee,
+    )
+    residuals = verify_energy_balance(
+        res2_full, params, raise_on_failure=False,
+    )
+    print(
+        "[verify:intraday] residuals(kWh): "
+        + ", ".join(f"{k}={v:.3g}" for k, v in residuals.items())
+    )
+    if config.strict:
+        _check_strict_energy_balance(residuals)
+    invariants = verify_dispatch_invariants(
+        res2_full, params, mode=resolve_mode(params),
+    )
+    print(
+        "[invariants:intraday] "
+        + ", ".join(f"{k}={v:.3g}" for k, v in invariants.items())
+    )
+    if config.strict:
+        _check_strict_invariants(invariants)
+    kpis2 = compute_kpis(res2, params, verify_balance=False)
+    kpis2 = apply_operating_derates(kpis2, params)
+    _emit_bess_utilisation_audit(kpis2, params)
+    kpis_monthly2 = compute_monthly_kpis(res2)
+    return res2, resolved2, kpis2, kpis_monthly2
+
 
 def _compute_risk_metrics(
     rolling_mc_df: pd.DataFrame | None,
@@ -1154,7 +1204,10 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
     # stay aligned with the loader's epsilon (_validate_balancing_config).
     bal_b1 = "invariant_b1_capacity_share_sum_pct_excess"
     bal_b2 = "invariant_b2_reservation_share_cap_excess_kw"
-    skip_keys = {"invariant_5_no_sim_grid_io_max_product_kwh2", bal_b1, bal_b2}
+    id_i3 = "invariant_i3_sell_buy_overlap_kwh2"
+    skip_keys = {
+        "invariant_5_no_sim_grid_io_max_product_kwh2", bal_b1, bal_b2, id_i3,
+    }
     offenders = {
         k: v for k, v in invariants.items()
         if v > tol and k not in skip_keys
@@ -1167,13 +1220,21 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
         offenders[bal_b1] = float(invariants[bal_b1])
     if invariants.get(bal_b2, 0.0) > tol:
         offenders[bal_b2] = float(invariants[bal_b2])
+    # Intraday overlap (Eq. I5) is a kWh^2 product like invariant 5.
+    if invariants.get(id_i3, 0.0) > tol ** 2:
+        offenders[id_i3] = float(invariants[id_i3])
     # Sanity guard against API drift — the verifier must always emit
-    # every balancing-invariant key, even when the block did not fire.
-    missing = [k for k in BALANCING_INVARIANT_KEYS if k not in invariants]
+    # every balancing- and intraday-invariant key, even when the block
+    # did not fire.
+    missing = [
+        k
+        for k in (*BALANCING_INVARIANT_KEYS, *INTRADAY_INVARIANT_KEYS)
+        if k not in invariants
+    ]
     if missing:
         raise AssertionError(
-            "verify_dispatch_invariants is missing balancing-invariant "
-            f"keys: {missing}"
+            "verify_dispatch_invariants is missing balancing/intraday "
+            f"invariant keys: {missing}"
         )
     if offenders:
         raise AssertionError(
@@ -1376,6 +1437,13 @@ def _resolve_uncertainty_config(
             "merchant mode: ignoring uncertainty_load_enabled (no load to perturb)"
         )
         enable_load = False
+    # Intraday-price noise (Eq. U12) is meaningful only on two-stage
+    # runs: force the flag off when the venue is off so an idle
+    # ida_price column can never perturb the rng stream of a
+    # pre-existing seed.
+    enable_ida = bool(econ.get("uncertainty_ida_enabled", True)) and bool(
+        econ.get("id_enabled", False)
+    )
     return {
         "enabled": enabled,
         "compare_sources": compare,
@@ -1385,9 +1453,11 @@ def _resolve_uncertainty_config(
         "enable_dam": enable_dam,
         "enable_pv": enable_pv,
         "enable_load": enable_load,
+        "enable_ida": enable_ida,
         "sigma_dam": float(econ.get("uncertainty_sigma_dam", 0.20) or 0.20),
         "sigma_pv": float(econ.get("uncertainty_sigma_pv", 0.12) or 0.12),
         "sigma_load": float(econ.get("uncertainty_sigma_load", 0.05) or 0.05),
+        "sigma_ida": float(econ.get("uncertainty_sigma_ida", 0.15) or 0.15),
         # Ex-post imbalance settlement (Eqs. U6-U9); the loader has
         # already validated the coupling to the rolling-horizon MC.
         "imbalance_enabled": bool(econ.get("imbalance_enabled", False)),
@@ -1496,6 +1566,7 @@ def _run_one(
         # PF-feasible), and the benchmark must remain the best case.
         def _solve_perfect_foresight(mip_gap: float) -> tuple[
             pd.DataFrame, str, dict[str, Any], pd.DataFrame, dict[str, Any],
+            pd.DataFrame,
         ]:
             res, resolved_solver, res_full = run_scenario(
                 params, ts, solver_name=config.solver,
@@ -1552,11 +1623,48 @@ def _run_one(
                     key: value for key, value in bm_mc.items()
                     if key != "bm_mc_total_realised_eur"
                 })
-            return res, resolved_solver, kpis, kpis_monthly, bm_mc
+            # res_full rides along for consumers that need the
+            # unrounded dispatch (the intraday Stage-2 pins committed
+            # flows as equalities — round(4) noise there would have to
+            # be absorbed by spurious micro-trades).
+            return res, resolved_solver, kpis, kpis_monthly, bm_mc, res_full
 
-        res, resolved_solver, kpis, kpis_monthly, bm_mc = (
+        res, resolved_solver, kpis, kpis_monthly, bm_mc, res_full = (
             _solve_perfect_foresight(config.mip_gap)
         )
+
+        # Intraday Stage-2 re-dispatch (Eqs. I1-I5): re-solve with the
+        # committed day-ahead position pinned; the Stage-2 frame and
+        # KPIs become the headline result so cycles, degradation, the
+        # financial stack AND the rolling-horizon foresight benchmark
+        # below all reflect the combined DA + ID operation (the
+        # two-stage seeds must compare against a two-stage benchmark,
+        # Eq. U12).  The loader gates guarantee merchant mode with
+        # balancing, PPA/support, imbalance and the mid-life diagnostic
+        # off.  A zero deviation fraction disables trading, so the
+        # committed dispatch is already the Stage-2 result.
+        _id_raw = params.get("intraday") or {}
+        _id_two_stage = bool(_id_raw.get("id_enabled", False)) and (
+            float(_id_raw.get("id_max_deviation_frac_of_cap", 0.25) or 0.0)
+            > 0.0
+        )
+        if bool(_id_raw.get("id_enabled", False)) and not _id_two_stage:
+            logger.info(
+                "[intraday] id_max_deviation_frac_of_cap = 0 disables "
+                "trading; the committed day-ahead dispatch is already "
+                "the Stage-2 result, so the re-solve is skipped."
+            )
+        if _id_two_stage:
+            _stage1_profit = float(kpis.get("profit_total_eur", 0.0))
+            # Pin the FULL-PRECISION Stage-1 dispatch: the linking
+            # constraints are equalities, and round(4) noise would
+            # have to be absorbed by spurious micro-trades.
+            res, resolved_solver, kpis, kpis_monthly = (
+                _run_intraday_stage2(params, ts, res_full, config)
+            )
+            # Stage-1 (day-ahead only) profit in the same derated
+            # scope, for the two-stage uplift audit in the KPI sheet.
+            kpis["id_stage1_profit_total_eur"] = round(_stage1_profit, 2)
 
         # Optional rolling-horizon run (writes its KPIs alongside the
         # perfect-foresight benchmark for comparison).
@@ -1603,9 +1711,11 @@ def _run_one(
                         sigma_dam=unc_cfg["sigma_dam"],
                         sigma_pv=unc_cfg["sigma_pv"],
                         sigma_load=unc_cfg["sigma_load"],
+                        sigma_ida=unc_cfg["sigma_ida"],
                         enable_dam=en_dam,
                         enable_pv=en_pv,
                         enable_load=en_load,
+                        enable_ida=unc_cfg["enable_ida"],
                         window_hours=window_h,
                         commit_hours=commit_h,
                         solver_name=config.solver,
@@ -1631,9 +1741,11 @@ def _run_one(
                     sigma_dam=unc_cfg["sigma_dam"],
                     sigma_pv=unc_cfg["sigma_pv"],
                     sigma_load=unc_cfg["sigma_load"],
+                    sigma_ida=unc_cfg["sigma_ida"],
                     enable_dam=unc_cfg["enable_dam"],
                     enable_pv=unc_cfg["enable_pv"],
                     enable_load=unc_cfg["enable_load"],
+                    enable_ida=unc_cfg["enable_ida"],
                     window_hours=window_h,
                     commit_hours=commit_h,
                     imbalance_enabled=unc_cfg["imbalance_enabled"],
@@ -1706,9 +1818,22 @@ def _run_one(
                     f"model error) -- re-solving the benchmark at "
                     f"mip_gap={next_gap:g}"
                 )
-                c_res, c_solver, c_kpis, c_monthly, c_bm = (
+                c_res, c_solver, c_kpis, c_monthly, c_bm, c_full = (
                     _solve_perfect_foresight(next_gap)
                 )
+                if _id_two_stage:
+                    # Two-stage benchmark (Eq. U12): the retightened
+                    # Stage-1 incumbent re-dispatches intraday so the
+                    # comparison stays two-stage vs two-stage.
+                    _c_stage1_profit = float(
+                        c_kpis.get("profit_total_eur", 0.0)
+                    )
+                    c_res, c_solver, c_kpis, c_monthly = (
+                        _run_intraday_stage2(params, ts, c_full, config)
+                    )
+                    c_kpis["id_stage1_profit_total_eur"] = round(
+                        _c_stage1_profit, 2,
+                    )
                 new_pf = float(c_kpis.get("profit_total_eur", 0.0))
                 if new_pf <= pf_profit_eur + _PF_IMPROVEMENT_EPS_EUR:
                     print(
@@ -1723,8 +1848,8 @@ def _run_one(
                         f"gap."
                     )
                     break
-                res, resolved_solver, kpis, kpis_monthly, bm_mc = (
-                    c_res, c_solver, c_kpis, c_monthly, c_bm
+                res, resolved_solver, kpis, kpis_monthly, bm_mc, res_full = (
+                    c_res, c_solver, c_kpis, c_monthly, c_bm, c_full
                 )
                 pf_profit_eur = new_pf
                 pf_gap_used = next_gap
@@ -1952,6 +2077,22 @@ def _run_one(
                 )
             except Exception:
                 logger.exception("Emissions / CFE plot generation failed")
+        # Intraday-venue figures (Eqs. I1-I5): only when the Stage-2
+        # re-dispatch wrote its columns, so the default figure set is
+        # bit-identical (the DSCR conditional-figure pattern).
+        if "id_sell_pv_kwh" in res.columns:
+            try:
+                plot_da_ida_price_duration(
+                    res,
+                    layout["financial_plots"]
+                    / "da_ida_price_duration.pdf",
+                )
+                plot_intraday_position(
+                    res,
+                    layout["financial_plots"] / "intraday_position.pdf",
+                )
+            except Exception:
+                logger.exception("Intraday figure generation failed")
 
         if bundle.get("yearly_cf") is not None:
             _generate_financial_plots(
