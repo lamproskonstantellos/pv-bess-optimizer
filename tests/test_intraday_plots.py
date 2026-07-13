@@ -117,8 +117,10 @@ def test_position_figure_month_axis_convention(tmp_path, monkeypatch):
     out = plot_intraday_position(res, tmp_path / "position_year.pdf")
     assert out.exists()
     labels = [lab for lab in captured["labels"] if lab]
-    # One tick per month across the year (01-2026 .. 12-2026).
+    # One tick per month across the year, closing on the next month
+    # boundary at the end of the last step (01-2026 .. 01-2027) — the
+    # yearly energy plots' convention.
     assert labels[0] == "01-2026"
-    assert "12-2026" in labels
-    assert len(labels) == 12
+    assert labels[-1] == "01-2027"
+    assert len(labels) == 13
     assert captured["rotations"] == {float(XTICK_ROT)}

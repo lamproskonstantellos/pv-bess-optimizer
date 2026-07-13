@@ -13,8 +13,12 @@ Production release.
   bimonthly `YYYY-MM` ticks, inconsistent with every other month
   axis).  The axis label matches the uncertainty family's `Timestamp`;
   the index fallback keeps its `Timestep` axis, now also edge to edge.
-  Convention pinned by a rendering test (12 monthly labels, rotation);
-  the README gallery PNG re-rendered.
+  The right limit sits at the END of the last step, so a full-year
+  frame closes on the next month boundary and carries the closing
+  `01-2027` tick — matching the yearly plots, whose December bar ends
+  on the same boundary.  Convention pinned by a rendering test
+  (13 monthly labels `01-2026..01-2027`, rotation); the README gallery
+  PNG re-rendered.
 
 ### Fixed (pre-release docs sync)
 
