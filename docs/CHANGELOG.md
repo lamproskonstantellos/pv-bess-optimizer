@@ -4,6 +4,18 @@
 
 Production release.
 
+### Fixed (intraday position axis convention)
+
+- The intraday net-position figure's time axis now follows the house
+  month-axis convention shared with the yearly energy plots — one tick
+  per month, `MM-YYYY` labels, rotated right-anchored, dense time axis
+  edge to edge — instead of matplotlib's auto locator (which produced
+  bimonthly `YYYY-MM` ticks, inconsistent with every other month
+  axis).  The axis label matches the uncertainty family's `Timestamp`;
+  the index fallback keeps its `Timestep` axis, now also edge to edge.
+  Convention pinned by a rendering test (12 monthly labels, rotation);
+  the README gallery PNG re-rendered.
+
 ### Fixed (pre-release docs sync)
 
 - Stale cross-document counts and equation ranges brought in line with

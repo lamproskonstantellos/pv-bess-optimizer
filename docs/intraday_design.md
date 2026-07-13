@@ -254,9 +254,12 @@ bit-identical:
 
 Both follow the house figure contract: 7x4 in canvas, registered
 theme colours/labels only, the shared legend below the axes, the
-universal margin discipline (the duration curve keeps its bounded
-0-100 % x-axis edge to edge) and the `empty_placeholder` gating when
-the columns are absent.
+universal margin discipline (both x-axes edge to edge — the duration
+curve on its bounded 0-100 % scale, the position figure on its time
+span) and the `empty_placeholder` gating when the columns are absent.
+The position figure's time axis carries the house month-axis
+convention shared with the yearly energy plots: one tick per month,
+`MM-YYYY` labels, rotated right-anchored.
 
 ## Implementation map
 
