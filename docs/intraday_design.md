@@ -259,7 +259,9 @@ curve on its bounded 0-100 % scale, the position figure on its time
 span) and the `empty_placeholder` gating when the columns are absent.
 The position figure's time axis carries the house month-axis
 convention shared with the yearly energy plots: one tick per month,
-`MM-YYYY` labels, rotated right-anchored.
+`MM-YYYY` labels, rotated right-anchored, with the right limit at the
+END of the last step so a full-year frame closes on the next month
+boundary and carries the closing tick (`01-2027`).
 
 ## Implementation map
 

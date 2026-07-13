@@ -105,12 +105,19 @@ def plot_intraday_position(res: pd.DataFrame, out_path: Path) -> Path:
         # House month-axis convention (the yearly energy plots'
         # `_setup_month_axis`): one tick per month, `MM-YYYY` labels,
         # rotated right-anchored, and the dense time axis edge to edge.
+        # The right limit is the END of the last step, so a full-year
+        # frame closes on the next month boundary and the axis carries
+        # the closing tick (`01-2027`), exactly like the yearly plots.
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%Y"))
         plt.setp(ax.get_xticklabels(), rotation=XTICK_ROT, ha="right")
-        ax.set_xlim(x.iloc[0], x.iloc[-1])
+        step = x.diff().median()
+        if pd.isna(step) or step <= pd.Timedelta(0):
+            step = pd.Timedelta(hours=1)
+        ax.set_xlim(x.iloc[0], x.iloc[-1] + step)
     else:
-        ax.set_xlim(0, max(net.size - 1, 1))
+        # Same end-of-last-step convention in step coordinates.
+        ax.set_xlim(0, net.size)
     apply_universal_margins(ax, skip_x=True)
     apply_financial_legend(ax)
     return save_figure(out_path)
