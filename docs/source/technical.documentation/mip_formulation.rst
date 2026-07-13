@@ -9,8 +9,9 @@ lives in :mod:`pvbess_opt.optimization`.
    The **authoritative formulation**, with every constraint as a
    numbered equation and its implementing symbol, lives in the domain
    design documents ``docs/self_consumption_design.md`` (equations
-   S1-S34), ``docs/merchant_design.md`` (M1-M3) and
-   ``docs/balancing_market_design.md`` (B1-B8), indexed by
+   S1-S36), ``docs/merchant_design.md`` (M1-M3),
+   ``docs/balancing_market_design.md`` (B1-B10) and
+   ``docs/intraday_design.md`` (I1-I6), indexed by
    ``docs/README.md``.  This page is a one-stop summary kept verbatim-
    consistent with those documents.
 
@@ -162,6 +163,16 @@ SOC headroom constraints (``BM_SOC_UP`` / ``BM_SOC_DN``) and the
 expected-revenue objective terms; these are equations B1-B7 in
 ``docs/balancing_market_design.md`` (this page does not duplicate
 them).
+
+Intraday extension: when the second-stage re-dispatch runs
+(``id_enabled`` with the committed day-ahead position supplied as
+data), the model additionally carries the four bounded deviation
+variables (per-origin intraday sells and buys), the position and
+origin links, the deviation-budget gates with the sell/buy
+complementarity binary, and the spread-form margin objective term;
+these are equations I1-I5 in ``docs/intraday_design.md`` (this page
+does not duplicate them).  The block attaches only in Stage 2, so a
+day-ahead solve is structurally unchanged.
 
 In ``self_consumption`` mode additionally:
 

@@ -80,7 +80,7 @@ reproduce the same dispatch shape scaled by capacity).  Scope:
 | economics | `depreciation_years_pv`, `depreciation_years_bess`, `depreciation_years_site` | 20, 10, 20 | $N_a$ (straight-line lives per asset class; inert at $\tau = 0$) |
 | economics | `tax_loss_carryforward_years` | 0 | $W$ (FIFO loss expiry window; 0 = unlimited) |
 | economics | `benchmark_lco{e,s}_{low,high}_eur_per_mwh` | 30/85, 157/274 | Lazard band overlays (plots only) |
-| economics | `sensitivity_*` (5 keys) | 10/10/10/2/10 | tornado deltas (`docs/uncertainty_design.md`) |
+| economics | `sensitivity_*` (6 delta keys) | 10/10/10/2/10/5 | tornado deltas: CAPEX/OPEX/revenue %, discount-rate pp, PPA-price %, tax-rate pp (`docs/uncertainty_design.md`) |
 | economics | `gearing_pct`, `debt_interest_rate_pct`, `debt_tenor_years`, `debt_repayment` | 0, 5.0, 15, annuity | debt layer |
 | economics | `grid_co2_intensity_kg_per_mwh`, `grid_co2_annual_decline_pct` | 0, 0 | emissions / 24-7 CFE (`pvbess_opt.emissions`) |
 | project | `project_lifecycle_years` | 20 | $Y$ |

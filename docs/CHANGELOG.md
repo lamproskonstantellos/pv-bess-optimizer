@@ -4,6 +4,21 @@
 
 Production release.
 
+### Fixed (pre-release docs sync)
+
+- Stale cross-document counts and equation ranges brought in line with
+  the shipped surface: the `balancing` sheet is 36 keys (was quoted as
+  34 in the design doc's Inputs section and the user guide), the
+  design doc's Inputs table gains the `bm_block_hours` /
+  `bm_merit_order_enabled` rows (B9/B10, previously documented only in
+  their own sections), the `ppa` sheet is 14 keys (nine `ppa_*` plus
+  five `support_*`), the economics sensitivity block is 6 delta keys
+  (the tax-rate driver joined the original five), the MIP-formulation
+  summary page cites S1-S36 / B1-B10 and gains the intraday-extension
+  paragraph (I1-I5) next to the balancing one, and the
+  uncertainty-modelling page cites U1-U12 with the imbalance /
+  VaR-CVaR / two-stage extensions.
+
 ### Changed (README)
 
 - The README now covers the full opt-in surface: the intraday venue
