@@ -86,3 +86,39 @@ def test_position_figure_without_timestamp(tmp_path):
     res = _res_with_intraday().drop(columns=["timestamp"])
     out = plot_intraday_position(res, tmp_path / "position_idx.pdf")
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_position_figure_month_axis_convention(tmp_path, monkeypatch):
+    """Full-year time axis: one tick per month, MM-YYYY, rotated 45."""
+    import matplotlib.pyplot as plt
+
+    from pvbess_opt.theme import XTICK_ROT
+
+    captured = {}
+    orig_save = plt.Figure.savefig
+
+    def _spy(fig, *args, **kwargs):
+        ax = fig.axes[0]
+        fig.canvas.draw()  # materialise the tick labels
+        captured["labels"] = [t.get_text() for t in ax.get_xticklabels()]
+        captured["rotations"] = {
+            t.get_rotation() for t in ax.get_xticklabels()
+        }
+        return orig_save(fig, *args, **kwargs)
+
+    monkeypatch.setattr(plt.Figure, "savefig", _spy)
+    n = 8760
+    res = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=n, freq="h"),
+        "id_sell_pv_kwh": np.zeros(n),
+        "id_sell_bess_kwh": np.where(np.arange(n) % 24 == 18, 900.0, 0.0),
+        "id_buy_kwh": np.where(np.arange(n) % 24 == 3, 700.0, 0.0),
+    })
+    out = plot_intraday_position(res, tmp_path / "position_year.pdf")
+    assert out.exists()
+    labels = [lab for lab in captured["labels"] if lab]
+    # One tick per month across the year (01-2026 .. 12-2026).
+    assert labels[0] == "01-2026"
+    assert "12-2026" in labels
+    assert len(labels) == 12
+    assert captured["rotations"] == {float(XTICK_ROT)}

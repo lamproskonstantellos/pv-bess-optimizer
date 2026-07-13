@@ -15,11 +15,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ..theme import apply_financial_legend, financial_color
+from ..theme import XTICK_ROT, apply_financial_legend, financial_color
 from .style import (
     apply_universal_margins,
     empty_placeholder,
@@ -83,11 +84,13 @@ def plot_intraday_position(res: pd.DataFrame, out_path: Path) -> Path:
     if net.size == 0:
         return empty_placeholder(out_path, "Intraday venue disabled.")
     _fig, ax = plt.subplots(figsize=(7, 4))
-    if "timestamp" in res.columns and pd.api.types.is_datetime64_any_dtype(
-        res["timestamp"],
-    ):
+    use_time = (
+        "timestamp" in res.columns
+        and pd.api.types.is_datetime64_any_dtype(res["timestamp"])
+    )
+    if use_time:
         x = res["timestamp"]
-        ax.set_xlabel("Time")
+        ax.set_xlabel("Timestamp")
     else:
         x = np.arange(net.size)
         ax.set_xlabel("Timestep")
@@ -98,6 +101,16 @@ def plot_intraday_position(res: pd.DataFrame, out_path: Path) -> Path:
     )
     ax.axhline(0.0, color="black", linewidth=0.6)
     ax.set_ylabel("Net intraday trade (kWh per step)")
-    apply_universal_margins(ax)
+    if use_time:
+        # House month-axis convention (the yearly energy plots'
+        # `_setup_month_axis`): one tick per month, `MM-YYYY` labels,
+        # rotated right-anchored, and the dense time axis edge to edge.
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%Y"))
+        plt.setp(ax.get_xticklabels(), rotation=XTICK_ROT, ha="right")
+        ax.set_xlim(x.iloc[0], x.iloc[-1])
+    else:
+        ax.set_xlim(0, max(net.size - 1, 1))
+    apply_universal_margins(ax, skip_x=True)
     apply_financial_legend(ax)
     return save_figure(out_path)
