@@ -417,12 +417,93 @@ def test_apply_unknown_debt_sizing_name_errors(tmp_path):
         )
 
 
-def test_apply_resolve_mode_not_yet_available(tmp_path):
+def test_apply_resolve_mode_needs_params(tmp_path):
     econ = _armed_econ(tmp_path, scenario_projection_mode="resolve")
-    with pytest.raises(PriceDataError, match="re-solve phase"):
+    with pytest.raises(PriceDataError, match="params"):
         apply_price_scenarios(
             econ, _armed_ts(), _res(pv_export=1.0), base_dir=tmp_path,
         )
+
+
+def test_apply_resolve_overrides_dam_streams(monkeypatch, tmp_path):
+    """The wiring contract of 'resolve': Tier-2 factors override the
+    three DAM streams in econ['trajectories'] while the fan/paths
+    tables stay Tier-1, and the delta table reports the gap."""
+    import pvbess_opt.optimization as optimization_mod
+
+    calls = {"n": 0}
+
+    def fake_run(_params, ts_y, **_kwargs):
+        # Each successive support-year solve exports twice as much as
+        # the previous one — a dispatch adaptation the frozen Year-1
+        # dispatch cannot see, so Tier-2 departs from Tier-1.
+        calls["n"] += 1
+        n = len(ts_y)
+        frame = pd.DataFrame({
+            "timestamp": ts_y["timestamp"],
+            "pv_to_grid_kwh": np.full(n, float(calls["n"])),
+            "bess_dis_grid_kwh": np.full(n, float(calls["n"])),
+            "bess_charge_grid_kwh": np.full(n, float(calls["n"])),
+            "soc_kwh": np.zeros(n),
+        })
+        return frame, "fake", frame
+
+    monkeypatch.setattr(optimization_mod, "run_scenario", fake_run)
+    monkeypatch.setattr(
+        "pvbess_opt.kpis.compute_kpis",
+        lambda _res, _params, **_kw: {},
+    )
+    econ = _armed_econ(
+        tmp_path,
+        scenario_projection_mode="resolve",
+        scenario_resolve_years="2",
+        scenario_resolve_resolution=60,
+        scenario_interp="loglinear",
+        bess_replacement_year_effective=0,
+    )
+    ts = _armed_ts()
+    ts.insert(
+        0, "timestamp",
+        pd.date_range("2026-01-01", periods=HOURS, freq="h"),
+    )
+    application = apply_price_scenarios(
+        econ, ts, _res(pv_export=1.0, bess_export=0.5, bess_charge=0.2),
+        base_dir=tmp_path,
+        params={
+            "dt_minutes": 60, "bess_capacity_kwh": 1000.0,
+            "balancing": {"balancing_enabled": True},
+            "intraday": {"id_enabled": True},
+        },
+        kpis={"bess_total_discharge_mwh": 500.0},
+    )
+    assert application is not None and application.mode == "resolve"
+    # Year-2 re-solve doubled every volume while prices fell to 0.9x:
+    # Tier-2 factor 2 x 0.9 = 1.8, held flat beyond the last support
+    # year — versus the Tier-1 reprice factors 0.9 / 0.81.
+    for stream in ("revenue_dam_pv", "revenue_dam_bess_export",
+                   "expense_dam_bess_charge"):
+        assert econ["trajectories"][stream]["values"] == pytest.approx(
+            [1.0, 1.8, 1.8],
+        )
+    # The fan/paths tables stay Tier-1 (every scenario on the same
+    # frozen-dispatch footing); the gap lives in the delta table.
+    paths_year2 = application.paths[
+        application.paths["project_year"] == 2
+    ].iloc[0]
+    assert paths_year2["g_revenue_dam_pv"] == pytest.approx(0.9)
+    assert application.resolve_delta is not None
+    delta_pv = application.resolve_delta[
+        (application.resolve_delta["stream"] == "revenue_dam_pv")
+        & (application.resolve_delta["project_year"] == 2)
+    ].iloc[0]
+    assert delta_pv["g_tier1_reprice"] == pytest.approx(0.9)
+    assert delta_pv["g_tier2_resolve"] == pytest.approx(1.8)
+    assert delta_pv["delta"] == pytest.approx(0.9)
+    assert application.resolve_support is not None
+    assert set(application.resolve_support["project_year"]) == {1, 2}
+    # The Year-1 discharge throughput reached the cycle-fade model.
+    assert econ["_resolve_year1_discharge_mwh"] == 500.0
+    assert any("Tier-2" in line for line in application.summary_lines)
 
 
 def test_apply_trajectory_only_is_inert(tmp_path, caplog):

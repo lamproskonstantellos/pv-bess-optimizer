@@ -5628,6 +5628,7 @@ def write_results_workbook(
     risk_metrics: pd.DataFrame | None = None,
     market_provenance: pd.DataFrame | None = None,
     scenario_price_paths: pd.DataFrame | None = None,
+    scenario_resolve_delta: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -5714,6 +5715,17 @@ def write_results_workbook(
         ):
             scenario_price_paths.to_excel(
                 writer, sheet_name="scenario_price_paths", index=False,
+            )
+        # Tier-2 − Tier-1 factor delta at the support years
+        # (scenario_projection_mode = 'resolve'): the E53-style
+        # diagnostic showing where dispatch adaptation departs from
+        # the frozen-dispatch approximation.  Absent under 'reprice'.
+        if (
+            scenario_resolve_delta is not None
+            and not scenario_resolve_delta.empty
+        ):
+            scenario_resolve_delta.to_excel(
+                writer, sheet_name="scenario_resolve_delta", index=False,
             )
         style_workbook(writer.book)
     return out_path

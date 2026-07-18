@@ -706,21 +706,11 @@ def _build_financials(
     """Run the multi-year cash-flow + sensitivity + lifetime pipeline.
 
     ``solver_opts`` (run_scenario keyword form) is consumed only by
-    the ``debt_sizing_case = 'low_price'`` deck re-dispatch; None
-    falls back to the solver defaults.
+    the ``debt_sizing_case = 'low_price'`` deck re-dispatch and the
+    price-scenario Tier-2 support-year re-solves; None falls back to
+    the solver defaults.
     """
     econ = read_economic_params(excel_path)
-    # Price-scenario layer (scenario_engine sheet, pricedata engine):
-    # with the master switch off this returns None and econ is
-    # untouched — bit-identical behaviour.  Armed in 'reprice' mode it
-    # reprices the FROZEN Year-1 dispatch into auto-trajectories on
-    # the split streams (Eqs. E60/E61) and merges them into
-    # econ['trajectories'], so everything below — cashflow, LCOE/LCOS
-    # OPEX, sensitivity, debt sizing — flows through the existing
-    # Eq. E24 machinery unchanged.
-    scenario_application = apply_price_scenarios(
-        econ, ts, res, base_dir=Path(excel_path).parent,
-    )
 
     site_capex_eur = float(econ.get("site_capex_eur", 0.0) or 0.0)
     site_devex_eur = float(econ.get("site_devex_eur", 0.0) or 0.0)
@@ -766,6 +756,22 @@ def _build_financials(
             "lifecycle.",
             repl_year, econ.get("bess_eol_soh_pct", 80.0), repl_second,
         )
+    # Price-scenario layer (scenario_engine sheet, pricedata engine):
+    # with the master switch off this returns None and econ is
+    # untouched — bit-identical behaviour.  Armed in 'reprice' mode it
+    # reprices the FROZEN Year-1 dispatch into auto-trajectories on
+    # the split streams (Eqs. E60/E61) and merges them into
+    # econ['trajectories']; 'resolve' additionally re-solves the MILP
+    # at the support years, which is why the call sits AFTER the
+    # replacement resolver just above (factors_for_year needs the
+    # effective replacement year) and BEFORE the cashflow build, so
+    # everything below — cashflow, LCOE/LCOS OPEX, sensitivity, debt
+    # sizing — flows through the existing Eq. E24 machinery unchanged.
+    scenario_application = apply_price_scenarios(
+        econ, ts, res,
+        base_dir=Path(excel_path).parent,
+        params=params, solver_opts=solver_opts, kpis=kpis,
+    )
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
     # Target-DSCR debt sizing (Eqs. E41-E43) resolves exactly ONCE per
     # run, on the configured sizing case: the sized debt is frozen
@@ -2056,6 +2062,7 @@ def _run_one(
             rolling_mc_df, kpis, econ, bundle.get("capacities"),
         )
 
+        _ps_application = bundle.get("price_scenarios")
         write_results_workbook(
             out_dir / "03_results.xlsx",
             res_year1=res,
@@ -2080,11 +2087,12 @@ def _run_one(
                 pd.DataFrame(params["market_provenance"])
                 if params.get("market_provenance") else None
             ),
-            scenario_price_paths=_scenario_paths_frame(
-                bundle.get("price_scenarios"),
+            scenario_price_paths=_scenario_paths_frame(_ps_application),
+            scenario_resolve_delta=(
+                _ps_application.resolve_delta
+                if _ps_application is not None else None
             ),
         )
-        _ps_application = bundle.get("price_scenarios")
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
             kpis_year1=kpis,

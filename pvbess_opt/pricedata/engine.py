@@ -328,7 +328,11 @@ class ScenarioApplication:
     ``paths`` is the APPLIED scenario's per-year price-path/capture
     table; ``fan`` maps every enabled scenario name to its table (the
     fan-chart input); ``summary_lines`` are the SUMMARY.md digest
-    lines.
+    lines.  Both tables stay TIER-1 (frozen-dispatch) even under
+    ``resolve`` mode, so the fan compares every scenario on the same
+    footing; the Tier-2 factors surface in ``resolve_delta`` (the
+    Tier-2 − Tier-1 diagnostic at the support years) and
+    ``resolve_support`` (the raw per-support-year re-solve table).
     """
 
     applied: str
@@ -337,6 +341,8 @@ class ScenarioApplication:
     fan: dict[str, pd.DataFrame]
     weights: dict[str, float]
     summary_lines: list[str]
+    resolve_delta: pd.DataFrame | None = None
+    resolve_support: pd.DataFrame | None = None
 
 
 def apply_price_scenarios(
@@ -345,16 +351,25 @@ def apply_price_scenarios(
     res: pd.DataFrame,
     *,
     base_dir: Path,
+    params: dict[str, Any] | None = None,
+    solver_opts: dict[str, Any] | None = None,
+    kpis: dict[str, Any] | None = None,
 ) -> ScenarioApplication | None:
-    """Arm the price-scenario layer on one run (the Tier-1 entry point).
+    """Arm the price-scenario layer on one run (the engine entry point).
 
     Reads the merged ``scenario_engine`` keys plus the parsed
     ``price_scenarios`` list from ``econ``; returns None (untouched
-    econ) when disarmed.  When armed in ``reprice`` mode the applied
-    scenario's auto-trajectories are merged into
-    ``econ['trajectories']`` IN PLACE — everything downstream
-    (cashflow, LCOE/LCOS OPEX, sensitivity, debt) then flows through
-    the existing Eq. E24 machinery unchanged.
+    econ) when disarmed.  When armed the applied scenario's
+    auto-trajectories are merged into ``econ['trajectories']`` IN
+    PLACE — everything downstream (cashflow, LCOE/LCOS OPEX,
+    sensitivity, debt) then flows through the existing Eq. E24
+    machinery unchanged.  ``reprice`` derives every factor from the
+    frozen Year-1 dispatch; ``resolve`` additionally re-solves the
+    MILP at the support years and overrides the three DAM streams
+    with the degradation-normalised Tier-2 factors
+    (:mod:`pvbess_opt.pricedata.resolve`) — it therefore needs the
+    dispatch ``params`` (and reads the Year-1 discharge throughput
+    from ``kpis`` for the pooled cycle-fade model).
 
     The applied scenario of a single run is ``debt_sizing_scenario``
     when named (the bankable path), else the first enabled row; the
@@ -381,11 +396,12 @@ def apply_price_scenarios(
             "carries the price paths."
         )
         return None
-    if mode == "resolve":
+    if mode == "resolve" and params is None:
         raise PriceDataError(
-            "scenario_projection_mode='resolve' ships with the "
-            "support-year re-solve phase; use 'reprice' or "
-            "'trajectory_only'."
+            "scenario_projection_mode='resolve' re-solves the dispatch "
+            "at the support years and needs the run's dispatch params; "
+            "the pipeline threads them automatically — a programmatic "
+            "caller must pass params=."
         )
 
     n_years = int(econ.get("project_lifecycle_years", 0) or 0)
@@ -412,6 +428,7 @@ def apply_price_scenarios(
     weights: dict[str, float] = {}
     applied_trajectories: dict[str, dict[str, Any]] | None = None
     applied_paths: pd.DataFrame | None = None
+    applied_deck: ScenarioDeck | None = None
     for entry in scenarios:
         deck = build_scenario_deck(
             entry,
@@ -429,7 +446,49 @@ def apply_price_scenarios(
         if deck.name == applied_name:
             applied_trajectories = trajectories
             applied_paths = paths
+            applied_deck = deck
     assert applied_trajectories is not None and applied_paths is not None
+    assert applied_deck is not None
+
+    resolve_delta: pd.DataFrame | None = None
+    resolve_support: pd.DataFrame | None = None
+    if mode == "resolve":
+        # Lazy import: resolve.py itself imports the revenue helpers
+        # from this module, so a top-level import would be circular.
+        from .resolve import (
+            build_resolve_delta,
+            derive_resolve_trajectories,
+            parse_support_years,
+        )
+
+        assert params is not None  # guarded above
+        support_years = parse_support_years(
+            str(econ.get("scenario_resolve_years", "") or ""), n_years,
+        )
+        resolution = int(
+            econ.get("scenario_resolve_resolution", 60) or 60,
+        )
+        # The pooled cycle-fade model inside factors_for_year reads the
+        # Year-1 discharge throughput — the same derated KPI number the
+        # cashflow's replacement resolver consumes.
+        econ["_resolve_year1_discharge_mwh"] = float(
+            (kpis or {}).get("bess_total_discharge_mwh", 0.0) or 0.0
+        )
+        tier2, resolve_support = derive_resolve_trajectories(
+            applied_deck, params, ts, econ,
+            n_years=n_years, support_years=support_years,
+            resolution_minutes=resolution,
+            interp=str(
+                econ.get("scenario_interp", "loglinear") or "loglinear",
+            ),
+            solver_opts=solver_opts,
+        )
+        resolve_delta = build_resolve_delta(
+            applied_trajectories, tier2, support_years,
+        )
+        # The re-solves refine the three DAM streams only; balancing
+        # paths from the store's annual table ride along from Tier-1.
+        applied_trajectories = {**applied_trajectories, **tier2}
 
     econ["trajectories"] = merge_auto_trajectories(
         econ.get("trajectories"), applied_trajectories,
@@ -437,16 +496,16 @@ def apply_price_scenarios(
     )
     streams = ", ".join(sorted(applied_trajectories))
     logger.info(
-        "[pricedata] price-scenario engine armed (mode 'reprice'): "
-        "scenario %r repriced the frozen Year-1 dispatch into "
+        "[pricedata] price-scenario engine armed (mode %r): "
+        "scenario %r projected the Year-1 dispatch into "
         "auto-trajectories for %s; %d enabled scenario(s) feed the "
         "price-path figures (the weighted ensemble runs in the "
         "scenarios harness).",
-        applied_name, streams, len(scenarios),
+        mode, applied_name, streams, len(scenarios),
     )
     final_year = applied_paths.iloc[-1]
     summary_lines = [
-        f"- Price scenarios: `reprice` on `{applied_name}` "
+        f"- Price scenarios: `{mode}` on `{applied_name}` "
         f"({len(scenarios)} enabled scenario(s))",
         f"- Year-{n_years} PV capture rate: "
         f"{final_year['pv_capture_rate']:.3f} "
@@ -454,6 +513,13 @@ def apply_price_scenarios(
         f"vs baseload {final_year['dam_mean_price_eur_per_mwh']:.2f} "
         "EUR/MWh)",
     ]
+    if resolve_delta is not None and not resolve_delta.empty:
+        summary_lines.append(
+            f"- Tier-2 re-solves at year(s) "
+            f"{', '.join(str(y) for y in support_years)} "
+            f"({resolution} min grid); max |g2 - g1| = "
+            f"{float(resolve_delta['delta'].abs().max()):.4f}"
+        )
     return ScenarioApplication(
         applied=applied_name,
         mode=mode,
@@ -461,6 +527,8 @@ def apply_price_scenarios(
         fan=fan,
         weights=weights,
         summary_lines=summary_lines,
+        resolve_delta=resolve_delta,
+        resolve_support=resolve_support,
     )
 
 

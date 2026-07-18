@@ -242,6 +242,40 @@ def test_results_workbook_carries_scenario_paths_sheet(tmp_path):
     assert "scenario_price_paths" not in pd.ExcelFile(out2).sheet_names
 
 
+def test_results_workbook_carries_resolve_delta_sheet(tmp_path):
+    from pvbess_opt.io import write_results_workbook
+
+    delta = pd.DataFrame({
+        "project_year": [1, 3],
+        "stream": ["revenue_dam_pv", "revenue_dam_pv"],
+        "g_tier1_reprice": [1.0, 0.81],
+        "g_tier2_resolve": [1.0, 0.84],
+        "delta": [0.0, 0.03],
+        "delta_pct": [0.0, 3.7037],
+    })
+    res = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=4, freq="h"),
+        "pv_kwh": [1.0, 2.0, 3.0, 4.0],
+    })
+    out = write_results_workbook(
+        tmp_path / "03_results.xlsx",
+        res_year1=res,
+        kpis_year1={"profit_total_eur": 1.0},
+        kpis_monthly_year1=None,
+        scenario_resolve_delta=delta,
+    )
+    sheet = pd.read_excel(out, sheet_name="scenario_resolve_delta")
+    assert list(sheet["project_year"]) == [1, 3]
+    # Reprice mode / disarmed: the sheet is absent.
+    out2 = write_results_workbook(
+        tmp_path / "03_results_off.xlsx",
+        res_year1=res,
+        kpis_year1={"profit_total_eur": 1.0},
+        kpis_monthly_year1=None,
+    )
+    assert "scenario_resolve_delta" not in pd.ExcelFile(out2).sheet_names
+
+
 def test_summary_gating_of_price_scenario_lines(tmp_path):
     from pvbess_opt.io import write_summary_md
 
