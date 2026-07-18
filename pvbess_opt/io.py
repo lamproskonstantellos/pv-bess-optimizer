@@ -2151,6 +2151,30 @@ TRAJECTORY_STREAMS: tuple[str, ...] = (
     "opex",
     "opex_pv",
     "opex_bess",
+    # Per-leg DAM split (Eq. E60): PV export revenue, BESS export
+    # revenue and the BESS grid-charging expense escalate on their own
+    # paths, so cannibalization (PV capture falling) and the arbitrage
+    # spread (export minus charge) evolve independently.  The
+    # aggregate 'revenue_dam' above stays the accepted alias applying
+    # to all three legs; combining it with a split leg is rejected
+    # (the opex/opex_pv precedent).
+    "revenue_dam_pv",
+    "revenue_dam_bess_export",
+    "expense_dam_bess_charge",
+    # Per-product balancing split (Eq. E61): each product's capacity /
+    # activation revenue escalates on its own saturation path (FCR has
+    # no activation by design).  The aggregate streams above stay the
+    # accepted aliases; combining aggregate and per-product is
+    # rejected.
+    "balancing_capacity_fcr",
+    "balancing_capacity_afrr_up",
+    "balancing_capacity_afrr_dn",
+    "balancing_capacity_mfrr_up",
+    "balancing_capacity_mfrr_dn",
+    "balancing_activation_afrr_up",
+    "balancing_activation_afrr_dn",
+    "balancing_activation_mfrr_up",
+    "balancing_activation_mfrr_dn",
 )
 
 # Streams that deliberately take NO trajectory: the PPA strike escalates
@@ -2170,6 +2194,19 @@ _TRAJECTORY_INFLATION_KEYS: dict[str, tuple[str, str]] = {
     "opex": ("economics", "opex_inflation_pct"),
     "opex_pv": ("economics", "opex_inflation_pct"),
     "opex_bess": ("economics", "opex_inflation_pct"),
+    # Split legs replace the same scalar index their aggregate does.
+    "revenue_dam_pv": ("economics", "dam_inflation_pct"),
+    "revenue_dam_bess_export": ("economics", "dam_inflation_pct"),
+    "expense_dam_bess_charge": ("economics", "dam_inflation_pct"),
+    "balancing_capacity_fcr": ("balancing", "bm_inflation_pct"),
+    "balancing_capacity_afrr_up": ("balancing", "bm_inflation_pct"),
+    "balancing_capacity_afrr_dn": ("balancing", "bm_inflation_pct"),
+    "balancing_capacity_mfrr_up": ("balancing", "bm_inflation_pct"),
+    "balancing_capacity_mfrr_dn": ("balancing", "bm_inflation_pct"),
+    "balancing_activation_afrr_up": ("balancing", "bm_inflation_pct"),
+    "balancing_activation_afrr_dn": ("balancing", "bm_inflation_pct"),
+    "balancing_activation_mfrr_up": ("balancing", "bm_inflation_pct"),
+    "balancing_activation_mfrr_dn": ("balancing", "bm_inflation_pct"),
 }
 
 TRAJECTORIES_SHEET_COLUMNS: tuple[str, ...] = (
@@ -4448,6 +4485,34 @@ def validate_workbook_params(
                 "combined with the per-asset 'opex_pv' / 'opex_bess' "
                 "streams; use one or the other."
             )
+        # Same one-or-the-other contract for the DAM legs (Eq. E60) and
+        # the per-product balancing streams (Eq. E61).
+        _dam_split = {
+            "revenue_dam_pv", "revenue_dam_bess_export",
+            "expense_dam_bess_charge",
+        } & set(trajectories)
+        if "revenue_dam" in trajectories and _dam_split:
+            raise ValueError(
+                "trajectories: the aggregate 'revenue_dam' stream "
+                "cannot be combined with the per-leg "
+                f"{'/'.join(sorted(_dam_split))} stream(s); use one or "
+                "the other."
+            )
+        for _aggregate, _prefix in (
+            ("balancing_capacity", "balancing_capacity_"),
+            ("balancing_activation", "balancing_activation_"),
+        ):
+            _products = {
+                s for s in trajectories
+                if s.startswith(_prefix) and s != _aggregate
+            }
+            if _aggregate in trajectories and _products:
+                raise ValueError(
+                    f"trajectories: the aggregate {_aggregate!r} stream "
+                    "cannot be combined with the per-product "
+                    f"{'/'.join(sorted(_products))} stream(s); use one "
+                    "or the other."
+                )
         for stream, spec in trajectories.items():
             if spec["mode"] != "replace":
                 continue

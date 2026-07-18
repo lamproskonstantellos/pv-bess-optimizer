@@ -332,13 +332,35 @@ def test_builder_defaults_to_disabled_example():
 
 def test_all_streams_accepted_end_to_end(tmp_path):
     n = _n_years()
+    # Aggregates conflict with their split legs (E24a/E60/E61), so the
+    # sweep carries the SPLIT names and drops the aggregate aliases.
+    conflicting_aggregates = {
+        "opex", "revenue_dam", "balancing_capacity",
+        "balancing_activation",
+    }
     block = {
         stream: {"mode": "overlay", "values": [1.0] * n}
         for stream in TRAJECTORY_STREAMS
-        if stream != "opex"  # conflicts with the per-asset split
+        if stream not in conflicting_aggregates
     }
     reread = _typed_with(block, tmp_path)
     assert set(reread["trajectories"]) == set(block)
+
+
+def test_aggregate_and_split_leg_conflicts_rejected(tmp_path):
+    n = _n_years()
+    ones = [1.0] * n
+    with pytest.raises(ValueError, match="revenue_dam_pv"):
+        _validate_block({"revenue_dam": ones, "revenue_dam_pv": ones})
+    with pytest.raises(ValueError, match="balancing_capacity_fcr"):
+        _validate_block({
+            "balancing_capacity": ones, "balancing_capacity_fcr": ones,
+        })
+    with pytest.raises(ValueError, match="balancing_activation_afrr_up"):
+        _validate_block({
+            "balancing_activation": ones,
+            "balancing_activation_afrr_up": ones,
+        })
 
 
 def test_polish_creates_sheet_once(tmp_path):

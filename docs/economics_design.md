@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E59 (+ suffixed E8a, E13a-E13d, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E61 (+ suffixed E8a, E13a-E13d, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U12 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | `self_consumption_design.md` | system/dispatch constraints (shared with merchant mode) | S36 |
@@ -696,6 +696,51 @@ complement: a scenario's deck swaps the Year-1 price inputs and
 re-solves the dispatch, then the multi-year projection applies
 E9-E15 (and any trajectories) unchanged — an input swap, deliberately
 NOT a new equation.
+
+### Per-stream escalation split (Eqs. E60/E61)
+
+The single DAM series of E24 mis-prices cannibalization: the net BESS
+spread `rev1_dam_bess` (export minus grid-charging cost, the
+`conventions.md` bundling) is scaled by the SAME $g^{\mathrm{dam}}_y$
+as the PV capture revenue, while in reality the PV capture price falls
+faster than the average and the arbitrage spread follows its own path.
+E60 splits the wholesale stream into three independently escalating
+legs (streams `revenue_dam_pv` / `revenue_dam_bess_export` /
+`expense_dam_bess_charge`; the aggregate `revenue_dam` remains the
+accepted alias for all three, and combining alias with a split leg is
+loader-rejected — the E24a opex precedent):
+
+$$R^{\mathrm{dam}}_y = R^{\mathrm{dam,PV}}_1\, f^{\mathrm{PV}}_y\,
+g^{\mathrm{dam\_pv}}_y + \underbrace{\left(R^{\mathrm{dam,B+}}_1\,
+g^{\mathrm{dam\_bx}}_y - C^{\mathrm{dam,B-}}_1\,
+g^{\mathrm{dam\_bc}}_y\right) f^{\mathrm{B}}_y}_{\text{net spread from
+separately scaled legs}} \tag{E60}$$
+
+The bracketed BESS wholesale margin is the SINGLE shared quantity the
+E13d optimizer bases, the E25a netting base and the toll zeroing
+(E29a) read, so the split reaches every consumer consistently.  The
+CfD DAM leg, the post-term PPA reversion (E12) and the PV-error
+imbalance cost ride the **PV leg's** series $g^{\mathrm{dam\_pv}}_y$
+(they price PV-origin volume); while no split leg is declared every
+$g$ collapses to the aggregate series and the computation keeps the
+historical grouping bit-identically.
+
+E61 applies the same taxonomy to balancing: per-product streams
+(`balancing_capacity_fcr`/`..._afrr_up`/`..._afrr_dn`/`..._mfrr_up`/
+`..._mfrr_dn` and the four activation counterparts — FCR has no
+activation by design) scale the per-product Year-1 bases
+`bm_<product>_{capacity,activation}_revenue_eur` (kpis.py):
+
+$$R^{\mathrm{bm,cap}}_y = \sum_{p} R^{\mathrm{bm,cap},p}_1\,
+f^{\mathrm{B}}_y\, g^{\mathrm{bm\_cap},p}_y
+\qquad (\text{likewise activation}) \tag{E61}$$
+
+so saturation hits products at their own pace (aFRR before mFRR, FCR
+collapse on BESS entry) instead of one aggregate
+`(1+i_{\mathrm{bm}})^{y-1}`.  The aggregate streams remain aliases;
+the per-product sum replaces the aggregate base when a split is
+active (a mismatch beyond KPI rounding is warned, never silently
+mixed).
 
 ### Route-to-market and optimizer fees (structural market-access costs)
 
@@ -1570,6 +1615,8 @@ fee totals, ≤ 0; rendered in `SUMMARY.md` only when non-zero),
 | (E57) | eligibility via `ppa.negative_price_mask` (shared strict p < 0 classifier) |
 | (E58) | `build_yearly_cashflow` intraday_revenue_eur row (per-origin fade x id_inflation_pct; E13d base extension; E25a membership) |
 | (E59) | `build_yearly_cashflow` intraday_fee_eur row (flat venue rate on per-origin fading volume); `sensitivity._scale_revenue` no-scale decision |
+| (E60) | `economics._escalation_series_aliased` + the `_split_dam` branch of `build_yearly_cashflow` (`_bess_dam_margin_y` shared with E13d/E25a; PV-leg series on the CfD/reversion/imbalance sites); `io.TRAJECTORY_STREAMS` split names + alias-conflict validation |
+| (E61) | `economics._escalation_series_aliased` + the `_split_bm_cap`/`_split_bm_act` branches of `build_yearly_cashflow` (per-product `bm_*_revenue_eur` bases); `io.TRAJECTORY_STREAMS` per-product names |
 | aggregates table | `kpis.add_economic_columns`, `kpis._compute_canonical_revenue_aggregates` |
 
 ## Validation & tests
