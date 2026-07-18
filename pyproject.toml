@@ -23,6 +23,7 @@ packages = [
     "pvbess_opt",
     "pvbess_opt.marketdata",
     "pvbess_opt.plotting",
+    "pvbess_opt.pricedata",
     "pvbess_opt.resource",
 ]
 

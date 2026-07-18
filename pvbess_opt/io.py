@@ -107,6 +107,7 @@ __all__ = [
     "PPA_SHEET_DEFAULTS",
     "PROJECT_SHEET_DEFAULTS",
     "PV_SHEET_DEFAULTS",
+    "SCENARIO_ENGINE_SHEET_DEFAULTS",
     "SIMULATION_SHEET_DEFAULTS",
     "TRUTHY",
     "copy_input_snapshot",
@@ -509,6 +510,45 @@ MARKET_DATA_SHEET_DEFAULTS: dict[str, Any] = {
     "market_fetch_mode": "cache_first",
 }
 
+SCENARIO_ENGINE_SHEET_DEFAULTS: dict[str, Any] = {
+    # Master switch for the multi-year price-scenario layer.  When
+    # False every output is bit-identical to a workbook without the
+    # sheet: years 2..N keep the flat inflation indices exactly as
+    # before.
+    "price_scenarios_enabled": False,
+    # How per-year scenario curves reach the cashflow: 'reprice'
+    # (Tier 1) revalues the FROZEN Year-1 dispatch against each year's
+    # curve and feeds the resulting per-stream factors into the
+    # existing Eq. E24 escalation machinery; 'resolve' (Tier 2)
+    # additionally re-solves the MILP at the support years below;
+    # 'trajectory_only' (Tier 3) keeps today's analytic behaviour with
+    # the refined stream taxonomy.
+    "scenario_projection_mode": "reprice",
+    # Support years for the Tier-2 re-solves (CSV of operating years)
+    # and the re-solve grid resolution in minutes (hourly by default:
+    # a full-year hourly MILP solves in seconds-to-minutes, the 15-min
+    # grid does not scale to 6 scenarios x N years).
+    "scenario_resolve_years": "1,5,10,15,20,25",
+    "scenario_resolve_resolution": 60,
+    # Interpolation of the per-stream factors between support years.
+    "scenario_interp": "loglinear",
+    # Price basis of the engine's cashflow ('nominal' matches the
+    # repo's convention) plus the deflator bridge inputs: vendor
+    # curves are typically real EUR of a base year, bridged at cpi_pct
+    # (see pvbess_opt/pricedata/store.py).
+    "price_basis": "nominal",
+    "price_base_year": 0,
+    "cpi_pct": 2.0,
+    # Which enabled scenario sizes the debt (empty = the first
+    # enabled row); every scenario inherits that debt schedule so the
+    # ensemble compares operating outcomes, not re-levered capital
+    # structures.
+    "debt_sizing_scenario": "",
+    # CfD / FiP support reference follows the scenario DAM path
+    # (opt-out for a strike settled against a frozen reference curve).
+    "support_ref_follows_scenario": True,
+}
+
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_enabled": False,
     "uncertainty_compare_sources": False,
@@ -556,6 +596,7 @@ _SHEET_DEFAULTS: dict[str, dict[str, Any]] = {
     "ppa": PPA_SHEET_DEFAULTS,
     "intraday": INTRADAY_SHEET_DEFAULTS,
     "market_data": MARKET_DATA_SHEET_DEFAULTS,
+    "scenario_engine": SCENARIO_ENGINE_SHEET_DEFAULTS,
 }
 
 _KEY_TO_SHEET: dict[str, str] = {}
@@ -593,6 +634,8 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "support_negative_hour_suspension",
     "id_enabled",
     "id_allow_purchases",
+    "price_scenarios_enabled",
+    "support_ref_follows_scenario",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -622,6 +665,8 @@ _INT_KEYS: frozenset[str] = frozenset({
     "tax_loss_carryforward_years",
     "support_term_years",
     "price_reference_year",
+    "scenario_resolve_resolution",
+    "price_base_year",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -649,6 +694,9 @@ _STR_KEYS: frozenset[str] = frozenset({
     "balancing_source",
     "imbalance_source",
     "market_fetch_mode",
+    "scenario_projection_mode",
+    "scenario_interp",
+    "price_basis",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -683,6 +731,11 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "balancing_source": frozenset({"file", "auto", "entsoe", "admie"}),
     "imbalance_source": frozenset({"file", "auto", "entsoe", "admie"}),
     "market_fetch_mode": frozenset({"cache_first", "refresh", "offline"}),
+    "scenario_projection_mode": frozenset({
+        "reprice", "resolve", "trajectory_only",
+    }),
+    "scenario_interp": frozenset({"loglinear"}),
+    "price_basis": frozenset({"nominal", "real"}),
 }
 
 
@@ -1615,6 +1668,62 @@ _MARKET_DATA_ROWS: tuple[tuple[str, object, str, str], ...] = (
 )
 
 
+_SCENARIO_ENGINE_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("price_scenarios_enabled", False, "bool",
+     "Master switch for the multi-year price-scenario layer. FALSE "
+     "(default) keeps every output bit-identical to a workbook "
+     "without the sheet: years 2..N reuse the Year-1 prices through "
+     "the flat inflation indices exactly as before. TRUE arms the "
+     "scenarios listed on the price_scenarios sheet."),
+    ("scenario_projection_mode", "reprice", "enum",
+     "How per-year scenario curves reach the cashflow. 'reprice' "
+     "(Tier 1, default): revalue the FROZEN Year-1 dispatch against "
+     "each (scenario, year) curve and feed the per-stream factors "
+     "g[y] = R(dispatch1, price_y) / R(dispatch1, price_1) into the "
+     "existing per-year escalation machinery (Eq. E24) as "
+     "auto-generated replace-mode trajectories. 'resolve' (Tier 2): "
+     "additionally re-solve the MILP at scenario_resolve_years with "
+     "that year's prices AND degraded plant, interpolating between "
+     "support years. 'trajectory_only' (Tier 3): today's analytic "
+     "behaviour with the refined stream taxonomy."),
+    ("scenario_resolve_years", "1,5,10,15,20,25", "CSV of years",
+     "Support years (operating years) for the Tier-2 re-solves; "
+     "ignored unless scenario_projection_mode = resolve."),
+    ("scenario_resolve_resolution", 60, "min",
+     "Model-grid resolution of the Tier-2 support-year re-solves. "
+     "Hourly (60) by default: a full-year hourly MILP solves in "
+     "seconds-to-minutes, while re-solving 6 scenarios x N years at "
+     "the 15-minute grid is infeasible as a default."),
+    ("scenario_interp", "loglinear", "enum",
+     "Interpolation of the per-stream factors between Tier-2 support "
+     "years (log-linear on the factor level)."),
+    ("price_basis", "nominal", "enum",
+     "Basis of the engine's cashflow prices. 'nominal' matches the "
+     "repo convention; 'real' additionally requires price_base_year. "
+     "Scenario stores declare their own basis in meta.yaml and are "
+     "bridged onto this basis at cpi_pct (vendor curves are typically "
+     "real EUR of a base year while this cashflow is nominal)."),
+    ("price_base_year", 0, "year",
+     "Reference year of the engine price level when price_basis = "
+     "'real' (0 = unset)."),
+    ("cpi_pct", 2.0, "%/yr",
+     "CPI used by the real/nominal deflator bridge between scenario "
+     "stores and the engine basis. Inert while every enabled store "
+     "already sits on the engine basis."),
+    ("debt_sizing_scenario", "", "scenario name",
+     "Which enabled price scenario sizes the debt (empty = the first "
+     "enabled row). Debt is sized ONCE on that scenario and every "
+     "scenario inherits the schedule, so the ensemble compares "
+     "operating outcomes rather than re-levered capital structures — "
+     "pick a downside case for bankable sizing."),
+    ("support_ref_follows_scenario", True, "bool",
+     "TRUE: the CfD / sliding-FiP market-reference leg follows each "
+     "scenario's DAM path (the support settlement moves with the "
+     "scenario). FALSE: the reference stays on the base DAM path "
+     "(a strike settled against a frozen reference curve)."),
+)
+
+
 _SHEET_ROW_TEMPLATES: dict[
     str, tuple[tuple[str, object, str, str], ...]
 ] = {
@@ -1627,6 +1736,7 @@ _SHEET_ROW_TEMPLATES: dict[
     "ppa": _PPA_ROWS,
     "intraday": _INTRADAY_ROWS,
     "market_data": _MARKET_DATA_ROWS,
+    "scenario_engine": _SCENARIO_ENGINE_ROWS,
 }
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
@@ -1813,6 +1923,202 @@ def _build_scenarios_sheet(
             for r in _SCENARIOS_EXAMPLE_ROWS
         ],
         columns=list(SCENARIOS_SHEET_COLUMNS),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Optional tidy sheet: price_scenarios (multi-year price-scenario list)
+# ---------------------------------------------------------------------------
+
+# Price-scenarios sheet: tidy — ONE row per scenario, gated by an
+# ``enabled`` TRUE/FALSE toggle read from the first data row (the
+# sizing / scenarios / trajectories sheet pattern; shipped disabled so
+# a normal run is bit-identical).  ``store_path`` is resolved against
+# the workbook's directory; the canonical store schema and the
+# provider adapters live in :mod:`pvbess_opt.pricedata`.  The engine
+# additionally requires ``price_scenarios_enabled = TRUE`` on the
+# ``scenario_engine`` sheet — an enabled sheet with the master switch
+# off is inert data, exactly like a ``bm_merit_order`` sheet with its
+# switch off.
+PRICE_SCENARIOS_SHEET_COLUMNS: tuple[str, ...] = (
+    "enabled",
+    "name",
+    "provider",
+    "vintage",
+    "weight_pct",
+    "store_path",
+    "notes",
+)
+
+# Disabled worked example: a parametric central/downside pair plus the
+# free TYNDP proxy, weights summing to 100.
+_PRICE_SCENARIOS_EXAMPLE_ROWS: tuple[tuple[Any, ...], ...] = (
+    ("FALSE", "Central", "parametric", "2026-07", 50,
+     "price_scenarios/central",
+     "Parametric knobs in the store's meta.yaml (level drift, "
+     "PV-weighted capture decline, spread evolution, per-product "
+     "balancing paths)."),
+    (None, "Downside", "parametric", "2026-07", 30,
+     "price_scenarios/downside",
+     "Steeper cannibalization / saturation for debt sizing."),
+    (None, "TYNDP proxy", "tyndp", "TYNDP-2026", 20,
+     "price_scenarios/tyndp",
+     "Free ENTSO-E TYNDP hourly marginal-cost milestones (CC-BY 4.0), "
+     "interpolated between 2030/2040/2050."),
+)
+
+
+def _build_price_scenarios_sheet(
+    rows: list[dict[str, Any]] | None = None,
+) -> pd.DataFrame:
+    """Render the optional ``price_scenarios`` sheet."""
+    if rows:
+        frame = pd.DataFrame(rows)
+        if "enabled" not in frame.columns:
+            frame["enabled"] = None
+            frame.loc[0, "enabled"] = "TRUE"
+        for col in PRICE_SCENARIOS_SHEET_COLUMNS:
+            if col not in frame.columns:
+                frame[col] = None
+        return frame[list(PRICE_SCENARIOS_SHEET_COLUMNS)]
+    return pd.DataFrame(
+        [
+            dict(zip(PRICE_SCENARIOS_SHEET_COLUMNS, r, strict=True))
+            for r in _PRICE_SCENARIOS_EXAMPLE_ROWS
+        ],
+        columns=list(PRICE_SCENARIOS_SHEET_COLUMNS),
+    )
+
+
+def _normalise_price_scenarios_block(
+    raw: Any, *, source: str,
+) -> list[dict[str, Any]] | None:
+    """Validate a raw price-scenarios list (sheet or YAML surface).
+
+    Returns the normalised ``[{name, provider, vintage, weight_pct,
+    store_path, notes}]`` list or None when the block is absent/empty.
+    Validation is structural and precise: unique non-empty names, a
+    known provider (:data:`pvbess_opt.pricedata.SCENARIO_PROVIDERS`),
+    non-negative weights summing to 100 %, and a ``store_path`` for
+    every provider that reads or generates a store directory.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"{source}: price_scenarios must be a list of scenario "
+            f"mappings, got {type(raw).__name__}."
+        )
+    if not raw:
+        return None
+    from .pricedata import SCENARIO_PROVIDERS
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw, start=1):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{source}: price_scenarios entry {index} must be a "
+                f"mapping, got {type(entry).__name__}."
+            )
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            raise ValueError(
+                f"{source}: price_scenarios entry {index} has no name."
+            )
+        if name in seen:
+            raise ValueError(
+                f"{source}: duplicate price scenario name {name!r}."
+            )
+        seen.add(name)
+        provider = str(entry.get("provider") or "").strip().lower()
+        if provider not in SCENARIO_PROVIDERS:
+            raise ValueError(
+                f"{source}: scenario {name!r} provider {provider!r} is "
+                f"not one of {', '.join(SCENARIO_PROVIDERS)}."
+            )
+        try:
+            weight = float(entry.get("weight_pct", 0.0) or 0.0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"{source}: scenario {name!r} weight_pct "
+                f"{entry.get('weight_pct')!r} is not a number."
+            ) from exc
+        if weight < 0.0:
+            raise ValueError(
+                f"{source}: scenario {name!r} weight_pct must be >= 0; "
+                f"got {weight:g}."
+            )
+        store_path = str(entry.get("store_path") or "").strip()
+        if not store_path:
+            raise ValueError(
+                f"{source}: scenario {name!r} (provider {provider!r}) "
+                "needs a store_path — every provider reads or "
+                "generates a store directory (meta.yaml at minimum)."
+            )
+        out.append({
+            "name": name,
+            "provider": provider,
+            "vintage": str(entry.get("vintage") or "").strip(),
+            "weight_pct": weight,
+            "store_path": store_path,
+            "notes": str(entry.get("notes") or "").strip(),
+        })
+    total = sum(entry["weight_pct"] for entry in out)
+    if abs(total - 100.0) > 1e-6:
+        raise ValueError(
+            f"{source}: price scenario weights must sum to 100 %; the "
+            f"{len(out)} enabled row(s) sum to {total:g}."
+        )
+    return out
+
+
+def _parse_price_scenarios_sheet(
+    df: pd.DataFrame,
+) -> list[dict[str, Any]] | None:
+    """Parse the tidy ``price_scenarios`` sheet (enabled-gated)."""
+    def cell(row: pd.Series, column: str) -> Any:
+        value = row.get(column)
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return None
+        return value
+
+    if df.empty:
+        return None
+    missing = set(PRICE_SCENARIOS_SHEET_COLUMNS) - {"notes"} - set(
+        str(c) for c in df.columns
+    )
+    if missing:
+        raise ValueError(
+            "price_scenarios sheet is missing column(s) "
+            f"{', '.join(sorted(missing))}; expected "
+            f"{', '.join(PRICE_SCENARIOS_SHEET_COLUMNS)}."
+        )
+    enabled_raw = cell(df.iloc[0], "enabled")
+    if enabled_raw is None or str(
+        enabled_raw,
+    ).strip().lower() in FALSY:
+        return None
+    if str(enabled_raw).strip().lower() not in TRUTHY:
+        raise ValueError(
+            f"price_scenarios sheet: enabled cell {enabled_raw!r} is "
+            "neither TRUE nor FALSE."
+        )
+    rows: list[dict[str, Any]] = []
+    for _, row in df.iterrows():
+        if all(
+            cell(row, column) is None
+            for column in PRICE_SCENARIOS_SHEET_COLUMNS
+            if column != "enabled"
+        ):
+            continue
+        rows.append({
+            column: cell(row, column)
+            for column in PRICE_SCENARIOS_SHEET_COLUMNS
+            if column != "enabled"
+        })
+    return _normalise_price_scenarios_block(
+        rows, source="price_scenarios sheet",
     )
 
 
@@ -2109,6 +2415,13 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         MARKET_DATA_SHEET_DEFAULTS,
     )
     market_df = _build_kv_sheet(market_section, _MARKET_DATA_ROWS)
+    engine_section = typed.get("scenario_engine") or dict(
+        SCENARIO_ENGINE_SHEET_DEFAULTS,
+    )
+    engine_df = _build_kv_sheet(engine_section, _SCENARIO_ENGINE_ROWS)
+    price_scenarios_df = _build_price_scenarios_sheet(
+        typed.get("price_scenarios"),
+    )
 
     profile = typed.get("max_injection_profile")
     if profile is None:
@@ -2129,6 +2442,12 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         ppa_df.to_excel(writer, sheet_name="ppa", index=False)
         intraday_df.to_excel(writer, sheet_name="intraday", index=False)
         market_df.to_excel(writer, sheet_name="market_data", index=False)
+        engine_df.to_excel(
+            writer, sheet_name="scenario_engine", index=False,
+        )
+        price_scenarios_df.to_excel(
+            writer, sheet_name="price_scenarios", index=False,
+        )
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
@@ -2319,6 +2638,10 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         # and a cache path may be case-sensitive on disk — none of them
         # may pass through the lowercasing enum parser.
         "entsoe_token", "entsoe_token_env", "market_cache_dir",
+        # Free-form scenario_engine strings: a CSV of support years and
+        # a scenario NAME (matched case-sensitively against the
+        # price_scenarios sheet).
+        "scenario_resolve_years", "debt_sizing_scenario",
     ):
         # Free-form strings: a blank cell resolves to the default; a
         # non-blank cell is taken verbatim (stripped).
@@ -4311,6 +4634,31 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         typed["market_data"] = _parse_kv_sheet("market_data", market_flat)
     else:
         typed["market_data"] = dict(MARKET_DATA_SHEET_DEFAULTS)
+
+    # Optional ``scenario_engine`` sheet — same master-switch pattern:
+    # absent means the price-scenario layer is disabled and the run is
+    # bit-identical to before.
+    if "scenario_engine" in sheets:
+        engine_flat = _read_kv_flat(xlsx_path, "scenario_engine")
+        typed["scenario_engine"] = _parse_kv_sheet(
+            "scenario_engine", engine_flat,
+        )
+    else:
+        typed["scenario_engine"] = dict(SCENARIO_ENGINE_SHEET_DEFAULTS)
+
+    # Optional ``price_scenarios`` tidy sheet — absent sheet, enabled
+    # FALSE, or no data rows all resolve to None (trajectories
+    # pattern); an enabled sheet with the scenario_engine master
+    # switch off stays inert data.
+    if "price_scenarios" in sheets:
+        try:
+            typed["price_scenarios"] = _parse_price_scenarios_sheet(
+                pd.read_excel(xlsx_path, sheet_name="price_scenarios"),
+            )
+        except ValueError as exc:
+            raise ValueError(f"price_scenarios: {exc}") from exc
+    else:
+        typed["price_scenarios"] = None
 
     # Optional ``trajectories`` sheet — per-year stream multipliers
     # (Eq. E24).  Absent sheet, ``enabled`` = FALSE, or no data rows all

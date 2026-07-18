@@ -172,6 +172,7 @@ def test_write_workbook_emits_all_sheets(tmp_path, repo_input_xlsx):
     assert set(pd.ExcelFile(dst).sheet_names) == {
         "timeseries", "project", "pv", "bess", "economics",
         "simulation", "balancing", "ppa", "intraday", "market_data",
+        "scenario_engine", "price_scenarios",
         "max_injection_profile",
         "max_injection_profile_pv", "max_injection_profile_bess",
         "sizing", "scenarios", "trajectories",

@@ -26,7 +26,7 @@ from pvbess_opt.io_read import (
 ROOT = Path(__file__).resolve().parent.parent
 _SECTIONS = (
     "project", "pv", "bess", "economics", "simulation", "balancing", "ppa",
-    "intraday", "market_data",
+    "intraday", "market_data", "scenario_engine",
 )
 
 
