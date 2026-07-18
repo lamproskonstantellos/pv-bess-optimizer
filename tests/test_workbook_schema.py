@@ -24,6 +24,7 @@ from pvbess_opt.io import (
     BESS_SHEET_DEFAULTS,
     ECONOMICS_SHEET_DEFAULTS,
     INTRADAY_SHEET_DEFAULTS,
+    MARKET_DATA_SHEET_DEFAULTS,
     PPA_SHEET_DEFAULTS,
     PROJECT_SHEET_DEFAULTS,
     PV_SHEET_DEFAULTS,
@@ -176,6 +177,16 @@ def test_intraday_sheet_keys():
     assert set(INTRADAY_SHEET_DEFAULTS) == expected
 
 
+def test_market_data_sheet_keys():
+    expected = {
+        "price_source", "bidding_zone", "price_reference_year",
+        "price_resample_policy", "balancing_source", "imbalance_source",
+        "entsoe_token", "entsoe_token_env",
+        "market_cache_dir", "market_fetch_mode",
+    }
+    assert set(MARKET_DATA_SHEET_DEFAULTS) == expected
+
+
 def test_simulation_sheet_keys():
     expected = {
         "uncertainty_enabled", "uncertainty_compare_sources",
@@ -205,7 +216,7 @@ def test_all_sheets_present(repo_input_xlsx):
     sheets = pd.ExcelFile(repo_input_xlsx).sheet_names
     assert set(sheets) == {
         "timeseries", "project", "pv", "bess", "economics",
-        "simulation", "balancing", "ppa", "intraday",
+        "simulation", "balancing", "ppa", "intraday", "market_data",
         "max_injection_profile",
         "max_injection_profile_pv", "max_injection_profile_bess",
         "sizing", "scenarios", "trajectories",
@@ -222,6 +233,7 @@ def test_repo_workbook_kv_sheets_match_schema(repo_input_xlsx):
         "balancing": BALANCING_SHEET_DEFAULTS,
         "ppa": PPA_SHEET_DEFAULTS,
         "intraday": INTRADAY_SHEET_DEFAULTS,
+        "market_data": MARKET_DATA_SHEET_DEFAULTS,
         "simulation": SIMULATION_SHEET_DEFAULTS,
     }
     for sheet, schema in defaults.items():

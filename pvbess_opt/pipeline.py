@@ -76,6 +76,7 @@ from pvbess_opt.lifetime import (
     resolve_augmentation_config,
     resolve_bess_replacement_year,
 )
+from pvbess_opt.marketdata import materialize_bypassed_workbook
 from pvbess_opt.modes import resolve_mode
 from pvbess_opt.optimization import (
     BALANCING_INVARIANT_KEYS,
@@ -1952,6 +1953,14 @@ def _run_one(
         if snap is not None:
             renamed = layout["inputs"] / "input_snapshot.xlsx"
             snap.replace(renamed)
+            # Market-data bypass (market_data sheet): materialise the
+            # fetched columns into the snapshot and reset the source
+            # keys to 'file', so the snapshot re-runs the exact prices
+            # offline — no token, no network, no cache.
+            if params.get("market_provenance"):
+                materialize_bypassed_workbook(
+                    renamed, ts, params["market_provenance"],
+                )
         write_assumptions_summary(
             layout["inputs"] / "assumptions_summary.txt", params, econ,
         )
@@ -2025,6 +2034,10 @@ def _run_one(
             lender_cases=bundle.get("lender_cases"),
             midlife_resolve=midlife_df,
             risk_metrics=risk_df,
+            market_provenance=(
+                pd.DataFrame(params["market_provenance"])
+                if params.get("market_provenance") else None
+            ),
         )
         write_summary_md(
             layout["summary"] / "SUMMARY.md",

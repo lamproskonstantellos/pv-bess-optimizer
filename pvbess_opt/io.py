@@ -103,6 +103,7 @@ __all__ = [
     "FALSY",
     "INTRADAY_SHEET_DEFAULTS",
     "LAYOUT_SUBDIRS",
+    "MARKET_DATA_SHEET_DEFAULTS",
     "PPA_SHEET_DEFAULTS",
     "PROJECT_SHEET_DEFAULTS",
     "PV_SHEET_DEFAULTS",
@@ -472,6 +473,42 @@ INTRADAY_SHEET_DEFAULTS: dict[str, Any] = {
     "id_inflation_pct": 0.0,
 }
 
+MARKET_DATA_SHEET_DEFAULTS: dict[str, Any] = {
+    # Day-ahead price source.  'file' (default) keeps the workbook
+    # column untouched — bit-identical behaviour; 'entsoe' fetches the
+    # reference-year series from the ENTSO-E Transparency Platform and
+    # REPLACES dam_price_eur_per_mwh for the whole horizon (override
+    # semantics — workbook values are used only under 'file').
+    "price_source": "file",
+    # Bidding zone / country selector; the EIC code and local timezone
+    # come from pvbess_opt.marketdata.ZONES.
+    "bidding_zone": "gr",
+    # Historical calendar year fetched as the Year-1 price basis.
+    "price_reference_year": 2025,
+    # Fixed intensive-quantity resampling policy: coarser native data
+    # is step-held onto a finer model grid (an hourly price repeats
+    # over its four quarters, NEVER divided), finer data is averaged
+    # onto a coarser grid.  Single accepted value; the key exists so a
+    # future alternative is an explicit, versioned choice.
+    "price_resample_policy": "step_hold",
+    # Balancing / imbalance sources.  'file' keeps workbook columns;
+    # 'auto' lets the per-zone registry pick (GR → admie, else entsoe);
+    # the API providers land with the ADMIE ingestion phase.
+    "balancing_source": "file",
+    "imbalance_source": "file",
+    # ENTSO-E API token: the literal token, or empty to read the
+    # environment variable named by entsoe_token_env.  The shipped
+    # template keeps this empty — never commit a real token; logs mask
+    # it to its first 8 characters.
+    "entsoe_token": "",
+    "entsoe_token_env": "ENTSOE_API_TOKEN",
+    # On-disk fetch cache (the PVGIS pattern) and its usage mode:
+    # cache_first reuses cached fetches, refresh always re-hits the
+    # API, offline errors on a cache miss (reproducible CI runs).
+    "market_cache_dir": "~/.cache/pvbess/market",
+    "market_fetch_mode": "cache_first",
+}
+
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_enabled": False,
     "uncertainty_compare_sources": False,
@@ -518,6 +555,7 @@ _SHEET_DEFAULTS: dict[str, dict[str, Any]] = {
     "balancing": BALANCING_SHEET_DEFAULTS,
     "ppa": PPA_SHEET_DEFAULTS,
     "intraday": INTRADAY_SHEET_DEFAULTS,
+    "market_data": MARKET_DATA_SHEET_DEFAULTS,
 }
 
 _KEY_TO_SHEET: dict[str, str] = {}
@@ -583,6 +621,7 @@ _INT_KEYS: frozenset[str] = frozenset({
     "depreciation_years_site",
     "tax_loss_carryforward_years",
     "support_term_years",
+    "price_reference_year",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -604,6 +643,12 @@ _STR_KEYS: frozenset[str] = frozenset({
     "optimizer_margin_basis",
     "support_scheme",
     "support_ref_period",
+    "price_source",
+    "bidding_zone",
+    "price_resample_policy",
+    "balancing_source",
+    "imbalance_source",
+    "market_fetch_mode",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -628,6 +673,16 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "optimizer_margin_basis": frozenset({"dam", "dam_plus_balancing"}),
     "support_scheme": frozenset({"none", "sliding_fip", "cfd_two_way"}),
     "support_ref_period": frozenset({"monthly", "hourly"}),
+    "price_source": frozenset({"file", "entsoe"}),
+    # Lowercase zone tokens (the enum parser lowercases); the canonical
+    # spellings and EIC codes live in pvbess_opt.marketdata.ZONES.
+    "bidding_zone": frozenset({
+        "gr", "de_lu", "fr", "it_nord", "es", "bg", "ro",
+    }),
+    "price_resample_policy": frozenset({"step_hold"}),
+    "balancing_source": frozenset({"file", "auto", "entsoe", "admie"}),
+    "imbalance_source": frozenset({"file", "auto", "entsoe", "admie"}),
+    "market_fetch_mode": frozenset({"cache_first", "refresh", "offline"}),
 }
 
 
@@ -1497,6 +1552,69 @@ _INTRADAY_ROWS: tuple[tuple[str, object, str, str], ...] = (
 )
 
 
+_MARKET_DATA_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("price_source", "file", "enum",
+     "Day-ahead price source: 'file' (default) reads the workbook "
+     "dam_price_eur_per_mwh column; 'entsoe' fetches the "
+     "price_reference_year series for the selected bidding_zone from "
+     "the ENTSO-E Transparency Platform and REPLACES the workbook "
+     "column for the whole horizon (override semantics — with an API "
+     "source the workbook values are bypassed even where present). "
+     "One consolidated INFO log lists every bypassed column with its "
+     "provenance; the same records land on the results workbook's "
+     "market_data_provenance sheet."),
+    ("bidding_zone", "gr", "enum",
+     "Country / bidding-zone selector for every fetched dataset. "
+     "Accepted: gr, de_lu, fr, it_nord, es, bg, ro (EIC codes and "
+     "local timezones in pvbess_opt.marketdata.ZONES; extendable "
+     "there)."),
+    ("price_reference_year", 2025, "year",
+     "Historical calendar year fetched as the Year-1 price basis. The "
+     "fetched local-time series is laid onto the workbook grid by "
+     "calendar position; a leap reference year drops Feb 29 (industry "
+     "8760-hour convention). Requires the workbook timeseries to span "
+     "one full non-leap year from Jan 1 00:00."),
+    ("price_resample_policy", "step_hold", "enum",
+     "Fixed intensive-quantity resampling policy (single accepted "
+     "value). Prices are EUR/MWh levels: coarser native data is "
+     "step-held onto a finer model grid (an hourly price repeats over "
+     "its four quarters, never divided), finer data is averaged onto "
+     "a coarser grid with an INFO that intra-period spread is "
+     "averaged away."),
+    ("balancing_source", "file", "enum",
+     "Balancing price source: 'file' (default) keeps the nine workbook "
+     "balancing columns / scalar fallbacks; 'auto' lets the per-zone "
+     "registry pick (GR -> admie, else entsoe, falling back to 'file' "
+     "with a WARNING when the zone publishes nothing); 'entsoe' / "
+     "'admie' force a provider. The API providers land with the ADMIE "
+     "ingestion phase - until then any non-file selection fails "
+     "loudly."),
+    ("imbalance_source", "file", "enum",
+     "Imbalance price source; same options and rollout status as "
+     "balancing_source."),
+    ("entsoe_token", "", "token",
+     "ENTSO-E Web API security token (free, via 'Web API Security "
+     "Token' after registering at transparency.entsoe.eu). Leave "
+     "empty to read the environment variable named by "
+     "entsoe_token_env instead. Keep real tokens out of committed / "
+     "shared workbooks; logs mask the token to its first 8 "
+     "characters."),
+    ("entsoe_token_env", "ENTSOE_API_TOKEN", "env var",
+     "Name of the environment variable checked for the ENTSO-E token "
+     "when entsoe_token is empty."),
+    ("market_cache_dir", "~/.cache/pvbess/market", "path",
+     "On-disk cache for fetched market data (the PVGIS pattern): raw "
+     "provider responses are cached keyed on the request identity, so "
+     "a repeat run never re-hits the network."),
+    ("market_fetch_mode", "cache_first", "enum",
+     "Cache usage: 'cache_first' reuses cached fetches and hits the "
+     "API only on a miss; 'refresh' always re-fetches and overwrites "
+     "the cache; 'offline' never touches the network and errors on a "
+     "cache miss, naming the missing cache file (reproducible / CI "
+     "runs)."),
+)
+
+
 _SHEET_ROW_TEMPLATES: dict[
     str, tuple[tuple[str, object, str, str], ...]
 ] = {
@@ -1508,6 +1626,7 @@ _SHEET_ROW_TEMPLATES: dict[
     "balancing": _BALANCING_ROWS,
     "ppa": _PPA_ROWS,
     "intraday": _INTRADAY_ROWS,
+    "market_data": _MARKET_DATA_ROWS,
 }
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
@@ -1986,6 +2105,10 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     ppa_df = _build_kv_sheet(ppa_section, _PPA_ROWS)
     intraday_section = typed.get("intraday") or dict(INTRADAY_SHEET_DEFAULTS)
     intraday_df = _build_kv_sheet(intraday_section, _INTRADAY_ROWS)
+    market_section = typed.get("market_data") or dict(
+        MARKET_DATA_SHEET_DEFAULTS,
+    )
+    market_df = _build_kv_sheet(market_section, _MARKET_DATA_ROWS)
 
     profile = typed.get("max_injection_profile")
     if profile is None:
@@ -2005,6 +2128,7 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         balancing_df.to_excel(writer, sheet_name="balancing", index=False)
         ppa_df.to_excel(writer, sheet_name="ppa", index=False)
         intraday_df.to_excel(writer, sheet_name="intraday", index=False)
+        market_df.to_excel(writer, sheet_name="market_data", index=False)
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
@@ -2188,9 +2312,16 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         return _parse_pv_tilt(raw, default)
     if key == "weather_year":
         return _parse_pv_weather_year(raw, default)
-    if key in ("timeseries_path", "raddatabase"):
-        # Free-form PVGIS strings: a blank cell resolves to the default
-        # (None); a non-blank cell is taken verbatim (stripped).
+    if key in (
+        "timeseries_path", "raddatabase",
+        # Free-form market_data strings, case-preserved: a token is
+        # case-sensitive, an env-var name is conventionally uppercase
+        # and a cache path may be case-sensitive on disk — none of them
+        # may pass through the lowercasing enum parser.
+        "entsoe_token", "entsoe_token_env", "market_cache_dir",
+    ):
+        # Free-form strings: a blank cell resolves to the default; a
+        # non-blank cell is taken verbatim (stripped).
         return _parse_pv_path(raw, default)
     if key == "debt_sizing_deck":
         # Free-form deck name (matched lowercase against the
@@ -4173,6 +4304,14 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     else:
         typed["intraday"] = dict(INTRADAY_SHEET_DEFAULTS)
 
+    # Optional ``market_data`` sheet — same pattern: absent means every
+    # source stays 'file' and the run is bit-identical to before.
+    if "market_data" in sheets:
+        market_flat = _read_kv_flat(xlsx_path, "market_data")
+        typed["market_data"] = _parse_kv_sheet("market_data", market_flat)
+    else:
+        typed["market_data"] = dict(MARKET_DATA_SHEET_DEFAULTS)
+
     # Optional ``trajectories`` sheet — per-year stream multipliers
     # (Eq. E24).  Absent sheet, ``enabled`` = FALSE, or no data rows all
     # resolve to None and the run is bit-identical to before.
@@ -4245,6 +4384,16 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     ts = typed.pop("ts")
     dt_minutes = detect_timestep_minutes(ts)
     validate_workbook_params(typed, dt_minutes=dt_minutes)
+    # Market-data source resolution (market_data sheet): with every
+    # source at its 'file' default this is a no-op; an API source
+    # REPLACES the matching price column(s) with the fetched
+    # reference-year series (override semantics) and records the
+    # provenance under typed['market_provenance'].  Runs BEFORE the
+    # balancing scalar fallback below so a fetched balancing column
+    # suppresses the fallback exactly like a workbook column would.
+    from .marketdata import resolve_market_data
+
+    resolve_market_data(typed, ts, dt_minutes)
     # Two-tier feasibility guard for a finite grid-import cap (Eq. S35),
     # here because ts and dt_minutes are both in scope.  Tier 1 is a
     # certificate: a step whose load exceeds PV + BESS power + the cap
@@ -4520,6 +4669,13 @@ def _typed_to_flat(
         # intraday cashflow columns.
         "intraday": dict(typed.get("intraday") or INTRADAY_SHEET_DEFAULTS),
     }
+    # Market-data bypass provenance (market_data sheet, API sources
+    # only): carried to the pipeline for the results workbook's
+    # provenance sheet and the materialised input snapshot.  Absent —
+    # not None — when nothing was fetched, so the flat params dict is
+    # unchanged for every 'file'-source run.
+    if typed.get("market_provenance"):
+        params["market_provenance"] = typed["market_provenance"]
     return params, ts
 
 
@@ -5052,6 +5208,7 @@ def write_results_workbook(
     lender_cases: pd.DataFrame | None = None,
     midlife_resolve: pd.DataFrame | None = None,
     risk_metrics: pd.DataFrame | None = None,
+    market_provenance: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -5120,5 +5277,13 @@ def write_results_workbook(
             )
         if emissions is not None and not emissions.empty:
             emissions.to_excel(writer, sheet_name="emissions", index=False)
+        # Market-data bypass provenance (market_data sheet, API
+        # sources): one row per bypassed column — zone, reference
+        # year, source, fetch date, cache state.  Absent on every
+        # 'file'-source run so the default workbook is unchanged.
+        if market_provenance is not None and not market_provenance.empty:
+            market_provenance.to_excel(
+                writer, sheet_name="market_data_provenance", index=False,
+            )
         style_workbook(writer.book)
     return out_path

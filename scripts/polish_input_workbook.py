@@ -60,7 +60,7 @@ AMBER_FILL_HEXES: frozenset[str] = frozenset({
 
 _PARAMETER_SHEETS: tuple[str, ...] = (
     "project", "pv", "bess", "economics", "simulation", "balancing", "ppa",
-    "intraday",
+    "intraday", "market_data",
 )
 
 # Sheets whose header row is center-aligned on top of the house style.
