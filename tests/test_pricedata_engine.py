@@ -381,6 +381,14 @@ def test_apply_reprice_merges_auto_trajectories(tmp_path):
     )
     assert "Central" in application.fan
     assert any("capture" in line for line in application.summary_lines)
+    # The armed marker and the applied auto-block (the ensemble's
+    # verbatim-reuse input) are exposed on the application.
+    assert econ["_price_scenario_applied"] == "Central"
+    assert application.applied_trajectories is not None
+    assert {
+        "revenue_dam_pv", "revenue_dam_bess_export",
+        "expense_dam_bess_charge",
+    } <= set(application.applied_trajectories)
 
 
 def test_apply_selects_debt_sizing_scenario(tmp_path):

@@ -88,6 +88,18 @@ def test_full_run_with_armed_reprice_engine(tmp_path):
     plots = out_dir / "04_financial_plots"
     assert (plots / "price_path_fan.pdf").exists()
     assert (plots / "capture_kpis.pdf").exists()
+    # Weighted ensemble: with a single 100 %-weight scenario the sheet
+    # still lands — one scenario row plus the labelled stat rows, the
+    # expectation equal to the sole member's NPV — and the digest
+    # carries the E[NPV] line.
+    ensemble = pd.read_excel(
+        results, sheet_name="price_scenario_ensemble",
+    ).set_index("scenario")
+    assert bool(ensemble.loc["Central", "applied"]) is True
+    assert ensemble.loc["E[NPV]", "npv_eur"] == pytest.approx(
+        float(ensemble.loc["Central", "npv_eur"]),
+    )
+    assert "E[NPV]" in summary
 
 
 @pytest.mark.slow

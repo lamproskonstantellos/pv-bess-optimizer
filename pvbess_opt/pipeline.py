@@ -141,6 +141,7 @@ from pvbess_opt.plotting import (
 )
 from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
 from pvbess_opt.pricedata.engine import apply_price_scenarios
+from pvbess_opt.pricedata.ensemble import run_price_scenario_ensemble
 from pvbess_opt.rolling_horizon import (
     monte_carlo_balancing,
     monte_carlo_rolling,
@@ -895,6 +896,31 @@ def _scenario_paths_frame(application: Any) -> pd.DataFrame | None:
         )
         frames.append(frame)
     return pd.concat(frames, ignore_index=True)
+
+
+def _ensemble_frame(result: Any) -> pd.DataFrame | None:
+    """Per-scenario ensemble table plus the weighted-stat rows.
+
+    The weighted headline statistics land as labelled rows under the
+    scenario rows (E[NPV] / P10 / P50 / P90 / E[IRR]) so the sheet is
+    self-contained — None while the ensemble did not run.
+    """
+    if result is None:
+        return None
+    table: pd.DataFrame = result.table.copy()
+    stat_rows: list[dict[str, Any]] = []
+    for key, label, column in (
+        ("expected_npv_eur", "E[NPV]", "npv_eur"),
+        ("npv_p10_eur", "P10", "npv_eur"),
+        ("npv_p50_eur", "P50", "npv_eur"),
+        ("npv_p90_eur", "P90", "npv_eur"),
+        ("expected_irr_pct", "E[IRR]", "irr_pct"),
+    ):
+        if key in result.stats:
+            stat_rows.append({"scenario": label, column: result.stats[key]})
+    return pd.concat(
+        [table, pd.DataFrame(stat_rows)], ignore_index=True,
+    )
 
 
 def _build_degradation_report(
@@ -2062,7 +2088,27 @@ def _run_one(
             rolling_mc_df, kpis, econ, bundle.get("capacities"),
         )
 
+        # Weighted price-scenario ensemble (pricedata layer): one
+        # dispatch, N cashflows — every enabled scenario evaluated on
+        # the SAME Year-1 dispatch and the SAME sized debt (the frozen
+        # keys in the bundle econ), weighted into E[NPV] / E[IRR] and
+        # the discrete P10/P50/P90.  None while the engine is
+        # disarmed, so the default outputs stay bit-identical.
         _ps_application = bundle.get("price_scenarios")
+        ensemble_result = None
+        if _ps_application is not None:
+            ensemble_result = run_price_scenario_ensemble(
+                econ, kpis, bundle.get("capacities") or {}, ts, res,
+                base_dir=Path(config.excel).parent,
+                applied_trajectories=_ps_application.applied_trajectories,
+                applied_name=_ps_application.applied,
+                lifetime_yearly=bundle.get("lifetime_yearly"),
+            )
+        _ps_lines: list[str] | None = None
+        if _ps_application is not None:
+            _ps_lines = list(_ps_application.summary_lines)
+            if ensemble_result is not None:
+                _ps_lines += ensemble_result.summary_lines
         write_results_workbook(
             out_dir / "03_results.xlsx",
             res_year1=res,
@@ -2092,6 +2138,7 @@ def _run_one(
                 _ps_application.resolve_delta
                 if _ps_application is not None else None
             ),
+            price_scenario_ensemble=_ensemble_frame(ensemble_result),
         )
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
@@ -2102,10 +2149,7 @@ def _run_one(
             replacement_note=_format_replacement_note(econ),
             lender_cases=bundle.get("lender_cases"),
             midlife_resolve=midlife_df,
-            price_scenario_lines=(
-                _ps_application.summary_lines
-                if _ps_application is not None else None
-            ),
+            price_scenario_lines=_ps_lines,
         )
 
         # Balancing plot pair promised by the README's report list; both

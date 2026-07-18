@@ -1109,10 +1109,12 @@ def build_yearly_cashflow(
     bm_infl = float(econ.get("bm_inflation_pct", 0.0) or 0.0) / 100.0
 
     # Per-stream escalation series (Eq. E24): flat scalar indices unless
-    # a trajectory reshapes the stream.  The CfD DAM leg, the post-term
-    # PPA reversion and the optimizer-fee base (E13d) all ride the SAME
-    # DAM series as the merchant DAM revenue; the PPA strike escalates
-    # contractually (ppa_inflation_pct, no trajectory by design).
+    # a trajectory reshapes the stream.  The post-term PPA reversion and
+    # the optimizer-fee base (E13d) ride the SAME DAM series as the
+    # merchant DAM revenue; the CfD DAM leg does too unless the armed
+    # scenario engine decouples it (_g_cfd_ref below); the PPA strike
+    # escalates contractually (ppa_inflation_pct, no trajectory by
+    # design).
     trajectories = econ.get("trajectories") or None
     g_retail = _escalation_series(
         "revenue_retail", retail_infl, n_years, trajectories,
@@ -1199,6 +1201,32 @@ def build_yearly_cashflow(
     _g_opex_bess = _opex_escalation_series(
         "opex_bess", opex_infl, n_years, trajectories,
     )
+    # Support-reference escalation (scenario_engine sheet,
+    # support_ref_follows_scenario): with the price-scenario engine
+    # armed, every support REFERENCE leg — the CfD difference legs
+    # (E45/E46) and the E56 settlement reference — follows one rule:
+    # the scenario's PV-leg DAM path when TRUE (the default: a market
+    # reference settles on scenario prices, so the capture-price
+    # cannibalization reaches the support settlement), or the plain
+    # dam_inflation_pct scalar when FALSE (a decoupled administered
+    # index).  Disarmed, each site keeps its historical series —
+    # bit-identity: the CfD legs ride g_dam_pv, the E56 reference the
+    # scalar.  The post-term PPA reversion and the imbalance stream
+    # are MERCHANT flows, not reference legs; they stay on g_dam_pv
+    # in every configuration.
+    _scalar_dam_esc = [
+        (1.0 + dam_infl) ** (y - 1) for y in range(1, n_years + 1)
+    ]
+    _scenario_armed = bool(econ.get("_price_scenario_applied"))
+    _support_follows = bool(
+        econ.get("support_ref_follows_scenario", True)
+    )
+    if _scenario_armed:
+        _g_cfd_ref = g_dam_pv if _support_follows else _scalar_dam_esc
+        _g_support_ref = _g_cfd_ref
+    else:
+        _g_cfd_ref = g_dam_pv
+        _g_support_ref = _scalar_dam_esc
     # Year-1 balancing revenue lines come from the KPI dict; they
     # already carry the BESS degradation factor for Year 1 (which is
     # 1.0) and degrade on the BESS capacity-fade curve via bess_factor
@@ -1485,7 +1513,9 @@ def build_yearly_cashflow(
                     strike_leg = (
                         ppa_strike_value_1 * (1.0 + ppa_infl) ** (y - 1)
                     )
-                    ppa_y = strike_leg - ppa_covered_dam_1 * g_dam_pv[y - 1]
+                    ppa_y = (
+                        strike_leg - ppa_covered_dam_1 * _g_cfd_ref[y - 1]
+                    )
                 else:
                     strike_leg = (
                         ppa_strike_value_1 * pv_factor
@@ -1493,7 +1523,8 @@ def build_yearly_cashflow(
                     )
                     if ppa_settlement == "cfd":
                         ppa_y = strike_leg - (
-                            ppa_covered_dam_1 * pv_factor * g_dam_pv[y - 1]
+                            ppa_covered_dam_1 * pv_factor
+                            * _g_cfd_ref[y - 1]
                         )
                     else:
                         ppa_y = strike_leg
@@ -1771,7 +1802,7 @@ def build_yearly_cashflow(
             # sliding FiP; zero after the support term.
             if support_on and y <= support_term:
                 support_settlement_y = 0.0
-                _ref_esc = (1.0 + dam_infl) ** (y - 1)
+                _ref_esc = _g_support_ref[y - 1]
                 for _e_m, _p_m in zip(
                     support_e_m, support_p_m, strict=False,
                 ):

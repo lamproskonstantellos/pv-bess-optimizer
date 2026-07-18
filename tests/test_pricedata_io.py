@@ -276,6 +276,38 @@ def test_results_workbook_carries_resolve_delta_sheet(tmp_path):
     assert "scenario_resolve_delta" not in pd.ExcelFile(out2).sheet_names
 
 
+def test_results_workbook_carries_ensemble_sheet(tmp_path):
+    from pvbess_opt.io import write_results_workbook
+
+    ensemble = pd.DataFrame({
+        "scenario": ["Central", "Downside", "E[NPV]"],
+        "weight_pct": [60.0, 40.0, None],
+        "npv_eur": [300.0, 100.0, 220.0],
+    })
+    res = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=4, freq="h"),
+        "pv_kwh": [1.0, 2.0, 3.0, 4.0],
+    })
+    out = write_results_workbook(
+        tmp_path / "03_results.xlsx",
+        res_year1=res,
+        kpis_year1={"profit_total_eur": 1.0},
+        kpis_monthly_year1=None,
+        price_scenario_ensemble=ensemble,
+    )
+    sheet = pd.read_excel(out, sheet_name="price_scenario_ensemble")
+    assert list(sheet["scenario"]) == ["Central", "Downside", "E[NPV]"]
+    out2 = write_results_workbook(
+        tmp_path / "03_results_off.xlsx",
+        res_year1=res,
+        kpis_year1={"profit_total_eur": 1.0},
+        kpis_monthly_year1=None,
+    )
+    assert (
+        "price_scenario_ensemble" not in pd.ExcelFile(out2).sheet_names
+    )
+
+
 def test_summary_gating_of_price_scenario_lines(tmp_path):
     from pvbess_opt.io import write_summary_md
 

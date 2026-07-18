@@ -5629,6 +5629,7 @@ def write_results_workbook(
     market_provenance: pd.DataFrame | None = None,
     scenario_price_paths: pd.DataFrame | None = None,
     scenario_resolve_delta: pd.DataFrame | None = None,
+    price_scenario_ensemble: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -5726,6 +5727,17 @@ def write_results_workbook(
         ):
             scenario_resolve_delta.to_excel(
                 writer, sheet_name="scenario_resolve_delta", index=False,
+            )
+        # Weighted price-scenario ensemble: one row per scenario
+        # (NPV / IRR / payback / min DSCR on the shared sized debt)
+        # plus the labelled weighted-stat rows.  Absent while the
+        # scenario engine is disarmed.
+        if (
+            price_scenario_ensemble is not None
+            and not price_scenario_ensemble.empty
+        ):
+            price_scenario_ensemble.to_excel(
+                writer, sheet_name="price_scenario_ensemble", index=False,
             )
         style_workbook(writer.book)
     return out_path

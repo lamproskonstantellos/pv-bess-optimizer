@@ -343,6 +343,10 @@ class ScenarioApplication:
     summary_lines: list[str]
     resolve_delta: pd.DataFrame | None = None
     resolve_support: pd.DataFrame | None = None
+    #: The applied scenario's merged auto-trajectory block (including
+    #: the Tier-2 overrides under resolve mode) — the weighted
+    #: ensemble reuses it verbatim for the applied member.
+    applied_trajectories: dict[str, dict[str, Any]] | None = None
 
 
 def apply_price_scenarios(
@@ -494,6 +498,10 @@ def apply_price_scenarios(
         econ.get("trajectories"), applied_trajectories,
         scenario=applied_name,
     )
+    # The armed marker: economics gates the support-reference rule
+    # (support_ref_follows_scenario) on it, so a disarmed run with
+    # user-declared price trajectories keeps its historical series.
+    econ["_price_scenario_applied"] = applied_name
     streams = ", ".join(sorted(applied_trajectories))
     logger.info(
         "[pricedata] price-scenario engine armed (mode %r): "
@@ -529,6 +537,7 @@ def apply_price_scenarios(
         summary_lines=summary_lines,
         resolve_delta=resolve_delta,
         resolve_support=resolve_support,
+        applied_trajectories=applied_trajectories,
     )
 
 
