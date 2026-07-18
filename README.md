@@ -50,6 +50,23 @@ fee — so the day-ahead revenue stream stays intact and the venue adds
 only the re-dispatch margin. See
 [`docs/intraday_design.md`](docs/intraday_design.md).
 
+Two opt-in price layers complete the market picture (both ship
+disabled; defaults are bit-identical). The `market_data` sheet fetches
+historical day-ahead and balancing prices for a selectable bidding
+zone (GR, DE-LU, FR, IT-Nord, ES, BG, RO) from ENTSO-E — with the
+Greek balancing gap covered by the ADMIE file API and a HEnEx
+cross-check — and *replaces* the workbook price columns with the
+fetched reference year (override semantics, provenance recorded, the
+input snapshot re-runs the exact prices offline). The
+`scenario_engine` + `price_scenarios` sheets then project years 2..N
+on per-scenario price decks instead of flat inflation: the frozen
+Year-1 dispatch is repriced year by year into per-stream escalation
+factors (PV capture-price cannibalization, BESS spread evolution,
+per-product balancing paths), optionally refined by full MILP
+re-solves at support years, and a weighted scenario ensemble reports
+E[NPV] / E[IRR] with P10/P50/P90 on one shared debt sizing. See
+[`docs/market_scenarios_design.md`](docs/market_scenarios_design.md).
+
 On top of the market regimes, the economics layer models the Greek
 contracted-revenue and fiscal landscape (all opt-in, neutral
 mechanisms): a BESS tolling agreement with merchant zeroing, an
@@ -136,7 +153,7 @@ produce identical results; `tests/test_input_surface_parity.py` checks
 the parity.
 
 1. **The workbook** (`inputs/input.xlsx`) is the primary surface.
-   Every parameter is a row on one of the eight kv sheets. The sheets
+   Every parameter is a row on one of the ten kv sheets. The sheets
    are migrated to the canonical schema by
    `python scripts/polish_input_workbook.py`, which drops removed
    keys, appends new ones in template order, creates missing sheets,
@@ -382,6 +399,52 @@ scenario price decks: the deck sets the Year-1 price level (dispatch
 re-solves), the trajectory sets the years-2+ shape. A YAML / JSON
 config expresses the same block as `trajectories:`.
 
+### `market_data`
+
+Optional key / value sheet selecting the Year-1 price basis
+(`docs/market_scenarios_design.md`, Layer A). With every source at its
+`file` default the workbook columns are used untouched. `price_source
+= entsoe` fetches the `price_reference_year` day-ahead series for the
+selected `bidding_zone` from the ENTSO-E Transparency Platform and
+replaces `dam_price_eur_per_mwh` wholesale; `balancing_source` /
+`imbalance_source` accept `auto` (per-zone registry: GR → ADMIE, else
+ENTSO-E) or an explicit provider. Fetches cache on disk
+(`market_cache_dir`, `market_fetch_mode`: `cache_first` / `refresh` /
+`offline`). The ENTSO-E token comes from the `entsoe_token` cell or
+the environment variable named by `entsoe_token_env` — the shipped
+template keeps the cell empty; never commit a token.
+
+### `scenario_engine`
+
+Optional key / value sheet arming the multi-year price-scenario layer
+(`docs/market_scenarios_design.md`, Layer B). `price_scenarios_enabled
+= FALSE` (the default) keeps years 2..N on the flat inflation indices,
+bit-identical. Armed, `scenario_projection_mode` picks the projection
+tier: `reprice` revalues the frozen Year-1 dispatch against each
+year's scenario curve, `resolve` additionally re-solves the MILP at
+`scenario_resolve_years` on a coarser grid
+(`scenario_resolve_resolution`, hourly by default) with factors
+interpolated between support years (`scenario_interp`), and
+`trajectory_only` leaves the declared `trajectories` sheet in charge.
+`price_basis` / `price_base_year` / `cpi_pct` bridge real vendor decks
+to the nominal cashflow; `debt_sizing_scenario` names the scenario the
+debt is sized on (every ensemble member inherits that schedule);
+`support_ref_follows_scenario` decides whether CfD / FiP reference
+legs follow the scenario path (default) or stay on the plain
+`dam_inflation_pct` index.
+
+### `price_scenarios`
+
+Optional tidy sheet (gated by the first data row's `enabled` cell)
+listing the scenario decks: `name`, `provider` (`file` for a
+ready-made store directory, `parametric` for the three-knob generator
+driven by the workbook's own Year-1 prices, `tyndp` for the free
+ENTSO-E TYNDP milestone curves), `vintage`, `weight_pct` (must sum to
+100), `store_path` (resolved against the workbook), `notes`. Each
+store is a directory with `meta.yaml`, per-year `dam.csv` curves and
+an optional `balancing_annual.csv` — see the design doc for the
+schema.
+
 ## Output reference
 
 Each run writes a self-contained folder
@@ -396,7 +459,11 @@ Each run writes a self-contained folder
                      financial_kpis | sensitivity_analysis |
                      lifetime_dispatch_yearly | economic_assumptions |
                      degradation (+ debt_schedule / lender_cases /
-                     emissions / rolling-horizon sheets when enabled)
+                     emissions / rolling-horizon sheets when enabled;
+                     market_data_provenance on API-sourced runs;
+                     scenario_price_paths / scenario_resolve_delta /
+                     price_scenario_ensemble when price scenarios are
+                     armed)
 04_financial_plots/  revenue stack, BESS waterfall/by-month/split,
                      balancing reservation + MC, lifetime cycles,
                      cumulative + monthly cashflow, payback, NPV/IRR
@@ -795,6 +862,12 @@ implementing symbol:
 * [`docs/economics_design.md`](docs/economics_design.md): year
   conventions, the nine revenue aggregates, fee clamp, degradation
   factors, debt, NPV/IRR/payback, LCOE/LCOS.
+* [`docs/market_scenarios_design.md`](docs/market_scenarios_design.md):
+  the market-data ingestion layer (zones, ENTSO-E / ADMIE / HEnEx
+  providers, the calendar contract, bypass semantics) and the
+  multi-year price-scenario layer (scenario stores, the parametric /
+  TYNDP adapters, Tier-1 repricing and Tier-2 support-year re-solves,
+  capture KPIs, the weighted ensemble).
 * [`docs/uncertainty_design.md`](docs/uncertainty_design.md):
   rolling-horizon MC, the foresight gap, balancing MC, imbalance
   settlement, VaR / CVaR, sensitivity drivers.

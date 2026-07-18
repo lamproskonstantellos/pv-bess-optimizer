@@ -114,6 +114,39 @@ Sizing & scenarios
 .. automodule:: pvbess_opt.scenarios
    :members:
 
+Market data ingestion
+~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: pvbess_opt.marketdata.base
+   :members:
+
+.. automodule:: pvbess_opt.marketdata.entsoe
+   :members:
+
+.. automodule:: pvbess_opt.marketdata.admie
+   :members:
+
+.. automodule:: pvbess_opt.marketdata.henex
+   :members:
+
+Price scenarios
+~~~~~~~~~~~~~~~
+
+.. automodule:: pvbess_opt.pricedata.store
+   :members:
+
+.. automodule:: pvbess_opt.pricedata.adapters
+   :members:
+
+.. automodule:: pvbess_opt.pricedata.engine
+   :members:
+
+.. automodule:: pvbess_opt.pricedata.resolve
+   :members:
+
+.. automodule:: pvbess_opt.pricedata.ensemble
+   :members:
+
 PV resource layer
 ~~~~~~~~~~~~~~~~~
 
