@@ -5345,6 +5345,7 @@ def write_summary_md(
     replacement_note: str | None = None,
     lender_cases: pd.DataFrame | None = None,
     midlife_resolve: pd.DataFrame | None = None,
+    price_scenario_lines: list[str] | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -5374,6 +5375,10 @@ def write_summary_md(
         lines.append(f"- BESS replacement: {replacement_note}")
     if solver_name:
         lines.append(f"- Solver: `{solver_name}`")
+    # Price-scenario digest (pricedata layer): absent while the engine
+    # is disarmed so the default SUMMARY is unchanged.
+    if price_scenario_lines:
+        lines.extend(price_scenario_lines)
     lines.append("")
 
     lines.append("## Year-1 dispatch KPIs")
@@ -5622,6 +5627,7 @@ def write_results_workbook(
     midlife_resolve: pd.DataFrame | None = None,
     risk_metrics: pd.DataFrame | None = None,
     market_provenance: pd.DataFrame | None = None,
+    scenario_price_paths: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -5697,6 +5703,17 @@ def write_results_workbook(
         if market_provenance is not None and not market_provenance.empty:
             market_provenance.to_excel(
                 writer, sheet_name="market_data_provenance", index=False,
+            )
+        # Price-scenario paths (pricedata layer): one row per
+        # (scenario, operating year) with the per-stream factors and
+        # the capture KPIs.  Absent while the engine is disarmed so
+        # the default workbook is unchanged.
+        if (
+            scenario_price_paths is not None
+            and not scenario_price_paths.empty
+        ):
+            scenario_price_paths.to_excel(
+                writer, sheet_name="scenario_price_paths", index=False,
             )
         style_workbook(writer.book)
     return out_path

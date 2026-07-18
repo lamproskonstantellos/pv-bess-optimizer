@@ -202,3 +202,62 @@ def test_write_workbook_roundtrips_enabled_rows(tmp_path):
     assert again["price_scenarios"] == typed["price_scenarios"]
     sheet = pd.read_excel(dst, sheet_name="price_scenarios")
     assert str(sheet.iloc[0]["enabled"]).upper() == "TRUE"
+
+
+# ---------------------------------------------------------------------------
+# Output writers (results workbook sheet + SUMMARY digest)
+# ---------------------------------------------------------------------------
+
+
+def test_results_workbook_carries_scenario_paths_sheet(tmp_path):
+    from pvbess_opt.io import write_results_workbook
+
+    paths = pd.DataFrame({
+        "scenario": ["Central", "Central"],
+        "applied": [True, True],
+        "weight_pct": [100.0, 100.0],
+        "project_year": [1, 2],
+        "dam_mean_price_eur_per_mwh": [80.0, 72.0],
+    })
+    res = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=4, freq="h"),
+        "pv_kwh": [1.0, 2.0, 3.0, 4.0],
+    })
+    out = write_results_workbook(
+        tmp_path / "03_results.xlsx",
+        res_year1=res,
+        kpis_year1={"profit_total_eur": 1.0},
+        kpis_monthly_year1=None,
+        scenario_price_paths=paths,
+    )
+    sheet = pd.read_excel(out, sheet_name="scenario_price_paths")
+    assert list(sheet["scenario"]) == ["Central", "Central"]
+    # Disarmed: the sheet is absent (bit-identical workbook).
+    out2 = write_results_workbook(
+        tmp_path / "03_results_off.xlsx",
+        res_year1=res,
+        kpis_year1={"profit_total_eur": 1.0},
+        kpis_monthly_year1=None,
+    )
+    assert "scenario_price_paths" not in pd.ExcelFile(out2).sheet_names
+
+
+def test_summary_gating_of_price_scenario_lines(tmp_path):
+    from pvbess_opt.io import write_summary_md
+
+    common = dict(
+        kpis_year1={"profit_total_eur": 1.0},
+        financial_kpis=None,
+        params={"mode": "merchant", "pv_nameplate_kwp": 1000.0},
+    )
+    armed = write_summary_md(
+        tmp_path / "SUMMARY_armed.md",
+        price_scenario_lines=[
+            "- Price scenarios: `reprice` on `Central` (2 enabled "
+            "scenario(s))",
+        ],
+        **common,
+    )
+    assert "Price scenarios" in armed.read_text(encoding="utf-8")
+    plain = write_summary_md(tmp_path / "SUMMARY_plain.md", **common)
+    assert "Price scenarios" not in plain.read_text(encoding="utf-8")

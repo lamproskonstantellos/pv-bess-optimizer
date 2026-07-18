@@ -81,6 +81,10 @@ from .monthly import (
     plot_monthly_supply,
     plot_monthly_surplus,
 )
+from .price_scenarios import (
+    plot_capture_kpis,
+    plot_price_path_fan,
+)
 from .scenarios import (
     plot_scenario_comparison_bars,
     plot_scenario_revenue_bridge,
@@ -118,6 +122,7 @@ __all__ = [
     "plot_bess_capacity_vs_activation_split",
     "plot_bess_revenue_by_month",
     "plot_bess_revenue_waterfall",
+    "plot_capture_kpis",
     "plot_cfe_duration_curve",
     "plot_cumulative_cashflow",
     "plot_da_ida_price_duration",
@@ -155,6 +160,7 @@ __all__ = [
     "plot_npv_vs_capacity",
     "plot_npv_waterfall",
     "plot_payback",
+    "plot_price_path_fan",
     "plot_revenue_stack_yearly",
     "plot_rolling_horizon_distribution",
     "plot_scenario_comparison_bars",

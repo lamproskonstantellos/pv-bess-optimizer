@@ -91,6 +91,7 @@ from pvbess_opt.plotting import (
     plot_bess_capacity_vs_activation_split,
     plot_bess_revenue_by_month,
     plot_bess_revenue_waterfall,
+    plot_capture_kpis,
     plot_cfe_duration_curve,
     plot_cumulative_cashflow,
     plot_da_ida_price_duration,
@@ -122,6 +123,7 @@ from pvbess_opt.plotting import (
     plot_npv_tornado,
     plot_npv_waterfall,
     plot_payback,
+    plot_price_path_fan,
     plot_revenue_stack_yearly,
     plot_rolling_horizon_distribution,
     plot_soh_trajectory,
@@ -138,6 +140,7 @@ from pvbess_opt.plotting import (
     set_show_titles,
 )
 from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
+from pvbess_opt.pricedata.engine import apply_price_scenarios
 from pvbess_opt.rolling_horizon import (
     monte_carlo_balancing,
     monte_carlo_rolling,
@@ -707,6 +710,17 @@ def _build_financials(
     falls back to the solver defaults.
     """
     econ = read_economic_params(excel_path)
+    # Price-scenario layer (scenario_engine sheet, pricedata engine):
+    # with the master switch off this returns None and econ is
+    # untouched — bit-identical behaviour.  Armed in 'reprice' mode it
+    # reprices the FROZEN Year-1 dispatch into auto-trajectories on
+    # the split streams (Eqs. E60/E61) and merges them into
+    # econ['trajectories'], so everything below — cashflow, LCOE/LCOS
+    # OPEX, sensitivity, debt sizing — flows through the existing
+    # Eq. E24 machinery unchanged.
+    scenario_application = apply_price_scenarios(
+        econ, ts, res, base_dir=Path(excel_path).parent,
+    )
 
     site_capex_eur = float(econ.get("site_capex_eur", 0.0) or 0.0)
     site_devex_eur = float(econ.get("site_devex_eur", 0.0) or 0.0)
@@ -846,7 +860,35 @@ def _build_financials(
         "sensitivity": sensitivity_df,
         "debt_schedule": build_debt_schedule(yearly_cf, econ),
         "lender_cases": lender_cases_df,
+        "price_scenarios": scenario_application,
     }
+
+
+def _scenario_paths_frame(application: Any) -> pd.DataFrame | None:
+    """Long-format price-path table for the results workbook.
+
+    One row per (scenario, operating year), the applied scenario's
+    rows first — None when the engine is disarmed so the workbook
+    stays bit-identical.
+    """
+    if application is None:
+        return None
+    frames: list[pd.DataFrame] = []
+    ordered = sorted(
+        application.fan.items(),
+        key=lambda item: item[0] != application.applied,
+    )
+    for name, paths in ordered:
+        frame = paths.copy()
+        frame.insert(0, "scenario", name)
+        frame.insert(
+            1, "applied", name == application.applied,
+        )
+        frame.insert(
+            2, "weight_pct", application.weights.get(name, 0.0),
+        )
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
 
 
 def _build_degradation_report(
@@ -2038,7 +2080,11 @@ def _run_one(
                 pd.DataFrame(params["market_provenance"])
                 if params.get("market_provenance") else None
             ),
+            scenario_price_paths=_scenario_paths_frame(
+                bundle.get("price_scenarios"),
+            ),
         )
+        _ps_application = bundle.get("price_scenarios")
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
             kpis_year1=kpis,
@@ -2048,6 +2094,10 @@ def _run_one(
             replacement_note=_format_replacement_note(econ),
             lender_cases=bundle.get("lender_cases"),
             midlife_resolve=midlife_df,
+            price_scenario_lines=(
+                _ps_application.summary_lines
+                if _ps_application is not None else None
+            ),
         )
 
         # Balancing plot pair promised by the README's report list; both
@@ -2090,6 +2140,21 @@ def _run_one(
                 )
             except Exception:
                 logger.exception("Emissions / CFE plot generation failed")
+        # Price-scenario figures (pricedata layer): only when the
+        # engine is armed, so the default figure set is bit-identical
+        # (the intraday conditional-figure pattern).
+        if _ps_application is not None:
+            try:
+                plot_price_path_fan(
+                    _ps_application.fan,
+                    layout["financial_plots"] / "price_path_fan.pdf",
+                )
+                plot_capture_kpis(
+                    _ps_application.paths,
+                    layout["financial_plots"] / "capture_kpis.pdf",
+                )
+            except Exception:
+                logger.exception("Price-scenario plot generation failed")
         # Intraday-venue figures (Eqs. I1-I5): only when the Stage-2
         # re-dispatch wrote its columns, so the default figure set is
         # bit-identical (the DSCR conditional-figure pattern).

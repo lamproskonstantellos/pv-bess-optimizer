@@ -9,6 +9,11 @@ inert.
 """
 
 from .adapters import build_parametric_deck, build_tyndp_deck
+from .engine import (
+    ScenarioApplication,
+    apply_price_scenarios,
+    derive_reprice_trajectories,
+)
 from .store import (
     BALANCING_PRODUCTS,
     SCENARIO_PROVIDERS,
@@ -22,9 +27,12 @@ __all__ = [
     "BALANCING_PRODUCTS",
     "SCENARIO_PROVIDERS",
     "PriceDataError",
+    "ScenarioApplication",
     "ScenarioDeck",
+    "apply_price_scenarios",
     "build_parametric_deck",
     "build_tyndp_deck",
+    "derive_reprice_trajectories",
     "load_scenario_store",
     "stub_provider_error",
 ]

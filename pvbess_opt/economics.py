@@ -547,9 +547,9 @@ def resolve_debt_sizing(
 
 def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the project / pv / bess / economics / simulation / balancing
-    / ppa / intraday sheets.
+    / ppa / intraday / scenario_engine sheets.
 
-    Returns a single flat dict combining every key from the eight
+    Returns a single flat dict combining every key from the nine
     parameter sheets — the financial helpers downstream expect a flat
     mapping (e.g. ``econ['discount_rate_pct']``,
     ``econ['capex_pv_eur_per_kw']``, ``econ['ppa_term_years']``).
@@ -560,13 +560,18 @@ def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     for section in (
         "project", "pv", "bess", "economics", "simulation", "balancing",
-        "ppa", "intraday",
+        "ppa", "intraday", "scenario_engine",
     ):
         merged.update(typed[section])
     # The per-year trajectory block (Eq. E24) rides along under a
     # reserved non-kv key: kv-sheet keys are lowercase snake_case
     # scalars validated by the loader, so the flat merge stays lossless.
     merged["trajectories"] = typed.get("trajectories")
+    # The parsed price-scenario list (pricedata layer) rides the same
+    # reserved-key convention; the market_data sheet deliberately stays
+    # OUT of the merge (its token must never reach the econ dict, which
+    # lands verbatim on the assumptions sheets).
+    merged["price_scenarios"] = typed.get("price_scenarios")
     return merged
 
 

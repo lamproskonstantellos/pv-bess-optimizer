@@ -50,6 +50,8 @@ PLOTTING_FUNCTIONS: tuple[str, ...] = (
     "plot_balancing_reservation_profile", "plot_balancing_mc_distribution",
     # Intraday venue
     "plot_da_ida_price_duration", "plot_intraday_position",
+    # Price scenarios (pricedata layer)
+    "plot_price_path_fan", "plot_capture_kpis",
     # BESS revenue decomposition
     "plot_bess_revenue_waterfall", "plot_bess_capacity_vs_activation_split",
     "plot_bess_revenue_by_month",
