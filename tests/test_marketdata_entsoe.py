@@ -330,3 +330,188 @@ def test_refresh_overwrites_cache(monkeypatch, tmp_path):
         lambda _params: (200, _year_window_xml(0.0)), counter=counter,
     )
     assert cached.segments[0].values[0] == 999.0
+
+
+# ---------------------------------------------------------------------------
+# Balancing documents (A81 / A84 / A85)
+# ---------------------------------------------------------------------------
+
+from pvbess_opt.marketdata.entsoe import (  # noqa: E402
+    ENTSOE_BALANCING_COLUMNS,
+    column_segments,
+    fetch_balancing_prices_year,
+    fetch_imbalance_prices_year,
+    parse_balancing_document,
+)
+
+_BAL_NS = "urn:iec62325.351:tc57wg16:451-6:balancingdocument:4:1"
+
+
+def _balancing_xml(
+    series: list[dict],
+) -> bytes:
+    """Build a Balancing_MarketDocument from per-TimeSeries specs.
+
+    Each spec: {businessType, direction, category, unit, start, end,
+    resolution, prices: dict pos→value, field}.
+    """
+    parts = [
+        f'<?xml version="1.0"?><Balancing_MarketDocument xmlns="{_BAL_NS}">'
+    ]
+    for spec in series:
+        points = "".join(
+            f"<Point><position>{pos}</position>"
+            f"<{spec.get('field', 'procurement_Price.amount')}>{price}"
+            f"</{spec.get('field', 'procurement_Price.amount')}></Point>"
+            for pos, price in sorted(spec["prices"].items())
+        )
+        direction = (
+            f"<flowDirection.direction>{spec['direction']}"
+            "</flowDirection.direction>"
+            if spec.get("direction") else ""
+        )
+        business = (
+            f"<businessType>{spec['businessType']}</businessType>"
+            if spec.get("businessType") else ""
+        )
+        category = (
+            f"<imbalance_Price.category>{spec['category']}"
+            "</imbalance_Price.category>"
+            if spec.get("category") else ""
+        )
+        parts.append(
+            "<TimeSeries>"
+            f"{business}{direction}{category}"
+            "<currency_Unit.name>EUR</currency_Unit.name>"
+            f"<price_Measure_Unit.name>{spec.get('unit', 'MWH')}"
+            "</price_Measure_Unit.name>"
+            f"<Period><timeInterval><start>{spec['start']}</start>"
+            f"<end>{spec['end']}</end></timeInterval>"
+            f"<resolution>{spec.get('resolution', 'PT60M')}</resolution>"
+            f"{points}</Period></TimeSeries>"
+        )
+    parts.append("</Balancing_MarketDocument>")
+    return "".join(parts).encode()
+
+
+def test_parses_balancing_document_with_tags():
+    body = _balancing_xml([{
+        "businessType": "B95", "direction": "A01",
+        "start": "2025-03-15T00:00Z", "end": "2025-03-15T04:00Z",
+        "prices": {1: 12.0, 3: 15.0},
+    }])
+    [(tags, seg)] = parse_balancing_document(body)
+    assert tags["businessType"] == "B95"
+    assert tags["direction"] == "A01"
+    assert seg.values == [12.0, 12.0, 15.0, 15.0]
+
+
+def test_mw_unit_normalises_to_per_mwh_basis():
+    # 4-hour blocks priced 100 EUR/MW per block -> 25 EUR/MW/h.
+    body = _balancing_xml([{
+        "businessType": "B95",
+        "start": "2025-03-15T00:00Z", "end": "2025-03-16T00:00Z",
+        "resolution": "P1D", "unit": "MAW", "prices": {1: 240.0},
+    }])
+    [(_tags, seg)] = parse_balancing_document(body)
+    assert seg.values == [10.0]  # 240 EUR/MW per 24 h day == 10 EUR/MW/h
+
+
+def test_mwh_unit_passes_through():
+    body = _balancing_xml([{
+        "businessType": "B95",
+        "start": "2025-03-15T00:00Z", "end": "2025-03-15T01:00Z",
+        "unit": "MWH", "prices": {1: 55.0},
+    }])
+    [(_tags, seg)] = parse_balancing_document(body)
+    assert seg.values == [55.0]
+
+
+def test_balancing_ack_raises_no_data():
+    with pytest.raises(EntsoeNoDataError):
+        parse_balancing_document(_ack_xml("No matching data found"))
+
+
+def test_wrong_document_root_rejected_for_balancing():
+    body = _publication_xml([(
+        "2025-03-15T00:00Z", "2025-03-15T01:00Z", "PT60M", {1: 1.0},
+    )])
+    with pytest.raises(MarketDataError, match="Balancing_MarketDocument"):
+        parse_balancing_document(body)
+
+
+def _year_balancing_responder(params):
+    """Serve a full padded GR-style year for every balancing request."""
+    window = {
+        "start": "2024-12-31T21:00Z", "end": "2026-01-01T00:00Z",
+    }
+    doc_type = params["documentType"]
+    if doc_type == "A81":
+        product_series = []
+        if params["processType"] == "A52":
+            product_series.append({
+                "businessType": "B95", **window, "prices": {1: 5.0},
+            })
+        else:
+            for direction in ("A01", "A02"):
+                product_series.append({
+                    "businessType": "B95", "direction": direction,
+                    **window, "prices": {1: 7.0},
+                })
+        return 200, _balancing_xml(product_series)
+    if doc_type == "A84":
+        return 200, _balancing_xml([
+            {
+                "businessType": business, "direction": direction,
+                **window, "prices": {1: 90.0},
+                "field": "activation_Price.amount",
+            }
+            for business in ("A96", "A97")
+            for direction in ("A01", "A02")
+        ])
+    if doc_type == "A85":
+        return 200, _balancing_xml([
+            {
+                "category": category, **window, "prices": {1: 30.0},
+                "field": "imbalance_Price.amount",
+            }
+            for category in ("A04", "A05")
+        ])
+    raise AssertionError(f"unexpected documentType {doc_type}")
+
+
+def test_fetch_balancing_prices_year_covers_all_nine_columns(
+    monkeypatch, tmp_path,
+):
+    counter = {"n": 0}
+    _install_fake_get(monkeypatch, _year_balancing_responder, counter)
+    series = fetch_balancing_prices_year(
+        ZONES["de_lu"], 2025,
+        token_resolver=lambda: _TOKEN,
+        cache=MarketDataCache(tmp_path / "cache"),
+    )
+    columns = column_segments(series)
+    assert set(columns) == set(ENTSOE_BALANCING_COLUMNS)
+    assert counter["n"] == 4  # three A81 products + one A84 request
+    # And the packed columns_map survives the cache round-trip.
+    series2 = fetch_balancing_prices_year(
+        ZONES["de_lu"], 2025,
+        token_resolver=lambda: _TOKEN,
+        cache=MarketDataCache(tmp_path / "cache"),
+    )
+    assert counter["n"] == 4
+    assert set(column_segments(series2)) == set(ENTSOE_BALANCING_COLUMNS)
+
+
+def test_fetch_imbalance_prices_year_maps_categories(monkeypatch, tmp_path):
+    _install_fake_get(monkeypatch, _year_balancing_responder)
+    series = fetch_imbalance_prices_year(
+        ZONES["de_lu"], 2025,
+        token_resolver=lambda: _TOKEN,
+        cache=MarketDataCache(tmp_path / "cache"),
+    )
+    columns = column_segments(series)
+    assert set(columns) == {
+        "imbalance_price_long_eur_per_mwh",
+        "imbalance_price_short_eur_per_mwh",
+    }

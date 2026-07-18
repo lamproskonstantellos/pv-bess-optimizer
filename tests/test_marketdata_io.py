@@ -219,14 +219,6 @@ def test_offline_cache_hit_needs_no_token(monkeypatch, tmp_path):
     assert (ts["dam_price_eur_per_mwh"] == 88.0).all()
 
 
-def test_balancing_source_not_yet_registered(tmp_path):
-    src = _workbook_with_market_cells(
-        tmp_path, balancing_source="entsoe",
-    )
-    with pytest.raises(MarketDataUnavailableError, match="ADMIE"):
-        read_workbook(src)
-
-
 def test_partial_year_grid_rejected(monkeypatch, tmp_path):
     _install_fake_get(monkeypatch)
     src = _workbook_with_market_cells(
@@ -357,3 +349,163 @@ def test_materialized_snapshot_reruns_offline(monkeypatch, tmp_path):
     np.testing.assert_allclose(
         typed["ts"]["dam_price_eur_per_mwh"].to_numpy(dtype=float), 150.0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Balancing / imbalance bypass (ADMIE + ENTSO-E + registry)
+# ---------------------------------------------------------------------------
+
+from pvbess_opt.marketdata import admie as admie_mod  # noqa: E402
+from tests._marketdata_helpers import (  # noqa: E402
+    ADMIE_IMBALANCE_HEADERS,
+    balancing_year_responder,
+    install_admie_year_fetch,
+)
+
+
+def test_gr_balancing_via_admie_replaces_eight_columns(
+    monkeypatch, tmp_path, caplog,
+):
+    install_admie_year_fetch(monkeypatch, value=10.0)
+    src = _workbook_with_market_cells(
+        tmp_path,
+        balancing_source="admie",
+        market_cache_dir=str(tmp_path / "cache"),
+    )
+    original_fcr = pd.read_excel(
+        WORKBOOK, sheet_name="timeseries",
+        usecols=["fcr_capacity_price_eur_per_mwh"],
+    )["fcr_capacity_price_eur_per_mwh"].to_numpy(dtype=float)
+    with caplog.at_level(logging.INFO):
+        params, ts = read_inputs(src)
+
+    from pvbess_opt.marketdata.admie import BALANCING_HEADER_PATTERNS
+
+    # The 30-min synthetic prices step-hold onto the 15-min grid.
+    for column in BALANCING_HEADER_PATTERNS:
+        assert (ts[column] == 10.0).all(), column
+    # FCR is NOT served by ADMIE (no standalone Greek FCR): the column
+    # keeps its workbook values and a WARNING says so.
+    np.testing.assert_allclose(
+        ts["fcr_capacity_price_eur_per_mwh"].to_numpy(dtype=float),
+        original_fcr,
+    )
+    assert any(
+        "no standalone FCR" in r.message for r in caplog.records
+    )
+    records = params["market_provenance"]
+    assert len(records) == 8
+    assert {r["source"] for r in records} == {"admie"}
+    assert {r["source_key"] for r in records} == {"balancing_source"}
+    assert all(r["workbook_column_overridden"] for r in records)
+
+
+def test_gr_auto_routes_balancing_to_admie(monkeypatch, tmp_path):
+    install_admie_year_fetch(monkeypatch, value=12.5)
+    src = _workbook_with_market_cells(
+        tmp_path,
+        balancing_source="auto",
+        market_cache_dir=str(tmp_path / "cache"),
+    )
+    _params, ts = read_inputs(src)
+    assert (ts["afrr_up_capacity_price_eur_per_mwh"] == 12.5).all()
+
+
+def test_gr_imbalance_via_admie(monkeypatch, tmp_path):
+    install_admie_year_fetch(
+        monkeypatch, value=33.0, headers=ADMIE_IMBALANCE_HEADERS,
+        n_periods=96,
+    )
+    src = _workbook_with_market_cells(
+        tmp_path,
+        imbalance_source="admie",
+        market_cache_dir=str(tmp_path / "cache"),
+    )
+    params, ts = read_inputs(src)
+    assert (ts["imbalance_price_eur_per_mwh"] == 33.0).all()
+    [record] = params["market_provenance"]
+    assert record["source_key"] == "imbalance_source"
+    assert record["workbook_column_overridden"] is False
+
+
+def test_de_lu_balancing_via_entsoe(monkeypatch, tmp_path):
+    def fake_get(params, timeout):
+        assert timeout is not None
+        return balancing_year_responder(params)
+
+    monkeypatch.setattr(entsoe_mod, "_http_get", fake_get)
+    src = _workbook_with_market_cells(
+        tmp_path,
+        bidding_zone="de_lu",
+        balancing_source="entsoe",
+        entsoe_token=_TOKEN,
+        market_cache_dir=str(tmp_path / "cache"),
+    )
+    _params, ts = read_inputs(src)
+    assert (ts["fcr_capacity_price_eur_per_mwh"] == 5.0).all()
+    assert (ts["afrr_dn_capacity_price_eur_per_mwh"] == 7.0).all()
+    assert (ts["mfrr_up_activation_price_eur_per_mwh"] == 90.0).all()
+
+
+def test_de_lu_imbalance_via_entsoe_writes_dual_columns(
+    monkeypatch, tmp_path,
+):
+    def fake_get(params, timeout):
+        assert timeout is not None
+        return balancing_year_responder(params)
+
+    monkeypatch.setattr(entsoe_mod, "_http_get", fake_get)
+    src = _workbook_with_market_cells(
+        tmp_path,
+        bidding_zone="de_lu",
+        imbalance_source="entsoe",
+        entsoe_token=_TOKEN,
+        market_cache_dir=str(tmp_path / "cache"),
+    )
+    _params, ts = read_inputs(src)
+    assert (ts["imbalance_price_long_eur_per_mwh"] == 30.0).all()
+    assert (ts["imbalance_price_short_eur_per_mwh"] == 30.0).all()
+
+
+def test_registry_rejects_entsoe_balancing_for_greece(tmp_path):
+    src = _workbook_with_market_cells(
+        tmp_path, balancing_source="entsoe",
+    )
+    with pytest.raises(
+        MarketDataUnavailableError, match="Integrated Scheduling",
+    ):
+        read_workbook(src)
+
+
+def test_registry_rejects_admie_outside_greece(tmp_path):
+    src = _workbook_with_market_cells(
+        tmp_path, bidding_zone="de_lu", balancing_source="admie",
+    )
+    with pytest.raises(MarketDataUnavailableError, match="Greek TSO"):
+        read_workbook(src)
+
+
+def test_snapshot_flips_balancing_source_too(monkeypatch, tmp_path):
+    install_admie_year_fetch(monkeypatch, value=10.0)
+    src = _workbook_with_market_cells(
+        tmp_path,
+        balancing_source="admie",
+        market_cache_dir=str(tmp_path / "cache"),
+    )
+    params, ts = read_inputs(src)
+    snapshot = tmp_path / "snap.xlsx"
+    shutil.copy(src, snapshot)
+    materialize_bypassed_workbook(
+        snapshot, ts, params["market_provenance"],
+    )
+    md_base._FETCH_MEMO.clear()
+    _forbid_network(monkeypatch)
+    def no_admie(url, params, timeout):
+        raise AssertionError("snapshot must not hit ADMIE")
+
+    monkeypatch.setattr(admie_mod, "_http_get", no_admie)
+    typed = read_workbook(snapshot)
+    assert typed["market_data"]["balancing_source"] == "file"
+    assert (
+        typed["ts"]["afrr_up_capacity_price_eur_per_mwh"] == 10.0
+    ).all()

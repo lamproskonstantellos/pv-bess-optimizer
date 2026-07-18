@@ -50,6 +50,7 @@ import json
 import logging
 import os
 from calendar import isleap
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from itertools import pairwise
@@ -263,51 +264,65 @@ def resolve_entsoe_token(market_cfg: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _segment_to_model_cadence(
-    seg: PriceSegment, dt_minutes: int, *, column: str,
+def resample_intensive(
+    values: np.ndarray,
+    native_minutes: int,
+    dt_minutes: int,
+    *,
+    column: str,
     notes: set[str],
-) -> tuple[pd.DatetimeIndex, np.ndarray]:
-    """Resample ONE segment onto the model cadence, on the UTC axis.
+    context: str = "series",
+) -> np.ndarray:
+    """Resample an intensive (EUR/MWh) series between cadences.
 
-    Intensive-quantity rules only (rule 1 of the module contract):
-    step-hold when the native step is coarser than the model step,
-    arithmetic mean of the equal-length sub-steps when finer.
+    Rule 1 of the module contract: step-hold when the native step is
+    coarser than the model step (a price is a level, NEVER divided),
+    arithmetic mean of the equal-length sub-steps when finer (with a
+    deduplicated note that intra-period spread is averaged away).
     """
-    native = int(seg.resolution_minutes)
-    values = np.asarray(seg.values, dtype=float)
-    if np.isnan(values).any():
+    native = int(native_minutes)
+    arr = np.asarray(values, dtype=float)
+    if np.isnan(arr).any():
         raise MarketDataError(
-            f"{column}: fetched segment starting {seg.start_utc.isoformat()} "
-            "contains NaN prices; refusing to write gaps into the model grid."
+            f"{column}: fetched {context} contains NaN prices; refusing "
+            "to write gaps into the model grid."
         )
     if native == dt_minutes:
-        out = values
-    elif native % dt_minutes == 0:
-        # Coarser native step: hold the price across the sub-steps.
-        # NEVER divide — EUR/MWh is a level, not an amount.
-        out = np.repeat(values, native // dt_minutes)
-    elif dt_minutes % native == 0:
+        return arr
+    if native % dt_minutes == 0:
+        return np.repeat(arr, native // dt_minutes)
+    if dt_minutes % native == 0:
         k = dt_minutes // native
-        if len(values) % k != 0:
+        if len(arr) % k != 0:
             raise MarketDataError(
-                f"{column}: segment starting {seg.start_utc.isoformat()} "
-                f"carries {len(values)} values at {native} min, not a "
-                f"whole number of {dt_minutes}-min model steps."
+                f"{column}: fetched {context} carries {len(arr)} values "
+                f"at {native} min, not a whole number of "
+                f"{dt_minutes}-min model steps."
             )
-        # Finer native step: equal-length sub-steps, so the period price
-        # is their arithmetic mean.  Intra-period spread is averaged
-        # away — note once per resolution pair, like the intraday
-        # hourly-cadence note.
         notes.add(
             f"{native}-min market data averaged onto the {dt_minutes}-min "
             "model grid (intra-period price spread is averaged away)"
         )
-        out = values.reshape(-1, k).mean(axis=1)
-    else:
-        raise MarketDataError(
-            f"{column}: native resolution {native} min is incommensurable "
-            f"with the model cadence {dt_minutes} min."
-        )
+        return np.asarray(arr.reshape(-1, k).mean(axis=1), dtype=float)
+    raise MarketDataError(
+        f"{column}: native resolution {native} min is incommensurable "
+        f"with the model cadence {dt_minutes} min."
+    )
+
+
+def _segment_to_model_cadence(
+    seg: PriceSegment, dt_minutes: int, *, column: str,
+    notes: set[str],
+) -> tuple[pd.DatetimeIndex, np.ndarray]:
+    """Resample ONE segment onto the model cadence, on the UTC axis."""
+    out = resample_intensive(
+        np.asarray(seg.values, dtype=float),
+        seg.resolution_minutes,
+        dt_minutes,
+        column=column,
+        notes=notes,
+        context=f"segment starting {seg.start_utc.isoformat()}",
+    )
     idx = pd.date_range(
         seg.start_utc, periods=len(out), freq=f"{dt_minutes}min", tz="UTC",
     )
@@ -456,30 +471,256 @@ def validate_model_year_grid(
 _FETCH_MEMO: dict[tuple[str, str, int], MarketSeries] = {}
 
 
-def _fetch_day_ahead_memoized(
-    zone: Zone, year: int, market_cfg: dict[str, Any],
+def _market_cache(market_cfg: dict[str, Any]) -> MarketDataCache:
+    return MarketDataCache(
+        str(market_cfg.get("market_cache_dir") or "").strip() or None
+    )
+
+
+def _memoized_fetch(
+    dataset: str,
+    zone: Zone,
+    year: int,
+    fetcher: Callable[[], MarketSeries],
 ) -> MarketSeries:
-    memo_key = ("dam-a44", zone.code, int(year))
+    memo_key = (dataset, zone.code, int(year))
     cached = _FETCH_MEMO.get(memo_key)
     if cached is not None:
         return cached
-    from .entsoe import fetch_day_ahead_year
-
-    series = fetch_day_ahead_year(
-        zone,
-        int(year),
-        # Lazy: a cache hit (and the whole offline mode) must work
-        # without any token configured.
-        token_resolver=lambda: resolve_entsoe_token(market_cfg),
-        cache=MarketDataCache(
-            str(market_cfg.get("market_cache_dir") or "").strip() or None
-        ),
-        fetch_mode=str(
-            market_cfg.get("market_fetch_mode") or "cache_first"
-        ).strip().lower(),
-    )
+    series = fetcher()
     _FETCH_MEMO[memo_key] = series
     return series
+
+
+def _fetch_day_ahead_memoized(
+    zone: Zone, year: int, market_cfg: dict[str, Any],
+) -> MarketSeries:
+    from .entsoe import fetch_day_ahead_year
+
+    return _memoized_fetch(
+        "dam-a44", zone, year,
+        lambda: fetch_day_ahead_year(
+            zone,
+            int(year),
+            # Lazy: a cache hit (and the whole offline mode) must work
+            # without any token configured.
+            token_resolver=lambda: resolve_entsoe_token(market_cfg),
+            cache=_market_cache(market_cfg),
+            fetch_mode=str(
+                market_cfg.get("market_fetch_mode") or "cache_first"
+            ).strip().lower(),
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-(zone, dataset) source registry
+# ---------------------------------------------------------------------------
+
+# Which provider the 'auto' source picks per dataset and zone; zones
+# not listed use the default.  GR is special-cased throughout: its
+# balancing/imbalance domain on the ENTSO-E platform is effectively
+# empty (co-optimised ISP, nationally published results), so GR routes
+# to the ADMIE file API and an EXPLICIT entsoe selection for GR is an
+# error rather than a silent empty fetch.
+_AUTO_SOURCE: dict[str, dict[str, str]] = {
+    "balancing": {"gr": "admie"},
+    "imbalance": {"gr": "admie"},
+}
+_AUTO_DEFAULT_SOURCE = "entsoe"
+
+# (dataset, zone) combinations known to publish nothing anywhere — the
+# 'auto' source falls back to 'file' with a WARNING for these.  Empty
+# today (every shipped zone has a route); kept as the documented hook
+# so a future zone without any publication degrades per the contract.
+_PUBLISHES_NOTHING: frozenset[tuple[str, str]] = frozenset()
+
+
+def resolve_dataset_source(
+    dataset: str, requested: str, zone: Zone,
+) -> str | None:
+    """Resolve a balancing/imbalance source selection for ``zone``.
+
+    Returns the provider token (``entsoe`` / ``admie``) or ``None`` for
+    the workbook path.  ``auto`` consults the registry (GR → admie,
+    else entsoe) and degrades to ``None`` with a WARNING when the
+    (dataset, zone) combination publishes nothing; an EXPLICIT
+    selection of an unavailable provider raises instead — the user
+    asked for something that cannot be served.
+    """
+    token = str(requested or "file").strip().lower()
+    zone_key = zone.code.lower()
+    if token == "file":
+        return None
+    if token == "auto":
+        if (dataset, zone_key) in _PUBLISHES_NOTHING:
+            logger.warning(
+                "[marketdata] %s_source='auto': zone %s publishes no "
+                "%s data on any registered provider; falling back to "
+                "the workbook ('file') path.",
+                dataset, zone.code, dataset,
+            )
+            return None
+        return _AUTO_SOURCE.get(dataset, {}).get(
+            zone_key, _AUTO_DEFAULT_SOURCE,
+        )
+    if token == "admie" and zone_key != "gr":
+        raise MarketDataUnavailableError(
+            f"{dataset}_source='admie' is the Greek TSO file API; zone "
+            f"{zone.code} is not served by it. Use 'auto' (per-zone "
+            "registry), 'entsoe', or 'file'."
+        )
+    if token == "entsoe" and zone_key == "gr":
+        raise MarketDataUnavailableError(
+            f"{dataset}_source='entsoe': the GR balancing/imbalance "
+            "domain on the ENTSO-E platform is effectively empty "
+            "(Greece runs a co-optimised Integrated Scheduling Process "
+            "and publishes results nationally). Use 'admie' or 'auto'."
+        )
+    if token not in ("entsoe", "admie"):
+        raise MarketDataError(
+            f"{dataset}_source {token!r} is not one of 'file', 'auto', "
+            "'entsoe', 'admie'."
+        )
+    return token
+
+
+# ---------------------------------------------------------------------------
+# Dataset application helpers
+# ---------------------------------------------------------------------------
+
+
+def _provenance_record(
+    column: str,
+    *,
+    dataset: str,
+    source: str,
+    source_key: str,
+    zone: Zone,
+    year: int,
+    dt_minutes: int,
+    overridden: bool,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "column": column,
+        "dataset": dataset,
+        "source": source,
+        # The market_data key that selected this source; the input
+        # snapshot flips it back to 'file' after materialising the
+        # fetched values, so the snapshot re-runs offline.
+        "source_key": source_key,
+        "bidding_zone": zone.code,
+        "eic": zone.eic,
+        "reference_year": year,
+        "model_cadence_min": int(dt_minutes),
+        "workbook_column_overridden": overridden,
+        **{
+            k: metadata.get(k)
+            for k in ("fetched_at", "cache_state", "cache_key")
+        },
+    }
+
+
+def _info_line(
+    columns: list[str],
+    *,
+    label: str,
+    zone: Zone,
+    year: int,
+    dt_minutes: int,
+    metadata: dict[str, Any],
+    notes: list[str],
+) -> str:
+    return (
+        f"{', '.join(columns)} <- {label} {zone.code} ({zone.eic}), "
+        f"reference year {year}, {dt_minutes}-min grid, "
+        f"{metadata.get('cache_state', 'live')} "
+        f"(fetched {metadata.get('fetched_at', 'unknown')}, "
+        f"cache key {metadata.get('cache_key', 'n/a')})"
+        + (f"; {'; '.join(notes)}" if notes else "")
+    )
+
+
+def _apply_utc_dataset(
+    ts: pd.DataFrame,
+    column_segments: dict[str, list[PriceSegment]],
+    *,
+    required: tuple[str, ...] | None,
+    zone: Zone,
+    year: int,
+    dt_minutes: int,
+) -> tuple[list[str], list[str]]:
+    """Sample a per-column UTC segment map onto the grid; replace columns.
+
+    ``required`` demands exactly that column set (hard error on any
+    missing one — partial datasets are never silently mixed); ``None`` applies
+    whatever columns the provider returned (the imbalance single/dual
+    variability).  Returns (applied columns, resample notes).
+    """
+    if required is not None:
+        missing = sorted(set(required) - set(column_segments))
+        if missing:
+            raise MarketDataError(
+                f"fetched dataset is missing the column(s) "
+                f"{', '.join(missing)} for zone {zone.code} in {year}; "
+                "refusing a partial bypass — use the 'file' source for "
+                "this dataset if the zone does not publish it in full."
+            )
+    notes: set[str] = set()
+    applied: list[str] = []
+    for column in (required or tuple(sorted(column_segments))):
+        stitched, seg_notes = stitch_segments_utc(
+            column_segments[column], dt_minutes, column=column,
+        )
+        notes.update(seg_notes)
+        ts[column] = sample_local_year(
+            stitched,
+            tz_name=zone.tz,
+            year=year,
+            dt_minutes=dt_minutes,
+            column=column,
+        )
+        applied.append(column)
+    return applied, sorted(notes)
+
+
+def _apply_local_native_dataset(
+    ts: pd.DataFrame,
+    columns_map: dict[str, tuple[int, np.ndarray]],
+    *,
+    required: tuple[str, ...],
+    n_steps: int,
+    dt_minutes: int,
+    zone: Zone,
+    year: int,
+) -> tuple[list[str], list[str]]:
+    """Apply an ADMIE-style local-native column map onto the grid."""
+    missing = sorted(set(required) - set(columns_map))
+    if missing:
+        raise MarketDataError(
+            f"ADMIE dataset is missing the column(s) {', '.join(missing)} "
+            f"for {year}; the declared header map may need re-pinning "
+            "via scripts/probe_market_data.py — refusing a partial "
+            "bypass."
+        )
+    notes: set[str] = set()
+    applied: list[str] = []
+    for column in required:
+        native_minutes, values = columns_map[column]
+        out = resample_intensive(
+            values, native_minutes, dt_minutes,
+            column=column, notes=notes, context=f"{year} year series",
+        )
+        if len(out) != n_steps:
+            raise MarketDataError(
+                f"{column}: normalised ADMIE series carries {len(out)} "
+                f"steps, expected {n_steps} (zone {zone.code}, "
+                f"{dt_minutes}-min grid)."
+            )
+        ts[column] = out
+        applied.append(column)
+    return applied, sorted(notes)
 
 
 def resolve_market_data(
@@ -541,74 +782,201 @@ def resolve_market_data(
             "1990-2100 range."
         )
 
-    validate_model_year_grid(
-        ts, dt_minutes,
-        context=f"price_source='{price_source}' (market_data sheet)",
+    active_key = next(
+        key for key, value in (
+            ("price_source", price_source),
+            ("balancing_source", balancing_source),
+            ("imbalance_source", imbalance_source),
+        ) if value != "file"
     )
+    n_steps = validate_model_year_grid(
+        ts, dt_minutes,
+        context=f"{active_key}='{market_cfg.get(active_key)}' "
+                "(market_data sheet)",
+    )
+    cache = _market_cache(market_cfg)
 
     provenance: list[dict[str, Any]] = []
     info_lines: list[str] = []
+    # Captured BEFORE any bypass so the provenance can say whether the
+    # workbook actually carried each column.
+    pre_existing = set(ts.columns)
 
     if price_source == "entsoe":
         series = _fetch_day_ahead_memoized(zone, year, market_cfg)
-        stitched, notes = stitch_segments_utc(
-            series.segments, dt_minutes, column="dam_price_eur_per_mwh",
+        applied, notes = _apply_utc_dataset(
+            ts,
+            {"dam_price_eur_per_mwh": series.segments},
+            required=("dam_price_eur_per_mwh",),
+            zone=zone, year=year, dt_minutes=dt_minutes,
         )
-        values = sample_local_year(
-            stitched,
-            tz_name=zone.tz,
-            year=year,
-            dt_minutes=dt_minutes,
-            column="dam_price_eur_per_mwh",
+        provenance.extend(
+            _provenance_record(
+                column,
+                dataset="day-ahead prices (ENTSO-E 12.1.D, A44)",
+                source="entsoe", source_key="price_source",
+                zone=zone, year=year, dt_minutes=dt_minutes,
+                overridden=column in pre_existing,
+                metadata=series.metadata,
+            )
+            for column in applied
         )
-        had_column = "dam_price_eur_per_mwh" in ts.columns
-        ts["dam_price_eur_per_mwh"] = values
-        record: dict[str, Any] = {
-            "column": "dam_price_eur_per_mwh",
-            "dataset": "day-ahead prices (ENTSO-E 12.1.D, A44)",
-            "source": "entsoe",
-            # The market_data key that selected this source; the input
-            # snapshot flips it back to 'file' after materialising the
-            # fetched values, so the snapshot re-runs offline.
-            "source_key": "price_source",
-            "bidding_zone": zone.code,
-            "eic": zone.eic,
-            "reference_year": year,
-            "model_cadence_min": int(dt_minutes),
-            "workbook_column_overridden": bool(had_column),
-            **{
-                k: series.metadata.get(k)
-                for k in ("fetched_at", "cache_state", "cache_key")
-            },
-        }
-        provenance.append(record)
-        info_lines.append(
-            f"dam_price_eur_per_mwh <- ENTSO-E A44 {zone.code} ({zone.eic}), "
-            f"reference year {year}, {dt_minutes}-min grid, "
-            f"{series.metadata.get('cache_state', 'live')} "
-            f"(fetched {series.metadata.get('fetched_at', 'unknown')}, "
-            f"cache key {series.metadata.get('cache_key', 'n/a')})"
-            + (f"; {'; '.join(notes)}" if notes else "")
-        )
+        info_lines.append(_info_line(
+            applied, label="ENTSO-E A44", zone=zone, year=year,
+            dt_minutes=dt_minutes, metadata=series.metadata, notes=notes,
+        ))
     elif price_source != "file":
         raise MarketDataError(
             f"price_source {price_source!r} is not one of 'file', 'entsoe'."
         )
 
-    # Balancing / imbalance ingestion lands with the ADMIE provider and
-    # the per-(zone, dataset) registry phase; the keys already parse so
-    # the sheet schema is stable, but a non-file selection must fail
-    # loudly rather than silently keep workbook values.
-    for key, value in (
-        ("balancing_source", balancing_source),
-        ("imbalance_source", imbalance_source),
-    ):
-        if value != "file":
-            raise MarketDataUnavailableError(
-                f"{key}='{value}': no provider is registered yet for this "
-                "dataset (the balancing/imbalance providers ship with the "
-                "ADMIE ingestion phase); set the key to 'file'."
+    bal_provider = resolve_dataset_source("balancing", balancing_source, zone)
+    if bal_provider == "admie":
+        from .admie import (
+            BALANCING_HEADER_PATTERNS,
+            fetch_gr_balancing_year,
+            series_columns,
+        )
+
+        series = _memoized_fetch(
+            "gr-balancing", zone, year,
+            lambda: fetch_gr_balancing_year(
+                year, cache=cache, fetch_mode=fetch_mode,
+            ),
+        )
+        applied, notes = _apply_local_native_dataset(
+            ts, series_columns(series),
+            required=tuple(BALANCING_HEADER_PATTERNS),
+            n_steps=n_steps, dt_minutes=dt_minutes, zone=zone, year=year,
+        )
+        provenance.extend(
+            _provenance_record(
+                column,
+                dataset="balancing prices (ADMIE ISP results)",
+                source="admie", source_key="balancing_source",
+                zone=zone, year=year, dt_minutes=dt_minutes,
+                overridden=column in pre_existing,
+                metadata=series.metadata,
             )
+            for column in applied
+        )
+        info_lines.append(_info_line(
+            applied, label="ADMIE", zone=zone, year=year,
+            dt_minutes=dt_minutes, metadata=series.metadata, notes=notes,
+        ))
+        # Greece procures no standalone FCR (co-optimised ISP): the FCR
+        # capacity column keeps its workbook / scalar-fallback path —
+        # the documented registry degradation, WARNED so a GR run never
+        # silently assumes a fetched FCR price.
+        logger.warning(
+            "[marketdata] balancing_source='%s' (GR): "
+            "fcr_capacity_price_eur_per_mwh is NOT fetched — Greece "
+            "procures no standalone FCR — and stays on the workbook / "
+            "scalar-fallback path.",
+            balancing_source,
+        )
+    elif bal_provider == "entsoe":
+        from .entsoe import (
+            ENTSOE_BALANCING_COLUMNS,
+            column_segments,
+            fetch_balancing_prices_year,
+        )
+
+        series = _memoized_fetch(
+            "bal-prices", zone, year,
+            lambda: fetch_balancing_prices_year(
+                zone, year,
+                token_resolver=lambda: resolve_entsoe_token(market_cfg),
+                cache=cache, fetch_mode=fetch_mode,
+            ),
+        )
+        applied, notes = _apply_utc_dataset(
+            ts, column_segments(series),
+            required=ENTSOE_BALANCING_COLUMNS,
+            zone=zone, year=year, dt_minutes=dt_minutes,
+        )
+        provenance.extend(
+            _provenance_record(
+                column,
+                dataset="balancing prices (ENTSO-E 17.1.B&C A81 + "
+                        "17.1.F A84)",
+                source="entsoe", source_key="balancing_source",
+                zone=zone, year=year, dt_minutes=dt_minutes,
+                overridden=column in pre_existing,
+                metadata=series.metadata,
+            )
+            for column in applied
+        )
+        info_lines.append(_info_line(
+            applied, label="ENTSO-E A81/A84", zone=zone, year=year,
+            dt_minutes=dt_minutes, metadata=series.metadata, notes=notes,
+        ))
+
+    imb_provider = resolve_dataset_source("imbalance", imbalance_source, zone)
+    if imb_provider == "admie":
+        from .admie import (
+            IMBALANCE_HEADER_PATTERNS,
+            fetch_gr_imbalance_year,
+            series_columns,
+        )
+
+        series = _memoized_fetch(
+            "gr-imbalance", zone, year,
+            lambda: fetch_gr_imbalance_year(
+                year, cache=cache, fetch_mode=fetch_mode,
+            ),
+        )
+        applied, notes = _apply_local_native_dataset(
+            ts, series_columns(series),
+            required=tuple(IMBALANCE_HEADER_PATTERNS),
+            n_steps=n_steps, dt_minutes=dt_minutes, zone=zone, year=year,
+        )
+        provenance.extend(
+            _provenance_record(
+                column,
+                dataset="imbalance prices (ADMIE IMBABE)",
+                source="admie", source_key="imbalance_source",
+                zone=zone, year=year, dt_minutes=dt_minutes,
+                overridden=column in pre_existing,
+                metadata=series.metadata,
+            )
+            for column in applied
+        )
+        info_lines.append(_info_line(
+            applied, label="ADMIE", zone=zone, year=year,
+            dt_minutes=dt_minutes, metadata=series.metadata, notes=notes,
+        ))
+    elif imb_provider == "entsoe":
+        from .entsoe import column_segments, fetch_imbalance_prices_year
+
+        series = _memoized_fetch(
+            "imbalance", zone, year,
+            lambda: fetch_imbalance_prices_year(
+                zone, year,
+                token_resolver=lambda: resolve_entsoe_token(market_cfg),
+                cache=cache, fetch_mode=fetch_mode,
+            ),
+        )
+        applied, notes = _apply_utc_dataset(
+            ts, column_segments(series),
+            required=None,  # single vs dual pricing varies by zone
+            zone=zone, year=year, dt_minutes=dt_minutes,
+        )
+        provenance.extend(
+            _provenance_record(
+                column,
+                dataset="imbalance prices (ENTSO-E 17.1.G, A85)",
+                source="entsoe", source_key="imbalance_source",
+                zone=zone, year=year, dt_minutes=dt_minutes,
+                overridden=column in pre_existing,
+                metadata=series.metadata,
+            )
+            for column in applied
+        )
+        info_lines.append(_info_line(
+            applied, label="ENTSO-E A85", zone=zone, year=year,
+            dt_minutes=dt_minutes, metadata=series.metadata, notes=notes,
+        ))
 
     if provenance:
         typed["market_provenance"] = provenance
