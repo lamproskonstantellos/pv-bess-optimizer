@@ -362,3 +362,221 @@ def test_discount_rate_rebuild_keeps_trajectories():
     rate_rows = sens.loc[sens["variable"] == "DiscountRate"]
     assert not rate_rows.empty
     assert rate_rows["npv_eur"].notna().all()
+
+
+# ---------------------------------------------------------------------------
+# 7. Per-stream split taxonomy (Eqs. E60/E61)
+# ---------------------------------------------------------------------------
+
+
+def _kpis_with_products() -> dict:
+    return {
+        **_kpis(),
+        "bm_fcr_capacity_revenue_eur": 5_000.0,
+        "bm_afrr_up_capacity_revenue_eur": 6_000.0,
+        "bm_afrr_dn_capacity_revenue_eur": 3_000.0,
+        "bm_mfrr_up_capacity_revenue_eur": 4_000.0,
+        "bm_mfrr_dn_capacity_revenue_eur": 2_000.0,
+        "bm_afrr_up_activation_revenue_eur": 3_000.0,
+        "bm_afrr_dn_activation_revenue_eur": 1_000.0,
+        "bm_mfrr_up_activation_revenue_eur": 3_000.0,
+        "bm_mfrr_dn_activation_revenue_eur": 1_000.0,
+    }
+
+
+_DAM_SPLIT = ("revenue_dam_pv", "revenue_dam_bess_export",
+              "expense_dam_bess_charge")
+
+
+def test_split_equals_aggregate_when_factors_equal():
+    """Old aggregate ≡ new split when every leg carries the same vector."""
+    vec = [1.0, 0.9, 0.85, 0.8, 0.75, 0.7]
+    aggregate = build_yearly_cashflow(
+        _kpis(), _econ(trajectories=_traj("revenue_dam", vec)), _caps(),
+    )
+    split_block = {
+        stream: {"mode": "replace", "values": list(vec)}
+        for stream in _DAM_SPLIT
+    }
+    split = build_yearly_cashflow(
+        _kpis(), _econ(trajectories=split_block), _caps(),
+    )
+    for col in ("revenue_dam_eur", "optimizer_fee_eur",
+                "net_cashflow_eur"):
+        pd.testing.assert_series_equal(
+            aggregate[col], split[col], rtol=1e-12, atol=1e-9,
+        )
+
+
+def test_no_split_declared_keeps_bit_identity():
+    """The split branch is gated: without split streams the historical
+    grouping (and its floats) is untouched."""
+    base = build_yearly_cashflow(_kpis(), _econ(), _caps())
+    again = build_yearly_cashflow(
+        _kpis(),
+        _econ(trajectories=_traj("revenue_retail", [1.0] * N_YEARS)),
+        _caps(),
+    )
+    pd.testing.assert_series_equal(
+        base["revenue_dam_eur"], again["revenue_dam_eur"],
+    )
+
+
+def test_pv_leg_decline_reproduces_hand_computed_year2():
+    """Cannibalization on the PV leg only: year-2 DAM revenue equals the
+    hand-computed sum of legs (Defect 1 fixed — the BESS legs hold)."""
+    pv_vec = [1.0, 0.8] + [0.8] * (N_YEARS - 2)
+    shaped = build_yearly_cashflow(
+        _kpis(),
+        _econ(dam_inflation_pct=0.0,
+              trajectories=_traj("revenue_dam_pv", pv_vec)),
+        _caps(),
+    )
+    kpis = _kpis()
+    pv_f2 = (1.0 - 0.02) * (1.0 - 0.01) ** 0  # year-2 PV factor
+    bess_f2 = 1.0 - 0.03                      # year-2 BESS factor
+    expected = (
+        kpis["profit_export_from_pv_eur"] * pv_f2 * 0.8
+        + (kpis["profit_export_from_bess_eur"]
+           - kpis["expense_charge_bess_grid_eur"]) * bess_f2
+    )
+    y2 = shaped["project_year"] == 2
+    assert float(shaped.loc[y2, "revenue_dam_eur"].iloc[0]) == pytest.approx(
+        expected, rel=1e-9,
+    )
+
+
+def test_charge_leg_escalation_erodes_net_spread():
+    """Defect 1: a rising charging cost with a flat export leg must
+    shrink the net BESS margin — and the E13d optimizer fee with it."""
+    charge_up = [1.0, 1.5] + [1.5] * (N_YEARS - 2)
+    base = build_yearly_cashflow(
+        _kpis(), _econ(dam_inflation_pct=0.0), _caps(),
+    )
+    shaped = build_yearly_cashflow(
+        _kpis(),
+        _econ(dam_inflation_pct=0.0,
+              trajectories=_traj("expense_dam_bess_charge", charge_up)),
+        _caps(),
+    )
+    y2 = shaped["project_year"] == 2
+    kpis = _kpis()
+    bess_f2 = 1.0 - 0.03
+    delta_expected = (
+        kpis["expense_charge_bess_grid_eur"] * bess_f2 * 0.5
+    )
+    drop = float(base.loc[y2, "revenue_dam_eur"].iloc[0]) - float(
+        shaped.loc[y2, "revenue_dam_eur"].iloc[0],
+    )
+    assert drop == pytest.approx(delta_expected, rel=1e-9)
+    # The optimizer share base uses the SAME split margin.
+    assert float(shaped.loc[y2, "optimizer_fee_eur"].iloc[0]) > float(
+        base.loc[y2, "optimizer_fee_eur"].iloc[0],
+    )
+
+
+def test_cfd_dam_leg_follows_pv_split_leg():
+    """The CfD covered-DAM leg prices PV-origin volume: it rides the
+    revenue_dam_pv series while the BESS legs stay untouched."""
+    kpis = {**_kpis(), "revenue_pv_ppa_eur": 30_000.0,
+            "ppa_covered_dam_value_eur": 25_000.0}
+    econ_kw = dict(
+        ppa_enabled=True, ppa_settlement="cfd", ppa_term_years=N_YEARS,
+        ppa_inflation_pct=0.0, ppa_volume_share_pct=50.0,
+    )
+    pv_vec = [1.0, 0.5] + [0.5] * (N_YEARS - 2)
+    base = build_yearly_cashflow(kpis, _econ(**econ_kw), _caps())
+    shaped = build_yearly_cashflow(
+        kpis,
+        _econ(trajectories=_traj("revenue_dam_pv", pv_vec), **econ_kw),
+        _caps(),
+    )
+    y2 = shaped["project_year"] == 2
+    # Halving the PV capture path raises the CfD payout (strike-ref).
+    assert float(shaped.loc[y2, "ppa_revenue_eur"].iloc[0]) > float(
+        base.loc[y2, "ppa_revenue_eur"].iloc[0],
+    )
+
+
+def test_split_requires_year1_breakdown():
+    bare = {"profit_total_eur": 100_000.0}
+    with pytest.raises(ValueError, match="breakdown"):
+        build_yearly_cashflow(
+            bare,
+            _econ(trajectories=_traj(
+                "revenue_dam_pv", [1.0] * N_YEARS,
+            )),
+            _caps(),
+        )
+
+
+def test_per_product_split_equals_aggregate_when_factors_equal():
+    vec = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]
+    aggregate = build_yearly_cashflow(
+        _kpis_with_products(),
+        _econ(trajectories={
+            "balancing_capacity": {"mode": "replace", "values": vec},
+            "balancing_activation": {"mode": "replace", "values": vec},
+        }),
+        _caps(),
+    )
+    products = {
+        f"balancing_capacity_{p}": {"mode": "replace", "values": list(vec)}
+        for p in ("fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+    }
+    products.update({
+        f"balancing_activation_{p}": {
+            "mode": "replace", "values": list(vec),
+        }
+        for p in ("afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+    })
+    split = build_yearly_cashflow(
+        _kpis_with_products(), _econ(trajectories=products), _caps(),
+    )
+    for col in ("balancing_capacity_revenue_eur",
+                "balancing_activation_revenue_eur", "net_cashflow_eur"):
+        pd.testing.assert_series_equal(
+            aggregate[col], split[col], rtol=1e-12, atol=1e-9,
+        )
+
+
+def test_fcr_collapse_hits_only_its_share():
+    """A German-style FCR collapse: only the FCR slice of the capacity
+    revenue dies; aFRR/mFRR keep the scalar index."""
+    fcr_dead = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    base = build_yearly_cashflow(
+        _kpis_with_products(), _econ(bm_inflation_pct=0.0), _caps(),
+    )
+    shaped = build_yearly_cashflow(
+        _kpis_with_products(),
+        _econ(bm_inflation_pct=0.0,
+              trajectories=_traj("balancing_capacity_fcr", fcr_dead)),
+        _caps(),
+    )
+    y2 = shaped["project_year"] == 2
+    bess_f2 = 1.0 - 0.03
+    expected_drop = 5_000.0 * bess_f2  # the FCR Year-1 slice, faded
+    drop = float(base.loc[y2, "balancing_capacity_revenue_eur"].iloc[0]) - (
+        float(shaped.loc[y2, "balancing_capacity_revenue_eur"].iloc[0])
+    )
+    assert drop == pytest.approx(expected_drop, rel=1e-9)
+    pd.testing.assert_series_equal(
+        base["balancing_activation_revenue_eur"],
+        shaped["balancing_activation_revenue_eur"],
+    )
+
+
+def test_split_streams_leave_lcoe_lcos_unchanged():
+    block = {
+        stream: {"mode": "replace",
+                 "values": [1.0, 0.5, 0.5, 0.5, 0.5, 0.5]}
+        for stream in _DAM_SPLIT
+    }
+    fin0, fin1 = _fin(_econ()), _fin(_econ(trajectories=block))
+    assert fin1["lcoe_eur_per_mwh"] == pytest.approx(
+        fin0["lcoe_eur_per_mwh"],
+    )
+    assert fin1["lcos_eur_per_mwh"] == pytest.approx(
+        fin0["lcos_eur_per_mwh"],
+    )
+    assert fin1["npv_eur"] < fin0["npv_eur"]

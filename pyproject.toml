@@ -19,7 +19,13 @@ Documentation = "https://pv-bess-optimizer.readthedocs.io/en/latest/"
 pvbess = "pvbess_opt.cli:main"
 
 [tool.setuptools]
-packages = ["pvbess_opt", "pvbess_opt.plotting", "pvbess_opt.resource"]
+packages = [
+    "pvbess_opt",
+    "pvbess_opt.marketdata",
+    "pvbess_opt.plotting",
+    "pvbess_opt.pricedata",
+    "pvbess_opt.resource",
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "pvbess_opt.__version__" }

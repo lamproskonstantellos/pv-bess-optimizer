@@ -6,10 +6,11 @@ The optimiser consumes a single Excel workbook.  Ten core data sheets
 ``balancing``, ``ppa``, ``intraday``, ``simulation``,
 ``max_injection_profile``)
 carry the run, plus the optional per-source sub-cap sheets
-(``max_injection_profile_pv`` / ``max_injection_profile_bess``) and two
-optional opt-in sheets ``sizing``, ``scenarios`` and ``trajectories``
-(each gated by an ``enabled`` toggle and shipped disabled).  All keys
-use lowercase snake_case.
+(``max_injection_profile_pv`` / ``max_injection_profile_bess``) and the
+optional opt-in sheets ``sizing``, ``scenarios``, ``trajectories``,
+``market_data``, ``scenario_engine`` and ``price_scenarios`` (each
+shipped inert: gated by an ``enabled`` toggle or defaulting to the
+inactive source / master switch).  All keys use lowercase snake_case.
 
 Sheet ``timeseries``
 --------------------
@@ -1247,3 +1248,62 @@ With the sheet disabled (or no ``trajectories:`` block) every stream
 keeps its flat scalar index and the run is bit-identical to before.  The
 multi-year application itself (equations E24 / E24a) is described in the
 economics guide.
+
+Market data & price scenarios (``market_data`` / ``scenario_engine`` / ``price_scenarios``)
+-------------------------------------------------------------------------------------------
+
+Three optional sheets, shipped inert, documented in full in
+``docs/market_scenarios_design.md``:
+
+* ``market_data`` (key / value) selects the Year-1 price basis.  With
+  every source at its ``file`` default the workbook price columns are
+  used untouched.  ``price_source = entsoe`` fetches the
+  ``price_reference_year`` day-ahead series for the selected
+  ``bidding_zone`` (``gr``, ``de_lu``, ``fr``, ``it_nord``, ``es``,
+  ``bg``, ``ro``) from the ENTSO-E Transparency Platform and
+  **replaces** ``dam_price_eur_per_mwh`` for the whole horizon;
+  ``balancing_source`` / ``imbalance_source`` accept ``auto`` (per-zone
+  registry: GR resolves to the ADMIE file API, every other zone to
+  ENTSO-E) or an explicit provider.  Fetches cache on disk
+  (``market_cache_dir``; ``market_fetch_mode``: ``cache_first`` /
+  ``refresh`` / ``offline``).  The API token comes from the
+  ``entsoe_token`` cell or the environment variable named by
+  ``entsoe_token_env`` — the shipped template keeps the cell empty;
+  never commit a token.  Bypassed columns are recorded on the results
+  workbook's ``market_data_provenance`` sheet and materialised into the
+  input snapshot (source keys reset to ``file``, token blanked) so the
+  snapshot re-runs the exact prices offline.
+
+* ``scenario_engine`` (key / value) arms the multi-year price-scenario
+  layer.  ``price_scenarios_enabled = FALSE`` (the default) keeps years
+  2..N on the flat inflation indices, bit-identical.
+  ``scenario_projection_mode`` picks the projection tier: ``reprice``
+  revalues the frozen Year-1 dispatch against each year's scenario
+  curve into per-stream escalation factors; ``resolve`` additionally
+  re-solves the MILP at ``scenario_resolve_years`` on a coarser grid
+  (``scenario_resolve_resolution`` minutes, hourly by default) with
+  log-linear interpolation between support years (``scenario_interp``);
+  ``trajectory_only`` leaves the declared ``trajectories`` sheet in
+  charge.  ``price_basis`` / ``price_base_year`` / ``cpi_pct`` bridge
+  real vendor decks to the nominal cashflow, ``debt_sizing_scenario``
+  names the scenario the debt is sized on, and
+  ``support_ref_follows_scenario`` decides whether CfD / FiP reference
+  legs follow the scenario path (default) or stay on the plain
+  ``dam_inflation_pct`` index.
+
+* ``price_scenarios`` (tidy, gated by the first data row's ``enabled``
+  cell) lists the scenario decks: ``name``, ``provider`` (``file`` for
+  a ready-made store directory, ``parametric`` for the three-knob
+  generator driven by the workbook's own Year-1 prices, ``tyndp`` for
+  the free ENTSO-E TYNDP milestone curves), ``vintage``,
+  ``weight_pct`` (the enabled rows must sum to 100), ``store_path``
+  (resolved against the workbook) and ``notes``.  A store is a
+  directory carrying ``meta.yaml``, per-year ``dam.csv`` curves and an
+  optional ``balancing_annual.csv``.
+
+Armed runs add the ``scenario_price_paths`` (per-year capture KPIs and
+factors), ``scenario_resolve_delta`` (Tier-2 vs Tier-1 factor gap) and
+``price_scenario_ensemble`` (weighted E[NPV] / E[IRR] with P10 / P50 /
+P90 on one shared debt sizing) sheets to the results workbook, two
+figures (the price-path fan and the capture-KPI panel), and the
+scenario digest lines in ``SUMMARY.md``.

@@ -60,7 +60,7 @@ AMBER_FILL_HEXES: frozenset[str] = frozenset({
 
 _PARAMETER_SHEETS: tuple[str, ...] = (
     "project", "pv", "bess", "economics", "simulation", "balancing", "ppa",
-    "intraday",
+    "intraday", "market_data", "scenario_engine",
 )
 
 # Sheets whose header row is center-aligned on top of the house style.
@@ -299,6 +299,32 @@ def _ensure_trajectories_sheet(wb) -> bool:
     return True
 
 
+def _ensure_price_scenarios_sheet(wb) -> bool:
+    """Create the optional ``price_scenarios`` sheet when absent.
+
+    Written with the shipped disabled example
+    (:data:`pvbess_opt.io._PRICE_SCENARIOS_EXAMPLE_ROWS`); an existing
+    sheet is left untouched (idempotent — user rows are never
+    rewritten).  Returns True when the sheet was created.
+    """
+    if "price_scenarios" in wb.sheetnames:
+        return False
+    from pvbess_opt.io import (
+        _PRICE_SCENARIOS_EXAMPLE_ROWS,
+        PRICE_SCENARIOS_SHEET_COLUMNS,
+    )
+
+    logger.info(
+        "creating missing 'price_scenarios' sheet with the disabled "
+        "example.",
+    )
+    ws = wb.create_sheet("price_scenarios")
+    ws.append(list(PRICE_SCENARIOS_SHEET_COLUMNS))
+    for row in _PRICE_SCENARIOS_EXAMPLE_ROWS:
+        ws.append(list(row))
+    return True
+
+
 def polish_workbook(path: Path) -> dict[str, int]:
     """Polish ``path`` in place and return per-sheet diagnostics.
 
@@ -313,6 +339,7 @@ def polish_workbook(path: Path) -> dict[str, int]:
         _migrate_legacy_bess_capex(wb["bess"])
     _ensure_parameter_sheets(wb)
     _ensure_trajectories_sheet(wb)
+    _ensure_price_scenarios_sheet(wb)
     cleared_by_sheet: dict[str, int] = {}
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]

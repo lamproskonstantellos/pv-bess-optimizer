@@ -103,9 +103,11 @@ __all__ = [
     "FALSY",
     "INTRADAY_SHEET_DEFAULTS",
     "LAYOUT_SUBDIRS",
+    "MARKET_DATA_SHEET_DEFAULTS",
     "PPA_SHEET_DEFAULTS",
     "PROJECT_SHEET_DEFAULTS",
     "PV_SHEET_DEFAULTS",
+    "SCENARIO_ENGINE_SHEET_DEFAULTS",
     "SIMULATION_SHEET_DEFAULTS",
     "TRUTHY",
     "copy_input_snapshot",
@@ -472,6 +474,81 @@ INTRADAY_SHEET_DEFAULTS: dict[str, Any] = {
     "id_inflation_pct": 0.0,
 }
 
+MARKET_DATA_SHEET_DEFAULTS: dict[str, Any] = {
+    # Day-ahead price source.  'file' (default) keeps the workbook
+    # column untouched — bit-identical behaviour; 'entsoe' fetches the
+    # reference-year series from the ENTSO-E Transparency Platform and
+    # REPLACES dam_price_eur_per_mwh for the whole horizon (override
+    # semantics — workbook values are used only under 'file').
+    "price_source": "file",
+    # Bidding zone / country selector; the EIC code and local timezone
+    # come from pvbess_opt.marketdata.ZONES.
+    "bidding_zone": "gr",
+    # Historical calendar year fetched as the Year-1 price basis.
+    "price_reference_year": 2025,
+    # Fixed intensive-quantity resampling policy: coarser native data
+    # is step-held onto a finer model grid (an hourly price repeats
+    # over its four quarters, NEVER divided), finer data is averaged
+    # onto a coarser grid.  Single accepted value; the key exists so a
+    # future alternative is an explicit, versioned choice.
+    "price_resample_policy": "step_hold",
+    # Balancing / imbalance sources.  'file' keeps workbook columns;
+    # 'auto' lets the per-zone registry pick (GR → admie, else entsoe);
+    # the API providers land with the ADMIE ingestion phase.
+    "balancing_source": "file",
+    "imbalance_source": "file",
+    # ENTSO-E API token: the literal token, or empty to read the
+    # environment variable named by entsoe_token_env.  The shipped
+    # template keeps this empty — never commit a real token; logs mask
+    # it to its first 8 characters.
+    "entsoe_token": "",
+    "entsoe_token_env": "ENTSOE_API_TOKEN",
+    # On-disk fetch cache (the PVGIS pattern) and its usage mode:
+    # cache_first reuses cached fetches, refresh always re-hits the
+    # API, offline errors on a cache miss (reproducible CI runs).
+    "market_cache_dir": "~/.cache/pvbess/market",
+    "market_fetch_mode": "cache_first",
+}
+
+SCENARIO_ENGINE_SHEET_DEFAULTS: dict[str, Any] = {
+    # Master switch for the multi-year price-scenario layer.  When
+    # False every output is bit-identical to a workbook without the
+    # sheet: years 2..N keep the flat inflation indices exactly as
+    # before.
+    "price_scenarios_enabled": False,
+    # How per-year scenario curves reach the cashflow: 'reprice'
+    # (Tier 1) revalues the FROZEN Year-1 dispatch against each year's
+    # curve and feeds the resulting per-stream factors into the
+    # existing Eq. E24 escalation machinery; 'resolve' (Tier 2)
+    # additionally re-solves the MILP at the support years below;
+    # 'trajectory_only' (Tier 3) keeps today's analytic behaviour with
+    # the refined stream taxonomy.
+    "scenario_projection_mode": "reprice",
+    # Support years for the Tier-2 re-solves (CSV of operating years)
+    # and the re-solve grid resolution in minutes (hourly by default:
+    # a full-year hourly MILP solves in seconds-to-minutes, the 15-min
+    # grid does not scale to 6 scenarios x N years).
+    "scenario_resolve_years": "1,5,10,15,20,25",
+    "scenario_resolve_resolution": 60,
+    # Interpolation of the per-stream factors between support years.
+    "scenario_interp": "loglinear",
+    # Price basis of the engine's cashflow ('nominal' matches the
+    # repo's convention) plus the deflator bridge inputs: vendor
+    # curves are typically real EUR of a base year, bridged at cpi_pct
+    # (see pvbess_opt/pricedata/store.py).
+    "price_basis": "nominal",
+    "price_base_year": 0,
+    "cpi_pct": 2.0,
+    # Which enabled scenario sizes the debt (empty = the first
+    # enabled row); every scenario inherits that debt schedule so the
+    # ensemble compares operating outcomes, not re-levered capital
+    # structures.
+    "debt_sizing_scenario": "",
+    # CfD / FiP support reference follows the scenario DAM path
+    # (opt-out for a strike settled against a frozen reference curve).
+    "support_ref_follows_scenario": True,
+}
+
 SIMULATION_SHEET_DEFAULTS: dict[str, Any] = {
     "uncertainty_enabled": False,
     "uncertainty_compare_sources": False,
@@ -518,6 +595,8 @@ _SHEET_DEFAULTS: dict[str, dict[str, Any]] = {
     "balancing": BALANCING_SHEET_DEFAULTS,
     "ppa": PPA_SHEET_DEFAULTS,
     "intraday": INTRADAY_SHEET_DEFAULTS,
+    "market_data": MARKET_DATA_SHEET_DEFAULTS,
+    "scenario_engine": SCENARIO_ENGINE_SHEET_DEFAULTS,
 }
 
 _KEY_TO_SHEET: dict[str, str] = {}
@@ -555,6 +634,8 @@ _BOOL_KEYS: frozenset[str] = frozenset({
     "support_negative_hour_suspension",
     "id_enabled",
     "id_allow_purchases",
+    "price_scenarios_enabled",
+    "support_ref_follows_scenario",
 })
 _INT_KEYS: frozenset[str] = frozenset({
     "project_lifecycle_years",
@@ -583,6 +664,9 @@ _INT_KEYS: frozenset[str] = frozenset({
     "depreciation_years_site",
     "tax_loss_carryforward_years",
     "support_term_years",
+    "price_reference_year",
+    "scenario_resolve_resolution",
+    "price_base_year",
 })
 _STR_KEYS: frozenset[str] = frozenset({
     "mode",
@@ -604,6 +688,15 @@ _STR_KEYS: frozenset[str] = frozenset({
     "optimizer_margin_basis",
     "support_scheme",
     "support_ref_period",
+    "price_source",
+    "bidding_zone",
+    "price_resample_policy",
+    "balancing_source",
+    "imbalance_source",
+    "market_fetch_mode",
+    "scenario_projection_mode",
+    "scenario_interp",
+    "price_basis",
 })
 _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "mode": frozenset({"self_consumption", "merchant"}),
@@ -628,6 +721,21 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "optimizer_margin_basis": frozenset({"dam", "dam_plus_balancing"}),
     "support_scheme": frozenset({"none", "sliding_fip", "cfd_two_way"}),
     "support_ref_period": frozenset({"monthly", "hourly"}),
+    "price_source": frozenset({"file", "entsoe"}),
+    # Lowercase zone tokens (the enum parser lowercases); the canonical
+    # spellings and EIC codes live in pvbess_opt.marketdata.ZONES.
+    "bidding_zone": frozenset({
+        "gr", "de_lu", "fr", "it_nord", "es", "bg", "ro",
+    }),
+    "price_resample_policy": frozenset({"step_hold"}),
+    "balancing_source": frozenset({"file", "auto", "entsoe", "admie"}),
+    "imbalance_source": frozenset({"file", "auto", "entsoe", "admie"}),
+    "market_fetch_mode": frozenset({"cache_first", "refresh", "offline"}),
+    "scenario_projection_mode": frozenset({
+        "reprice", "resolve", "trajectory_only",
+    }),
+    "scenario_interp": frozenset({"loglinear"}),
+    "price_basis": frozenset({"nominal", "real"}),
 }
 
 
@@ -1497,6 +1605,125 @@ _INTRADAY_ROWS: tuple[tuple[str, object, str, str], ...] = (
 )
 
 
+_MARKET_DATA_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("price_source", "file", "enum",
+     "Day-ahead price source: 'file' (default) reads the workbook "
+     "dam_price_eur_per_mwh column; 'entsoe' fetches the "
+     "price_reference_year series for the selected bidding_zone from "
+     "the ENTSO-E Transparency Platform and REPLACES the workbook "
+     "column for the whole horizon (override semantics — with an API "
+     "source the workbook values are bypassed even where present). "
+     "One consolidated INFO log lists every bypassed column with its "
+     "provenance; the same records land on the results workbook's "
+     "market_data_provenance sheet."),
+    ("bidding_zone", "gr", "enum",
+     "Country / bidding-zone selector for every fetched dataset. "
+     "Accepted: gr, de_lu, fr, it_nord, es, bg, ro (EIC codes and "
+     "local timezones in pvbess_opt.marketdata.ZONES; extendable "
+     "there)."),
+    ("price_reference_year", 2025, "year",
+     "Historical calendar year fetched as the Year-1 price basis. The "
+     "fetched local-time series is laid onto the workbook grid by "
+     "calendar position; a leap reference year drops Feb 29 (industry "
+     "8760-hour convention). Requires the workbook timeseries to span "
+     "one full non-leap year from Jan 1 00:00."),
+    ("price_resample_policy", "step_hold", "enum",
+     "Fixed intensive-quantity resampling policy (single accepted "
+     "value). Prices are EUR/MWh levels: coarser native data is "
+     "step-held onto a finer model grid (an hourly price repeats over "
+     "its four quarters, never divided), finer data is averaged onto "
+     "a coarser grid with an INFO that intra-period spread is "
+     "averaged away."),
+    ("balancing_source", "file", "enum",
+     "Balancing price source: 'file' (default) keeps the nine workbook "
+     "balancing columns / scalar fallbacks; 'auto' lets the per-zone "
+     "registry pick (GR -> admie, else entsoe, falling back to 'file' "
+     "with a WARNING when the zone publishes nothing); 'entsoe' / "
+     "'admie' force a provider. The API providers land with the ADMIE "
+     "ingestion phase - until then any non-file selection fails "
+     "loudly."),
+    ("imbalance_source", "file", "enum",
+     "Imbalance price source; same options and rollout status as "
+     "balancing_source."),
+    ("entsoe_token", "", "token",
+     "ENTSO-E Web API security token (free, via 'Web API Security "
+     "Token' after registering at transparency.entsoe.eu). Leave "
+     "empty to read the environment variable named by "
+     "entsoe_token_env instead. Keep real tokens out of committed / "
+     "shared workbooks; logs mask the token to its first 8 "
+     "characters."),
+    ("entsoe_token_env", "ENTSOE_API_TOKEN", "env var",
+     "Name of the environment variable checked for the ENTSO-E token "
+     "when entsoe_token is empty."),
+    ("market_cache_dir", "~/.cache/pvbess/market", "path",
+     "On-disk cache for fetched market data (the PVGIS pattern): raw "
+     "provider responses are cached keyed on the request identity, so "
+     "a repeat run never re-hits the network."),
+    ("market_fetch_mode", "cache_first", "enum",
+     "Cache usage: 'cache_first' reuses cached fetches and hits the "
+     "API only on a miss; 'refresh' always re-fetches and overwrites "
+     "the cache; 'offline' never touches the network and errors on a "
+     "cache miss, naming the missing cache file (reproducible / CI "
+     "runs)."),
+)
+
+
+_SCENARIO_ENGINE_ROWS: tuple[tuple[str, object, str, str], ...] = (
+    ("price_scenarios_enabled", False, "bool",
+     "Master switch for the multi-year price-scenario layer. FALSE "
+     "(default) keeps every output bit-identical to a workbook "
+     "without the sheet: years 2..N reuse the Year-1 prices through "
+     "the flat inflation indices exactly as before. TRUE arms the "
+     "scenarios listed on the price_scenarios sheet."),
+    ("scenario_projection_mode", "reprice", "enum",
+     "How per-year scenario curves reach the cashflow. 'reprice' "
+     "(Tier 1, default): revalue the FROZEN Year-1 dispatch against "
+     "each (scenario, year) curve and feed the per-stream factors "
+     "g[y] = R(dispatch1, price_y) / R(dispatch1, price_1) into the "
+     "existing per-year escalation machinery (Eq. E24) as "
+     "auto-generated replace-mode trajectories. 'resolve' (Tier 2): "
+     "additionally re-solve the MILP at scenario_resolve_years with "
+     "that year's prices AND degraded plant, interpolating between "
+     "support years. 'trajectory_only' (Tier 3): today's analytic "
+     "behaviour with the refined stream taxonomy."),
+    ("scenario_resolve_years", "1,5,10,15,20,25", "CSV of years",
+     "Support years (operating years) for the Tier-2 re-solves; "
+     "ignored unless scenario_projection_mode = resolve."),
+    ("scenario_resolve_resolution", 60, "min",
+     "Model-grid resolution of the Tier-2 support-year re-solves. "
+     "Hourly (60) by default: a full-year hourly MILP solves in "
+     "seconds-to-minutes, while re-solving 6 scenarios x N years at "
+     "the 15-minute grid is infeasible as a default."),
+    ("scenario_interp", "loglinear", "enum",
+     "Interpolation of the per-stream factors between Tier-2 support "
+     "years (log-linear on the factor level)."),
+    ("price_basis", "nominal", "enum",
+     "Basis of the engine's cashflow prices. 'nominal' matches the "
+     "repo convention; 'real' additionally requires price_base_year. "
+     "Scenario stores declare their own basis in meta.yaml and are "
+     "bridged onto this basis at cpi_pct (vendor curves are typically "
+     "real EUR of a base year while this cashflow is nominal)."),
+    ("price_base_year", 0, "year",
+     "Reference year of the engine price level when price_basis = "
+     "'real' (0 = unset)."),
+    ("cpi_pct", 2.0, "%/yr",
+     "CPI used by the real/nominal deflator bridge between scenario "
+     "stores and the engine basis. Inert while every enabled store "
+     "already sits on the engine basis."),
+    ("debt_sizing_scenario", "", "scenario name",
+     "Which enabled price scenario sizes the debt (empty = the first "
+     "enabled row). Debt is sized ONCE on that scenario and every "
+     "scenario inherits the schedule, so the ensemble compares "
+     "operating outcomes rather than re-levered capital structures — "
+     "pick a downside case for bankable sizing."),
+    ("support_ref_follows_scenario", True, "bool",
+     "TRUE: the CfD / sliding-FiP market-reference leg follows each "
+     "scenario's DAM path (the support settlement moves with the "
+     "scenario). FALSE: the reference stays on the base DAM path "
+     "(a strike settled against a frozen reference curve)."),
+)
+
+
 _SHEET_ROW_TEMPLATES: dict[
     str, tuple[tuple[str, object, str, str], ...]
 ] = {
@@ -1508,6 +1735,8 @@ _SHEET_ROW_TEMPLATES: dict[
     "balancing": _BALANCING_ROWS,
     "ppa": _PPA_ROWS,
     "intraday": _INTRADAY_ROWS,
+    "market_data": _MARKET_DATA_ROWS,
+    "scenario_engine": _SCENARIO_ENGINE_ROWS,
 }
 
 # Default share of p_grid_export_max_kw available for export (24 hourly
@@ -1698,6 +1927,202 @@ def _build_scenarios_sheet(
 
 
 # ---------------------------------------------------------------------------
+# Optional tidy sheet: price_scenarios (multi-year price-scenario list)
+# ---------------------------------------------------------------------------
+
+# Price-scenarios sheet: tidy — ONE row per scenario, gated by an
+# ``enabled`` TRUE/FALSE toggle read from the first data row (the
+# sizing / scenarios / trajectories sheet pattern; shipped disabled so
+# a normal run is bit-identical).  ``store_path`` is resolved against
+# the workbook's directory; the canonical store schema and the
+# provider adapters live in :mod:`pvbess_opt.pricedata`.  The engine
+# additionally requires ``price_scenarios_enabled = TRUE`` on the
+# ``scenario_engine`` sheet — an enabled sheet with the master switch
+# off is inert data, exactly like a ``bm_merit_order`` sheet with its
+# switch off.
+PRICE_SCENARIOS_SHEET_COLUMNS: tuple[str, ...] = (
+    "enabled",
+    "name",
+    "provider",
+    "vintage",
+    "weight_pct",
+    "store_path",
+    "notes",
+)
+
+# Disabled worked example: a parametric central/downside pair plus the
+# free TYNDP proxy, weights summing to 100.
+_PRICE_SCENARIOS_EXAMPLE_ROWS: tuple[tuple[Any, ...], ...] = (
+    ("FALSE", "Central", "parametric", "2026-07", 50,
+     "price_scenarios/central",
+     "Parametric knobs in the store's meta.yaml (level drift, "
+     "PV-weighted capture decline, spread evolution, per-product "
+     "balancing paths)."),
+    (None, "Downside", "parametric", "2026-07", 30,
+     "price_scenarios/downside",
+     "Steeper cannibalization / saturation for debt sizing."),
+    (None, "TYNDP proxy", "tyndp", "TYNDP-2026", 20,
+     "price_scenarios/tyndp",
+     "Free ENTSO-E TYNDP hourly marginal-cost milestones (CC-BY 4.0), "
+     "interpolated between 2030/2040/2050."),
+)
+
+
+def _build_price_scenarios_sheet(
+    rows: list[dict[str, Any]] | None = None,
+) -> pd.DataFrame:
+    """Render the optional ``price_scenarios`` sheet."""
+    if rows:
+        frame = pd.DataFrame(rows)
+        if "enabled" not in frame.columns:
+            frame["enabled"] = None
+            frame.loc[0, "enabled"] = "TRUE"
+        for col in PRICE_SCENARIOS_SHEET_COLUMNS:
+            if col not in frame.columns:
+                frame[col] = None
+        return frame[list(PRICE_SCENARIOS_SHEET_COLUMNS)]
+    return pd.DataFrame(
+        [
+            dict(zip(PRICE_SCENARIOS_SHEET_COLUMNS, r, strict=True))
+            for r in _PRICE_SCENARIOS_EXAMPLE_ROWS
+        ],
+        columns=list(PRICE_SCENARIOS_SHEET_COLUMNS),
+    )
+
+
+def _normalise_price_scenarios_block(
+    raw: Any, *, source: str,
+) -> list[dict[str, Any]] | None:
+    """Validate a raw price-scenarios list (sheet or YAML surface).
+
+    Returns the normalised ``[{name, provider, vintage, weight_pct,
+    store_path, notes}]`` list or None when the block is absent/empty.
+    Validation is structural and precise: unique non-empty names, a
+    known provider (:data:`pvbess_opt.pricedata.SCENARIO_PROVIDERS`),
+    non-negative weights summing to 100 %, and a ``store_path`` for
+    every provider that reads or generates a store directory.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"{source}: price_scenarios must be a list of scenario "
+            f"mappings, got {type(raw).__name__}."
+        )
+    if not raw:
+        return None
+    from .pricedata import SCENARIO_PROVIDERS
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw, start=1):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{source}: price_scenarios entry {index} must be a "
+                f"mapping, got {type(entry).__name__}."
+            )
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            raise ValueError(
+                f"{source}: price_scenarios entry {index} has no name."
+            )
+        if name in seen:
+            raise ValueError(
+                f"{source}: duplicate price scenario name {name!r}."
+            )
+        seen.add(name)
+        provider = str(entry.get("provider") or "").strip().lower()
+        if provider not in SCENARIO_PROVIDERS:
+            raise ValueError(
+                f"{source}: scenario {name!r} provider {provider!r} is "
+                f"not one of {', '.join(SCENARIO_PROVIDERS)}."
+            )
+        try:
+            weight = float(entry.get("weight_pct", 0.0) or 0.0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"{source}: scenario {name!r} weight_pct "
+                f"{entry.get('weight_pct')!r} is not a number."
+            ) from exc
+        if weight < 0.0:
+            raise ValueError(
+                f"{source}: scenario {name!r} weight_pct must be >= 0; "
+                f"got {weight:g}."
+            )
+        store_path = str(entry.get("store_path") or "").strip()
+        if not store_path:
+            raise ValueError(
+                f"{source}: scenario {name!r} (provider {provider!r}) "
+                "needs a store_path — every provider reads or "
+                "generates a store directory (meta.yaml at minimum)."
+            )
+        out.append({
+            "name": name,
+            "provider": provider,
+            "vintage": str(entry.get("vintage") or "").strip(),
+            "weight_pct": weight,
+            "store_path": store_path,
+            "notes": str(entry.get("notes") or "").strip(),
+        })
+    total = sum(entry["weight_pct"] for entry in out)
+    if abs(total - 100.0) > 1e-6:
+        raise ValueError(
+            f"{source}: price scenario weights must sum to 100 %; the "
+            f"{len(out)} enabled row(s) sum to {total:g}."
+        )
+    return out
+
+
+def _parse_price_scenarios_sheet(
+    df: pd.DataFrame,
+) -> list[dict[str, Any]] | None:
+    """Parse the tidy ``price_scenarios`` sheet (enabled-gated)."""
+    def cell(row: pd.Series, column: str) -> Any:
+        value = row.get(column)
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return None
+        return value
+
+    if df.empty:
+        return None
+    missing = set(PRICE_SCENARIOS_SHEET_COLUMNS) - {"notes"} - set(
+        str(c) for c in df.columns
+    )
+    if missing:
+        raise ValueError(
+            "price_scenarios sheet is missing column(s) "
+            f"{', '.join(sorted(missing))}; expected "
+            f"{', '.join(PRICE_SCENARIOS_SHEET_COLUMNS)}."
+        )
+    enabled_raw = cell(df.iloc[0], "enabled")
+    if enabled_raw is None or str(
+        enabled_raw,
+    ).strip().lower() in FALSY:
+        return None
+    if str(enabled_raw).strip().lower() not in TRUTHY:
+        raise ValueError(
+            f"price_scenarios sheet: enabled cell {enabled_raw!r} is "
+            "neither TRUE nor FALSE."
+        )
+    rows: list[dict[str, Any]] = []
+    for _, row in df.iterrows():
+        if all(
+            cell(row, column) is None
+            for column in PRICE_SCENARIOS_SHEET_COLUMNS
+            if column != "enabled"
+        ):
+            continue
+        rows.append({
+            column: cell(row, column)
+            for column in PRICE_SCENARIOS_SHEET_COLUMNS
+            if column != "enabled"
+        })
+    return _normalise_price_scenarios_block(
+        rows, source="price_scenarios sheet",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Optional escalation sheet: trajectories (per-year stream multipliers)
 # ---------------------------------------------------------------------------
 
@@ -1726,6 +2151,30 @@ TRAJECTORY_STREAMS: tuple[str, ...] = (
     "opex",
     "opex_pv",
     "opex_bess",
+    # Per-leg DAM split (Eq. E60): PV export revenue, BESS export
+    # revenue and the BESS grid-charging expense escalate on their own
+    # paths, so cannibalization (PV capture falling) and the arbitrage
+    # spread (export minus charge) evolve independently.  The
+    # aggregate 'revenue_dam' above stays the accepted alias applying
+    # to all three legs; combining it with a split leg is rejected
+    # (the opex/opex_pv precedent).
+    "revenue_dam_pv",
+    "revenue_dam_bess_export",
+    "expense_dam_bess_charge",
+    # Per-product balancing split (Eq. E61): each product's capacity /
+    # activation revenue escalates on its own saturation path (FCR has
+    # no activation by design).  The aggregate streams above stay the
+    # accepted aliases; combining aggregate and per-product is
+    # rejected.
+    "balancing_capacity_fcr",
+    "balancing_capacity_afrr_up",
+    "balancing_capacity_afrr_dn",
+    "balancing_capacity_mfrr_up",
+    "balancing_capacity_mfrr_dn",
+    "balancing_activation_afrr_up",
+    "balancing_activation_afrr_dn",
+    "balancing_activation_mfrr_up",
+    "balancing_activation_mfrr_dn",
 )
 
 # Streams that deliberately take NO trajectory: the PPA strike escalates
@@ -1745,6 +2194,19 @@ _TRAJECTORY_INFLATION_KEYS: dict[str, tuple[str, str]] = {
     "opex": ("economics", "opex_inflation_pct"),
     "opex_pv": ("economics", "opex_inflation_pct"),
     "opex_bess": ("economics", "opex_inflation_pct"),
+    # Split legs replace the same scalar index their aggregate does.
+    "revenue_dam_pv": ("economics", "dam_inflation_pct"),
+    "revenue_dam_bess_export": ("economics", "dam_inflation_pct"),
+    "expense_dam_bess_charge": ("economics", "dam_inflation_pct"),
+    "balancing_capacity_fcr": ("balancing", "bm_inflation_pct"),
+    "balancing_capacity_afrr_up": ("balancing", "bm_inflation_pct"),
+    "balancing_capacity_afrr_dn": ("balancing", "bm_inflation_pct"),
+    "balancing_capacity_mfrr_up": ("balancing", "bm_inflation_pct"),
+    "balancing_capacity_mfrr_dn": ("balancing", "bm_inflation_pct"),
+    "balancing_activation_afrr_up": ("balancing", "bm_inflation_pct"),
+    "balancing_activation_afrr_dn": ("balancing", "bm_inflation_pct"),
+    "balancing_activation_mfrr_up": ("balancing", "bm_inflation_pct"),
+    "balancing_activation_mfrr_dn": ("balancing", "bm_inflation_pct"),
 }
 
 TRAJECTORIES_SHEET_COLUMNS: tuple[str, ...] = (
@@ -1986,6 +2448,17 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
     ppa_df = _build_kv_sheet(ppa_section, _PPA_ROWS)
     intraday_section = typed.get("intraday") or dict(INTRADAY_SHEET_DEFAULTS)
     intraday_df = _build_kv_sheet(intraday_section, _INTRADAY_ROWS)
+    market_section = typed.get("market_data") or dict(
+        MARKET_DATA_SHEET_DEFAULTS,
+    )
+    market_df = _build_kv_sheet(market_section, _MARKET_DATA_ROWS)
+    engine_section = typed.get("scenario_engine") or dict(
+        SCENARIO_ENGINE_SHEET_DEFAULTS,
+    )
+    engine_df = _build_kv_sheet(engine_section, _SCENARIO_ENGINE_ROWS)
+    price_scenarios_df = _build_price_scenarios_sheet(
+        typed.get("price_scenarios"),
+    )
 
     profile = typed.get("max_injection_profile")
     if profile is None:
@@ -2005,6 +2478,13 @@ def write_workbook(typed: dict[str, Any], dst: str | Path) -> Path:
         balancing_df.to_excel(writer, sheet_name="balancing", index=False)
         ppa_df.to_excel(writer, sheet_name="ppa", index=False)
         intraday_df.to_excel(writer, sheet_name="intraday", index=False)
+        market_df.to_excel(writer, sheet_name="market_data", index=False)
+        engine_df.to_excel(
+            writer, sheet_name="scenario_engine", index=False,
+        )
+        price_scenarios_df.to_excel(
+            writer, sheet_name="price_scenarios", index=False,
+        )
         max_injection_df.to_excel(
             writer, sheet_name="max_injection_profile", index=False,
         )
@@ -2188,9 +2668,20 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         return _parse_pv_tilt(raw, default)
     if key == "weather_year":
         return _parse_pv_weather_year(raw, default)
-    if key in ("timeseries_path", "raddatabase"):
-        # Free-form PVGIS strings: a blank cell resolves to the default
-        # (None); a non-blank cell is taken verbatim (stripped).
+    if key in (
+        "timeseries_path", "raddatabase",
+        # Free-form market_data strings, case-preserved: a token is
+        # case-sensitive, an env-var name is conventionally uppercase
+        # and a cache path may be case-sensitive on disk — none of them
+        # may pass through the lowercasing enum parser.
+        "entsoe_token", "entsoe_token_env", "market_cache_dir",
+        # Free-form scenario_engine strings: a CSV of support years and
+        # a scenario NAME (matched case-sensitively against the
+        # price_scenarios sheet).
+        "scenario_resolve_years", "debt_sizing_scenario",
+    ):
+        # Free-form strings: a blank cell resolves to the default; a
+        # non-blank cell is taken verbatim (stripped).
         return _parse_pv_path(raw, default)
     if key == "debt_sizing_deck":
         # Free-form deck name (matched lowercase against the
@@ -3994,6 +4485,34 @@ def validate_workbook_params(
                 "combined with the per-asset 'opex_pv' / 'opex_bess' "
                 "streams; use one or the other."
             )
+        # Same one-or-the-other contract for the DAM legs (Eq. E60) and
+        # the per-product balancing streams (Eq. E61).
+        _dam_split = {
+            "revenue_dam_pv", "revenue_dam_bess_export",
+            "expense_dam_bess_charge",
+        } & set(trajectories)
+        if "revenue_dam" in trajectories and _dam_split:
+            raise ValueError(
+                "trajectories: the aggregate 'revenue_dam' stream "
+                "cannot be combined with the per-leg "
+                f"{'/'.join(sorted(_dam_split))} stream(s); use one or "
+                "the other."
+            )
+        for _aggregate, _prefix in (
+            ("balancing_capacity", "balancing_capacity_"),
+            ("balancing_activation", "balancing_activation_"),
+        ):
+            _products = {
+                s for s in trajectories
+                if s.startswith(_prefix) and s != _aggregate
+            }
+            if _aggregate in trajectories and _products:
+                raise ValueError(
+                    f"trajectories: the aggregate {_aggregate!r} stream "
+                    "cannot be combined with the per-product "
+                    f"{'/'.join(sorted(_products))} stream(s); use one "
+                    "or the other."
+                )
         for stream, spec in trajectories.items():
             if spec["mode"] != "replace":
                 continue
@@ -4173,6 +4692,39 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     else:
         typed["intraday"] = dict(INTRADAY_SHEET_DEFAULTS)
 
+    # Optional ``market_data`` sheet — same pattern: absent means every
+    # source stays 'file' and the run is bit-identical to before.
+    if "market_data" in sheets:
+        market_flat = _read_kv_flat(xlsx_path, "market_data")
+        typed["market_data"] = _parse_kv_sheet("market_data", market_flat)
+    else:
+        typed["market_data"] = dict(MARKET_DATA_SHEET_DEFAULTS)
+
+    # Optional ``scenario_engine`` sheet — same master-switch pattern:
+    # absent means the price-scenario layer is disabled and the run is
+    # bit-identical to before.
+    if "scenario_engine" in sheets:
+        engine_flat = _read_kv_flat(xlsx_path, "scenario_engine")
+        typed["scenario_engine"] = _parse_kv_sheet(
+            "scenario_engine", engine_flat,
+        )
+    else:
+        typed["scenario_engine"] = dict(SCENARIO_ENGINE_SHEET_DEFAULTS)
+
+    # Optional ``price_scenarios`` tidy sheet — absent sheet, enabled
+    # FALSE, or no data rows all resolve to None (trajectories
+    # pattern); an enabled sheet with the scenario_engine master
+    # switch off stays inert data.
+    if "price_scenarios" in sheets:
+        try:
+            typed["price_scenarios"] = _parse_price_scenarios_sheet(
+                pd.read_excel(xlsx_path, sheet_name="price_scenarios"),
+            )
+        except ValueError as exc:
+            raise ValueError(f"price_scenarios: {exc}") from exc
+    else:
+        typed["price_scenarios"] = None
+
     # Optional ``trajectories`` sheet — per-year stream multipliers
     # (Eq. E24).  Absent sheet, ``enabled`` = FALSE, or no data rows all
     # resolve to None and the run is bit-identical to before.
@@ -4245,6 +4797,16 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     ts = typed.pop("ts")
     dt_minutes = detect_timestep_minutes(ts)
     validate_workbook_params(typed, dt_minutes=dt_minutes)
+    # Market-data source resolution (market_data sheet): with every
+    # source at its 'file' default this is a no-op; an API source
+    # REPLACES the matching price column(s) with the fetched
+    # reference-year series (override semantics) and records the
+    # provenance under typed['market_provenance'].  Runs BEFORE the
+    # balancing scalar fallback below so a fetched balancing column
+    # suppresses the fallback exactly like a workbook column would.
+    from .marketdata import resolve_market_data
+
+    resolve_market_data(typed, ts, dt_minutes)
     # Two-tier feasibility guard for a finite grid-import cap (Eq. S35),
     # here because ts and dt_minutes are both in scope.  Tier 1 is a
     # certificate: a step whose load exceeds PV + BESS power + the cap
@@ -4520,6 +5082,13 @@ def _typed_to_flat(
         # intraday cashflow columns.
         "intraday": dict(typed.get("intraday") or INTRADAY_SHEET_DEFAULTS),
     }
+    # Market-data bypass provenance (market_data sheet, API sources
+    # only): carried to the pipeline for the results workbook's
+    # provenance sheet and the materialised input snapshot.  Absent —
+    # not None — when nothing was fetched, so the flat params dict is
+    # unchanged for every 'file'-source run.
+    if typed.get("market_provenance"):
+        params["market_provenance"] = typed["market_provenance"]
     return params, ts
 
 
@@ -4776,6 +5345,7 @@ def write_summary_md(
     replacement_note: str | None = None,
     lender_cases: pd.DataFrame | None = None,
     midlife_resolve: pd.DataFrame | None = None,
+    price_scenario_lines: list[str] | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -4805,6 +5375,10 @@ def write_summary_md(
         lines.append(f"- BESS replacement: {replacement_note}")
     if solver_name:
         lines.append(f"- Solver: `{solver_name}`")
+    # Price-scenario digest (pricedata layer): absent while the engine
+    # is disarmed so the default SUMMARY is unchanged.
+    if price_scenario_lines:
+        lines.extend(price_scenario_lines)
     lines.append("")
 
     lines.append("## Year-1 dispatch KPIs")
@@ -5052,6 +5626,10 @@ def write_results_workbook(
     lender_cases: pd.DataFrame | None = None,
     midlife_resolve: pd.DataFrame | None = None,
     risk_metrics: pd.DataFrame | None = None,
+    market_provenance: pd.DataFrame | None = None,
+    scenario_price_paths: pd.DataFrame | None = None,
+    scenario_resolve_delta: pd.DataFrame | None = None,
+    price_scenario_ensemble: pd.DataFrame | None = None,
 ) -> Path:
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
@@ -5120,5 +5698,46 @@ def write_results_workbook(
             )
         if emissions is not None and not emissions.empty:
             emissions.to_excel(writer, sheet_name="emissions", index=False)
+        # Market-data bypass provenance (market_data sheet, API
+        # sources): one row per bypassed column — zone, reference
+        # year, source, fetch date, cache state.  Absent on every
+        # 'file'-source run so the default workbook is unchanged.
+        if market_provenance is not None and not market_provenance.empty:
+            market_provenance.to_excel(
+                writer, sheet_name="market_data_provenance", index=False,
+            )
+        # Price-scenario paths (pricedata layer): one row per
+        # (scenario, operating year) with the per-stream factors and
+        # the capture KPIs.  Absent while the engine is disarmed so
+        # the default workbook is unchanged.
+        if (
+            scenario_price_paths is not None
+            and not scenario_price_paths.empty
+        ):
+            scenario_price_paths.to_excel(
+                writer, sheet_name="scenario_price_paths", index=False,
+            )
+        # Tier-2 − Tier-1 factor delta at the support years
+        # (scenario_projection_mode = 'resolve'): the E53-style
+        # diagnostic showing where dispatch adaptation departs from
+        # the frozen-dispatch approximation.  Absent under 'reprice'.
+        if (
+            scenario_resolve_delta is not None
+            and not scenario_resolve_delta.empty
+        ):
+            scenario_resolve_delta.to_excel(
+                writer, sheet_name="scenario_resolve_delta", index=False,
+            )
+        # Weighted price-scenario ensemble: one row per scenario
+        # (NPV / IRR / payback / min DSCR on the shared sized debt)
+        # plus the labelled weighted-stat rows.  Absent while the
+        # scenario engine is disarmed.
+        if (
+            price_scenario_ensemble is not None
+            and not price_scenario_ensemble.empty
+        ):
+            price_scenario_ensemble.to_excel(
+                writer, sheet_name="price_scenario_ensemble", index=False,
+            )
         style_workbook(writer.book)
     return out_path

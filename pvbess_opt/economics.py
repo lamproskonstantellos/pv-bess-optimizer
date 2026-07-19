@@ -547,9 +547,9 @@ def resolve_debt_sizing(
 
 def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the project / pv / bess / economics / simulation / balancing
-    / ppa / intraday sheets.
+    / ppa / intraday / scenario_engine sheets.
 
-    Returns a single flat dict combining every key from the eight
+    Returns a single flat dict combining every key from the nine
     parameter sheets — the financial helpers downstream expect a flat
     mapping (e.g. ``econ['discount_rate_pct']``,
     ``econ['capex_pv_eur_per_kw']``, ``econ['ppa_term_years']``).
@@ -560,13 +560,18 @@ def read_economic_params(xlsx_path: str | Path) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     for section in (
         "project", "pv", "bess", "economics", "simulation", "balancing",
-        "ppa", "intraday",
+        "ppa", "intraday", "scenario_engine",
     ):
         merged.update(typed[section])
     # The per-year trajectory block (Eq. E24) rides along under a
     # reserved non-kv key: kv-sheet keys are lowercase snake_case
     # scalars validated by the loader, so the flat merge stays lossless.
     merged["trajectories"] = typed.get("trajectories")
+    # The parsed price-scenario list (pricedata layer) rides the same
+    # reserved-key convention; the market_data sheet deliberately stays
+    # OUT of the merge (its token must never reach the econ dict, which
+    # lands verbatim on the assumptions sheets).
+    merged["price_scenarios"] = typed.get("price_scenarios")
     return merged
 
 
@@ -606,6 +611,27 @@ def _escalation_series(
     if str(spec.get("mode", "replace")) == "replace":
         return values
     return [s * m for s, m in zip(scalar, values, strict=True)]
+
+
+def _escalation_series_aliased(
+    stream: str,
+    alias: str,
+    inflation_frac: float,
+    n_years: int,
+    trajectories: dict[str, dict[str, Any]] | None,
+) -> list[float]:
+    """Escalation for a SPLIT stream, falling back to its aggregate alias.
+
+    The split taxonomy (Eqs. E60/E61) keeps the old aggregate stream
+    names as accepted aliases: a declared split stream shapes its own
+    leg; an undeclared one falls back to the aggregate stream — which,
+    when itself undeclared, is the flat scalar index.  The loader
+    rejects declaring an aggregate together with any of its split legs
+    (the opex/opex_pv precedent), so the fallback is never ambiguous.
+    """
+    if trajectories and stream in trajectories:
+        return _escalation_series(stream, inflation_frac, n_years, trajectories)
+    return _escalation_series(alias, inflation_frac, n_years, trajectories)
 
 
 def _contract_phase(
@@ -980,6 +1006,16 @@ def build_yearly_cashflow(
         rev1_dam_bess = float(
             year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0
         ) - float(year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
+        # The two legs of the net spread, kept separately for the
+        # per-leg escalation split (Eq. E60): under cannibalization the
+        # export leg and the charging leg follow different price paths
+        # and the net spread emerges from the separately scaled legs.
+        rev1_dam_bess_export = float(
+            year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0
+        )
+        exp1_dam_bess_charge = float(
+            year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0
+        )
         revenue_1_retail = rev1_retail_pv + rev1_retail_bess
         revenue_1_dam = rev1_dam_pv + rev1_dam_bess
         revenue_1_gross = revenue_1_retail + revenue_1_dam
@@ -1039,6 +1075,8 @@ def build_yearly_cashflow(
         rev1_retail_bess = 0.0
         rev1_dam_pv = 0.0
         rev1_dam_bess = 0.0
+        rev1_dam_bess_export = 0.0
+        exp1_dam_bess_charge = 0.0
 
     # A tolled grid-scale battery has no retail leg, so the self-
     # consumption BESS stream (profit_load_from_bess_eur) is
@@ -1071,10 +1109,12 @@ def build_yearly_cashflow(
     bm_infl = float(econ.get("bm_inflation_pct", 0.0) or 0.0) / 100.0
 
     # Per-stream escalation series (Eq. E24): flat scalar indices unless
-    # a trajectory reshapes the stream.  The CfD DAM leg, the post-term
-    # PPA reversion and the optimizer-fee base (E13d) all ride the SAME
-    # DAM series as the merchant DAM revenue; the PPA strike escalates
-    # contractually (ppa_inflation_pct, no trajectory by design).
+    # a trajectory reshapes the stream.  The post-term PPA reversion and
+    # the optimizer-fee base (E13d) ride the SAME DAM series as the
+    # merchant DAM revenue; the CfD DAM leg does too unless the armed
+    # scenario engine decouples it (_g_cfd_ref below); the PPA strike
+    # escalates contractually (ppa_inflation_pct, no trajectory by
+    # design).
     trajectories = econ.get("trajectories") or None
     g_retail = _escalation_series(
         "revenue_retail", retail_infl, n_years, trajectories,
@@ -1086,6 +1126,66 @@ def build_yearly_cashflow(
     g_bm_act = _escalation_series(
         "balancing_activation", bm_infl, n_years, trajectories,
     )
+    # Per-leg DAM split (Eq. E60) — mirrors the _split_opex pattern: the
+    # split branch is entered ONLY when a per-leg stream is declared, so
+    # a run without split trajectories keeps the historical
+    # (pv + bess) * g grouping and stays bit-identical (float
+    # multiplication does not distribute exactly).  Each undeclared leg
+    # falls back to the aggregate 'revenue_dam' series, which the CfD /
+    # reversion / imbalance PV-side sites below now read through the
+    # PV leg (identical floats while the split is undeclared).
+    _split_dam = bool(trajectories) and bool(
+        {
+            "revenue_dam_pv", "revenue_dam_bess_export",
+            "expense_dam_bess_charge",
+        } & set(trajectories or {}),
+    )
+    g_dam_pv = _escalation_series_aliased(
+        "revenue_dam_pv", "revenue_dam", dam_infl, n_years, trajectories,
+    )
+    g_dam_bess_export = _escalation_series_aliased(
+        "revenue_dam_bess_export", "revenue_dam", dam_infl, n_years,
+        trajectories,
+    )
+    g_dam_bess_charge = _escalation_series_aliased(
+        "expense_dam_bess_charge", "revenue_dam", dam_infl, n_years,
+        trajectories,
+    )
+    if _split_dam and not _has_breakdown:
+        raise ValueError(
+            "per-leg DAM trajectories (revenue_dam_pv / "
+            "revenue_dam_bess_export / expense_dam_bess_charge) need the "
+            "Year-1 revenue breakdown KPIs (profit_export_from_pv_eur "
+            "etc.); this KPI dict carries only profit_total_eur."
+        )
+    # Per-product balancing split (Eq. E61) — same gating.  The
+    # per-product Year-1 bases are the bm_<product>_*_revenue_eur KPI
+    # keys (kpis._compute_balancing_kpis); their sum reconciles to the
+    # aggregate total within KPI rounding.
+    _BM_CAP_PRODUCTS = ("fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+    _BM_ACT_PRODUCTS = ("afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+    _split_bm_cap = bool(trajectories) and any(
+        f"balancing_capacity_{p}" in (trajectories or {})
+        for p in _BM_CAP_PRODUCTS
+    )
+    _split_bm_act = bool(trajectories) and any(
+        f"balancing_activation_{p}" in (trajectories or {})
+        for p in _BM_ACT_PRODUCTS
+    )
+    g_bm_cap_prod = {
+        p: _escalation_series_aliased(
+            f"balancing_capacity_{p}", "balancing_capacity",
+            bm_infl, n_years, trajectories,
+        )
+        for p in _BM_CAP_PRODUCTS
+    }
+    g_bm_act_prod = {
+        p: _escalation_series_aliased(
+            f"balancing_activation_{p}", "balancing_activation",
+            bm_infl, n_years, trajectories,
+        )
+        for p in _BM_ACT_PRODUCTS
+    }
     # Per-asset OPEX decomposition (Eq. E24a) — shared with the LCOE /
     # LCOS numerators through _opex_escalation_series.  The split branch
     # is entered ONLY when a per-asset stream is declared: the shared
@@ -1101,6 +1201,32 @@ def build_yearly_cashflow(
     _g_opex_bess = _opex_escalation_series(
         "opex_bess", opex_infl, n_years, trajectories,
     )
+    # Support-reference escalation (scenario_engine sheet,
+    # support_ref_follows_scenario): with the price-scenario engine
+    # armed, every support REFERENCE leg — the CfD difference legs
+    # (E45/E46) and the E56 settlement reference — follows one rule:
+    # the scenario's PV-leg DAM path when TRUE (the default: a market
+    # reference settles on scenario prices, so the capture-price
+    # cannibalization reaches the support settlement), or the plain
+    # dam_inflation_pct scalar when FALSE (a decoupled administered
+    # index).  Disarmed, each site keeps its historical series —
+    # bit-identity: the CfD legs ride g_dam_pv, the E56 reference the
+    # scalar.  The post-term PPA reversion and the imbalance stream
+    # are MERCHANT flows, not reference legs; they stay on g_dam_pv
+    # in every configuration.
+    _scalar_dam_esc = [
+        (1.0 + dam_infl) ** (y - 1) for y in range(1, n_years + 1)
+    ]
+    _scenario_armed = bool(econ.get("_price_scenario_applied"))
+    _support_follows = bool(
+        econ.get("support_ref_follows_scenario", True)
+    )
+    if _scenario_armed:
+        _g_cfd_ref = g_dam_pv if _support_follows else _scalar_dam_esc
+        _g_support_ref = _g_cfd_ref
+    else:
+        _g_cfd_ref = g_dam_pv
+        _g_support_ref = _scalar_dam_esc
     # Year-1 balancing revenue lines come from the KPI dict; they
     # already carry the BESS degradation factor for Year 1 (which is
     # 1.0) and degrade on the BESS capacity-fade curve via bess_factor
@@ -1111,6 +1237,36 @@ def build_yearly_cashflow(
     bm_act_y1 = float(
         year1_kpis.get("bm_total_activation_revenue_eur", 0.0) or 0.0
     )
+    # Per-product Year-1 bases for the Eq. E61 split.  When a split is
+    # active the product sum REPLACES the aggregate total as the base;
+    # a mismatch beyond KPI rounding is flagged, never silently mixed.
+    bm_cap_y1_prod = {
+        p: float(
+            year1_kpis.get(f"bm_{p}_capacity_revenue_eur", 0.0) or 0.0
+        )
+        for p in _BM_CAP_PRODUCTS
+    }
+    bm_act_y1_prod = {
+        p: float(
+            year1_kpis.get(f"bm_{p}_activation_revenue_eur", 0.0) or 0.0
+        )
+        for p in _BM_ACT_PRODUCTS
+    }
+    for _split_active, _prod_sum, _total, _label in (
+        (_split_bm_cap, sum(bm_cap_y1_prod.values()), bm_cap_y1,
+         "capacity"),
+        (_split_bm_act, sum(bm_act_y1_prod.values()), bm_act_y1,
+         "activation"),
+    ):
+        if _split_active and abs(_prod_sum - _total) > max(
+            1e-2, 1e-6 * abs(_total),
+        ):
+            logger.warning(
+                "per-product balancing %s bases sum to %.2f EUR but the "
+                "aggregate Year-1 total is %.2f EUR; the split "
+                "projection (Eq. E61) uses the per-product sum.",
+                _label, _prod_sum, _total,
+            )
 
     # Intraday venue (Eqs. E58/E59, docs/intraday_design.md): the
     # Year-1 GROSS spread margin and the venue fee come from the KPI
@@ -1306,9 +1462,29 @@ def build_yearly_cashflow(
             revenue_retail_y = (
                 rev1_retail_pv * pv_factor + rev1_retail_bess * bess_factor
             ) * g_retail[y - 1]
-            revenue_dam_y = (
-                rev1_dam_pv * pv_factor + _rev1_dam_bess_y * bess_factor
-            ) * g_dam[y - 1]
+            # DAM stream: the split branch (Eq. E60) prices each leg on
+            # its own escalation path — the net BESS spread emerges
+            # from the separately scaled export and charging legs.  The
+            # shared `_bess_dam_margin_y` feeds every downstream BESS
+            # wholesale base (E13d / E25a) so the split reaches them
+            # consistently; in the aggregate branch it carries the
+            # exact historical expression (bit-identity).
+            if _split_dam:
+                _bess_dam_margin_y = 0.0 if _toll_zeroed else (
+                    rev1_dam_bess_export * g_dam_bess_export[y - 1]
+                    - exp1_dam_bess_charge * g_dam_bess_charge[y - 1]
+                ) * bess_factor
+                revenue_dam_y = (
+                    rev1_dam_pv * pv_factor * g_dam_pv[y - 1]
+                    + _bess_dam_margin_y
+                )
+            else:
+                _bess_dam_margin_y = (
+                    _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                )
+                revenue_dam_y = (
+                    rev1_dam_pv * pv_factor + _rev1_dam_bess_y * bess_factor
+                ) * g_dam[y - 1]
             # Intraday margin row (Eq. E58): the Year-1 gross spread
             # margin, each origin fading on its own curve (Eq. I4),
             # indexed by id_inflation_pct.  The BESS-origin leg is
@@ -1337,7 +1513,9 @@ def build_yearly_cashflow(
                     strike_leg = (
                         ppa_strike_value_1 * (1.0 + ppa_infl) ** (y - 1)
                     )
-                    ppa_y = strike_leg - ppa_covered_dam_1 * g_dam[y - 1]
+                    ppa_y = (
+                        strike_leg - ppa_covered_dam_1 * _g_cfd_ref[y - 1]
+                    )
                 else:
                     strike_leg = (
                         ppa_strike_value_1 * pv_factor
@@ -1345,7 +1523,8 @@ def build_yearly_cashflow(
                     )
                     if ppa_settlement == "cfd":
                         ppa_y = strike_leg - (
-                            ppa_covered_dam_1 * pv_factor * g_dam[y - 1]
+                            ppa_covered_dam_1 * pv_factor
+                            * _g_cfd_ref[y - 1]
                         )
                     else:
                         ppa_y = strike_leg
@@ -1356,7 +1535,7 @@ def build_yearly_cashflow(
                     and ppa_structure != "baseload"
                 ):
                     revenue_dam_y += (
-                        ppa_covered_dam_1 * pv_factor * g_dam[y - 1]
+                        ppa_covered_dam_1 * pv_factor * g_dam_pv[y - 1]
                     )
             # Energy-aggregator fee base (Eq. E13; intraday treatment
             # per Eq. I6): the intraday margin does NOT join this base
@@ -1396,12 +1575,26 @@ def build_yearly_cashflow(
                 )
             else:
                 augmentation_capex_y = 0.0
-            balancing_capacity_y = (
-                _bm_cap_y1_y * bess_factor * g_bm_cap[y - 1]
-            )
-            balancing_activation_y = (
-                _bm_act_y1_y * bess_factor * g_bm_act[y - 1]
-            )
+            if _split_bm_cap:
+                balancing_capacity_y = 0.0 if _toll_zeroed else sum(
+                    bm_cap_y1_prod[p] * bess_factor
+                    * g_bm_cap_prod[p][y - 1]
+                    for p in _BM_CAP_PRODUCTS
+                )
+            else:
+                balancing_capacity_y = (
+                    _bm_cap_y1_y * bess_factor * g_bm_cap[y - 1]
+                )
+            if _split_bm_act:
+                balancing_activation_y = 0.0 if _toll_zeroed else sum(
+                    bm_act_y1_prod[p] * bess_factor
+                    * g_bm_act_prod[p][y - 1]
+                    for p in _BM_ACT_PRODUCTS
+                )
+            else:
+                balancing_activation_y = (
+                    _bm_act_y1_y * bess_factor * g_bm_act[y - 1]
+                )
             # Optional route-to-market (BSP) fee on GROSS balancing revenue.
             # A non-negative deduction, clamped at a zero-gross floor exactly
             # like the energy aggregator fee.  The gross is already escalated
@@ -1474,14 +1667,14 @@ def build_yearly_cashflow(
                 # venue-off run adds an exact 0.0 (bit-identity).
                 if optimizer_margin_basis == "dam_plus_balancing":
                     _opt_margin = (
-                        _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                        _bess_dam_margin_y
                         + balancing_capacity_y + balancing_activation_y
                         + balancing_aggregator_fee_y
                         + _id_bess_margin_y
                     )
                 else:
                     _opt_margin = (
-                        _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                        _bess_dam_margin_y
                         + _id_bess_margin_y
                     )
                 optimizer_fee_y = -optimizer_share_frac * max(
@@ -1492,7 +1685,7 @@ def build_yearly_cashflow(
                 ) + 0.0
             else:
                 optimizer_fee_y = -optimizer_share_frac * max(
-                    _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                    _bess_dam_margin_y
                     + _id_bess_margin_y,
                     0.0,
                 ) + 0.0
@@ -1503,7 +1696,7 @@ def build_yearly_cashflow(
             # Imbalance settlement (Eq. E28): PV-error-driven volume on
             # the PV curve, prices on the DAM escalation series.
             imbalance_cost_y = (
-                -imbalance_cost_1 * pv_factor * g_dam[y - 1]
+                -imbalance_cost_1 * pv_factor * g_dam_pv[y - 1]
             )
             # BESS market-revenue base (Eq. E25a): the battery's
             # wholesale trading margin (the E13d base, UNclamped) plus
@@ -1516,7 +1709,7 @@ def build_yearly_cashflow(
             # (Eq. I6): it is battery trading revenue like the DAM
             # margin.  Appended last for venue-off bit-identity.
             bess_market_rev_y = (
-                _rev1_dam_bess_y * bess_factor * g_dam[y - 1]
+                _bess_dam_margin_y
                 + balancing_capacity_y + balancing_activation_y
                 + balancing_aggregator_fee_y
                 + _id_bess_margin_y
@@ -1609,7 +1802,7 @@ def build_yearly_cashflow(
             # sliding FiP; zero after the support term.
             if support_on and y <= support_term:
                 support_settlement_y = 0.0
-                _ref_esc = (1.0 + dam_infl) ** (y - 1)
+                _ref_esc = _g_support_ref[y - 1]
                 for _e_m, _p_m in zip(
                     support_e_m, support_p_m, strict=False,
                 ):

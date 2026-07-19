@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+### Added (market data & price scenarios)
+
+- **Market-data ingestion** (`market_data` sheet,
+  `pvbess_opt/marketdata/`): a bidding-zone selector (GR, DE-LU, FR,
+  IT-Nord, ES, BG, RO) with per-dataset sources.  `entsoe` fetches the
+  configured historical reference year from the ENTSO-E Transparency
+  Platform (A44 day-ahead across the 2025-10-01 SDAC 15-minute MTU
+  switch; A81/A84 balancing, A85 imbalance) and REPLACES the matching
+  workbook columns; the GR balancing gap is covered by the ADMIE file
+  API with a HEnEx daily-workbook cross-check.  Fixed intensive
+  resampling (step-hold coarser→finer, mean finer→coarser), DST-safe
+  local-calendar assembly, on-disk fetch cache with
+  `cache_first`/`refresh`/`offline` modes, provenance on the results
+  workbook, and snapshot materialisation (fetched values written in,
+  source keys reset to `file`, token blanked).  All sources default to
+  `file` — bit-identical when unused.
+- **Multi-year price scenarios** (`scenario_engine` +
+  `price_scenarios` sheets, `pvbess_opt/pricedata/`): per-scenario
+  price decks (directory stores with `meta.yaml` / per-year `dam.csv`
+  / `balancing_annual.csv`; `parametric` three-knob generator and
+  `tyndp` milestone adapter) projected onto the cashflow through the
+  existing per-year escalation machinery on a refined stream taxonomy
+  (per-leg DAM split, per-product balancing split — Eqs. E60/E61).
+  Tier-1 `reprice` revalues the frozen Year-1 dispatch year by year
+  (PV capture-price cannibalization, realized BESS spread, balancing
+  saturation); Tier-2 `resolve` re-solves the MILP at support years
+  with degradation-normalised factors and a Tier-1-vs-Tier-2 delta
+  diagnostic; a weighted scenario ensemble reports E[NPV] / E[IRR]
+  and discrete P10/P50/P90 on one shared debt sizing
+  (`debt_sizing_scenario`), with the CfD / FiP support-reference rule
+  (`support_ref_follows_scenario`) armed-only.  New results sheets
+  (`market_data_provenance`, `scenario_price_paths`,
+  `scenario_resolve_delta`, `price_scenario_ensemble`), the price-path
+  fan and capture-KPI figures, and SUMMARY digest lines.  Disabled by
+  default — bit-identical when off.  Design:
+  `docs/market_scenarios_design.md` (Equations G1-G7).
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

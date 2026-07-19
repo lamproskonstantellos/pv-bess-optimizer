@@ -31,6 +31,7 @@ __all__ = [
     "LEGEND_ORDER",
     "MERCHANT_COLORS",
     "NOTES_WRAP",
+    "SCENARIO_PATH_COLORS",
     "UNCERTAINTY_SOURCE_COLORS",
     "XTICK_ROT",
     "apply_financial_legend",
@@ -380,6 +381,12 @@ FINANCIAL_COLORS: dict[str, str] = {
     "dscr_base":   "#283593",  # Material indigo 800
     "dscr_p90":    "#E53935",  # Material red 600
     "dscr_target": "#616161",  # Material grey 700
+    # Multi-year price-path / capture figures (pricedata layer): the
+    # yearly PV capture price against the DAM baseload (mean) price,
+    # and the realized BESS spread per year.
+    "pv_capture_price_line": "#F9A825",  # Material yellow 800 (PV tone)
+    "dam_baseload_line":     "#546E7A",  # Material blue-grey 600
+    "bess_spread_line":      "#7B1FA2",  # Material purple 700
 }
 
 
@@ -392,6 +399,28 @@ UNCERTAINTY_SOURCE_COLORS: dict[str, str] = {
     "load": "#1565C0",   # blue — load noise only
     "all":  "#2E7D32",   # green — all three combined
 }
+
+
+# Ordered palette for MULTI-SCENARIO price-path figures (the fan
+# chart of the pricedata layer): scenario names are user-defined, so
+# the per-figure series cannot bind to canonical labels — they draw
+# from this ordered registry instead, extending the four-entry
+# source-palette convention above to larger scenario sets.
+SCENARIO_PATH_COLORS: tuple[str, ...] = (
+    "#1565C0",   # blue
+    "#C62828",   # red
+    "#2E7D32",   # green
+    "#EF6C00",   # amber
+    "#7B1FA2",   # purple
+    "#00838F",   # cyan
+    "#AD1457",   # pink
+    "#5D4037",   # brown
+)
+
+
+def scenario_path_color(index: int) -> str:
+    """Colour for the ``index``-th scenario series (cycles past 8)."""
+    return SCENARIO_PATH_COLORS[index % len(SCENARIO_PATH_COLORS)]
 
 
 def assert_unique_financial_colors() -> None:
@@ -459,6 +488,9 @@ FINANCIAL_LABELS: tuple[str, ...] = (
     "Day-ahead price",
     "Intraday price",
     "Intraday net position",
+    "PV capture price",
+    "DAM baseload price",
+    "Realized BESS spread",
     # Bar / stack components
     "Revenue",
     "Balancing revenue",
@@ -523,6 +555,9 @@ FINANCIAL_LABEL_TO_COLOR_KEY: dict[str, str] = {
     "Day-ahead price":                  "da_price_line",
     "Intraday price":                   "ida_price_line",
     "Intraday net position":            "id_position_line",
+    "PV capture price":                 "pv_capture_price_line",
+    "DAM baseload price":               "dam_baseload_line",
+    "Realized BESS spread":             "bess_spread_line",
     "Revenue":                          "revenue",
     "Balancing revenue":                 "balancing_revenue",
     "OPEX":                             "opex",
@@ -580,6 +615,9 @@ FINANCIAL_LEGEND_ORDER: tuple[str, ...] = (
     "Day-ahead price",
     "Intraday price",
     "Intraday net position",
+    "PV capture price",
+    "DAM baseload price",
+    "Realized BESS spread",
     # Then bars / stacks, positive flows first
     "Revenue",
     "Balancing revenue",

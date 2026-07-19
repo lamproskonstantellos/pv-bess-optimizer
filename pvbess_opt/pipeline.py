@@ -76,6 +76,7 @@ from pvbess_opt.lifetime import (
     resolve_augmentation_config,
     resolve_bess_replacement_year,
 )
+from pvbess_opt.marketdata import materialize_bypassed_workbook
 from pvbess_opt.modes import resolve_mode
 from pvbess_opt.optimization import (
     BALANCING_INVARIANT_KEYS,
@@ -90,6 +91,7 @@ from pvbess_opt.plotting import (
     plot_bess_capacity_vs_activation_split,
     plot_bess_revenue_by_month,
     plot_bess_revenue_waterfall,
+    plot_capture_kpis,
     plot_cfe_duration_curve,
     plot_cumulative_cashflow,
     plot_da_ida_price_duration,
@@ -121,6 +123,7 @@ from pvbess_opt.plotting import (
     plot_npv_tornado,
     plot_npv_waterfall,
     plot_payback,
+    plot_price_path_fan,
     plot_revenue_stack_yearly,
     plot_rolling_horizon_distribution,
     plot_soh_trajectory,
@@ -137,6 +140,8 @@ from pvbess_opt.plotting import (
     set_show_titles,
 )
 from pvbess_opt.plotting.uncertainty import plot_foresight_gap_comparison
+from pvbess_opt.pricedata.engine import apply_price_scenarios
+from pvbess_opt.pricedata.ensemble import run_price_scenario_ensemble
 from pvbess_opt.rolling_horizon import (
     monte_carlo_balancing,
     monte_carlo_rolling,
@@ -702,8 +707,9 @@ def _build_financials(
     """Run the multi-year cash-flow + sensitivity + lifetime pipeline.
 
     ``solver_opts`` (run_scenario keyword form) is consumed only by
-    the ``debt_sizing_case = 'low_price'`` deck re-dispatch; None
-    falls back to the solver defaults.
+    the ``debt_sizing_case = 'low_price'`` deck re-dispatch and the
+    price-scenario Tier-2 support-year re-solves; None falls back to
+    the solver defaults.
     """
     econ = read_economic_params(excel_path)
 
@@ -751,6 +757,22 @@ def _build_financials(
             "lifecycle.",
             repl_year, econ.get("bess_eol_soh_pct", 80.0), repl_second,
         )
+    # Price-scenario layer (scenario_engine sheet, pricedata engine):
+    # with the master switch off this returns None and econ is
+    # untouched — bit-identical behaviour.  Armed in 'reprice' mode it
+    # reprices the FROZEN Year-1 dispatch into auto-trajectories on
+    # the split streams (Eqs. E60/E61) and merges them into
+    # econ['trajectories']; 'resolve' additionally re-solves the MILP
+    # at the support years, which is why the call sits AFTER the
+    # replacement resolver just above (factors_for_year needs the
+    # effective replacement year) and BEFORE the cashflow build, so
+    # everything below — cashflow, LCOE/LCOS OPEX, sensitivity, debt
+    # sizing — flows through the existing Eq. E24 machinery unchanged.
+    scenario_application = apply_price_scenarios(
+        econ, ts, res,
+        base_dir=Path(excel_path).parent,
+        params=params, solver_opts=solver_opts, kpis=kpis,
+    )
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)
     # Target-DSCR debt sizing (Eqs. E41-E43) resolves exactly ONCE per
     # run, on the configured sizing case: the sized debt is frozen
@@ -845,7 +867,60 @@ def _build_financials(
         "sensitivity": sensitivity_df,
         "debt_schedule": build_debt_schedule(yearly_cf, econ),
         "lender_cases": lender_cases_df,
+        "price_scenarios": scenario_application,
     }
+
+
+def _scenario_paths_frame(application: Any) -> pd.DataFrame | None:
+    """Long-format price-path table for the results workbook.
+
+    One row per (scenario, operating year), the applied scenario's
+    rows first — None when the engine is disarmed so the workbook
+    stays bit-identical.
+    """
+    if application is None:
+        return None
+    frames: list[pd.DataFrame] = []
+    ordered = sorted(
+        application.fan.items(),
+        key=lambda item: item[0] != application.applied,
+    )
+    for name, paths in ordered:
+        frame = paths.copy()
+        frame.insert(0, "scenario", name)
+        frame.insert(
+            1, "applied", name == application.applied,
+        )
+        frame.insert(
+            2, "weight_pct", application.weights.get(name, 0.0),
+        )
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
+def _ensemble_frame(result: Any) -> pd.DataFrame | None:
+    """Per-scenario ensemble table plus the weighted-stat rows.
+
+    The weighted headline statistics land as labelled rows under the
+    scenario rows (E[NPV] / P10 / P50 / P90 / E[IRR]) so the sheet is
+    self-contained — None while the ensemble did not run.
+    """
+    if result is None:
+        return None
+    table: pd.DataFrame = result.table.copy()
+    stat_rows: list[dict[str, Any]] = []
+    for key, label, column in (
+        ("expected_npv_eur", "E[NPV]", "npv_eur"),
+        ("npv_p10_eur", "P10", "npv_eur"),
+        ("npv_p50_eur", "P50", "npv_eur"),
+        ("npv_p90_eur", "P90", "npv_eur"),
+        ("expected_irr_pct", "E[IRR]", "irr_pct"),
+    ):
+        if key in result.stats:
+            stat_rows.append({"scenario": label, column: result.stats[key]})
+    return pd.concat(
+        [table, pd.DataFrame(stat_rows)], ignore_index=True,
+    )
 
 
 def _build_degradation_report(
@@ -1952,6 +2027,14 @@ def _run_one(
         if snap is not None:
             renamed = layout["inputs"] / "input_snapshot.xlsx"
             snap.replace(renamed)
+            # Market-data bypass (market_data sheet): materialise the
+            # fetched columns into the snapshot and reset the source
+            # keys to 'file', so the snapshot re-runs the exact prices
+            # offline — no token, no network, no cache.
+            if params.get("market_provenance"):
+                materialize_bypassed_workbook(
+                    renamed, ts, params["market_provenance"],
+                )
         write_assumptions_summary(
             layout["inputs"] / "assumptions_summary.txt", params, econ,
         )
@@ -2005,6 +2088,27 @@ def _run_one(
             rolling_mc_df, kpis, econ, bundle.get("capacities"),
         )
 
+        # Weighted price-scenario ensemble (pricedata layer): one
+        # dispatch, N cashflows — every enabled scenario evaluated on
+        # the SAME Year-1 dispatch and the SAME sized debt (the frozen
+        # keys in the bundle econ), weighted into E[NPV] / E[IRR] and
+        # the discrete P10/P50/P90.  None while the engine is
+        # disarmed, so the default outputs stay bit-identical.
+        _ps_application = bundle.get("price_scenarios")
+        ensemble_result = None
+        if _ps_application is not None:
+            ensemble_result = run_price_scenario_ensemble(
+                econ, kpis, bundle.get("capacities") or {}, ts, res,
+                base_dir=Path(config.excel).parent,
+                applied_trajectories=_ps_application.applied_trajectories,
+                applied_name=_ps_application.applied,
+                lifetime_yearly=bundle.get("lifetime_yearly"),
+            )
+        _ps_lines: list[str] | None = None
+        if _ps_application is not None:
+            _ps_lines = list(_ps_application.summary_lines)
+            if ensemble_result is not None:
+                _ps_lines += ensemble_result.summary_lines
         write_results_workbook(
             out_dir / "03_results.xlsx",
             res_year1=res,
@@ -2025,6 +2129,16 @@ def _run_one(
             lender_cases=bundle.get("lender_cases"),
             midlife_resolve=midlife_df,
             risk_metrics=risk_df,
+            market_provenance=(
+                pd.DataFrame(params["market_provenance"])
+                if params.get("market_provenance") else None
+            ),
+            scenario_price_paths=_scenario_paths_frame(_ps_application),
+            scenario_resolve_delta=(
+                _ps_application.resolve_delta
+                if _ps_application is not None else None
+            ),
+            price_scenario_ensemble=_ensemble_frame(ensemble_result),
         )
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
@@ -2035,6 +2149,7 @@ def _run_one(
             replacement_note=_format_replacement_note(econ),
             lender_cases=bundle.get("lender_cases"),
             midlife_resolve=midlife_df,
+            price_scenario_lines=_ps_lines,
         )
 
         # Balancing plot pair promised by the README's report list; both
@@ -2077,6 +2192,21 @@ def _run_one(
                 )
             except Exception:
                 logger.exception("Emissions / CFE plot generation failed")
+        # Price-scenario figures (pricedata layer): only when the
+        # engine is armed, so the default figure set is bit-identical
+        # (the intraday conditional-figure pattern).
+        if _ps_application is not None:
+            try:
+                plot_price_path_fan(
+                    _ps_application.fan,
+                    layout["financial_plots"] / "price_path_fan.pdf",
+                )
+                plot_capture_kpis(
+                    _ps_application.paths,
+                    layout["financial_plots"] / "capture_kpis.pdf",
+                )
+            except Exception:
+                logger.exception("Price-scenario plot generation failed")
         # Intraday-venue figures (Eqs. I1-I5): only when the Stage-2
         # re-dispatch wrote its columns, so the default figure set is
         # bit-identical (the DSCR conditional-figure pattern).

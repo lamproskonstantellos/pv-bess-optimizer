@@ -32,6 +32,7 @@ import pandas as pd
 from .io import (
     _KEY_TO_SHEET,
     _SHEET_DEFAULTS,
+    _normalise_price_scenarios_block,
     _normalise_trajectories_block,
     _parse_grid_export_max,
     _parse_value,
@@ -55,6 +56,7 @@ _TOP_LEVEL_EXTRAS: frozenset[str] = frozenset({
     "sizing",  # read separately by pvbess_opt.sizing.read_sizing_block
     "trajectories",  # per-year stream multipliers (Eq. E24)
     "price_decks",  # named price-deck files merged as __ variant columns
+    "price_scenarios",  # multi-year price-scenario list (pricedata layer)
 })
 
 # Reference specific yield (kWh/kWp/yr) and divergence threshold for the PV
@@ -242,6 +244,11 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
     # materialize_to_xlsx round-trip.
     typed["trajectories"] = _normalise_trajectories_block(
         raw.get("trajectories"), source=f"Config {path}",
+    )
+    # Optional price-scenario list, normalised through the SAME helper
+    # the workbook sheet parser uses (three-surface parity).
+    typed["price_scenarios"] = _normalise_price_scenarios_block(
+        raw.get("price_scenarios"), source=f"Config {path}",
     )
     typed["ts"] = _resolve_timeseries(raw, path.parent)
     _resolve_price_decks(raw, path.parent, typed)
@@ -703,6 +710,13 @@ def dump_structured_config(
             }
             for stream, spec in trajectories.items()
         }
+    price_scenarios = typed.get("price_scenarios")
+    if price_scenarios:
+        # Same emit-only-when-set contract as trajectories.
+        out["price_scenarios"] = [
+            {k: _yaml_scalar(v) for k, v in entry.items()}
+            for entry in price_scenarios
+        ]
 
     if config_path.suffix.lower() == ".json":
         config_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
@@ -811,6 +825,16 @@ def config_json_schema() -> dict[str, Any]:
             "balancing_activation, opex, opex_pv, opex_bess) to a "
             "values list or a {mode: replace|overlay, values: [...]} "
             "block; year-1 value must be 1.0."
+        ),
+    }
+    properties["price_scenarios"] = {
+        "type": "array",
+        "description": (
+            "Multi-year price scenarios: list of {name, provider "
+            "(retwin|ffe|maon|afry|tyndp|parametric|file), vintage, "
+            "weight_pct (summing to 100), store_path, notes} entries "
+            "read by the pricedata layer; armed by "
+            "scenario_engine.price_scenarios_enabled."
         ),
     }
     return {
