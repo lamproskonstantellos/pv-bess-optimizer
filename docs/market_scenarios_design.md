@@ -44,14 +44,22 @@ balancing saturation).
 
 The `bidding_zone` selector resolves through the
 `pvbess_opt.marketdata.ZONES` registry (code, ENTSO-E EIC, local
-timezone): `gr`, `de_lu`, `fr`, `it_nord`, `es`, `bg`, `ro`.  Sources
-per dataset:
+timezone).  Registered zones: `gr`, `de_lu`, `fr`, `es`, `pt`, `at`,
+`be`, `nl`, `ch`, `pl`, `cz`, `sk`, `hu`, `si`, `hr`, `rs`, `bg`,
+`ro`, `fi`, `ee`, `lv`, `lt`, `dk1`, `dk2`, `se1`–`se4`, `no1`–`no5`
+and the Italian zones `it_nord` / `it_cnor` / `it_csud` / `it_sud` /
+`it_sici` / `it_sard` — any other ENTSO-E zone is one registry line
+away (EIC + timezone), the workbook enum follows the registry, and a
+wrong EIC fails loudly at fetch time
+(`scripts/probe_market_data.py --zones` verifies a zone live before
+first use).  Sources per dataset:
 
 | Dataset | Providers | Notes |
 |---|---|---|
 | Day-ahead prices | `entsoe` (A44 Publication_MarketDocument) | PT60M before 2025-10-01, PT15M after (the SDAC 15-minute MTU switch) — both cadences within one fetched year are stitched. |
+| Intraday auction prices | `entsoe` (A44 + intraday contract type A07, auction sequence 1/2/3) | The pan-European SIDC auctions IDA1/IDA2/IDA3 (live since June 2024) — pick a reference year ≥ 2025 for full coverage. Continuous SIDC trade prices are exchange-proprietary and deliberately NOT fetchable. Replaces `ida_price_eur_per_mwh` (the intraday venue's auction price series). Parameter pair PROVISIONAL until probe-pinned. |
 | Balancing prices | `entsoe` (A81/A84) or `admie` | The ENTSO-E balancing domain is EMPTY for GR (co-optimised integrated scheduling process), so GR uses the ADMIE file API (`getOperationMarketFile`); `auto` resolves GR → `admie`, every other zone → `entsoe`. An explicit zone/source mismatch raises. |
-| Imbalance prices | `entsoe` (A85) or `admie` | Same registry rule. |
+| Imbalance prices | `entsoe` (A85) or `admie` | Same registry rule. The fetched columns must match the configured `imbalance_pricing` regime (single vs dual) and may never leave a stale sibling column of the other regime in the frame — both fail loudly. |
 
 The ADMIE file categories and workbook header patterns ship as
 PROVISIONAL constants pinned by `scripts/probe_market_data.py` (run
@@ -117,6 +125,8 @@ cell EMPTY (never commit a token) and logs mask it to its first
 | `price_resample_policy` | `step_hold` | The single accepted value (Eq. G1); the key exists so a future alternative is an explicit, versioned choice. |
 | `balancing_source` | `file` | `file` / `auto` / `entsoe` / `admie` (registry rule above). |
 | `imbalance_source` | `file` | Same options. |
+| `intraday_source` | `file` | `file` keeps the workbook `ida_price_eur_per_mwh` column; `entsoe` fetches the selected SIDC auction and replaces it. |
+| `intraday_auction` | `ida1` | `ida1` (D-1 15:00) / `ida2` (D-1 22:00) / `ida3` (delivery-day 10:00). |
 | `entsoe_token` | (empty) | Literal token, or empty to read the env var below. |
 | `entsoe_token_env` | `ENTSOE_API_TOKEN` | Environment variable consulted when the cell is empty. |
 | `market_cache_dir` | `~/.cache/pvbess/market` | On-disk fetch cache. |
@@ -142,10 +152,19 @@ sheet (`store_path`, relative paths resolved against the workbook):
 
 Curve years follow the Layer-A calendar contract and are laid on by
 Eq. G1.  Years past the last declared one hold the last curve
-(`hold_last`, logged); missing interior years are a hard error.  Real
-vendor curves bridge to the engine basis via the deflator
-(`price_basis` + `price_base_year` + `cpi_pct`), so every deck the
-engine sees is on ONE declared basis.
+(`hold_last`, logged); missing interior years are a hard error.  The
+same rules apply PER PRODUCT to the balancing table (a product's
+years must be contiguous from 1; a shorter product holds its OWN last
+year; a product entirely absent from the table simply generates no
+stream), and blank price cells are rejected at load — FCR's
+activation is the single blessed empty cell; a capacity-only product
+must carry an explicit activation of 0.  Real vendor curves bridge to
+the engine basis via the deflator (`price_basis` + `price_base_year`
++ `cpi_pct`), applied AFTER the hold_last tail is materialised so a
+real-basis store keeps inflating at CPI through the held years; every
+deck the engine sees is on ONE declared basis (the `parametric`
+provider derives from the workbook's own engine-basis prices and
+rejects a foreign declared basis outright).
 
 Providers on the sheet: `file` (ready-made store), `parametric`
 (Eq. G3), `tyndp` (free ENTSO-E TYNDP milestone curves, linear
@@ -162,11 +181,27 @@ $\delta(t) = p_1(t) - \bar p_d(t)$ the intra-day deviation,
 $w(t) = pv(t)/\max pv$ the PV weight, and knobs $\ell$ (level drift),
 $d$ (capture decline), $s$ (spread evolution) in %/yr:
 
-$$p_y(t) = \bigl(\bar p_d(t) + \delta(t)\,(1+s)^{y-1}\bigr)\,(1+\ell)^{y-1}\,\Bigl(1 - \bigl(1-(1-d)^{y-1}\bigr)\,w(t)\Bigr) \tag{G3}$$
+$$p_y(t) = \Bigl(\bar p_d(t)\,\bigl(1 - (1-(1-d)^{y-1})\,w(t)\bigr) + \delta(t)\,(1+s)^{y-1}\Bigr)\,(1+\ell)^{y-1} \tag{G3}$$
 
 Solar-hour prices fall faster than the average (the capture-rate
-story); the spread path scales deviations from the daily mean
-independently of the level path.  Optional per-product
+story); the haircut applies to the DAILY-MEAN component only — an
+additive subtraction, so negative solar-hour prices DEEPEN under
+cannibalization instead of shrinking toward zero — and the spread
+path scales deviations from the daily mean independently of the
+level path.  The literal `meta.yaml` keys:
+
+```yaml
+parametric:
+  dam_level_pct_per_yr: -1.0          # ℓ
+  pv_capture_decline_pct_per_yr: 1.5  # d (needs the workbook pv_kwh)
+  spread_evolution_pct_per_yr: 2.0    # s
+  balancing:                          # optional per-product paths
+    afrr_up: {capacity_pct_per_yr: -5.0, activation_pct_per_yr: -3.0}
+    fcr: {capacity_pct_per_yr: -8.0}  # FCR has no activation
+```
+
+Products: `fcr` / `afrr_up` / `afrr_dn` / `mfrr_up` / `mfrr_dn`.
+Optional per-product
 `{capacity,activation}_pct_per_yr` paths build the balancing table
 from the workbook's Year-1 per-product prices.
 
@@ -286,7 +321,7 @@ legs; they stay on `g_dam_pv` in every configuration.
 | `scenario_projection_mode` | `reprice` | `reprice` (G4) / `resolve` (G5) / `trajectory_only` (declared trajectories only, no auto-generation). |
 | `scenario_resolve_years` | `1,5,10,15,20,25` | Tier-2 support years (CSV; year 1 forced in; out-of-lifecycle years rejected). |
 | `scenario_resolve_resolution` | 60 | Re-solve grid in minutes; must be a whole multiple of the workbook cadence, never finer. |
-| `scenario_interp` | `loglinear` | Eq. G6 (`loglinear` / `linear`). |
+| `scenario_interp` | `loglinear` | Eq. G6 (`loglinear` default / `linear`; a stream with a non-positive support factor falls back to linear automatically). |
 | `price_basis` | `nominal` | Engine basis for every deck (the repo's cashflow convention). |
 | `price_base_year` | 0 | Base year of `real` vendor curves (deflator bridge). |
 | `cpi_pct` | 2.0 | Deflator rate of the real→nominal bridge. |
@@ -343,8 +378,9 @@ Gated by the first row's `enabled` cell.  Columns: `name` (unique),
 * Figures (emitted only when armed, the conditional-figure pattern):
   `price_path_fan.pdf` (yearly mean DAM price per enabled scenario,
   ordered `SCENARIO_PATH_COLORS` palette) and `capture_kpis.pdf`
-  (capture price / capture rate / realized spread, canonical
-  financial colours).
+  (DAM baseload price / PV capture price / realized BESS spread,
+  canonical financial colours; the capture RATE is reported on the
+  `scenario_price_paths` sheet and in the SUMMARY digest).
 
 ## Implementation map
 

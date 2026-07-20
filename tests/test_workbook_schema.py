@@ -182,6 +182,7 @@ def test_market_data_sheet_keys():
     expected = {
         "price_source", "bidding_zone", "price_reference_year",
         "price_resample_policy", "balancing_source", "imbalance_source",
+        "intraday_source", "intraday_auction",
         "entsoe_token", "entsoe_token_env",
         "market_cache_dir", "market_fetch_mode",
     }

@@ -5,19 +5,25 @@
 ### Added (market data & price scenarios)
 
 - **Market-data ingestion** (`market_data` sheet,
-  `pvbess_opt/marketdata/`): a bidding-zone selector (GR, DE-LU, FR,
-  IT-Nord, ES, BG, RO) with per-dataset sources.  `entsoe` fetches the
-  configured historical reference year from the ENTSO-E Transparency
-  Platform (A44 day-ahead across the 2025-10-01 SDAC 15-minute MTU
-  switch; A81/A84 balancing, A85 imbalance) and REPLACES the matching
-  workbook columns; the GR balancing gap is covered by the ADMIE file
-  API with a HEnEx daily-workbook cross-check.  Fixed intensive
-  resampling (step-hold coarser→finer, mean finer→coarser), DST-safe
-  local-calendar assembly, on-disk fetch cache with
-  `cache_first`/`refresh`/`offline` modes, provenance on the results
-  workbook, and snapshot materialisation (fetched values written in,
-  source keys reset to `file`, token blanked).  All sources default to
-  `file` — bit-identical when unused.
+  `pvbess_opt/marketdata/`): a bidding-zone selector spanning most
+  SDAC zones (GR, DE-LU, FR, ES, PT, the Nordic and Italian zones, and
+  more; EIC codes in `pvbess_opt.marketdata.ZONES`, the workbook enum
+  derived from the registry) with per-dataset sources.  `entsoe`
+  fetches the configured historical reference year from the ENTSO-E
+  Transparency Platform — A44 day-ahead across the 2025-10-01 SDAC
+  15-minute MTU switch, A44 + intraday contract type for the SIDC
+  intraday auctions (IDA1/2/3), A81/A84 balancing, A85 imbalance — and
+  REPLACES the matching workbook columns; the GR balancing gap is
+  covered by the ADMIE file API with a HEnEx daily-workbook
+  cross-check.  Fixed intensive resampling (step-hold coarser→finer,
+  mean finer→coarser), DST-safe local-calendar assembly, boundary-day
+  dedup in the too-much-data window bisection, on-disk fetch cache
+  with `cache_first`/`refresh`/`offline` modes, an imbalance-family
+  consistency guard (never a silent single-vs-dual regime mix),
+  provenance on the results workbook, and snapshot materialisation
+  (fetched values written in, source keys reset to `file`, token
+  blanked).  All sources default to `file` — bit-identical when
+  unused.
 - **Multi-year price scenarios** (`scenario_engine` +
   `price_scenarios` sheets, `pvbess_opt/pricedata/`): per-scenario
   price decks (directory stores with `meta.yaml` / per-year `dam.csv`

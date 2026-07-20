@@ -383,3 +383,56 @@ def test_no_override_scenario_matches_standalone(tmp_path):
     assert row["profit_total_eur"] == pytest.approx(
         kpis["profit_total_eur"], rel=1e-9, abs=1e-6,
     )
+
+
+# ---------------------------------------------------------------------------
+# market_data / scenario_engine overrides + the materialise-time flip
+# ---------------------------------------------------------------------------
+
+
+def test_overrides_reach_market_and_scenario_engine_sheets():
+    """The validator whitelists the two new sections; the apply loop
+    must land them (a validated-but-dropped override is exactly the
+    silent no-op the validator exists to prevent)."""
+    from pvbess_opt.io import (
+        MARKET_DATA_SHEET_DEFAULTS,
+        SCENARIO_ENGINE_SHEET_DEFAULTS,
+    )
+
+    base = _base_typed()
+    base["market_data"] = dict(MARKET_DATA_SHEET_DEFAULTS)
+    base["scenario_engine"] = dict(SCENARIO_ENGINE_SHEET_DEFAULTS)
+    typed = _apply_scenario_overrides(base, {
+        "name": "armed",
+        "scenario_engine": {"price_scenarios_enabled": True},
+        "market_data": {"bidding_zone": "de_lu"},
+    })
+    assert typed["scenario_engine"]["price_scenarios_enabled"] is True
+    assert typed["market_data"]["bidding_zone"] == "de_lu"
+
+
+def test_materialised_scenario_disarms_market_fetch():
+    """Without an explicit market_data override the materialised temp
+    workbook must not re-trigger the bypass on re-read: the base read
+    already resolved fetched columns into the frame, and a re-fetch
+    would clobber a price_deck override. Sources flip to 'file', the
+    token cell is blanked (the materialize_bypassed_workbook rule)."""
+    from pvbess_opt.io import MARKET_DATA_SHEET_DEFAULTS
+
+    base = _base_typed()
+    base["market_data"] = dict(
+        MARKET_DATA_SHEET_DEFAULTS,
+        price_source="entsoe", entsoe_token="secret-token",
+    )
+    typed = _apply_scenario_overrides(base, {"name": "plain"})
+    assert typed["market_data"]["price_source"] == "file"
+    assert typed["market_data"]["balancing_source"] == "file"
+    assert typed["market_data"]["imbalance_source"] == "file"
+    assert typed["market_data"]["entsoe_token"] == ""
+    # An explicit market_data override keeps its configuration —
+    # the deliberate re-fetch is the scenario's own semantics.
+    explicit = _apply_scenario_overrides(base, {
+        "name": "refetch", "market_data": {"price_reference_year": 2024},
+    })
+    assert explicit["market_data"]["price_source"] == "entsoe"
+    assert explicit["market_data"]["price_reference_year"] == 2024

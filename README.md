@@ -52,12 +52,14 @@ only the re-dispatch margin. See
 
 Two opt-in price layers complete the market picture (both ship
 disabled; defaults are bit-identical). The `market_data` sheet fetches
-historical day-ahead and balancing prices for a selectable bidding
-zone (GR, DE-LU, FR, IT-Nord, ES, BG, RO) from ENTSO-E — with the
-Greek balancing gap covered by the ADMIE file API and a HEnEx
-cross-check — and *replaces* the workbook price columns with the
-fetched reference year (override semantics, provenance recorded, the
-input snapshot re-runs the exact prices offline). The
+historical day-ahead, intraday-auction, balancing and imbalance prices
+for a selectable bidding zone (most SDAC zones — GR, DE-LU, FR, ES, the
+Nordic and Italian zones, and more — with EIC codes in
+`pvbess_opt.marketdata.ZONES`) from ENTSO-E — with the Greek balancing
+gap covered by the ADMIE file API and a HEnEx cross-check — and
+*replaces* the workbook price columns with the fetched reference year
+(override semantics, provenance recorded, the input snapshot re-runs
+the exact prices offline). The
 `scenario_engine` + `price_scenarios` sheets then project years 2..N
 on per-scenario price decks instead of flat inflation: the frozen
 Year-1 dispatch is repriced year by year into per-stream escalation
@@ -406,13 +408,17 @@ Optional key / value sheet selecting the Year-1 price basis
 `file` default the workbook columns are used untouched. `price_source
 = entsoe` fetches the `price_reference_year` day-ahead series for the
 selected `bidding_zone` from the ENTSO-E Transparency Platform and
-replaces `dam_price_eur_per_mwh` wholesale; `balancing_source` /
-`imbalance_source` accept `auto` (per-zone registry: GR → ADMIE, else
-ENTSO-E) or an explicit provider. Fetches cache on disk
-(`market_cache_dir`, `market_fetch_mode`: `cache_first` / `refresh` /
-`offline`). The ENTSO-E token comes from the `entsoe_token` cell or
-the environment variable named by `entsoe_token_env` — the shipped
-template keeps the cell empty; never commit a token.
+replaces `dam_price_eur_per_mwh` wholesale; `intraday_source = entsoe`
+does the same for `ida_price_eur_per_mwh` from the selected SIDC
+intraday auction (`intraday_auction`: `ida1` / `ida2` / `ida3`; the
+continuous intraday market is exchange-proprietary and not fetchable);
+`balancing_source` / `imbalance_source` accept `auto` (per-zone
+registry: GR → ADMIE, else ENTSO-E) or an explicit provider. Fetches
+cache on disk (`market_cache_dir`, `market_fetch_mode`: `cache_first`
+/ `refresh` / `offline`). The ENTSO-E token comes from the
+`entsoe_token` cell or the environment variable named by
+`entsoe_token_env` — the shipped template keeps the cell empty; never
+commit a token.
 
 ### `scenario_engine`
 

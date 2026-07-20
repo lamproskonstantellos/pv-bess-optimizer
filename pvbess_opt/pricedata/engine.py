@@ -116,6 +116,7 @@ def build_scenario_deck(
             ),
             year1_balancing=_year1_balancing_prices(ts),
             n_years=n_years,
+            engine_basis=engine_basis,
         )
     if provider == "tyndp":
         return build_tyndp_deck(
@@ -123,6 +124,9 @@ def build_scenario_deck(
             name=name, vintage=vintage, weight_pct=weight_pct,
             n_steps=n_steps, dt_minutes=dt_minutes, n_years=n_years,
             start_year=start_year,
+            engine_basis=engine_basis,
+            engine_base_year=engine_base_year,
+            cpi_pct=cpi_pct,
         )
     raise stub_provider_error(provider)
 
@@ -262,7 +266,24 @@ def derive_reprice_trajectories(
 
     if deck.balancing is not None:
         bal = deck.balancing.set_index(["year", "product"]).sort_index()
+        bal_years = bal.index.get_level_values("year").astype(int)
+        bal_products = bal.index.get_level_values("product").astype(str)
         for product in BALANCING_PRODUCTS:
+            # Hold-last horizon per PRODUCT: a product whose rows stop
+            # earlier than another's holds its OWN last year — the
+            # global max would silently drop the whole stream.  A
+            # product entirely absent from the table is the documented
+            # no-stream case (logged, not an error).
+            product_years = bal_years[bal_products == product]
+            if len(product_years) == 0:
+                logger.info(
+                    "[pricedata] scenario %r: balancing product %s is "
+                    "absent from the store's annual table; the stream "
+                    "keeps its workbook escalation.",
+                    deck.name, product,
+                )
+                continue
+            max_year = int(product_years.max())
             for kind, column in (
                 ("capacity", "capacity_price_eur_per_mwh"),
                 ("activation", "activation_price_eur_per_mwh"),
@@ -270,7 +291,6 @@ def derive_reprice_trajectories(
                 if kind == "activation" and product == "fcr":
                     continue
                 price_series = bal[column]
-                max_year = int(bal.index.get_level_values("year").max())
                 prices: list[float] = []
                 for y in range(1, n_years + 1):
                     value = price_series.get((min(y, max_year), product))
@@ -377,7 +397,8 @@ def apply_price_scenarios(
 
     The applied scenario of a single run is ``debt_sizing_scenario``
     when named (the bankable path), else the first enabled row; the
-    weighted ensemble across ALL rows is the scenarios-harness phase.
+    weighted ensemble across ALL rows runs afterwards in the same
+    pipeline run (:func:`pvbess_opt.pricedata.ensemble.run_price_scenario_ensemble`).
     """
     if not bool(econ.get("price_scenarios_enabled", False)):
         return None
@@ -507,8 +528,7 @@ def apply_price_scenarios(
         "[pricedata] price-scenario engine armed (mode %r): "
         "scenario %r projected the Year-1 dispatch into "
         "auto-trajectories for %s; %d enabled scenario(s) feed the "
-        "price-path figures (the weighted ensemble runs in the "
-        "scenarios harness).",
+        "price-path figures and the in-run weighted ensemble.",
         mode, applied_name, streams, len(scenarios),
     )
     final_year = applied_paths.iloc[-1]
