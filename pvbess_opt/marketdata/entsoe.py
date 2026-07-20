@@ -370,9 +370,111 @@ def fetch_day_ahead_year(
     return series
 
 
-def build_query_params(**overrides: Any) -> dict[str, str]:
-    """Assemble raw query parameters (probe/diagnostic helper)."""
-    return {str(k): str(v) for k, v in overrides.items()}
+#: Intraday-auction selector → ``classificationSequence_AttributeInstanceComponent.Position``.
+#: PROVISIONAL until pinned by ``scripts/probe_market_data.py``: the
+#: pan-European SIDC intraday auctions (IDA1/IDA2/IDA3, live since
+#: June 2024) publish on the Transparency Platform through the same
+#: A44 Price Document endpoint with ``contract_MarketAgreement.type``
+#: A07 (intraday) and the auction sequence as the classification
+#: position — the parameter pair the API guide documents for the
+#: intraday auction prices view.  Continuous SIDC trade prices are
+#: exchange-proprietary and deliberately NOT fetchable here.
+INTRADAY_AUCTIONS: dict[str, int] = {"ida1": 1, "ida2": 2, "ida3": 3}
+
+
+def fetch_intraday_auction_year(
+    zone: Zone,
+    year: int,
+    auction: str,
+    *,
+    token_resolver: Callable[[], str],
+    cache: MarketDataCache,
+    fetch_mode: str = "cache_first",
+    timeout: float = _REQUEST_TIMEOUT_S,
+) -> MarketSeries:
+    """Fetch one calendar year of intraday-AUCTION clearing prices.
+
+    The A44 sibling of :func:`fetch_day_ahead_year` with the intraday
+    contract type and the ``auction`` selector (``ida1`` / ``ida2`` /
+    ``ida3``) mapped to the classification-sequence position.  Note
+    the auctions only exist from mid-2024 on — a reference year before
+    that returns no data (a loud error, not an empty series).
+    """
+    auction = str(auction).strip().lower()
+    if auction not in INTRADAY_AUCTIONS:
+        raise MarketDataError(
+            f"intraday_auction {auction!r} is not one of "
+            f"{', '.join(sorted(INTRADAY_AUCTIONS))}."
+        )
+    cache_key = MarketDataCache.key(
+        "ida-a44", zone.code, year, auction=auction,
+    )
+    cache_path = cache.path(cache_key)
+    mode = str(fetch_mode).strip().lower()
+
+    if mode in ("cache_first", "offline"):
+        cached = cache.load(cache_key)
+        if cached is not None:
+            cached.metadata["cache_state"] = "cache hit"
+            cached.metadata.setdefault("cache_key", cache_key)
+            return cached
+        if mode == "offline":
+            raise MarketDataError(
+                "market_fetch_mode='offline' but the required cache entry "
+                f"is missing: {cache_path} (cache key {cache_key}). Run "
+                "once with network access (cache_first) or copy the cache "
+                "file in."
+            )
+
+    token = token_resolver()
+    tz = ZoneInfo(zone.tz)
+    start = datetime(year, 1, 1, tzinfo=tz).astimezone(UTC)
+    end = datetime(year + 1, 1, 1, tzinfo=tz).astimezone(UTC)
+    logger.info(
+        "[marketdata] ENTSO-E A44/A07 fetch: zone %s (%s), auction %s, "
+        "local year %d (%s → %s UTC), token %s.",
+        zone.code, zone.eic, auction.upper(), year,
+        _fmt_period(start - timedelta(hours=1)),
+        _fmt_period(end + timedelta(hours=1)),
+        mask_token(token),
+    )
+    segments = _fetch_window(
+        {
+            "documentType": "A44",
+            "in_Domain": zone.eic,
+            "out_Domain": zone.eic,
+            "contract_MarketAgreement.type": "A07",
+            "classificationSequence_AttributeInstanceComponent.Position":
+                str(INTRADAY_AUCTIONS[auction]),
+        },
+        start - timedelta(hours=1),
+        end + timedelta(hours=1),
+        token=token,
+        timeout=timeout,
+    )
+    if not segments:
+        raise MarketDataError(
+            f"ENTSO-E returned no {auction.upper()} intraday-auction "
+            f"data for zone {zone.code} in {year}; the SIDC IDAs only "
+            "publish from mid-2024 on — check the zone/year combination "
+            "on https://transparency.entsoe.eu."
+        )
+    series = MarketSeries(
+        segments=segments,
+        metadata={
+            "source": "entsoe",
+            "dataset": "ida-a44",
+            "zone": zone.code,
+            "eic": zone.eic,
+            "year": int(year),
+            "auction": auction,
+            "fetched_at": utcnow_isoformat(),
+            "cache_key": cache_key,
+            "cache_state": "live fetch" if mode != "refresh" else "refresh",
+        },
+    )
+    cache.save(cache_key, series)
+    return series
 
 
 # ---------------------------------------------------------------------------

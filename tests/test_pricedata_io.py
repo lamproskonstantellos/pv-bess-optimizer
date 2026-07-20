@@ -327,3 +327,18 @@ def test_summary_gating_of_price_scenario_lines(tmp_path):
     assert "Price scenarios" in armed.read_text(encoding="utf-8")
     plain = write_summary_md(tmp_path / "SUMMARY_plain.md", **common)
     assert "Price scenarios" not in plain.read_text(encoding="utf-8")
+
+
+def test_scenario_interp_accepts_linear(tmp_path):
+    """'linear' is a selectable workbook value (not just the internal
+    non-positive-factor fallback)."""
+    dst = tmp_path / "linear.xlsx"
+    shutil.copy(WORKBOOK, dst)
+    wb = load_workbook(dst)
+    ws = wb["scenario_engine"]
+    for row in ws.iter_rows(min_row=2):
+        if row[0].value == "scenario_interp":
+            row[1].value = "linear"
+    wb.save(dst)
+    typed = read_workbook(dst)
+    assert typed["scenario_engine"]["scenario_interp"] == "linear"

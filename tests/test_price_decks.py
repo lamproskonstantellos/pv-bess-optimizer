@@ -172,7 +172,7 @@ def _fake_rows(monkeypatch):
     import pvbess_opt.scenarios as scn_mod
     from pvbess_opt.scenarios import _COMPARISON_COLUMNS
 
-    def _fake_eval(base_typed, scn, *, solver_opts):
+    def _fake_eval(base_typed, scn, *, solver_opts, base_dir=None):
         row = {c: 0.0 for c in _COMPARISON_COLUMNS}
         row["name"] = scn.get("name")
         row["price_deck"] = str(scn.get("price_deck") or "")

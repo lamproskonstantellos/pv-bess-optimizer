@@ -1198,7 +1198,20 @@ data row and shipped **disabled** with a worked example.  Streams:
 ``revenue_dam``, ``revenue_retail``, ``balancing_capacity``,
 ``balancing_activation``, ``opex``, or the per-asset split ``opex_pv`` /
 ``opex_bess`` (the shared ``opex`` stream and the split streams are
-mutually exclusive).  ``mode`` is ``replace`` (the vector substitutes the
+mutually exclusive).  The refined price taxonomy (equations E60/E61 in
+``docs/economics_design.md``) adds the per-leg DAM split
+``revenue_dam_pv`` / ``revenue_dam_bess_export`` /
+``expense_dam_bess_charge`` and the per-product balancing streams
+``balancing_capacity_fcr`` / ``balancing_capacity_afrr_up`` /
+``balancing_capacity_afrr_dn`` / ``balancing_capacity_mfrr_up`` /
+``balancing_capacity_mfrr_dn`` plus the four
+``balancing_activation_*`` counterparts (FCR has no activation) —
+each aggregate (``revenue_dam``, ``balancing_capacity``,
+``balancing_activation``) remains an accepted alias for its
+undeclared legs but is mutually exclusive with them, the same rule as
+``opex`` vs ``opex_pv`` / ``opex_bess``.  The split legs need the
+Year-1 revenue-breakdown KPIs of a full run (they are the base the
+factors scale).  ``mode`` is ``replace`` (the vector substitutes the
 stream's inflation index; the loader warns when the matching
 ``*_inflation_pct`` is also non-zero) or ``overlay`` (the vector
 multiplies on top of it):
@@ -1259,15 +1272,23 @@ Three optional sheets, shipped inert, documented in full in
   every source at its ``file`` default the workbook price columns are
   used untouched.  ``price_source = entsoe`` fetches the
   ``price_reference_year`` day-ahead series for the selected
-  ``bidding_zone`` (``gr``, ``de_lu``, ``fr``, ``it_nord``, ``es``,
-  ``bg``, ``ro``) from the ENTSO-E Transparency Platform and
-  **replaces** ``dam_price_eur_per_mwh`` for the whole horizon;
-  ``balancing_source`` / ``imbalance_source`` accept ``auto`` (per-zone
-  registry: GR resolves to the ADMIE file API, every other zone to
-  ENTSO-E) or an explicit provider.  Fetches cache on disk
-  (``market_cache_dir``; ``market_fetch_mode``: ``cache_first`` /
-  ``refresh`` / ``offline``).  The API token comes from the
-  ``entsoe_token`` cell or the environment variable named by
+  ``bidding_zone`` from the ENTSO-E Transparency Platform and
+  **replaces** ``dam_price_eur_per_mwh`` for the whole horizon (the
+  registered zones span most SDAC bidding zones — GR, DE-LU, FR, ES,
+  PT, AT, BE, NL, CH, PL, CZ, SK, HU, SI, HR, RS, BG, RO, FI, EE, LV,
+  LT, the DK/SE/NO zones and the Italian zones; the full list with
+  EIC codes lives in ``pvbess_opt.marketdata.ZONES`` and any other
+  zone is one registry line away).  ``intraday_source = entsoe``
+  fetches the selected SIDC intraday auction's clearing prices
+  (``intraday_auction``: ``ida1`` / ``ida2`` / ``ida3``; the auctions
+  publish from June 2024 on) and replaces ``ida_price_eur_per_mwh`` —
+  continuous intraday trade prices are exchange-proprietary and not
+  fetchable.  ``balancing_source`` / ``imbalance_source`` accept
+  ``auto`` (per-zone registry: GR resolves to the ADMIE file API,
+  every other zone to ENTSO-E) or an explicit provider.  Fetches
+  cache on disk (``market_cache_dir``; ``market_fetch_mode``:
+  ``cache_first`` / ``refresh`` / ``offline``).  The API token comes
+  from the ``entsoe_token`` cell or the environment variable named by
   ``entsoe_token_env`` — the shipped template keeps the cell empty;
   never commit a token.  Bypassed columns are recorded on the results
   workbook's ``market_data_provenance`` sheet and materialised into the

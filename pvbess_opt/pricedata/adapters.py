@@ -34,7 +34,9 @@ from .store import (
     BALANCING_PRODUCTS,
     PriceDataError,
     ScenarioDeck,
+    _basis_factor,
     _read_meta,
+    validate_engine_basis,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,7 @@ def build_parametric_deck(
     pv_kwh: np.ndarray | None,
     year1_balancing: dict[str, tuple[float, float]] | None,
     n_years: int,
+    engine_basis: str = "nominal",
 ) -> ScenarioDeck:
     """Generate per-year curves from the Year-1 column and three knobs.
 
@@ -77,9 +80,13 @@ def build_parametric_deck(
 
     ``capture_y(t)``: the PV-weighted cannibalization shape.  With
     ``w(t) = pv(t)/max(pv)`` (0 outside daylight) the year-``y`` curve
-    loses ``(1 - (1 - d)^(y-1)) · w(t)`` of its level in PV-heavy
-    steps, ``d = pv_capture_decline_pct/100`` — solar-hour prices fall
-    faster than the average, which is exactly the capture-rate story.
+    loses ``(1 - (1 - d)^(y-1)) · w(t)`` of its DAILY-MEAN level in
+    PV-heavy steps, ``d = pv_capture_decline_pct/100`` — solar-hour
+    prices fall faster than the average, which is exactly the
+    capture-rate story.  The haircut applies to the daily-mean
+    component only (an additive subtraction), so negative solar-hour
+    prices DEEPEN under cannibalization instead of shrinking toward
+    zero, as a multiplicative factor on the signed price would.
 
     ``spread_y``: intra-day deviations from the DAILY mean scale by
     ``(1 + s/100)^(y-1)`` — the BESS arbitrage spread path, independent
@@ -92,6 +99,18 @@ def build_parametric_deck(
     """
     store_dir = Path(store_dir)
     meta = _read_meta(store_dir)
+    # Parametric curves derive from the workbook's own Year-1 prices,
+    # which are already on the engine basis — a declared foreign basis
+    # would invite a double-counting bridge, so it is rejected.
+    engine_basis = str(engine_basis).strip().lower()
+    if str(meta["basis"]) != engine_basis:
+        raise PriceDataError(
+            f"{store_dir.name}: provider 'parametric' derives its "
+            "curves from the workbook's own Year-1 prices, which are "
+            f"already on the engine basis ({engine_basis!r}); "
+            f"meta.yaml declares basis {meta['basis']!r} — declare the "
+            "engine basis (or omit the key) instead of bridging."
+        )
     block = _parametric_block(meta, store_dir.name)
     level_pct = float(block.get("dam_level_pct_per_yr", 0.0) or 0.0)
     capture_pct = float(
@@ -130,11 +149,13 @@ def build_parametric_deck(
             1.0 - capture_pct / 100.0
         ) ** (y - 1)
         spread = (1.0 + spread_pct / 100.0) ** (y - 1)
+        # The capture haircut subtracts from the daily-mean component
+        # only: scaling the SIGNED price would move negative solar-hour
+        # prices toward zero — the opposite of cannibalization.
         curve = (
-            (daily_mean_steps + deviation * spread)
-            * level
-            * (1.0 - capture_loss * weight)
-        )
+            daily_mean_steps * (1.0 - capture_loss * weight)
+            + deviation * spread
+        ) * level
         dam[y] = curve
 
     balancing: pd.DataFrame | None = None
@@ -204,6 +225,9 @@ def build_tyndp_deck(
     dt_minutes: int,
     n_years: int,
     start_year: int,
+    engine_basis: str = "nominal",
+    engine_base_year: int = 0,
+    cpi_pct: float = 0.0,
 ) -> ScenarioDeck:
     """Adapt TYNDP hourly marginal-cost milestone files to a deck.
 
@@ -259,7 +283,13 @@ def build_tyndp_deck(
                 f"{path}: {len(values)} steps is not a whole non-leap "
                 "year at any cadence."
             )
-        native_minutes = (24 * 60) // (len(values) // 365)
+        native_steps_per_day = len(values) // 365
+        if (24 * 60) % native_steps_per_day != 0:
+            raise PriceDataError(
+                f"{path}: {native_steps_per_day} steps/day does not "
+                "divide the day into whole minutes."
+            )
+        native_minutes = (24 * 60) // native_steps_per_day
         notes: set[str] = set()
         curve = resample_intensive(
             values, native_minutes, dt_minutes,
@@ -301,6 +331,31 @@ def build_tyndp_deck(
         "years %d..%d (linear between, hold outside).",
         store_dir.name, ordered, start_year, start_year + n_years - 1,
     )
+
+    # Basis bridge onto the engine basis, per operating year on its
+    # calendar year — the same guarded bridge the file loader applies
+    # (TYNDP marginal-cost curves are typically real EUR of the
+    # milestone study's base year).  The milestone mapping above fills
+    # every operating year, so the bridge covers the whole horizon.
+    store_basis = str(meta["basis"])
+    store_base_year = int(meta.get("base_year") or 0)
+    engine_basis = validate_engine_basis(engine_basis, int(engine_base_year))
+    if store_basis != engine_basis or store_basis == "real":
+        for y in list(dam):
+            dam[y] = dam[y] * _basis_factor(
+                start_year + y - 1,
+                store_basis=store_basis,
+                store_base_year=store_base_year,
+                engine_basis=engine_basis,
+                engine_base_year=int(engine_base_year),
+                cpi_pct=cpi_pct,
+            )
+        logger.info(
+            "[pricedata] %s: bridged store basis %r (base %s) to "
+            "engine basis %r at %.2f %%/yr CPI.",
+            store_dir.name, store_basis, store_base_year or "-",
+            engine_basis, cpi_pct,
+        )
     return ScenarioDeck(
         name=name,
         provider="tyndp",

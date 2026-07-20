@@ -547,3 +547,36 @@ def test_apply_conflicts_with_user_price_trajectory(tmp_path):
         apply_price_scenarios(
             econ, _armed_ts(), _res(pv_export=1.0), base_dir=tmp_path,
         )
+
+
+def test_balancing_hold_last_is_per_product():
+    """A product with fewer declared years holds its OWN last year —
+    the global max across products must never drop the stream."""
+    balancing = pd.DataFrame([
+        {"year": 1, "product": "afrr_up",
+         "capacity_price_eur_per_mwh": 10.0,
+         "activation_price_eur_per_mwh": 40.0},
+        {"year": 2, "product": "afrr_up",
+         "capacity_price_eur_per_mwh": 5.0,
+         "activation_price_eur_per_mwh": 20.0},
+        {"year": 1, "product": "mfrr_up",
+         "capacity_price_eur_per_mwh": 4.0,
+         "activation_price_eur_per_mwh": 16.0},
+    ])
+    deck = _deck(
+        {1: np.full(HOURS, 80.0), 2: np.full(HOURS, 80.0)},
+        balancing=balancing,
+    )
+    trajectories, _ = derive_reprice_trajectories(
+        deck, _res(pv_export=1.0), n_years=3,
+    )
+    assert trajectories["balancing_capacity_afrr_up"]["values"] == (
+        pytest.approx([1.0, 0.5, 0.5])
+    )
+    # mfrr_up covers year 1 only: flat at its own level, never dropped.
+    assert trajectories["balancing_capacity_mfrr_up"]["values"] == (
+        pytest.approx([1.0, 1.0, 1.0])
+    )
+    assert trajectories["balancing_activation_mfrr_up"]["values"] == (
+        pytest.approx([1.0, 1.0, 1.0])
+    )

@@ -66,14 +66,13 @@ HENEX_URL_TEMPLATE = (
 )
 
 # EIC codes of the zone enum the marketdata layer will ship (§ design).
+# Derived from the package's zone registry so `--zones` can verify
+# every registered zone (including registry extensions) live — the
+# probe is the designated re-pinning tool for a wrong/rotated EIC.
+from pvbess_opt.marketdata.base import ZONES as _PACKAGE_ZONES  # noqa: E402
+
 ZONE_EIC: dict[str, str] = {
-    "GR": "10YGR-HTSO-----Y",
-    "DE_LU": "10Y1001A1001A82H",
-    "FR": "10YFR-RTE------C",
-    "IT_NORD": "10Y1001A1001A73I",
-    "ES": "10YES-REE------0",
-    "BG": "10YCA-BULGARIA-R",
-    "RO": "10YRO-TEL------P",
+    zone.code: zone.eic for zone in _PACKAGE_ZONES.values()
 }
 
 # Candidate ADMIE FileCategory names around the four dataset families
@@ -273,6 +272,31 @@ def probe_entsoe(
             )
             print(f"{label}: HTTP {status} — {_dissect_body(body)}")
             _save(save_dir, f"entsoe_{zone}_A44_{start}.xml", body)
+        # Intraday auctions (SIDC IDA1/2/3, live since June 2024): the
+        # A44 endpoint with the intraday contract type; the sequence
+        # position selects the auction.  This pins the PROVISIONAL
+        # parameter pair in pvbess_opt.marketdata.entsoe
+        # (INTRADAY_AUCTIONS / fetch_intraday_auction_year).
+        for position in (1, 2, 3):
+            status, body = _entsoe_get(
+                token,
+                {
+                    "documentType": "A44",
+                    "in_Domain": eic,
+                    "out_Domain": eic,
+                    "contract_MarketAgreement.type": "A07",
+                    "classificationSequence_AttributeInstanceComponent"
+                    ".Position": str(position),
+                    "periodStart": "202503150000",
+                    "periodEnd": "202503170000",
+                },
+                timeout,
+            )
+            print(
+                f"A44/A07 intraday auction IDA{position}: HTTP {status} "
+                f"— {_dissect_body(body)}"
+            )
+            _save(save_dir, f"entsoe_{zone}_A44_A07_ida{position}.xml", body)
         balancing_probes = [
             ("A81 FCR capacity (17.1.B&C)", {"processType": "A52"}),
             ("A81 aFRR capacity (17.1.B&C)", {"processType": "A51"}),

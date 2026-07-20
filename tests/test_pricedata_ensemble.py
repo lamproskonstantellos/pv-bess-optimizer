@@ -189,6 +189,12 @@ def test_ensemble_reuses_applied_trajectories(monkeypatch, tmp_path):
         if e["trajectories"]["revenue_dam_pv"]["values"] == [1.0, 0.5]
     ]
     assert len(downside_econ) == 1
+    # The distinguishing signal: a freshly DERIVED member would carry
+    # [1.0, 1.0] on the BESS export stream (zero BESS volume -> the
+    # flat-factor guard), so [1.0, 0.5] proves verbatim reuse.
+    assert downside_econ[0]["trajectories"][
+        "revenue_dam_bess_export"
+    ]["values"] == [1.0, 0.5]
 
 
 def test_ensemble_disarmed_returns_none(tmp_path):

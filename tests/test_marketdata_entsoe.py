@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import io
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -19,6 +19,7 @@ from pvbess_opt.marketdata import (
     MarketDataError,
     MarketSeries,
     PriceSegment,
+    stitch_segments_utc,
 )
 from pvbess_opt.marketdata import entsoe as entsoe_mod
 from pvbess_opt.marketdata.entsoe import (
@@ -207,6 +208,11 @@ def test_fetch_sends_expected_query(monkeypatch, tmp_path):
 
 
 def test_too_much_data_bisects(monkeypatch, tmp_path):
+    """The platform answers with WHOLE stored documents overlapping the
+    request (never trimmed to periodStart/periodEnd), so the delivery
+    day straddling the bisection boundary arrives once from EACH half;
+    the stitch dedups the exact duplicate instead of failing on
+    overlap."""
     counter = {"n": 0}
 
     def responder(params):
@@ -220,18 +226,30 @@ def test_too_much_data_bisects(monkeypatch, tmp_path):
             return 200, _ack_xml(
                 "amount of requested data exceeds allowed limit",
             )
-        hours = int((end - start).total_seconds() // 3600)
-        return 200, _publication_xml([(
-            start.strftime("%Y-%m-%dT%H:%MZ"),
-            end.strftime("%Y-%m-%dT%H:%MZ"),
-            "PT60M",
-            {i: 75.0 for i in (1, hours)},
-        )])
+        periods = []
+        day = start.replace(hour=0, minute=0)
+        while day < end:
+            day_end = day + timedelta(days=1)
+            periods.append((
+                day.strftime("%Y-%m-%dT%H:%MZ"),
+                day_end.strftime("%Y-%m-%dT%H:%MZ"),
+                "PT60M",
+                {1: 75.0, 24: 75.0},
+            ))
+            day = day_end
+        return 200, _publication_xml(periods)
 
     series = _fetch(monkeypatch, tmp_path, responder, counter=counter)
     assert counter["n"] >= 3  # the oversized window plus its halves
-    total_hours = sum(len(seg.values) for seg in series.segments)
-    assert total_hours == 8762  # padded Athens local year
+    # The mid-window boundary day was served by both halves: the raw
+    # segment list carries the duplicate, the stitch drops it and
+    # tiles the whole-day span with no gap and no overlap error.
+    stitched, _notes = stitch_segments_utc(
+        series.segments, 60, column="dam_price_eur_per_mwh",
+    )
+    assert len(stitched) == 8784  # whole days covering the padded year
+    assert stitched.index.is_unique
+    assert (stitched == 75.0).all()
 
 
 def test_invalid_token_masked_in_error(monkeypatch, tmp_path):

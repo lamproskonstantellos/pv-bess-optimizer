@@ -1,10 +1,11 @@
 """Market-data provider plumbing: zones, cache, calendar normalisation.
 
-The market-data layer fetches historical wholesale price series (day-ahead
-now; balancing/imbalance with the ADMIE phase) and lays them onto the model
-grid, **replacing** the matching workbook columns when the ``market_data``
-sheet selects an API source.  This module owns everything the individual
-providers share:
+The market-data layer fetches historical wholesale price series —
+day-ahead (ENTSO-E A44), balancing capacity/activation (ENTSO-E
+A81/A84, or the ADMIE file API for GR), and imbalance (ENTSO-E A85 /
+ADMIE) — and lays them onto the model grid, **replacing** the matching
+workbook columns when the ``market_data`` sheet selects an API source.
+This module owns everything the individual providers share:
 
 * the bidding-zone registry (EIC code + IANA timezone per zone),
 * the on-disk fetch cache (the PVGIS pattern: JSON payload keyed on the
@@ -94,6 +95,12 @@ class Zone:
 # (``_parse_string_enum`` lowercases); ``Zone.code`` keeps the canonical
 # uppercase spelling for logs and provenance.  Extendable: new zones only
 # need a row here plus the ``bidding_zone`` enum entry in ``io.py``.
+# EIC codes follow the ENTSO-E Transparency area registry; a wrong code
+# fails LOUDLY at fetch time (invalid-parameter / no-data response), and
+# ``scripts/probe_market_data.py --zones`` verifies any zone live.  The
+# original seven zones were pinned by the spike probe
+# (``docs/notes/market_data_spike.md``); the extension batch below
+# awaits the same local verification.
 ZONES: dict[str, Zone] = {
     "gr": Zone("GR", "10YGR-HTSO-----Y", "Europe/Athens"),
     "de_lu": Zone("DE_LU", "10Y1001A1001A82H", "Europe/Berlin"),
@@ -102,6 +109,39 @@ ZONES: dict[str, Zone] = {
     "es": Zone("ES", "10YES-REE------0", "Europe/Madrid"),
     "bg": Zone("BG", "10YCA-BULGARIA-R", "Europe/Sofia"),
     "ro": Zone("RO", "10YRO-TEL------P", "Europe/Bucharest"),
+    # --- extension batch (EIC per the ENTSO-E area registry) ---
+    "at": Zone("AT", "10YAT-APG------L", "Europe/Vienna"),
+    "be": Zone("BE", "10YBE----------2", "Europe/Brussels"),
+    "nl": Zone("NL", "10YNL----------L", "Europe/Amsterdam"),
+    "pt": Zone("PT", "10YPT-REN------W", "Europe/Lisbon"),
+    "pl": Zone("PL", "10YPL-AREA-----S", "Europe/Warsaw"),
+    "cz": Zone("CZ", "10YCZ-CEPS-----N", "Europe/Prague"),
+    "sk": Zone("SK", "10YSK-SEPS-----K", "Europe/Bratislava"),
+    "hu": Zone("HU", "10YHU-MAVIR----U", "Europe/Budapest"),
+    "si": Zone("SI", "10YSI-ELES-----O", "Europe/Ljubljana"),
+    "hr": Zone("HR", "10YHR-HEP------M", "Europe/Zagreb"),
+    "rs": Zone("RS", "10YCS-SERBIATSOV", "Europe/Belgrade"),
+    "ch": Zone("CH", "10YCH-SWISSGRIDZ", "Europe/Zurich"),
+    "fi": Zone("FI", "10YFI-1--------U", "Europe/Helsinki"),
+    "ee": Zone("EE", "10Y1001A1001A39I", "Europe/Tallinn"),
+    "lv": Zone("LV", "10YLV-1001A00074", "Europe/Riga"),
+    "lt": Zone("LT", "10YLT-1001A0008Q", "Europe/Vilnius"),
+    "dk1": Zone("DK1", "10YDK-1--------W", "Europe/Copenhagen"),
+    "dk2": Zone("DK2", "10YDK-2--------M", "Europe/Copenhagen"),
+    "se1": Zone("SE1", "10Y1001A1001A44P", "Europe/Stockholm"),
+    "se2": Zone("SE2", "10Y1001A1001A45N", "Europe/Stockholm"),
+    "se3": Zone("SE3", "10Y1001A1001A46L", "Europe/Stockholm"),
+    "se4": Zone("SE4", "10Y1001A1001A47J", "Europe/Stockholm"),
+    "no1": Zone("NO1", "10YNO-1--------2", "Europe/Oslo"),
+    "no2": Zone("NO2", "10YNO-2--------T", "Europe/Oslo"),
+    "no3": Zone("NO3", "10YNO-3--------J", "Europe/Oslo"),
+    "no4": Zone("NO4", "10YNO-4--------9", "Europe/Oslo"),
+    "no5": Zone("NO5", "10Y1001A1001A48H", "Europe/Oslo"),
+    "it_cnor": Zone("IT_CNOR", "10Y1001A1001A70O", "Europe/Rome"),
+    "it_csud": Zone("IT_CSUD", "10Y1001A1001A71M", "Europe/Rome"),
+    "it_sud": Zone("IT_SUD", "10Y1001A1001A788", "Europe/Rome"),
+    "it_sici": Zone("IT_SICI", "10Y1001A1001A75E", "Europe/Rome"),
+    "it_sard": Zone("IT_SARD", "10Y1001A1001A74G", "Europe/Rome"),
 }
 
 
@@ -342,10 +382,32 @@ def stitch_segments_utc(
     """
     if not segments:
         raise MarketDataError(f"{column}: provider returned no data segments.")
+    # The too-much-data window bisection re-fetches whole stored
+    # documents, so the delivery day straddling a bisection boundary
+    # arrives once from EACH half.  Exact duplicates (same start, same
+    # cadence, same values) are dropped here — the single choke point
+    # every provider path passes through — so the continuity check
+    # below only ever sees genuine overlaps.
+    ordered_segments = sorted(segments, key=lambda s: s.start_utc)
+    deduped: list[PriceSegment] = []
+    for seg in ordered_segments:
+        prev = deduped[-1] if deduped else None
+        if (
+            prev is not None
+            and seg.start_utc == prev.start_utc
+            and seg.resolution_minutes == prev.resolution_minutes
+            and len(seg.values) == len(prev.values)
+            and np.array_equal(
+                np.asarray(seg.values, dtype=float),
+                np.asarray(prev.values, dtype=float),
+            )
+        ):
+            continue
+        deduped.append(seg)
     notes: set[str] = set()
     parts = [
         _segment_to_model_cadence(seg, dt_minutes, column=column, notes=notes)
-        for seg in sorted(segments, key=lambda s: s.start_utc)
+        for seg in deduped
     ]
     for (prev_idx, _), (next_idx, _) in pairwise(parts):
         prev_end = prev_idx[-1] + pd.Timedelta(minutes=dt_minutes)
@@ -749,9 +811,11 @@ def resolve_market_data(
     imbalance_source = str(
         market_cfg.get("imbalance_source") or "file"
     ).strip().lower()
-    if (price_source, balancing_source, imbalance_source) == (
-        "file", "file", "file",
-    ):
+    intraday_source = str(
+        market_cfg.get("intraday_source") or "file"
+    ).strip().lower()
+    if (price_source, balancing_source, imbalance_source,
+            intraday_source) == ("file", "file", "file", "file"):
         return
 
     fetch_mode = str(
@@ -787,6 +851,7 @@ def resolve_market_data(
             ("price_source", price_source),
             ("balancing_source", balancing_source),
             ("imbalance_source", imbalance_source),
+            ("intraday_source", intraday_source),
         ) if value != "file"
     )
     n_steps = validate_model_year_grid(
@@ -828,6 +893,53 @@ def resolve_market_data(
     elif price_source != "file":
         raise MarketDataError(
             f"price_source {price_source!r} is not one of 'file', 'entsoe'."
+        )
+
+    if intraday_source == "entsoe":
+        from .entsoe import fetch_intraday_auction_year
+
+        auction = str(
+            market_cfg.get("intraday_auction") or "ida1"
+        ).strip().lower()
+        series = _memoized_fetch(
+            f"ida-{auction}", zone, year,
+            lambda: fetch_intraday_auction_year(
+                zone, year, auction,
+                token_resolver=lambda: resolve_entsoe_token(market_cfg),
+                cache=cache, fetch_mode=fetch_mode,
+            ),
+        )
+        applied, notes = _apply_utc_dataset(
+            ts,
+            {"ida_price_eur_per_mwh": series.segments},
+            required=("ida_price_eur_per_mwh",),
+            zone=zone, year=year, dt_minutes=dt_minutes,
+        )
+        provenance.extend(
+            _provenance_record(
+                column,
+                dataset=(
+                    "intraday auction prices (ENTSO-E A44/A07, "
+                    f"{auction.upper()})"
+                ),
+                source="entsoe", source_key="intraday_source",
+                zone=zone, year=year, dt_minutes=dt_minutes,
+                overridden=column in pre_existing,
+                metadata=series.metadata,
+            )
+            for column in applied
+        )
+        info_lines.append(_info_line(
+            applied, label=f"ENTSO-E A44/A07 {auction.upper()}",
+            zone=zone, year=year,
+            dt_minutes=dt_minutes, metadata=series.metadata, notes=notes,
+        ))
+    elif intraday_source != "file":
+        raise MarketDataError(
+            f"intraday_source {intraday_source!r} is not one of 'file', "
+            "'entsoe' (continuous SIDC trade prices are "
+            "exchange-proprietary; only the IDA auctions publish on the "
+            "Transparency Platform)."
         )
 
     bal_provider = resolve_dataset_source("balancing", balancing_source, zone)
@@ -913,6 +1025,7 @@ def resolve_market_data(
         ))
 
     imb_provider = resolve_dataset_source("imbalance", imbalance_source, zone)
+    imbalance_applied: list[str] | None = None
     if imb_provider == "admie":
         from .admie import (
             IMBALANCE_HEADER_PATTERNS,
@@ -931,6 +1044,7 @@ def resolve_market_data(
             required=tuple(IMBALANCE_HEADER_PATTERNS),
             n_steps=n_steps, dt_minutes=dt_minutes, zone=zone, year=year,
         )
+        imbalance_applied = list(applied)
         provenance.extend(
             _provenance_record(
                 column,
@@ -962,6 +1076,7 @@ def resolve_market_data(
             required=None,  # single vs dual pricing varies by zone
             zone=zone, year=year, dt_minutes=dt_minutes,
         )
+        imbalance_applied = list(applied)
         provenance.extend(
             _provenance_record(
                 column,
@@ -977,6 +1092,57 @@ def resolve_market_data(
             applied, label="ENTSO-E A85", zone=zone, year=year,
             dt_minutes=dt_minutes, metadata=series.metadata, notes=notes,
         ))
+
+    if imbalance_applied is not None:
+        # Never a silent mix: a provider returns the columns of the
+        # zone's pricing regime, and (a) any sibling imbalance column
+        # the workbook carried from the OTHER regime would stay stale
+        # in the frame (downstream picks columns by presence), while
+        # (b) a fetched regime that does not match the configured
+        # imbalance_pricing would leave the settlement reading proxies
+        # or stale data despite provenance claiming fetched prices.
+        family = (
+            "imbalance_price_eur_per_mwh",
+            "imbalance_price_short_eur_per_mwh",
+            "imbalance_price_long_eur_per_mwh",
+        )
+        stale = [
+            column for column in family
+            if column in pre_existing and column not in imbalance_applied
+        ]
+        if stale:
+            raise MarketDataError(
+                f"imbalance_source={imb_provider!r} fetched "
+                f"{', '.join(sorted(imbalance_applied))} but the "
+                f"workbook also carries {', '.join(stale)} from the "
+                "other pricing regime; the mixed frame would settle on "
+                "the stale workbook column(s). Remove them or set "
+                "imbalance_source='file'."
+            )
+        _sim = typed.get("simulation") or {}
+        if bool(_sim.get("imbalance_enabled", False)):
+            pricing = str(
+                _sim.get("imbalance_pricing", "dual") or "dual"
+            ).strip().lower()
+            needed = (
+                ("imbalance_price_short_eur_per_mwh",
+                 "imbalance_price_long_eur_per_mwh")
+                if pricing == "dual"
+                else ("imbalance_price_eur_per_mwh",)
+            )
+            missing = [
+                column for column in needed
+                if column not in imbalance_applied
+            ]
+            if missing:
+                raise MarketDataError(
+                    f"imbalance_pricing={pricing!r} needs "
+                    f"{', '.join(needed)}, but the {imb_provider!r} "
+                    f"fetch returned {', '.join(sorted(imbalance_applied))} "
+                    "— the zone publishes the other pricing regime. Set "
+                    "imbalance_pricing to match the published regime or "
+                    "use imbalance_source='file'."
+                )
 
     if provenance:
         typed["market_provenance"] = provenance

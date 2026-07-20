@@ -11,8 +11,10 @@ higher ``vNN``).  This module is a **diagnostic cross-check**, not a
 price source: :func:`crosscheck_gr_dam` compares a fetched ENTSO-E GR
 day against the HEnEx clearing prices and reports the divergence, so a
 zone/EIC/timezone mistake in the primary path is caught by an
-independent publication.  It is wired into
-``scripts/probe_market_data.py``; the model itself never reads HEnEx.
+independent publication.  ``scripts/probe_market_data.py`` carries its
+own standalone HEnEx probe for the format survey; this module is the
+library-side implementation for programmatic cross-checks.  The model
+itself never reads HEnEx.
 """
 
 from __future__ import annotations

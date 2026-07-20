@@ -509,3 +509,146 @@ def test_snapshot_flips_balancing_source_too(monkeypatch, tmp_path):
     assert (
         typed["ts"]["afrr_up_capacity_price_eur_per_mwh"] == 10.0
     ).all()
+
+
+# ---------------------------------------------------------------------------
+# Imbalance-family consistency guard (never a silent regime mix)
+# ---------------------------------------------------------------------------
+
+from pvbess_opt.marketdata import (  # noqa: E402
+    MarketDataError,
+    resolve_market_data,
+)
+
+
+def _year_ts_15min(**extra_columns) -> pd.DataFrame:
+    frame = pd.DataFrame({
+        "timestamp": pd.date_range(
+            "2026-01-01", periods=35040, freq="15min",
+        ),
+        "dam_price_eur_per_mwh": 50.0,
+    })
+    for column, value in extra_columns.items():
+        frame[column] = value
+    return frame
+
+
+def _imbalance_typed(tmp_path, **simulation) -> dict:
+    return {
+        "market_data": {
+            **MARKET_DATA_SHEET_DEFAULTS,
+            "imbalance_source": "admie",
+            "market_cache_dir": str(tmp_path / "cache"),
+        },
+        "simulation": dict(simulation),
+    }
+
+
+def test_imbalance_stale_sibling_of_other_regime_errors(
+    monkeypatch, tmp_path,
+):
+    """A fetched single-price regime must not leave the workbook's
+    dual-regime columns stale in the frame (downstream settlement
+    picks columns by presence)."""
+    install_admie_year_fetch(
+        monkeypatch, value=33.0, headers=ADMIE_IMBALANCE_HEADERS,
+        n_periods=96,
+    )
+    ts = _year_ts_15min(imbalance_price_short_eur_per_mwh=12.0)
+    with pytest.raises(MarketDataError, match="other pricing regime"):
+        resolve_market_data(_imbalance_typed(tmp_path), ts, 15)
+
+
+def test_imbalance_regime_mismatch_with_dual_config_errors(
+    monkeypatch, tmp_path,
+):
+    """imbalance_pricing='dual' + a zone publishing single pricing:
+    the dual settlement would silently proxy both sides from the DAM
+    and never read the fetched column — fail loudly instead."""
+    install_admie_year_fetch(
+        monkeypatch, value=33.0, headers=ADMIE_IMBALANCE_HEADERS,
+        n_periods=96,
+    )
+    ts = _year_ts_15min()
+    typed = _imbalance_typed(
+        tmp_path, imbalance_enabled=True, imbalance_pricing="dual",
+    )
+    with pytest.raises(MarketDataError, match="published regime"):
+        resolve_market_data(typed, ts, 15)
+
+
+def test_imbalance_single_regime_matches_single_config(
+    monkeypatch, tmp_path,
+):
+    install_admie_year_fetch(
+        monkeypatch, value=33.0, headers=ADMIE_IMBALANCE_HEADERS,
+        n_periods=96,
+    )
+    ts = _year_ts_15min()
+    typed = _imbalance_typed(
+        tmp_path, imbalance_enabled=True, imbalance_pricing="single",
+    )
+    resolve_market_data(typed, ts, 15)
+    assert (ts["imbalance_price_eur_per_mwh"] == 33.0).all()
+
+
+# ---------------------------------------------------------------------------
+# Intraday-auction bypass (A44 + intraday contract type)
+# ---------------------------------------------------------------------------
+
+
+def test_intraday_source_replaces_ida_column(monkeypatch, tmp_path):
+    seen: dict[str, str] = {}
+
+    def fake_get(params, timeout):
+        assert timeout is not None
+        seen.update(params)
+        return 200, _year_window_xml(88.0)
+
+    monkeypatch.setattr(entsoe_mod, "_http_get", fake_get)
+    src = _workbook_with_market_cells(
+        tmp_path,
+        intraday_source="entsoe",
+        intraday_auction="ida2",
+        entsoe_token=_TOKEN,
+        market_cache_dir=str(tmp_path / "cache"),
+    )
+    params, ts = read_inputs(src)
+    assert (ts["ida_price_eur_per_mwh"] == 88.0).all()
+    # The A44 sibling with the intraday contract type + auction
+    # sequence (PROVISIONAL parameter pair, pinned by the probe).
+    assert seen["documentType"] == "A44"
+    assert seen["contract_MarketAgreement.type"] == "A07"
+    assert seen[
+        "classificationSequence_AttributeInstanceComponent.Position"
+    ] == "2"
+    [record] = params["market_provenance"]
+    assert record["source_key"] == "intraday_source"
+    assert record["column"] == "ida_price_eur_per_mwh"
+    assert "IDA2" in record["dataset"]
+
+
+def test_intraday_unknown_auction_errors(monkeypatch, tmp_path):
+    from pvbess_opt.marketdata.entsoe import fetch_intraday_auction_year
+
+    with pytest.raises(MarketDataError, match="ida9"):
+        fetch_intraday_auction_year(
+            md_base.ZONES["gr"], 2025, "ida9",
+            token_resolver=lambda: _TOKEN,
+            cache=MarketDataCache(tmp_path / "cache"),
+        )
+
+
+def test_intraday_cache_key_separates_auctions(monkeypatch, tmp_path):
+    from pvbess_opt.marketdata.entsoe import fetch_intraday_auction_year
+
+    counter = {"n": 0}
+    _install_fake_get(monkeypatch, price=70.0, counter=counter)
+    cache = MarketDataCache(tmp_path / "cache")
+    kwargs = dict(token_resolver=lambda: _TOKEN, cache=cache)
+    fetch_intraday_auction_year(md_base.ZONES["gr"], 2025, "ida1", **kwargs)
+    fetch_intraday_auction_year(md_base.ZONES["gr"], 2025, "ida2", **kwargs)
+    assert counter["n"] == 2  # distinct cache entries per auction
+    counter["n"] = 0
+    fetch_intraday_auction_year(md_base.ZONES["gr"], 2025, "ida1", **kwargs)
+    assert counter["n"] == 0  # cache hit

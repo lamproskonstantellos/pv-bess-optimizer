@@ -277,3 +277,10 @@ def test_delta_table_reports_tier_gap():
     assert year3["g_tier1_reprice"] == pytest.approx(0.7)
     assert year3["g_tier2_resolve"] == pytest.approx(0.75)
     assert year3["delta"] == pytest.approx(0.05)
+
+
+def test_linear_interp_is_selectable():
+    values = interpolate_support_factors(
+        {1: 1.0, 3: 0.5}, 3, interp="linear", stream="s",
+    )
+    assert values == pytest.approx([1.0, 0.75, 0.5])
