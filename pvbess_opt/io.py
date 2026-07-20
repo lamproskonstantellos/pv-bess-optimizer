@@ -92,6 +92,7 @@ from .constants import (
     DEFAULT_SENSITIVITY_TAX_RATE_DELTA_PP,
 )
 from .io_style import style_workbook
+from .marketdata.base import ZONES as _MARKET_ZONES
 from .timeutils import dt_hours_from
 
 logger = logging.getLogger(__name__)
@@ -493,10 +494,17 @@ MARKET_DATA_SHEET_DEFAULTS: dict[str, Any] = {
     # future alternative is an explicit, versioned choice.
     "price_resample_policy": "step_hold",
     # Balancing / imbalance sources.  'file' keeps workbook columns;
-    # 'auto' lets the per-zone registry pick (GR → admie, else entsoe);
-    # the API providers land with the ADMIE ingestion phase.
+    # 'auto' lets the per-zone registry pick (GR → admie, else
+    # entsoe); 'entsoe' / 'admie' force a provider (an explicit
+    # zone/provider mismatch raises).
     "balancing_source": "file",
     "imbalance_source": "file",
+    # Intraday-auction price source: 'entsoe' fetches the selected
+    # SIDC auction's clearing prices (A44 + intraday contract type)
+    # and REPLACES ida_price_eur_per_mwh.  Continuous SIDC trade
+    # prices are exchange-proprietary and not fetchable.
+    "intraday_source": "file",
+    "intraday_auction": "ida1",
     # ENTSO-E API token: the literal token, or empty to read the
     # environment variable named by entsoe_token_env.  The shipped
     # template keeps this empty — never commit a real token; logs mask
@@ -693,6 +701,8 @@ _STR_KEYS: frozenset[str] = frozenset({
     "price_resample_policy",
     "balancing_source",
     "imbalance_source",
+    "intraday_source",
+    "intraday_auction",
     "market_fetch_mode",
     "scenario_projection_mode",
     "scenario_interp",
@@ -724,17 +734,19 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "price_source": frozenset({"file", "entsoe"}),
     # Lowercase zone tokens (the enum parser lowercases); the canonical
     # spellings and EIC codes live in pvbess_opt.marketdata.ZONES.
-    "bidding_zone": frozenset({
-        "gr", "de_lu", "fr", "it_nord", "es", "bg", "ro",
-    }),
+    # Derived from the zone registry — a new zone needs only its
+    # marketdata.ZONES row (EIC + timezone); the enum follows.
+    "bidding_zone": frozenset(_MARKET_ZONES),
     "price_resample_policy": frozenset({"step_hold"}),
     "balancing_source": frozenset({"file", "auto", "entsoe", "admie"}),
     "imbalance_source": frozenset({"file", "auto", "entsoe", "admie"}),
+    "intraday_source": frozenset({"file", "entsoe"}),
+    "intraday_auction": frozenset({"ida1", "ida2", "ida3"}),
     "market_fetch_mode": frozenset({"cache_first", "refresh", "offline"}),
     "scenario_projection_mode": frozenset({
         "reprice", "resolve", "trajectory_only",
     }),
-    "scenario_interp": frozenset({"loglinear"}),
+    "scenario_interp": frozenset({"loglinear", "linear"}),
     "price_basis": frozenset({"nominal", "real"}),
 }
 
@@ -1618,9 +1630,13 @@ _MARKET_DATA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "market_data_provenance sheet."),
     ("bidding_zone", "gr", "enum",
      "Country / bidding-zone selector for every fetched dataset. "
-     "Accepted: gr, de_lu, fr, it_nord, es, bg, ro (EIC codes and "
-     "local timezones in pvbess_opt.marketdata.ZONES; extendable "
-     "there)."),
+     "Accepted: gr, de_lu, fr, es, pt, at, be, nl, ch, pl, cz, sk, "
+     "hu, si, hr, rs, bg, ro, fi, ee, lv, lt, dk1, dk2, se1-se4, "
+     "no1-no5, it_nord / it_cnor / it_csud / it_sud / it_sici / "
+     "it_sard. EIC codes and local timezones live in "
+     "pvbess_opt.marketdata.ZONES - any other ENTSO-E zone is one "
+     "registry line away; scripts/probe_market_data.py verifies a "
+     "zone live before first use."),
     ("price_reference_year", 2025, "year",
      "Historical calendar year fetched as the Year-1 price basis. The "
      "fetched local-time series is laid onto the workbook grid by "
@@ -1638,13 +1654,31 @@ _MARKET_DATA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Balancing price source: 'file' (default) keeps the nine workbook "
      "balancing columns / scalar fallbacks; 'auto' lets the per-zone "
      "registry pick (GR -> admie, else entsoe, falling back to 'file' "
-     "with a WARNING when the zone publishes nothing); 'entsoe' / "
-     "'admie' force a provider. The API providers land with the ADMIE "
-     "ingestion phase - until then any non-file selection fails "
-     "loudly."),
+     "with a WARNING when the zone publishes nothing); 'entsoe' "
+     "(A81 capacity + A84 activation prices) / 'admie' (GR ISP "
+     "results file) force a provider - an explicit zone/provider "
+     "mismatch fails loudly. A fetched source REPLACES the matching "
+     "workbook columns (override semantics), recorded on the "
+     "market_data_provenance results sheet."),
     ("imbalance_source", "file", "enum",
-     "Imbalance price source; same options and rollout status as "
-     "balancing_source."),
+     "Imbalance price source; same options and override semantics as "
+     "balancing_source ('entsoe' = A85 imbalance prices, 'admie' = GR "
+     "imbalance file). The fetched columns must match the configured "
+     "imbalance_pricing regime (single vs dual) - a mismatch fails "
+     "loudly instead of settling on stale workbook prices."),
+    ("intraday_source", "file", "enum",
+     "Intraday-auction price source: 'file' (default) keeps the "
+     "workbook ida_price_eur_per_mwh column; 'entsoe' fetches the "
+     "intraday_auction clearing prices for the reference year and "
+     "REPLACES the column (same override semantics as price_source). "
+     "Only the SIDC intraday AUCTIONS (IDA1/2/3, live since June "
+     "2024) publish on the Transparency Platform - continuous "
+     "intraday trade prices are exchange-proprietary and cannot be "
+     "fetched, so pick a reference year >= 2025 for full coverage."),
+    ("intraday_auction", "ida1", "enum",
+     "Which SIDC intraday auction the fetch targets: ida1 (D-1 "
+     "15:00), ida2 (D-1 22:00) or ida3 (D 10:00, delivery-day). Used "
+     "only when intraday_source = 'entsoe'."),
     ("entsoe_token", "", "token",
      "ENTSO-E Web API security token (free, via 'Web API Security "
      "Token' after registering at transparency.entsoe.eu). Leave "
@@ -1684,8 +1718,10 @@ _SCENARIO_ENGINE_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "auto-generated replace-mode trajectories. 'resolve' (Tier 2): "
      "additionally re-solve the MILP at scenario_resolve_years with "
      "that year's prices AND degraded plant, interpolating between "
-     "support years. 'trajectory_only' (Tier 3): today's analytic "
-     "behaviour with the refined stream taxonomy."),
+     "support years. 'trajectory_only' (Tier 3): no auto-generated "
+     "factors - the price paths come solely from the trajectories "
+     "sheet you declare (per-leg DAM and per-product balancing "
+     "streams supported)."),
     ("scenario_resolve_years", "1,5,10,15,20,25", "CSV of years",
      "Support years (operating years) for the Tier-2 re-solves; "
      "ignored unless scenario_projection_mode = resolve."),
@@ -1696,7 +1732,10 @@ _SCENARIO_ENGINE_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "the 15-minute grid is infeasible as a default."),
     ("scenario_interp", "loglinear", "enum",
      "Interpolation of the per-stream factors between Tier-2 support "
-     "years (log-linear on the factor level)."),
+     "years: 'loglinear' (default; multiplicative paths stay "
+     "multiplicative) or 'linear'. A stream with a non-positive "
+     "support factor falls back to linear automatically (log "
+     "undefined), with a WARNING."),
     ("price_basis", "nominal", "enum",
      "Basis of the engine's cashflow prices. 'nominal' matches the "
      "repo convention; 'real' additionally requires price_base_year. "

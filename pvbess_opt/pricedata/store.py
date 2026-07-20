@@ -61,8 +61,6 @@ SCENARIO_PROVIDERS: tuple[str, ...] = (
     "retwin", "ffe", "maon", "afry", "tyndp", "parametric", "file",
 )
 
-_STUB_PROVIDERS: frozenset[str] = frozenset({"retwin", "ffe", "maon", "afry"})
-
 
 class PriceDataError(ValueError):
     """A price-scenario store, adapter, or validation failure."""
@@ -240,6 +238,26 @@ def _validate_year_coverage(
         )
 
 
+def validate_engine_basis(engine_basis: str, engine_base_year: int) -> str:
+    """Normalise and validate the ``scenario_engine`` basis inputs.
+
+    Shared by every deck builder that bridges store curves onto the
+    engine basis (the file loader and the TYNDP adapter), so the two
+    paths can never drift on what a valid basis is.
+    """
+    engine_basis = str(engine_basis).strip().lower()
+    if engine_basis not in ("nominal", "real"):
+        raise PriceDataError(
+            f"price_basis {engine_basis!r} must be 'nominal' or 'real'."
+        )
+    if engine_basis == "real" and not engine_base_year:
+        raise PriceDataError(
+            "price_basis 'real' requires price_base_year on the "
+            "scenario_engine sheet."
+        )
+    return engine_basis
+
+
 def _basis_factor(
     year_calendar: int,
     *,
@@ -259,7 +277,11 @@ def _basis_factor(
     g = 1.0 + float(cpi_pct) / 100.0
     if store_basis == engine_basis:
         if store_basis == "real":
-            return float(g ** (store_base_year - engine_base_year))
+            # Rebase between the two base years: a store-base-year
+            # price expressed in engine-base-year euros.  Matches the
+            # composition of the two cross-basis branches below
+            # (real→nominal then nominal→real).
+            return float(g ** (engine_base_year - store_base_year))
         return 1.0
     if store_basis == "real":  # → nominal
         return float(g ** (year_calendar - store_base_year))
@@ -303,6 +325,49 @@ def _read_balancing_annual(store_dir: Path) -> pd.DataFrame | None:
             f"{path}: duplicate (year, product) row "
             f"({int(first['year'])}, {first['product']})."
         )
+    # Empty price cells are only blessed on the FCR activation column
+    # (no activation by design).  Anywhere else a blank cell would leak
+    # NaN through the engine's zero-base guard and crash with a
+    # misleading non-finite-factor error — fail fast at load instead:
+    # a capacity-only product must carry an explicit activation of 0.
+    cap_nan = df["capacity_price_eur_per_mwh"].isna()
+    if cap_nan.any():
+        first = df[cap_nan].iloc[0]
+        raise PriceDataError(
+            f"{path}: capacity_price_eur_per_mwh is empty at "
+            f"(year {int(first['year'])}, {first['product']}); a "
+            "product with no capacity price must carry an explicit 0."
+        )
+    act_nan = (
+        df["activation_price_eur_per_mwh"].isna()
+        & (df["product"].astype(str) != "fcr")
+    )
+    if act_nan.any():
+        first = df[act_nan].iloc[0]
+        raise PriceDataError(
+            f"{path}: activation_price_eur_per_mwh is empty at "
+            f"(year {int(first['year'])}, {first['product']}); FCR is "
+            "the only product without an activation price — a "
+            "capacity-only product must carry an explicit 0."
+        )
+    # Per-product year contiguity from 1 (the DAM-curve rule): an
+    # interior gap or a late start would otherwise silently drop the
+    # product's entire scenario trajectory in the engine.  A product
+    # entirely absent from the table is the documented no-stream case.
+    for product in df["product"].astype(str).unique():
+        years = sorted(
+            int(v) for v in df.loc[
+                df["product"].astype(str) == product, "year"
+            ].unique()
+        )
+        if years != list(range(1, max(years) + 1)):
+            missing_years = sorted(
+                set(range(1, max(years) + 1)) - set(years)
+            )
+            raise PriceDataError(
+                f"{path}: product {product!r} years must be contiguous "
+                f"from 1; missing year(s) {missing_years}."
+            )
     return df
 
 
@@ -349,20 +414,47 @@ def load_scenario_store(
         )
     balancing = _read_balancing_annual(store_dir)
 
+    # Materialise the hold_last tail BEFORE the basis bridge, so every
+    # operating year is stamped with its own calendar-year deflator: a
+    # real-basis store must keep inflating at CPI through the held
+    # tail, not flatline at the last declared year's nominal level.
+    # After this, dam_curve's min(year, last) is inert within the
+    # project horizon.
+    last_dam = max(dam)
+    for y in range(last_dam + 1, n_years + 1):
+        dam[y] = dam[last_dam].copy()
+    if ida is not None:
+        last_ida = max(ida)
+        for y in range(last_ida + 1, n_years + 1):
+            ida[y] = ida[last_ida].copy()
+    if balancing is not None:
+        held_frames: list[pd.DataFrame] = []
+        for product in balancing["product"].astype(str).unique():
+            rows = balancing[balancing["product"].astype(str) == product]
+            last = int(rows["year"].max())
+            if last >= n_years:
+                continue
+            tail = rows[rows["year"] == last]
+            for y in range(last + 1, n_years + 1):
+                held = tail.copy()
+                held["year"] = y
+                held_frames.append(held)
+            logger.info(
+                "[pricedata] %s: balancing product %s covers years "
+                "1..%d of %d; later years hold its year-%d prices "
+                "(hold_last).",
+                store_dir.name, product, last, n_years, last,
+            )
+        if held_frames:
+            balancing = pd.concat(
+                [balancing, *held_frames], ignore_index=True,
+            )
+
     # Basis bridge (real→nominal etc.), applied per curve year on its
     # CALENDAR year.
     store_basis = str(meta["basis"])
     store_base_year = int(meta.get("base_year") or 0)
-    engine_basis = str(engine_basis).strip().lower()
-    if engine_basis not in ("nominal", "real"):
-        raise PriceDataError(
-            f"price_basis {engine_basis!r} must be 'nominal' or 'real'."
-        )
-    if engine_basis == "real" and not engine_base_year:
-        raise PriceDataError(
-            "price_basis 'real' requires price_base_year on the "
-            "scenario_engine sheet."
-        )
+    engine_basis = validate_engine_basis(engine_basis, int(engine_base_year))
     if store_basis != engine_basis or store_basis == "real":
         for y in list(dam):
             factor = _basis_factor(

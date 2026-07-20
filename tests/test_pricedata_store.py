@@ -76,7 +76,10 @@ def test_loads_minimal_store_with_hold_last(tmp_path, caplog):
 
     with caplog.at_level(logging.INFO):
         deck = _load(_write_store(tmp_path))
-    assert sorted(deck.dam) == [1, 2]
+    # The hold_last tail is materialised at load (every operating year
+    # carries its own curve so the basis bridge can stamp per-year
+    # deflators); years past the declared ones repeat the last curve.
+    assert sorted(deck.dam) == list(range(1, 21))
     assert (deck.dam_curve(2) == 45.0).all()
     # Year 20 holds the last declared curve (documented hold_last).
     assert (deck.dam_curve(20) == 45.0).all()
@@ -246,8 +249,11 @@ def test_real_store_rebases_to_real_engine(tmp_path):
         store, engine_basis="real", engine_base_year=2026,
         cpi_pct=2.0, start_year=2026,
     )
-    # Constant rebase 1.02^(2024-2026) — independent of the year.
-    assert deck.dam[1][0] == pytest.approx(100.0 / 1.02**2)
+    # Constant rebase 1.02^(2026-2024) — independent of the year: a
+    # 2024-real price expressed in 2026 euros is numerically HIGHER,
+    # matching the composition real→nominal→real of the two
+    # cross-basis branches.
+    assert deck.dam[1][0] == pytest.approx(100.0 * 1.02**2)
 
 
 def test_zero_cpi_bridge_is_inert(tmp_path):
@@ -471,3 +477,173 @@ def test_vendor_stub_error_names_the_alternatives(provider):
     err = stub_provider_error(provider)
     assert provider in str(err)
     assert "parametric" in str(err)
+
+
+# ---------------------------------------------------------------------------
+# Audit regressions: basis bridge on the held tail, balancing table
+# validation, adapter basis handling, negative-price cannibalization
+# ---------------------------------------------------------------------------
+
+
+def test_real_store_held_tail_keeps_inflating(tmp_path):
+    """hold_last is materialised BEFORE the bridge: a real-basis store
+    keeps inflating at CPI through the held tail instead of
+    flatlining at the last declared year's nominal level."""
+    store = _write_store(
+        tmp_path,
+        meta={"basis": "real", "base_year": 2026},
+        dam_years={1: np.full(HOURS, 100.0), 2: np.full(HOURS, 100.0)},
+    )
+    deck = _load(store, n_years=4, cpi_pct=2.0, start_year=2026)
+    assert deck.dam_curve(1).mean() == pytest.approx(100.0)
+    assert deck.dam_curve(2).mean() == pytest.approx(102.0)
+    assert deck.dam_curve(3).mean() == pytest.approx(104.04)
+    assert deck.dam_curve(4).mean() == pytest.approx(106.1208)
+
+
+def test_balancing_held_tail_is_per_product(tmp_path):
+    """A product whose rows stop earlier holds its OWN last year."""
+    store = _write_store(
+        tmp_path,
+        balancing_rows=[
+            {"year": 1, "product": "afrr_up",
+             "capacity_price_eur_per_mwh": 10.0,
+             "activation_price_eur_per_mwh": 40.0},
+            {"year": 2, "product": "afrr_up",
+             "capacity_price_eur_per_mwh": 8.0,
+             "activation_price_eur_per_mwh": 30.0},
+            {"year": 1, "product": "mfrr_up",
+             "capacity_price_eur_per_mwh": 5.0,
+             "activation_price_eur_per_mwh": 20.0},
+        ],
+    )
+    deck = _load(store, n_years=3)
+    assert deck.balancing is not None
+    table = deck.balancing.set_index(["year", "product"]).sort_index()
+    # afrr_up holds its year-2 prices; mfrr_up holds its year-1 prices.
+    assert table.loc[(3, "afrr_up"),
+                     "capacity_price_eur_per_mwh"] == pytest.approx(8.0)
+    assert table.loc[(3, "mfrr_up"),
+                     "capacity_price_eur_per_mwh"] == pytest.approx(5.0)
+    assert table.loc[(2, "mfrr_up"),
+                     "activation_price_eur_per_mwh"] == pytest.approx(20.0)
+
+
+def test_balancing_interior_gap_is_an_error(tmp_path):
+    store = _write_store(
+        tmp_path,
+        balancing_rows=[
+            {"year": 1, "product": "afrr_up",
+             "capacity_price_eur_per_mwh": 10.0,
+             "activation_price_eur_per_mwh": 40.0},
+            {"year": 3, "product": "afrr_up",
+             "capacity_price_eur_per_mwh": 8.0,
+             "activation_price_eur_per_mwh": 30.0},
+        ],
+    )
+    with pytest.raises(PriceDataError, match="contiguous"):
+        _load(store, n_years=3)
+
+
+def test_balancing_blank_capacity_cell_is_an_error(tmp_path):
+    store = _write_store(
+        tmp_path,
+        balancing_rows=[
+            {"year": 1, "product": "afrr_up",
+             "capacity_price_eur_per_mwh": None,
+             "activation_price_eur_per_mwh": 40.0},
+        ],
+    )
+    with pytest.raises(PriceDataError, match="explicit 0"):
+        _load(store, n_years=1)
+
+
+def test_balancing_blank_non_fcr_activation_is_an_error(tmp_path):
+    """A capacity-only product must price activation explicitly at 0 —
+    a blank cell would leak NaN past the engine's zero-base guard."""
+    store = _write_store(
+        tmp_path,
+        balancing_rows=[
+            {"year": 1, "product": "mfrr_up",
+             "capacity_price_eur_per_mwh": 15.0,
+             "activation_price_eur_per_mwh": None},
+        ],
+    )
+    with pytest.raises(PriceDataError, match="FCR is the only"):
+        _load(store, n_years=1)
+
+
+def test_tyndp_real_basis_bridges_to_nominal_engine(tmp_path):
+    """A real-basis TYNDP store is bridged like a file store — the
+    milestone trend must not be silently treated as nominal."""
+    store = _tyndp_store(tmp_path, {2030: 50.0})
+    meta = yaml.safe_load((store / "meta.yaml").read_text(encoding="utf-8"))
+    meta["basis"] = "real"
+    meta["base_year"] = 2030
+    (store / "meta.yaml").write_text(yaml.safe_dump(meta), encoding="utf-8")
+    deck = build_tyndp_deck(
+        store, name="t", vintage="v", weight_pct=100.0,
+        n_steps=HOURS, dt_minutes=60, n_years=2, start_year=2026,
+        engine_basis="nominal", engine_base_year=0, cpi_pct=2.0,
+    )
+    # Year 1 (calendar 2026): 50 real-2030 EUR -> 50 x 1.02^(2026-2030).
+    assert deck.dam[1][0] == pytest.approx(50.0 * 1.02 ** (2026 - 2030))
+    assert deck.dam[2][0] == pytest.approx(50.0 * 1.02 ** (2027 - 2030))
+
+
+def test_tyndp_bogus_steps_per_day_is_precise(tmp_path):
+    store = tmp_path / "tyndp_store"
+    store.mkdir()
+    pd.DataFrame({
+        "dam_price_eur_per_mwh": np.full(7 * 365, 50.0),  # 7 steps/day
+    }).to_csv(store / "t.csv", index=False)
+    (store / "meta.yaml").write_text(
+        yaml.safe_dump({
+            "provider": "tyndp", "tyndp": {"files": {2030: "t.csv"}},
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(PriceDataError, match="steps/day"):
+        build_tyndp_deck(
+            store, name="t", vintage="v", weight_pct=100.0,
+            n_steps=HOURS, dt_minutes=60, n_years=2, start_year=2026,
+        )
+
+
+def test_parametric_rejects_foreign_basis(tmp_path):
+    store = _parametric_store(tmp_path, {"dam_level_pct_per_yr": -5.0})
+    meta = yaml.safe_load((store / "meta.yaml").read_text(encoding="utf-8"))
+    meta["basis"] = "real"
+    meta["base_year"] = 2025
+    (store / "meta.yaml").write_text(yaml.safe_dump(meta), encoding="utf-8")
+    with pytest.raises(PriceDataError, match="engine basis"):
+        build_parametric_deck(
+            store, name="p", vintage="v", weight_pct=100.0,
+            year1_dam=np.full(HOURS, 100.0), pv_kwh=None,
+            year1_balancing=None, n_years=2,
+        )
+
+
+def test_parametric_capture_deepens_negative_prices(tmp_path):
+    """Cannibalization must push a negative solar-hour price DOWN —
+    the haircut applies to the daily-mean component, never as a
+    multiplicative factor on the signed price."""
+    store = _parametric_store(
+        tmp_path, {"pv_capture_decline_pct_per_yr": 10.0},
+    )
+    day = np.full(24, 60.0)
+    day[12] = -5.0  # negative midday price
+    base = np.tile(day, 365)
+    pv = np.zeros(HOURS)
+    pv[12::24] = 5.0  # full PV weight at noon
+    deck = build_parametric_deck(
+        store, name="p", vintage="v", weight_pct=100.0,
+        year1_dam=base, pv_kwh=pv, year1_balancing=None, n_years=2,
+    )
+    assert deck.dam[1][12] == pytest.approx(-5.0)
+    # Year 2 noon: daily mean loses 10 % under full weight while the
+    # negative deviation rides along -> the price gets MORE negative.
+    daily_mean = day.mean()
+    expected = daily_mean * 0.9 + (-5.0 - daily_mean)
+    assert deck.dam[2][12] == pytest.approx(expected)
+    assert deck.dam[2][12] < deck.dam[1][12]

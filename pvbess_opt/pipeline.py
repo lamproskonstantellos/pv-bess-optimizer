@@ -670,6 +670,12 @@ def _low_price_sizing_cashflow(
             "sensitivity_enabled": False,
         },
         "simulation": {"uncertainty_enabled": False},
+        # The deck case sizes debt on the DECK's Year-1 prices; the
+        # price-scenario engine stays OFF inside the recursion (its
+        # relative store paths would resolve against the temp dir, and
+        # 'resolve' mode would re-run every Tier-2 MILP re-solve for a
+        # single sizing frame).
+        "scenario_engine": {"price_scenarios_enabled": False},
     })
     tmp = Path(tempfile.mkdtemp(prefix="pvbess_lowprice_"))
     deck_xlsx = tmp / "low_price_case.xlsx"
@@ -703,13 +709,17 @@ def _build_financials(
     res: pd.DataFrame,
     *,
     solver_opts: dict[str, Any] | None = None,
+    base_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Run the multi-year cash-flow + sensitivity + lifetime pipeline.
 
     ``solver_opts`` (run_scenario keyword form) is consumed only by
     the ``debt_sizing_case = 'low_price'`` deck re-dispatch and the
     price-scenario Tier-2 support-year re-solves; None falls back to
-    the solver defaults.
+    the solver defaults.  ``base_dir`` anchors relative price-scenario
+    ``store_path`` entries; None means the workbook's own directory —
+    callers evaluating a MATERIALISED temp workbook (scenario batches)
+    pass the original workbook's directory instead.
     """
     econ = read_economic_params(excel_path)
 
@@ -770,7 +780,7 @@ def _build_financials(
     # sizing — flows through the existing Eq. E24 machinery unchanged.
     scenario_application = apply_price_scenarios(
         econ, ts, res,
-        base_dir=Path(excel_path).parent,
+        base_dir=base_dir or Path(excel_path).parent,
         params=params, solver_opts=solver_opts, kpis=kpis,
     )
     yearly_cf = build_yearly_cashflow(kpis, econ, capacities)

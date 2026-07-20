@@ -286,9 +286,15 @@ def _apply_scenario_overrides(
         typed["pv"][_PV_ALIASES.get(key, key)] = value
     for key, value in (scenario.get("bess") or {}).items():
         typed["bess"][_BESS_ALIASES.get(key, key)] = value
-    for section in ("project", "economics", "simulation", "ppa", "intraday"):
-        for key, value in (scenario.get(section) or {}).items():
-            typed[section][key] = value
+    for section in (
+        "project", "economics", "simulation", "ppa", "intraday",
+        "market_data", "scenario_engine",
+    ):
+        overrides = scenario.get(section) or {}
+        if overrides:
+            target = typed.setdefault(section, {})
+            for key, value in overrides.items():
+                target[key] = value
 
     bal = scenario.get("balancing")
     if isinstance(bal, dict):
@@ -344,6 +350,24 @@ def _apply_scenario_overrides(
     # The base PV profile is already resolved; scenarios rescale it by
     # nameplate through the standard read path, so force file mode.
     typed["pv"]["pv_source"] = "file"
+    # Same rule for the market-data bypass: the base read already
+    # resolved any fetched price columns into typed['ts'], so the
+    # materialised temp workbook must NOT re-trigger the fetch on
+    # re-read — a re-fetch REPLACES the canonical columns and would
+    # silently clobber a price_deck override (and needs network/token
+    # again).  Mirrors materialize_bypassed_workbook: sources flip to
+    # 'file', the token cell is blanked.  A scenario that explicitly
+    # overrides market_data keys keeps its configuration verbatim —
+    # the deliberate re-fetch is then the scenario's own semantics.
+    if not scenario.get("market_data"):
+        market_cfg = typed.get("market_data")
+        if isinstance(market_cfg, dict):
+            for source_key in (
+                "price_source", "balancing_source", "imbalance_source",
+                "intraday_source",
+            ):
+                market_cfg[source_key] = "file"
+            market_cfg["entsoe_token"] = ""
     return typed
 
 
@@ -353,7 +377,9 @@ def _apply_scenario_overrides(
 
 
 def evaluate_scenario(
-    base_typed: dict[str, Any], scenario: dict[str, Any], *, solver_opts: dict[str, Any],
+    base_typed: dict[str, Any], scenario: dict[str, Any], *,
+    solver_opts: dict[str, Any],
+    base_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Run one scenario and return its comparison row."""
     from .availability import apply_operating_derates
@@ -373,7 +399,12 @@ def evaluate_scenario(
     )
     kpis = compute_kpis(res, params, verify_balance=False)
     kpis = apply_operating_derates(kpis, params)
-    bundle = _build_financials(xlsx, params, ts, kpis, res)
+    # base_dir: an armed price-scenario engine resolves relative
+    # store_path entries against the ORIGINAL workbook's directory,
+    # never the throwaway temp dir the scenario materialised into.
+    bundle = _build_financials(
+        xlsx, params, ts, kpis, res, base_dir=base_dir,
+    )
     fin = bundle.get("fin_kpis") or {}
 
     row: dict[str, Any] = {
@@ -402,6 +433,7 @@ def run_scenario_batch(
     scenarios: list[dict[str, Any]],
     *,
     solver_opts: dict[str, Any],
+    base_dir: Path | None = None,
 ) -> pd.DataFrame:
     """Evaluate every (inheritance-resolved) scenario into a comparison table."""
     resolved = resolve_inheritance(scenarios)
@@ -418,7 +450,9 @@ def run_scenario_batch(
                 scenario_name=str(scn.get("name", "<unnamed>")),
             )
     rows = [
-        evaluate_scenario(base_typed, scn, solver_opts=solver_opts)
+        evaluate_scenario(
+            base_typed, scn, solver_opts=solver_opts, base_dir=base_dir,
+        )
         for scn in resolved
     ]
     # The comparison gains a price_deck column ONLY when at least one
@@ -596,6 +630,7 @@ def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResul
     apply_ieee_style()
     comparison = run_scenario_batch(
         base_typed, scenarios, solver_opts=solver_opts,
+        base_dir=src.parent,
     )
     result = ScenarioResult(comparison=comparison)
 
