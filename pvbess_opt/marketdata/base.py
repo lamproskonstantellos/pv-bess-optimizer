@@ -50,6 +50,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from calendar import isleap
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -265,6 +266,54 @@ def mask_token(token: str) -> str:
     lines and provenance records all go through this helper.
     """
     return token[:8] + "…" if len(token) > 8 else "…"
+
+
+# The ENTSO-E API requires the token as the ``securityToken`` URL query
+# parameter, so it necessarily rides in the request URL.  urllib3's DEBUG
+# request-line log ("… \"GET /api?securityToken=… HTTP/1.1\" 200 …") would
+# print the full token verbatim if a caller raised the HTTP stack's log
+# level to DEBUG — a leak the package's own mask_token calls cannot reach,
+# because the record originates inside the third-party library.  The filter
+# below masks the query parameter (to mask_token's first-8 form) on any log
+# record before it is emitted, so the token stays masked even at DEBUG.
+_SECURITY_TOKEN_RE = re.compile(r"(securityToken=)([^&\s'\"]+)", re.IGNORECASE)
+
+
+class _TokenRedactingFilter(logging.Filter):
+    """Mask a ``securityToken=<token>`` query parameter in a log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        if "securityToken=" in message:
+            record.msg = _SECURITY_TOKEN_RE.sub(
+                lambda m: m.group(1) + mask_token(m.group(2)), message,
+            )
+            record.args = ()
+        return True
+
+
+_TOKEN_LOG_REDACTION_INSTALLED = False
+
+
+def install_token_log_redaction() -> None:
+    """Idempotently attach the token-redaction filter to the HTTP loggers.
+
+    Called before any ENTSO-E request so urllib3's DEBUG request-line log
+    (the only place the token-bearing URL reaches the logging machinery)
+    masks the secret.  A filter on a logger runs for records emitted to
+    THAT logger, so it is attached to the concrete ``urllib3.connectionpool``
+    logger that emits the request line as well as the ``urllib3`` parent.
+    """
+    global _TOKEN_LOG_REDACTION_INSTALLED
+    if _TOKEN_LOG_REDACTION_INSTALLED:
+        return
+    _filter = _TokenRedactingFilter()
+    for _name in ("urllib3", "urllib3.connectionpool"):
+        logging.getLogger(_name).addFilter(_filter)
+    _TOKEN_LOG_REDACTION_INSTALLED = True
 
 
 def _blank_token_cell(md_worksheet: Any) -> bool:

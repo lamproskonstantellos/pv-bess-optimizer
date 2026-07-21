@@ -186,3 +186,43 @@ def test_bm_revenue_share_denominator_excludes_balancing_from_dam():
     # 1e-3 % tolerance is appropriate for the 4-dp rounding in
     # _compute_balancing_kpis.
     assert share == pytest.approx(expected_share, abs=0.01)
+
+
+def test_bm_revenue_share_denominator_includes_ppa_and_intraday():
+    """The non-balancing denominator must count PPA contract revenue and the
+    intraday spread (net of its venue fee): both feed profit_total_eur, so
+    omitting them overstates the balancing share when those layers are on."""
+    n = 3
+    res = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=n, freq="h"),
+            "profit_load_from_pv_eur": [200.0] * n,
+            "profit_load_from_bess_eur": [0.0] * n,
+            "profit_export_from_pv_eur": [100.0] * n,
+            "profit_export_from_bess_eur": [40.0] * n,
+            "expense_charge_bess_grid_eur": [10.0] * n,
+            # PPA + intraday non-balancing revenue present on the frame.
+            "revenue_pv_ppa_eur": [1000.0] * n,
+            "id_revenue_eur": [500.0] * n,
+            "id_fee_eur": [20.0] * n,
+        }
+    )
+    for p in PRODUCTS_ALL:
+        res[f"bm_reservation_{p}_kw"] = [100.0] * n
+        res[f"{p}_capacity_price_eur_per_mwh"] = [80.0] * n
+    for p in PRODUCTS_WITH_ACTIVATION:
+        res[f"{p}_activation_price_eur_per_mwh"] = [0.0] * n
+    params = {
+        "dt_minutes": 60,
+        "efficiency_charge": 0.95,
+        "efficiency_discharge": 0.95,
+        "balancing": {"balancing_enabled": True},
+    }
+    out = _compute_balancing_kpis(res, params)
+    # non_bal = (330 DAM/retail + 1000 PPA + 500 IDA - 20 IDA fee) * n.
+    expected_non_bal = (330.0 + 1000.0 + 500.0 - 20.0) * n
+    bal_total = float(out["bm_total_balancing_revenue_eur"])
+    expected_share = 100.0 * bal_total / (expected_non_bal + bal_total)
+    assert float(out["bm_revenue_share_pct"]) == pytest.approx(
+        expected_share, abs=0.01,
+    )

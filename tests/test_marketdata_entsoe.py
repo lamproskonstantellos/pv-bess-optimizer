@@ -8,6 +8,7 @@ No live network — the HTTP call is mocked throughout (synthetic IEC
 from __future__ import annotations
 
 import io
+import traceback
 import zipfile
 from datetime import UTC, datetime, timedelta
 
@@ -258,6 +259,91 @@ def test_invalid_token_masked_in_error(monkeypatch, tmp_path):
     message = str(err.value)
     assert _TOKEN not in message
     assert _TOKEN[:8] in message
+
+
+def test_transport_error_drops_token_bearing_exception(monkeypatch, tmp_path):
+    """A requests transport error must be re-raised scrubbed, with the
+    original (token-bearing URL) exception dropped from the chain so
+    logger.exception cannot write the token to a log."""
+    import requests
+
+    def _boom(_url, **_kw):
+        raise requests.ConnectionError(
+            f"HTTPSConnectionPool: url: /api?securityToken={_TOKEN}"
+        )
+
+    monkeypatch.setattr("requests.get", _boom)
+    with pytest.raises(MarketDataError) as err:
+        entsoe_mod._http_get({"securityToken": _TOKEN}, timeout=1.0)
+    # ``from None`` breaks the explicit cause and suppresses the context, so
+    # the token-bearing original never appears in a rendered traceback (what
+    # logger.exception writes to run_log.txt).
+    assert err.value.__cause__ is None
+    assert err.value.__suppress_context__ is True
+    assert _TOKEN not in str(err.value)
+    rendered = "".join(traceback.format_exception(
+        type(err.value), err.value, err.value.__traceback__,
+    ))
+    assert _TOKEN not in rendered
+
+
+def test_urllib3_debug_request_line_masks_token():
+    """urllib3 logs the request line (with the securityToken query param) at
+    DEBUG; the installed filter must mask the token to its first 8 chars so
+    enabling DEBUG logging cannot leak it."""
+    import logging
+
+    from pvbess_opt.marketdata.base import _TokenRedactingFilter
+
+    flt = _TokenRedactingFilter()
+    record = logging.LogRecord(
+        "urllib3.connectionpool", logging.DEBUG, __file__, 1,
+        'https://web-api.tp.entsoe.eu:443 "GET '
+        '/api?securityToken=%s&documentType=A44 HTTP/1.1" 200 5123',
+        (_TOKEN,), None,
+    )
+    flt.filter(record)
+    rendered = record.getMessage()
+    assert _TOKEN not in rendered
+    assert _TOKEN[:8] in rendered  # masked form keeps the first 8 chars
+
+
+def test_probe_script_scrubs_transport_error_token():
+    """scripts/probe_market_data._entsoe_get must scrub a transport error the
+    same way the package does, so the token never rides a probe traceback."""
+    import importlib.util
+    from pathlib import Path
+
+    import requests
+
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location(
+        "_probe_md", root / "scripts" / "probe_market_data.py",
+    )
+    assert spec is not None and spec.loader is not None
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+
+    orig_get = requests.get
+
+    def _boom(_url, **_kw):
+        raise requests.ConnectionError(
+            f"HTTPSConnectionPool: url: /api?securityToken={_TOKEN}"
+        )
+
+    requests.get = _boom
+    try:
+        with pytest.raises(RuntimeError) as err:
+            probe._entsoe_get(_TOKEN, {"documentType": "A44"}, timeout=1.0)
+    finally:
+        requests.get = orig_get
+    assert err.value.__cause__ is None
+    assert err.value.__suppress_context__ is True
+    assert _TOKEN not in str(err.value)
+    rendered = "".join(traceback.format_exception(
+        type(err.value), err.value, err.value.__traceback__,
+    ))
+    assert _TOKEN not in rendered
 
 
 def test_rate_limit_hint(monkeypatch, tmp_path):

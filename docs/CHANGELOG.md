@@ -45,6 +45,62 @@
   default — bit-identical when off.  Design:
   `docs/market_scenarios_design.md` (Equations G1-G7).
 
+### Fixed
+
+Pre-delivery release audit (round 1):
+
+- **Secrets.** The ENTSO-E API token can no longer reach a log or the
+  shareable `01_inputs` snapshot: `entsoe._http_get` re-raises transport
+  errors scrubbed (the token-bearing exception dropped from the chain), and
+  a `file`-source run blanks the workbook token cell via
+  `marketdata.blank_entsoe_token`.
+- **Tax layer.** Augmentation CAPEX is subtracted from EBITDA so it is
+  deducted only through its depreciation tranche, never double-counted;
+  `bess_augmentation_years` with `corporate_tax_rate_pct > 0` previously
+  overstated post-tax NPV/IRR.
+- **Price scenarios.** `project_start_year` defaults to the schema value
+  (2026) and raises on a non-positive year, instead of collapsing a
+  blank/zero cell to calendar year 0 and silently zeroing every projected
+  real-/TYNDP-basis curve.
+- **Rolling horizon.** The annual throughput cap (Eq. E46) is threaded as a
+  remaining per-window budget so it binds across window seams; a stitched
+  year can no longer exceed the warranty cap and beat the perfect-foresight
+  benchmark.
+- **Solver.** The self-consumption slack `Var` is renamed `export_slack`,
+  fixing an `appsi_highs` crash on APPSI's reserved-name import suffix.
+- **Docs & hygiene.** Equation-registry suffix list, audit-invariant count,
+  Sphinx module list and config-schema stream list corrected; duplicated
+  constants single-sourced; dead code removed; the ADMIE spring-forward DST
+  fill aligned with the UTC path.
+
+Pre-delivery release audit (round 2):
+
+- **Rolling horizon.** The daily cycle cap (Eq. E45) is now enforced across
+  window seams via a threaded per-window boundary-day budget, so a
+  `commit_hours` that does not divide 24 can no longer cycle a split day up
+  to twice the cap.
+- **Secrets.** Two residual ENTSO-E token log-leak paths are closed: a
+  redaction filter masks the `securityToken` query parameter in urllib3's
+  DEBUG request-line log, and `scripts/probe_market_data` scrubs transport
+  errors the same way the package does.
+- **KPIs & scenarios.** The balancing-revenue-share denominator now includes
+  PPA and intraday revenue (was overstated with those layers on); the
+  scenario-comparison `balancing_enabled` column reads the parsed run, not
+  the raw override string.
+- **Sizing.** A sizing sweep with `debt_sizing_case = low_price` no longer
+  sizes debt on the base plant for every grid point (falls back to per-point
+  base sizing with a warning).
+- **Price scenarios.** The IDA curve gets the same contiguous-year coverage
+  check as DAM; `cpi_pct` defaults to the schema value (2.0), not 0.0.
+- **Surfaces & hygiene.** The YAML/JSON config can now express a
+  `bm_merit_order` curve; `pd.ExcelFile` handles are closed (a per-read
+  ResourceWarning leak); the five balancing price-column copies are bound by
+  a single test; dead balancing helpers and a dead bool check removed.
+- **Docs.** Merchant audit-invariant count (ten), equation-registry tag
+  E28a, the uncertainty sensitivity table, README feature/output references
+  and the Sphinx inputs page (imbalance keys) corrected; several stale
+  docstrings and enum note cells fixed.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

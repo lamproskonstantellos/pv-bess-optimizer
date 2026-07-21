@@ -192,10 +192,13 @@ def test_replacement_capex_charged_only_in_horizon(repl, expect_charge):
 
 
 def test_balancing_price_columns_agree_across_modules():
-    """The 9 balancing price-column names are spelled out in three modules
-    (balancing MILP/KPI fallback, io schema fallback, entsoe fetch target).
-    They agree today but nothing bound them — this test does, deriving the
-    canonical set from PRODUCTS_ALL so a rename must update all three.
+    """The 9 balancing price-column names are spelled out in FIVE places
+    (balancing MILP/KPI fallback, io schema fallback, entsoe fetch target,
+    the rolling-horizon actuals-restore/noise set, and model_to_dataframe's
+    frame re-attach).  They agree today but a rename must update all five —
+    this test binds every copy to the canonical set derived from PRODUCTS_ALL
+    so a partial rename cannot silently corrupt the Monte-Carlo noise set or
+    the dispatch frame.
     """
     from pvbess_opt.balancing import (
         _PRODUCT_ACTIVATION_TS_COLUMNS,
@@ -205,6 +208,8 @@ def test_balancing_price_columns_agree_across_modules():
     )
     from pvbess_opt.io import _BALANCING_TS_COLUMN_DEFAULTS
     from pvbess_opt.marketdata.entsoe import ENTSOE_BALANCING_COLUMNS
+    from pvbess_opt.optimization import _MODEL_BALANCING_PRICE_COLUMNS
+    from pvbess_opt.rolling_horizon import PRICE_COLUMNS
 
     expected = set(
         f"{p}_capacity_price_eur_per_mwh" for p in PRODUCTS_ALL
@@ -218,3 +223,9 @@ def test_balancing_price_columns_agree_across_modules():
     assert balancing_cols == expected
     assert set(ENTSOE_BALANCING_COLUMNS) == expected
     assert set(_BALANCING_TS_COLUMN_DEFAULTS) == expected
+    assert set(_MODEL_BALANCING_PRICE_COLUMNS) == expected
+    # The rolling-horizon price set carries DAM / retail / IDA plus exactly
+    # the 9 balancing columns; the balancing subset must match the canon.
+    assert expected <= set(PRICE_COLUMNS), (
+        "rolling_horizon.PRICE_COLUMNS is missing a balancing price column"
+    )

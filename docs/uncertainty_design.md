@@ -162,8 +162,7 @@ notes (all load-bearing):
 | simulation | `uncertainty_diagnostics_enabled` | TRUE | input-uncertainty diagnostic PDFs |
 | balancing | `bm_price_sigma_capacity_pct` / `bm_price_sigma_activation_pct` | 25 / 35 | $\sigma^{\mathrm{cap}}, \sigma^{\mathrm{act}}$ (percent → fraction) |
 | balancing | `bm_mc_scenarios` / `bm_random_seed` | 200 / 1729 | balancing MC size / seed |
-| economics | `sensitivity_enabled` + 5 `sensitivity_*` deltas | TRUE; 10/10/10/2 pp/10 | U6-U9 imbalance settlement | `rolling_horizon.settle_imbalance`, `resolve_imbalance_prices`, nomination capture in `rolling_horizon_dispatch`, MC columns in `monte_carlo_rolling`, pipeline aggregation |
-| tornado drivers |
+| economics | `sensitivity_enabled` + 6 `sensitivity_*` deltas | TRUE; 10/10/10/2 pp/10/5 pp | tornado drivers (CAPEX/OPEX/revenue %, discount-rate pp, PPA-price %, tax-rate pp) |
 | project | `unavailability_pct` | 1.0 | $a$ |
 
 CLI overrides (merged in `pipeline._resolve_uncertainty_config`; a
@@ -385,6 +384,7 @@ parameters.
 | actuals restore | `rolling_horizon.PRICE_COLUMNS` + `kpis.add_economic_columns` |
 | (U3) | `rolling_horizon.monte_carlo_rolling` |
 | (U4)-(U5) | `rolling_horizon.realise_balancing_scenario` |
+| (U6)-(U9) | `rolling_horizon.settle_imbalance`, `resolve_imbalance_prices`, nomination capture in `rolling_horizon_dispatch`, MC columns in `monte_carlo_rolling`, pipeline aggregation |
 | MC aggregation | `rolling_horizon.monte_carlo_balancing` |
 | derate symmetry | `availability.apply_unavailability_derate` at `rolling_horizon_dispatch` and `pipeline._run_one` |
 | tornado drivers | `sensitivity.run_sensitivity_analysis`, `_scale_capex`, `_scale_opex`, `_scale_revenue`, `_infer_aggregator_fee_frac`, `_rebuild_with_discount_rate`, `variables_for_npv_sensitivity`, `variables_for_irr_sensitivity` |

@@ -45,6 +45,7 @@ from .base import (
     MarketSeries,
     PriceSegment,
     Zone,
+    install_token_log_redaction,
     mask_token,
     utcnow_isoformat,
 )
@@ -72,6 +73,11 @@ def _http_get(params: dict[str, str], timeout: float) -> tuple[int, bytes]:
     """One GET against the API; tests monkeypatch this symbol."""
     import requests
 
+    # The token rides in the ``securityToken`` query parameter (the API
+    # offers no header alternative), so urllib3's DEBUG request-line log
+    # would print it verbatim.  Install the redaction filter before the
+    # request so the secret stays masked even when a caller enables DEBUG.
+    install_token_log_redaction()
     try:
         resp = requests.get(ENTSOE_API_URL, params=params, timeout=timeout)
     except requests.RequestException as exc:

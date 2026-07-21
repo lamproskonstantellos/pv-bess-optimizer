@@ -28,6 +28,15 @@ ROOT = Path(__file__).resolve().parent.parent
 DOCS_SRC = ROOT / "docs" / "source"
 
 
+# Sphinx's own napoleon extension emits a RemovedInSphinx11Warning (its
+# internal autodoc-options mapping interface) once per documented object, so
+# building the HTML inside pytest floods the suite with ~1400 identical
+# third-party deprecations that are neither our code nor a correctness signal.
+# Silence that one message here (the build's OWN docutils/autodoc warnings are
+# still asserted below via warning_stream); every other warning stays visible.
+@pytest.mark.filterwarnings(
+    "ignore:The mapping interface for autodoc options:"
+)
 def test_docs_build_emits_no_warnings(tmp_path):
     """A clean Sphinx HTML build must produce no warnings or errors.
 

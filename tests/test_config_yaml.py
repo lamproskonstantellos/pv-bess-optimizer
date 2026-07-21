@@ -93,6 +93,40 @@ def test_yaml_round_trip_parses_identically(tmp_path):
     )
 
 
+def test_yaml_config_can_express_bm_merit_order_curve(tmp_path):
+    """A config that enables the merit-order activation curve must be able to
+    supply it: without the bm_merit_order surface, materialising the config
+    to a workbook fails read_workbook with 'add the bm_merit_order sheet',
+    guidance a config user cannot follow (there is no sheet to add)."""
+    import yaml
+
+    from pvbess_opt.io_read import materialize_to_xlsx
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    cfg = tmp_path / "merit.yaml"
+    dump_structured_config(typed, cfg)
+    raw = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    raw["balancing"]["balancing_enabled"] = True
+    raw["balancing"]["bm_merit_order_enabled"] = True
+    raw["bm_merit_order"] = [
+        {"product": "afrr_up", "price_eur_per_mwh": 50,
+         "activation_probability_pct": 90},
+        {"product": "afrr_up", "price_eur_per_mwh": 100,
+         "activation_probability_pct": 40},
+    ]
+    cfg.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    loaded = load_structured_config(cfg)
+    assert "bm_merit_order" in loaded
+    # Materialise + re-read: the sheet is written and validated, no raise.
+    wb = materialize_to_xlsx(cfg, tmp_path)
+    reread = read_workbook(wb)
+    assert reread["balancing"]["bm_merit_order_enabled"] is True
+    assert reread["balancing"]["bm_merit_order_curve"] == {
+        "afrr_up": [(50.0, 90.0), (100.0, 40.0)],
+    }
+
+
 def test_validate_pv_consistency_warns_on_divergence(caplog):
     pv = [0.5] * 8760  # ~4380 kWh/yr => implied ~3.65 kWp at 1200 kWh/kWp
     with caplog.at_level(logging.WARNING, logger="pvbess_opt.io_read"):

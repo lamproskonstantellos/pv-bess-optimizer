@@ -385,6 +385,30 @@ def test_no_override_scenario_matches_standalone(tmp_path):
     )
 
 
+def test_scenario_row_balancing_enabled_reflects_parsed_value(tmp_path):
+    """Regression: an Excel scenarios-sheet override written as the dotted
+    target ``balancing.balancing_enabled = FALSE`` reaches the scenario dict
+    as the unparsed string 'FALSE'.  The comparison row's balancing_enabled
+    column must report the PARSED value (False, what actually solved), not
+    ``bool('FALSE')`` (True)."""
+    from pvbess_opt.io import read_workbook, write_workbook
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)
+    short = tmp_path / "short.xlsx"
+    write_workbook(typed, short)
+    opts = {
+        "solver_name": "highs", "mip_gap": 0.05,
+        "time_limit_seconds": 180, "tee": False,
+    }
+    row = evaluate_scenario(
+        read_workbook(short),
+        {"name": "nobal", "balancing": {"balancing_enabled": "FALSE"}},
+        solver_opts=opts,
+    )
+    assert row["balancing_enabled"] is False
+
+
 # ---------------------------------------------------------------------------
 # market_data / scenario_engine overrides + the materialise-time flip
 # ---------------------------------------------------------------------------

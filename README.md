@@ -313,17 +313,20 @@ still binds); omit them for a single shared cap.
 
 ### `balancing`
 
-36 keys covering the master switch (`balancing_enabled`), per-product
+36 keys covering the master switch (`balancing_enabled`), the wholesale
+DAM power share (`dam_capacity_share_pct`) and the per-product balancing
 capacity shares of `bess_power_kw` (`fcr_capacity_share_pct`,
 `afrr_up_capacity_share_pct`, `afrr_dn_capacity_share_pct`,
-`mfrr_up_capacity_share_pct`, `mfrr_dn_capacity_share_pct`),
+`mfrr_up_capacity_share_pct`, `mfrr_dn_capacity_share_pct`) — which
+together sum to 100 % of the battery's power — plus the
 acceptance and activation probabilities, fallback capacity and
 activation prices, the FCR sustained-duration requirement, the SOC
 safety buffer, a balancing-revenue inflation rate, the reservation
 block structure (`bm_block_hours` — reservations committed in fixed
-multi-hour blocks rather than per step), an aFRR merit-order
-acceptance curve (`bm_merit_order_enabled` — acceptance probability
-falling with the offered volume share), and the Monte Carlo
+multi-hour blocks rather than per step), an aFRR/mFRR merit-order
+activation curve (`bm_merit_order_enabled` — per-product activation
+probability falling with the bid's activation price, so expensive bids
+activate less), and the Monte Carlo
 price sigmas, scenario count (`bm_mc_scenarios`) and seed. See
 [`docs/balancing_market_design.md`](docs/balancing_market_design.md)
 for the design document.
@@ -469,6 +472,8 @@ Each run writes a self-contained folder
                      lifetime_dispatch_yearly | economic_assumptions |
                      degradation (+ debt_schedule / lender_cases /
                      emissions / rolling-horizon sheets when enabled;
+                     risk_metrics when risk_metrics_enabled; midlife_resolve
+                     when midlife_resolve_year > 0;
                      market_data_provenance on API-sourced runs;
                      scenario_price_paths / scenario_resolve_delta /
                      price_scenario_ensemble when price scenarios are

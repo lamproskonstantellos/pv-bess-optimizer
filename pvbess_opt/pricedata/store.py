@@ -413,6 +413,15 @@ def load_scenario_store(
             n_steps=n_steps, dt_minutes=dt_minutes,
             source=f"{store_dir.name}/ida",
         )
+        # The IDA column gets the same contiguous-from-1 coverage check the
+        # DAM column gets: dropna() above silently drops a wholly-blank
+        # interior year, so without this an IDA populated for years 1 and 3
+        # but blank for year 2 would load with a year-2 gap and fail later
+        # when the engine looks up the missing curve (Eq. G-basis hold_last
+        # only covers the TAIL).
+        _validate_year_coverage(
+            sorted(ida), n_years, source=f"{store_dir.name}/ida",
+        )
     balancing = _read_balancing_annual(store_dir)
 
     # Materialise the hold_last tail BEFORE the basis bridge, so every

@@ -56,8 +56,6 @@ __all__ = [
     "activation_probability",
     "activation_probability_curve",
     "capacity_share_kw",
-    "expected_activation_revenue_per_kw_per_step",
-    "expected_capacity_revenue_per_kw_per_step",
     "generate_synthetic_balancing_timeseries",
     "resolve_balancing_config",
     "resolve_balancing_timeseries",
@@ -200,7 +198,12 @@ def resolve_balancing_config(raw: dict[str, Any]) -> BalancingConfig:
         if name not in raw:
             continue
         value = raw[name]
-        if fld.type is bool or name in (
+        # ``from __future__ import annotations`` stringises every field
+        # annotation, so ``fld.type`` is the string "bool", never the bool
+        # type — compare against the string.  The explicit name list is kept
+        # as a belt-and-braces for any field a future annotation form (e.g.
+        # ``bool | None``) would not stringise to a bare "bool".
+        if fld.type == "bool" or name in (
             "balancing_enabled", "bm_merit_order_enabled",
         ):
             kwargs[name] = bool(value)
@@ -371,47 +374,6 @@ def activation_probability_curve(
     xs = np.asarray([float(p) for p, _ in points], dtype=float)
     ys = np.asarray([float(q) / 100.0 for _, q in points], dtype=float)
     return np.interp(price_arr, xs, ys)
-
-
-def expected_capacity_revenue_per_kw_per_step(
-    cfg: BalancingConfig,
-    ts: BalancingTimeseries,
-    product: str,
-    t: int,
-    dt_hours: float,
-) -> float:
-    """Expected € of capacity revenue per kW reserved at step ``t``.
-
-    Equals ``alpha_k * p_cap_k(t) * dt_hours / 1000`` (the ``/1000``
-    converts EUR/MWh to EUR/kWh).
-    """
-    _check_product(product)
-    column = _PRODUCT_CAPACITY_TS_COLUMNS[product]
-    price = float(getattr(ts, column)[t])
-    alpha = acceptance_probability(cfg, product)
-    return alpha * price * float(dt_hours) / 1000.0
-
-
-def expected_activation_revenue_per_kw_per_step(
-    cfg: BalancingConfig,
-    ts: BalancingTimeseries,
-    product: str,
-    t: int,
-    dt_hours: float,
-) -> float:
-    """Expected € of activation revenue per kW reserved at step ``t``.
-
-    Zero for FCR (capacity-only). Otherwise equals
-    ``alpha_k * beta_k * p_act_k(t) * dt_hours / 1000``.
-    """
-    _check_product(product)
-    if product not in PRODUCTS_WITH_ACTIVATION:
-        return 0.0
-    column = _PRODUCT_ACTIVATION_TS_COLUMNS[product]
-    price = float(getattr(ts, column)[t])
-    alpha = acceptance_probability(cfg, product)
-    beta = activation_probability(cfg, product)
-    return alpha * beta * price * float(dt_hours) / 1000.0
 
 
 # ---------------------------------------------------------------------------

@@ -529,8 +529,12 @@ def require_economic_columns(df: pd.DataFrame, *, context: str) -> None:
     Enforces the ordering contract: :func:`compute_kpis` (or
     :func:`add_economic_columns`) must run before the financial pipeline
     so revenue is never silently defaulted to zero.  ``add_economic_columns``
-    always writes the full :data:`ECONOMIC_COLUMNS` set together, so the
-    absence of *all* of them means it was never called.
+    always writes the five DAM/retail columns (the four ``profit_*_eur`` legs
+    plus ``expense_charge_bess_grid_eur``); the remaining
+    :data:`ECONOMIC_COLUMNS` entries (the grid-charging fee, the two PPA
+    columns and the two intraday columns) are conditional on their feature
+    being active.  The always-written five mean the absence of *all* of them
+    is a reliable signal that the function was never called.
     """
     if not any(c in df.columns for c in ECONOMIC_COLUMNS):
         raise ValueError(
@@ -1167,6 +1171,15 @@ def _compute_balancing_kpis(
                 "expense_grid_charging_fee_eur", pd.Series(0.0),
             ).sum()
         )
+        # The PPA contract leg (Eq. P-family) and the intraday spread net
+        # of its venue fee (Eqs. I1-I5) are non-balancing revenue the
+        # project earns and both feed profit_total_eur, so they belong in
+        # the denominator too.  Absent columns (no PPA / no intraday venue)
+        # sum to 0 via res.get(..., 0), so a run without those layers is
+        # bit-identical to before.
+        + float(res.get("revenue_pv_ppa_eur", pd.Series(0.0)).sum())
+        + float(res.get("id_revenue_eur", pd.Series(0.0)).sum())
+        - float(res.get("id_fee_eur", pd.Series(0.0)).sum())
     )
     # The construction is safe today because balancing revenue does NOT
     # enter ``profit_*_eur`` (those columns are driven by DAM / retail

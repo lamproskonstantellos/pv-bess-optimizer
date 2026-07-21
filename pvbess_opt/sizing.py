@@ -136,7 +136,9 @@ def evaluate_sizing_point(
     )
     kpis = compute_kpis(res, params, verify_balance=False)
     kpis = apply_operating_derates(kpis, params)
-    bundle = _build_financials(Path(base_xlsx), params, ts_pt, kpis, res)
+    bundle = _build_financials(
+        Path(base_xlsx), params, ts_pt, kpis, res, in_sizing_sweep=True,
+    )
     fin = bundle.get("fin_kpis") or {}
 
     def _f(key: str) -> float:
@@ -361,7 +363,8 @@ def read_sizing_block(path: str | Path) -> dict[str, Any] | None:
         if not path.exists():
             return None
         try:
-            sheets = set(pd.ExcelFile(path).sheet_names)
+            with pd.ExcelFile(path) as _xl:
+                sheets = set(_xl.sheet_names)
         except (ValueError, OSError):
             return None
         if "sizing" not in sheets:

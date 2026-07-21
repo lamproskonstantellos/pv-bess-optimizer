@@ -413,8 +413,16 @@ def evaluate_scenario(
         "pv_nameplate_kwp": _to_float(params.get("pv_nameplate_kwp", 0.0)),
         "bess_power_kw": _to_float(params.get("bess_power_kw", 0.0)),
         "bess_capacity_kwh": _to_float(params.get("bess_capacity_kwh", 0.0)),
+        # Source the display flag from the PARSED params (what was actually
+        # solved), not the pre-materialize ``typed`` dict: an Excel
+        # scenarios-sheet override written as the dotted target
+        # ``balancing.balancing_enabled = FALSE`` lands in ``typed`` as the
+        # unparsed string 'FALSE', and ``bool('FALSE')`` is True — so the row
+        # would report balancing ENABLED for a run that solved with it
+        # DISABLED.  ``params`` re-reads the materialised workbook, where the
+        # loader has parsed 'FALSE' -> False.
         "balancing_enabled": bool(
-            typed["balancing"].get("balancing_enabled", False)
+            (params.get("balancing") or {}).get("balancing_enabled", False)
         ),
         "npv_eur": _to_float(fin.get("npv_eur")),
         "irr_pct": _to_float(fin.get("irr_pct")),
@@ -585,7 +593,8 @@ def read_scenarios_block(path: str | Path) -> list[dict[str, Any]] | None:
     if path.suffix.lower() not in (".xlsx", ".xls") or not path.exists():
         return None
     try:
-        sheets = set(pd.ExcelFile(path).sheet_names)
+        with pd.ExcelFile(path) as _xl:
+            sheets = set(_xl.sheet_names)
     except (ValueError, OSError):
         return None
     if "scenarios" not in sheets:

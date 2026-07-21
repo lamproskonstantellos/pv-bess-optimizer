@@ -239,7 +239,19 @@ def _entsoe_get(
     token: str, params: dict[str, str], timeout: float,
 ) -> tuple[int, bytes]:
     query = {"securityToken": token, **params}
-    resp = requests.get(ENTSOE_URL, params=query, timeout=timeout)
+    try:
+        resp = requests.get(ENTSOE_URL, params=query, timeout=timeout)
+    except requests.RequestException as exc:
+        # The request URL carries the ``securityToken`` query parameter, so a
+        # transport-level failure embeds the full token in the original
+        # exception's message.  Re-raise a scrubbed error and drop the
+        # token-bearing exception from the chain (``from None``) so it can
+        # never surface in this script's traceback — mirrors the package's
+        # entsoe._http_get scrub.
+        raise RuntimeError(
+            "ENTSO-E request failed at the transport layer "
+            f"({type(exc).__name__}); check network connectivity and retry."
+        ) from None
     return resp.status_code, resp.content
 
 
