@@ -189,3 +189,32 @@ def test_replacement_capex_charged_only_in_horizon(repl, expect_charge):
         # No reset anywhere: the factor decays monotonically.
         factors = op["bess_capacity_factor"].to_numpy(dtype=float)
         assert (np.diff(factors) <= 1e-12).all()
+
+
+def test_balancing_price_columns_agree_across_modules():
+    """The 9 balancing price-column names are spelled out in three modules
+    (balancing MILP/KPI fallback, io schema fallback, entsoe fetch target).
+    They agree today but nothing bound them — this test does, deriving the
+    canonical set from PRODUCTS_ALL so a rename must update all three.
+    """
+    from pvbess_opt.balancing import (
+        _PRODUCT_ACTIVATION_TS_COLUMNS,
+        _PRODUCT_CAPACITY_TS_COLUMNS,
+        PRODUCTS_ALL,
+        PRODUCTS_WITH_ACTIVATION,
+    )
+    from pvbess_opt.io import _BALANCING_TS_COLUMN_DEFAULTS
+    from pvbess_opt.marketdata.entsoe import ENTSOE_BALANCING_COLUMNS
+
+    expected = set(
+        f"{p}_capacity_price_eur_per_mwh" for p in PRODUCTS_ALL
+    ) | set(
+        f"{p}_activation_price_eur_per_mwh" for p in PRODUCTS_WITH_ACTIVATION
+    )
+    assert len(expected) == 9
+    balancing_cols = set(_PRODUCT_CAPACITY_TS_COLUMNS.values()) | set(
+        _PRODUCT_ACTIVATION_TS_COLUMNS.values()
+    )
+    assert balancing_cols == expected
+    assert set(ENTSOE_BALANCING_COLUMNS) == expected
+    assert set(_BALANCING_TS_COLUMN_DEFAULTS) == expected
