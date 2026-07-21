@@ -58,6 +58,7 @@ _TOP_LEVEL_EXTRAS: frozenset[str] = frozenset({
     "trajectories",  # per-year stream multipliers (Eq. E24)
     "price_decks",  # named price-deck files merged as __ variant columns
     "price_scenarios",  # multi-year price-scenario list (pricedata layer)
+    "bm_merit_order",  # aFRR/mFRR merit-order activation curve (Eq. B10)
 })
 
 # Reference specific yield (kWh/kWp/yr) and divergence threshold for the PV
@@ -165,8 +166,16 @@ def _apply_grid_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
 
 
 def load_structured_config(path: str | Path) -> dict[str, Any]:
-    """Load a YAML/JSON config into the typed nested dict that
-    :func:`pvbess_opt.io.read_workbook` produces."""
+    """Load a YAML/JSON config into the typed nested dict.
+
+    The result carries the same parsed sheet sections and ``ts`` frame as
+    :func:`pvbess_opt.io.read_workbook`, so it round-trips through
+    :func:`write_workbook` / :func:`materialize_to_xlsx` to a byte-equivalent
+    workbook.  It is the pre-workbook form, though: the derived keys
+    ``read_workbook`` adds on read (``dt_minutes`` and the market-data
+    resolution) are re-derived when the materialised workbook is read back,
+    not present on this dict directly.
+    """
     path = Path(path)
     raw = _load_raw(path)
     typed: dict[str, Any] = {}
@@ -251,6 +260,26 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
     typed["price_scenarios"] = _normalise_price_scenarios_block(
         raw.get("price_scenarios"), source=f"Config {path}",
     )
+    # Optional merit-order activation curve (Eq. B10): a list of
+    # {product, price_eur_per_mwh, activation_probability_pct} rows, staged
+    # as the raw bm_merit_order frame so materialize_to_xlsx writes the
+    # bm_merit_order sheet and read_workbook validates it exactly like the
+    # sheet surface.  Without this, a config that set
+    # balancing.bm_merit_order_enabled = TRUE would materialise a workbook
+    # with no such sheet and fail with guidance ("add the sheet") a config
+    # user cannot act on (three-surface parity).
+    merit = raw.get("bm_merit_order")
+    if merit is not None:
+        if not isinstance(merit, list) or not all(
+            isinstance(row, dict) for row in merit
+        ):
+            raise ValueError(
+                f"Config {path}: 'bm_merit_order' must be a list of "
+                "{product, price_eur_per_mwh, activation_probability_pct} "
+                "rows (aFRR/mFRR products; probability non-increasing in "
+                "price)."
+            )
+        typed["bm_merit_order"] = pd.DataFrame(merit)
     typed["ts"] = _resolve_timeseries(raw, path.parent)
     _resolve_price_decks(raw, path.parent, typed)
     mip = raw.get("max_injection_profile")
@@ -717,6 +746,14 @@ def dump_structured_config(
         out["price_scenarios"] = [
             {k: _yaml_scalar(v) for k, v in entry.items()}
             for entry in price_scenarios
+        ]
+    merit_frame = typed.get("bm_merit_order")
+    if merit_frame is not None and len(merit_frame):
+        # Emit the merit-order curve as row dicts (the load form), so a
+        # config that carries one round-trips.
+        out["bm_merit_order"] = [
+            {k: _yaml_scalar(v) for k, v in row.items()}
+            for row in merit_frame.to_dict(orient="records")
         ]
 
     if config_path.suffix.lower() == ".json":
