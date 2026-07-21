@@ -518,6 +518,7 @@ def build_model(
     initial_soc_kwh: float | None = None,
     terminal_soc_free: bool | None = None,
     terminal_soc_target_kwh: float | None = None,
+    annual_cycle_budget_kwh: float | None = None,
 ) -> pyo.ConcreteModel:
     """Construct the Pyomo MILP.
 
@@ -1149,8 +1150,23 @@ def build_model(
         max_cycles_per_year = (
             0.0 if raw_annual_cycles is None else float(raw_annual_cycles)
         )
-        if max_cycles_per_year > 0.0:
+        # ``annual_cycle_budget_kwh`` (supplied only by the rolling horizon)
+        # overrides the nominal ``max_cycles_per_year * e_cap`` with the
+        # budget REMAINING for this window, so the annual warranty cap is
+        # enforced ACROSS window seams rather than per window — each 48h
+        # window otherwise sees the full annual budget and the cap never
+        # binds, letting the stitched dispatch exceed it (and beat the
+        # perfect-foresight benchmark).  A ``None`` budget with a positive
+        # ``max_cycles_per_year`` keeps the historical full-year cap, so the
+        # single-solve (benchmark / non-rolling) path is bit-identical.
+        _cap_annual: float | None
+        if annual_cycle_budget_kwh is not None:
+            _cap_annual = float(annual_cycle_budget_kwh)
+        elif max_cycles_per_year > 0.0:
             _cap_annual = max_cycles_per_year * e_cap_param
+        else:
+            _cap_annual = None
+        if _cap_annual is not None:
             if intraday_active:
                 # Same committed-schedule headroom as the daily cap.
                 assert intraday_data is not None
@@ -1324,18 +1340,24 @@ def build_model(
         # grid_to_load) into the slack RHS, the constraint reduces to
         # ``grid_to_load <= pv_to_bess + pv_curtail``, i.e. an hour can
         # only export when its load is fully covered without grid import.
-        m.slack = pyo.Var(m.T, domain=pyo.NonNegativeReals)
+        # NB: the component is named ``export_slack`` (not ``slack``) on
+        # purpose — pyomo's APPSI result loader treats a model attribute
+        # literally named ``slack`` as a reserved import Suffix and calls
+        # ``.import_enabled()`` on it, which crashes on a decision Var
+        # (``'IndexedVar' object has no attribute 'import_enabled'``) and
+        # made ``--solver appsi_highs`` unusable in self_consumption mode.
+        m.export_slack = pyo.Var(m.T, domain=pyo.NonNegativeReals)
         m.LOAD_PRIORITY_SLACK_DEF = pyo.Constraint(
             m.T,
             rule=lambda m, t: (
-                m.slack[t]
+                m.export_slack[t]
                 >= pv[t] + m.bess_dis_load[t] + m.bess_dis_grid[t] - load[t]
             ),
         )
         m.LOAD_PRIORITY_EXPORT = pyo.Constraint(
             m.T,
             rule=lambda m, t: (
-                m.pv_to_grid[t] + m.bess_dis_grid[t] <= m.slack[t]
+                m.pv_to_grid[t] + m.bess_dis_grid[t] <= m.export_slack[t]
             ),
         )
 
@@ -1943,6 +1965,7 @@ def run_scenario(
     initial_soc_kwh: float | None = ...,
     terminal_soc_free: bool | None = ...,
     terminal_soc_target_kwh: float | None = ...,
+    annual_cycle_budget_kwh: float | None = ...,
     return_unrounded: Literal[False] = ...,
 ) -> tuple[pd.DataFrame, str]: ...
 @overload
@@ -1957,6 +1980,7 @@ def run_scenario(
     initial_soc_kwh: float | None = ...,
     terminal_soc_free: bool | None = ...,
     terminal_soc_target_kwh: float | None = ...,
+    annual_cycle_budget_kwh: float | None = ...,
     return_unrounded: Literal[True],
 ) -> tuple[pd.DataFrame, str, pd.DataFrame]: ...
 def run_scenario(
@@ -1970,6 +1994,7 @@ def run_scenario(
     initial_soc_kwh: float | None = None,
     terminal_soc_free: bool | None = None,
     terminal_soc_target_kwh: float | None = None,
+    annual_cycle_budget_kwh: float | None = None,
     return_unrounded: bool = False,
 ) -> tuple[pd.DataFrame, str] | tuple[pd.DataFrame, str, pd.DataFrame]:
     """Build, solve and extract dispatch for a single scenario.
@@ -1990,6 +2015,7 @@ def run_scenario(
         initial_soc_kwh=initial_soc_kwh,
         terminal_soc_free=terminal_soc_free,
         terminal_soc_target_kwh=terminal_soc_target_kwh,
+        annual_cycle_budget_kwh=annual_cycle_budget_kwh,
     )
     solved, resolved, achieved_gap = solve_model(
         model, solver_name,

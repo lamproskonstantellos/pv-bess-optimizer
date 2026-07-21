@@ -413,7 +413,10 @@ does the same for `ida_price_eur_per_mwh` from the selected SIDC
 intraday auction (`intraday_auction`: `ida1` / `ida2` / `ida3`; the
 continuous intraday market is exchange-proprietary and not fetchable);
 `balancing_source` / `imbalance_source` accept `auto` (per-zone
-registry: GR → ADMIE, else ENTSO-E) or an explicit provider. Fetches
+registry: GR → ADMIE, else ENTSO-E) or an explicit provider. Fetched
+prices are intensive quantities resampled onto the model grid per
+`price_resample_policy` (`step_hold`: a coarser native price is held
+across the finer steps, a finer one averaged). Fetches
 cache on disk (`market_cache_dir`, `market_fetch_mode`: `cache_first`
 / `refresh` / `offline`). The ENTSO-E token comes from the
 `entsoe_token` cell or the environment variable named by
@@ -851,7 +854,7 @@ implementing symbol:
 
 * [`docs/self_consumption_design.md`](docs/self_consumption_design.md):
   the self-consumption MILP. Variables, objective, every hard
-  constraint, and the nine audit invariants (machine-checked against
+  constraint, and the ten audit invariants (machine-checked against
   the built model by `tests/test_logic_spec_conformance.py`).
 * [`docs/merchant_design.md`](docs/merchant_design.md): the merchant
   regime. Pinning constraints, cap semantics, the merchant objective.

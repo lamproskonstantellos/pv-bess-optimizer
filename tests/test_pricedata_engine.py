@@ -580,3 +580,77 @@ def test_balancing_hold_last_is_per_product():
     assert trajectories["balancing_activation_mfrr_up"]["values"] == (
         pytest.approx([1.0, 1.0, 1.0])
     )
+
+
+# ---------------------------------------------------------------------------
+# Regression: project_start_year must default to the pipeline-wide schema
+# value (not calendar year 0), or the real→nominal / TYNDP basis bridge
+# silently zeroes every projected price.
+# ---------------------------------------------------------------------------
+
+
+def _real_basis_store(tmp_path: Path) -> Path:
+    """A file store on the REAL basis (base year 2025), flat 100 EUR/MWh."""
+    store = tmp_path / "real_store"
+    store.mkdir(exist_ok=True)
+    (store / "meta.yaml").write_text(
+        yaml.safe_dump({
+            "provider": "file", "vintage": "v", "zone": "GR",
+            "currency": "EUR", "basis": "real", "base_year": 2025,
+        }),
+        encoding="utf-8",
+    )
+    frames = []
+    for year in (1, 2):
+        frames.append(pd.DataFrame({
+            "year": year,
+            "step": np.arange(1, HOURS + 1),
+            "dam_price_eur_per_mwh": np.full(HOURS, 100.0),
+        }))
+    pd.concat(frames).to_csv(store / "dam.csv", index=False)
+    return store
+
+
+def _real_basis_econ(store: Path, **overrides) -> dict:
+    econ = {
+        "price_scenarios_enabled": True,
+        "scenario_projection_mode": "reprice",
+        "price_basis": "nominal",  # engine basis; store is real -> bridge
+        "price_base_year": 0,
+        "cpi_pct": 2.0,
+        "debt_sizing_scenario": "",
+        "project_lifecycle_years": 2,
+        "price_scenarios": [{
+            "name": "S", "provider": "file", "vintage": "v",
+            "weight_pct": 100.0, "store_path": str(store), "notes": "",
+        }],
+    }
+    econ.update(overrides)
+    return econ
+
+
+def test_blank_start_year_does_not_zero_real_basis_curve(tmp_path):
+    store = _real_basis_store(tmp_path)
+    # project_start_year deliberately ABSENT (a blank workbook cell).
+    econ = _real_basis_econ(store)
+    application = apply_price_scenarios(
+        econ, _armed_ts(), _res(pv_export=1.0), base_dir=tmp_path,
+    )
+    assert application is not None
+    y1 = float(application.paths.loc[
+        application.paths["project_year"] == 1,
+        "dam_mean_price_eur_per_mwh",
+    ].iloc[0])
+    # With the schema default (2026) the real->nominal bridge inflates the
+    # 100 EUR/MWh curve by one CPI step (1.02); the old default (calendar
+    # year 0) collapsed it to ~0.
+    assert y1 == pytest.approx(102.0, rel=1e-9)
+
+
+def test_nonpositive_start_year_raises_named_error(tmp_path):
+    store = _real_basis_store(tmp_path)
+    econ = _real_basis_econ(store, project_start_year=-5)
+    with pytest.raises(PriceDataError, match="project_start_year"):
+        apply_price_scenarios(
+            econ, _armed_ts(), _res(pv_export=1.0), base_dir=tmp_path,
+        )

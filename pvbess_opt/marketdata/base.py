@@ -175,11 +175,6 @@ class PriceSegment:
     resolution_minutes: int
     values: list[float]
 
-    def end_utc(self) -> datetime:
-        return self.start_utc + pd.Timedelta(
-            minutes=self.resolution_minutes * len(self.values)
-        )
-
 
 @dataclass
 class MarketSeries:
@@ -270,6 +265,49 @@ def mask_token(token: str) -> str:
     lines and provenance records all go through this helper.
     """
     return token[:8] + "…" if len(token) > 8 else "…"
+
+
+def _blank_token_cell(md_worksheet: Any) -> bool:
+    """Blank the ``entsoe_token`` value cell in place; return whether changed.
+
+    Single source of truth for scrubbing the secret out of a ``market_data``
+    worksheet — used both when materialising a fetched snapshot and when
+    scrubbing a plain (no-fetch) input snapshot.
+    """
+    changed = False
+    for row in md_worksheet.iter_rows(min_row=2, max_col=2):
+        key_cell, value_cell = row[0], row[1]
+        if not isinstance(key_cell.value, str):
+            continue
+        if key_cell.value.strip() == "entsoe_token" and value_cell.value not in (
+            None,
+            "",
+        ):
+            value_cell.value = ""
+            changed = True
+    return changed
+
+
+def blank_entsoe_token(workbook_path: Path) -> None:
+    """Scrub the ENTSO-E token from a workbook snapshot (secret hygiene).
+
+    The ``01_inputs`` snapshot is a shareable artifact, so a live token
+    must never ride into it — whether or not a fetch occurred (the
+    fetch path also blanks it via :func:`materialize_bypassed_workbook`).
+    A no-op on a non-workbook snapshot (e.g. a YAML config) and when the
+    token cell is already empty, so the common case leaves the snapshot
+    byte-for-byte untouched.
+    """
+    from openpyxl import load_workbook
+
+    try:
+        wb = load_workbook(workbook_path)
+    except Exception:
+        return  # not an .xlsx workbook — nothing to scrub
+    if "market_data" not in wb.sheetnames:
+        return
+    if _blank_token_cell(wb["market_data"]):
+        wb.save(workbook_path)
 
 
 def resolve_entsoe_token(market_cfg: dict[str, Any]) -> str:
@@ -1201,14 +1239,9 @@ def materialize_bypassed_workbook(
             key_cell, value_cell = row[0], row[1]
             if not isinstance(key_cell.value, str):
                 continue
-            key = key_cell.value.strip()
-            if key in flipped_keys:
+            if key_cell.value.strip() in flipped_keys:
                 value_cell.value = "file"
-            elif key == "entsoe_token":
-                # The snapshot re-runs offline with 'file' sources, so
-                # the token is dead weight — and results directories
-                # get shared; never carry a live secret into one.
-                value_cell.value = ""
+        _blank_token_cell(md)
     wb.save(workbook_path)
     logger.info(
         "[marketdata] materialised %d fetched column(s) into %s and reset "

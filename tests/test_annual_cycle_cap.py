@@ -262,3 +262,38 @@ def test_daily_tighter_than_annual_warns(caplog):
         "annual cap will never bind" in r.getMessage()
         for r in caplog.records
     )
+
+
+def test_rolling_horizon_respects_annual_cap_across_seams():
+    """The annual throughput cap (Eq. E46) must bind ACROSS rolling-horizon
+    window seams, not per window.  Applied per 48 h window with the full
+    annual budget it never binds, so the stitched year exceeds the cap and
+    beats the perfect-foresight benchmark (an impossible negative foresight
+    gap).  The benchmark itself respects the cap, so RH must too.
+    """
+    from pvbess_opt.rolling_horizon import rolling_horizon_dispatch
+
+    ts = _ts(n_days=4)
+    cap_cycles = 2.0
+    cap_kwh = cap_cycles * 2000.0
+    p = _params(
+        max_cycles_per_day=10.0,   # non-binding
+        max_cycles_per_year=cap_cycles,
+        terminal_soc_equal=True,
+    )
+    # Perfect-foresight benchmark respects the annual cap.
+    _r, _s, pf = run_scenario(p, ts, return_unrounded=True)
+    pf_dis = float((pf["bess_dis_load_kwh"] + pf["bess_dis_grid_kwh"]).sum())
+    assert pf_dis <= cap_kwh + 1e-3
+
+    res_rh, _k = rolling_horizon_dispatch(
+        p, ts, window_hours=48, commit_hours=24, forecast_seed=None,
+    )
+    rh_dis = float(
+        (res_rh["bess_dis_load_kwh"] + res_rh["bess_dis_grid_kwh"]).sum()
+    )
+    # Before the seam fix the stitched RH discharge overshoots the cap
+    # (each window saw the whole annual budget); it must now stay within
+    # it and hence not beat the perfect-foresight benchmark.
+    assert rh_dis <= cap_kwh + 1.0
+    assert rh_dis <= pf_dis + 1.0

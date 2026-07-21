@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from .engine import (
+    _infer_dt_minutes,
     build_scenario_deck,
     derive_reprice_trajectories,
     merge_auto_trajectories,
@@ -132,11 +133,9 @@ def run_price_scenario_ensemble(
             deck = build_scenario_deck(
                 entry,
                 base_dir=base_dir, ts=ts, n_steps=len(ts),
-                dt_minutes=_dt_minutes_from_frame(ts),
+                dt_minutes=_infer_dt_minutes(ts),
                 n_years=n_years,
-                start_year=int(
-                    econ_base.get("project_start_year", 0) or 0,
-                ),
+                start_year=_start_year(econ_base),
                 engine_basis=str(
                     econ_base.get("price_basis", "nominal") or "nominal",
                 ),
@@ -224,11 +223,22 @@ def run_price_scenario_ensemble(
     )
 
 
-def _dt_minutes_from_frame(ts: pd.DataFrame) -> int:
-    n_steps = len(ts)
-    if n_steps == 0 or n_steps % 365 != 0:
+def _start_year(econ: dict[str, Any]) -> int:
+    """Project start year with the pipeline-wide schema default.
+
+    Mirrors ``engine.apply_price_scenarios``: a blank/zero cell must not
+    collapse to calendar year 0 and silently zero real-basis / TYNDP
+    curves through the deflator bridge.
+    """
+    from pvbess_opt.io import PROJECT_SHEET_DEFAULTS
+
+    start_year = int(
+        econ.get("project_start_year")
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
+    if start_year <= 0:
         raise PriceDataError(
-            f"ensemble needs a whole non-leap-year timeseries; got "
-            f"{n_steps} steps."
+            "price scenarios need a positive project_start_year (got "
+            f"{start_year!r}); set project_start_year on the project sheet."
         )
-    return (24 * 60) // (n_steps // 365)
+    return start_year

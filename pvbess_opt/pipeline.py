@@ -76,7 +76,7 @@ from pvbess_opt.lifetime import (
     resolve_augmentation_config,
     resolve_bess_replacement_year,
 )
-from pvbess_opt.marketdata import materialize_bypassed_workbook
+from pvbess_opt.marketdata import blank_entsoe_token, materialize_bypassed_workbook
 from pvbess_opt.modes import resolve_mode
 from pvbess_opt.optimization import (
     BALANCING_INVARIANT_KEYS,
@@ -2045,6 +2045,12 @@ def _run_one(
                 materialize_bypassed_workbook(
                     renamed, ts, params["market_provenance"],
                 )
+            else:
+                # No fetch happened, so materialize_bypassed_workbook was
+                # not called — but a token may still sit in the workbook
+                # cell.  The snapshot is shareable; scrub the secret
+                # unconditionally so it never rides into a results dir.
+                blank_entsoe_token(renamed)
         write_assumptions_summary(
             layout["inputs"] / "assumptions_summary.txt", params, econ,
         )

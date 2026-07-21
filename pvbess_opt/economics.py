@@ -2069,6 +2069,15 @@ def apply_tax_layer(
     _net_list = df["net_cashflow_eur"].astype(float).to_list()
     _capex_list = df["capex_eur"].astype(float).to_list()
     _devex_list = df["devex_eur"].astype(float).to_list()
+    # Augmentation (Eq. E51) is a mid-life investment event, not an
+    # operating expense: like capex_eur / devex_eur it must be added back
+    # out of EBITDA so it is deducted ONLY through its depreciation
+    # tranche (added above), never expensed in full in its event year.
+    _aug_list = (
+        df["augmentation_capex_eur"].astype(float).to_list()
+        if "augmentation_capex_eur" in df.columns
+        else [0.0] * len(_years_list)
+    )
     dep_col: list[float] = []
     int_col: list[float] = []
     ti_col: list[float] = []
@@ -2096,7 +2105,7 @@ def apply_tax_layer(
         # EBITDA (Eq. E35): the operating net before investment events
         # — revenue net of every fee and the levy, plus balancing, PPA
         # and OPEX; the levy is therefore deductible by construction.
-        ebitda_y = _net_list[i] - _capex_list[i] - _devex_list[i]
+        ebitda_y = _net_list[i] - _capex_list[i] - _devex_list[i] - _aug_list[i]
         ti_y = ebitda_y - dep_y - int_y
         if carryforward_window > 0:
             vintages = [

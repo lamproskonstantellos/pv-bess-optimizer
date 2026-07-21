@@ -9,8 +9,9 @@ in order:
 2. Sweep every sheet for the prior amber bootstrap fill (``FFF2CC``)
    and reset it to *no fill*.
 3. Rebuild every parameter sheet (``project``, ``pv``, ``bess``,
-   ``economics``, ``simulation``, ``balancing``, ``ppa``) from the
-   canonical row templates in :mod:`pvbess_opt.io`: existing values are
+   ``economics``, ``simulation``, ``balancing``, ``ppa``, ``intraday``,
+   ``market_data``, ``scenario_engine``) from the canonical row
+   templates in :mod:`pvbess_opt.io`: existing values are
    preserved by key; rows are rewritten in template order; keys removed
    from the schema are dropped; new schema keys are added with their
    defaults; missing parameter sheets are created.  A migrated workbook
