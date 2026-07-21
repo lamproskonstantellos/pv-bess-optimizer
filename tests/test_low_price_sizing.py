@@ -250,3 +250,42 @@ def test_low_price_sizing_roundtrip_end_to_end(tmp_path):
         for r in sched
     ]
     assert min(base_dscrs) > 1.30
+
+
+def test_low_price_debt_sizing_falls_back_to_base_in_sizing_sweep(
+    tmp_path, monkeypatch, caplog,
+):
+    """Regression: inside a sizing sweep the low_price deck re-dispatch reads
+    the base workbook and cannot see the point's swept plant size, so it would
+    freeze a debt sized on the wrong plant.  With in_sizing_sweep=True the
+    deck re-dispatch must be skipped and debt sized on the point's own base
+    cashflow instead, with a warning."""
+    import logging
+
+    import pvbess_opt.pipeline as pl
+    from pvbess_opt.io import read_inputs, write_workbook
+    from pvbess_opt.kpis import compute_kpis
+    from pvbess_opt.optimization import run_scenario
+
+    xlsx = tmp_path / "deck_sizing_sweep.xlsx"
+    write_workbook(_typed_with_deck(), xlsx)
+    params, ts = read_inputs(xlsx)
+    res, _solver, _full = run_scenario(params, ts, return_unrounded=True)
+    kpis = compute_kpis(res, params, verify_balance=False)
+
+    def _must_not_run(*_a, **_k):
+        raise AssertionError(
+            "low_price deck re-dispatch must be skipped inside a sizing sweep"
+        )
+
+    monkeypatch.setattr(pl, "_low_price_sizing_cashflow", _must_not_run)
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.pipeline"):
+        bundle = pl._build_financials(
+            xlsx, params, ts, kpis, res, in_sizing_sweep=True,
+        )
+    assert any(
+        "not supported inside a sizing sweep" in r.getMessage()
+        for r in caplog.records
+    )
+    # Debt is still sized — on the point's own (base) cashflow.
+    assert bundle["econ"].get("_sized_debt_eur") is not None

@@ -710,6 +710,7 @@ def _build_financials(
     *,
     solver_opts: dict[str, Any] | None = None,
     base_dir: Path | None = None,
+    in_sizing_sweep: bool = False,
 ) -> dict[str, Any]:
     """Run the multi-year cash-flow + sensitivity + lifetime pipeline.
 
@@ -720,6 +721,15 @@ def _build_financials(
     ``store_path`` entries; None means the workbook's own directory —
     callers evaluating a MATERIALISED temp workbook (scenario batches)
     pass the original workbook's directory instead.
+
+    ``in_sizing_sweep`` marks a call from the sizing sweep, where each
+    grid point overrides the plant size in ``params`` (and the scaled PV
+    in ``ts``) but the ``excel_path`` still points at the base workbook.
+    The ``low_price`` debt-sizing case re-dispatches a fresh deck run from
+    that workbook and cannot see the point's swept sizes, so it would size
+    debt on the BASE plant for every non-base point; the flag makes the
+    sweep fall back to per-point ``base`` sizing (which uses the point's
+    own cashflow) with a warning instead of freezing a mis-sized debt.
     """
     econ = read_economic_params(excel_path)
 
@@ -804,6 +814,21 @@ def _build_financials(
         raw_p90 = econ.get("production_p90_factor_pct")
         sizing_frame = apply_production_case(
             yearly_cf, (100.0 if raw_p90 is None else float(raw_p90)) / 100.0,
+        )
+    elif sizing_case == "low_price" and sizing_mode_on and in_sizing_sweep:
+        # The low_price deck re-dispatch reads the base workbook, so inside a
+        # sizing sweep it would size debt on the BASE plant for a point being
+        # evaluated at swept sizes (distorting that point's DSCR / gearing /
+        # sized_debt and, via the tax-layer interest deduction, its NPV / IRR
+        # in the frontier).  Fall back to the point's own base-case cashflow
+        # (sizing_frame stays yearly_cf), which correctly reflects the swept
+        # sizes, and warn once.
+        logger.warning(
+            "[debt sizing] debt_sizing_case='low_price' is not supported "
+            "inside a sizing sweep (the deck re-dispatch cannot see the "
+            "swept plant size); sizing debt on each point's own base-case "
+            "cashflow instead. Run the low_price case on a single "
+            "fixed-size workbook for a deck-based debt schedule."
         )
     elif sizing_case == "low_price" and sizing_mode_on:
         # One full re-dispatch with the named deck's prices; the frame
