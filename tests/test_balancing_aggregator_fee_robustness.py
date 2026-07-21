@@ -7,8 +7,6 @@ documented contract — never an opaque crash or a silent wrong number.
 
 from __future__ import annotations
 
-import logging
-
 import numpy as np
 import pytest
 
@@ -93,13 +91,13 @@ def test_fee_is_noop_for_pv_only_project():
 # ---------------------------------------------------------------------------
 
 
-def test_malformed_fee_value_falls_back_to_default(caplog):
-    """A non-numeric workbook cell for the fee coerces to the default (0.0)
-    with a warning — the same contract as every other float key."""
-    with caplog.at_level(logging.WARNING):
-        out = _parse_value(_KEY, "not-a-number", _SHEET_DEFAULTS["economics"][_KEY])
-    assert out == 0.0
-    assert any("could not be parsed" in r.getMessage() for r in caplog.records)
+def test_malformed_fee_value_raises_actionable_error():
+    """A non-numeric workbook cell for a numeric key raises a loud,
+    key-naming error rather than silently substituting the default —
+    the same fail-fast contract as every other float key (a mis-typed
+    critical parameter must never produce a confident-wrong number)."""
+    with pytest.raises(ValueError, match=_KEY):
+        _parse_value(_KEY, "not-a-number", _SHEET_DEFAULTS["economics"][_KEY])
 
 
 def test_nan_fee_value_falls_back_to_default():

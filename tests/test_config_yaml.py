@@ -54,6 +54,18 @@ def test_json_schema_validates_a_sample_config():
     assert validate_config(raw, schema) == []
 
 
+def test_json_schema_declares_every_top_level_extra():
+    """Every non-sheet top-level config key the loader accepts must be a
+    declared property of the emitted JSON Schema, so the introspectable
+    schema surface matches the load surface (regression: sizing /
+    bm_merit_order / inline timeseries were accepted but undeclared)."""
+    from pvbess_opt.io_read import _TOP_LEVEL_EXTRAS
+
+    props = set(config_json_schema()["properties"])
+    missing = sorted(k for k in _TOP_LEVEL_EXTRAS if k not in props)
+    assert missing == [], f"config schema omits accepted keys: {missing}"
+
+
 def test_json_schema_trajectories_description_lists_every_stream():
     """The config-schema trajectories description must advertise ALL
     stream names, including the Eq. E60/E61 split-stream taxonomy — it

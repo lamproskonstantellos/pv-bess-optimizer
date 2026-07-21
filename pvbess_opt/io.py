@@ -536,7 +536,11 @@ SCENARIO_ENGINE_SHEET_DEFAULTS: dict[str, Any] = {
     # and the re-solve grid resolution in minutes (hourly by default:
     # a full-year hourly MILP solves in seconds-to-minutes, the 15-min
     # grid does not scale to 6 scenarios x N years).
-    "scenario_resolve_years": "1,5,10,15,20,25",
+    # Every entry must satisfy 1 <= year <= project_lifecycle_years; the
+    # default set matches the default 20-year lifecycle so resolve mode
+    # runs out of the box (an entry beyond the lifecycle is rejected by
+    # pricedata.resolve.parse_support_years).
+    "scenario_resolve_years": "1,5,10,15,20",
     "scenario_resolve_resolution": 60,
     # Interpolation of the per-stream factors between support years.
     "scenario_interp": "loglinear",
@@ -1150,9 +1154,9 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "Derating factor applied to BESS power for the capacity payment "
      "(EU mechanisms derate storage by duration vs the stress-event "
      "window; enter the auction's published class factor, e.g. "
-     "~40-95 % depending on duration). 100 = underated nameplate. In "
-     "[0, 100]. The payment is on the DERATED MW (convention stated "
-     "to avoid double-derating)."),
+     "~40-95 % depending on duration). 100 = no derate (payment on the "
+     "full nameplate MW); default 100. In [0, 100]. The payment is on "
+     "the DERATED MW (convention stated to avoid double-derating)."),
     ("capacity_market_year_from", 1, "year",
      "First project year of the capacity contract (inclusive)."),
     ("capacity_market_year_to", 0, "year",
@@ -1486,7 +1490,7 @@ _BALANCING_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "bit-identical."),
     ("bm_soc_headroom_pct", 10.0, "%",
      "Extra SOC safety buffer applied to the worst-case activation "
-     "reservation in both directions."),
+     "reservation in both directions. Range [0, 50] %; default 10."),
     ("bm_inflation_pct", 2.0, "%",
      "Yearly indexation of balancing revenue applied in the multi-year "
      "lifetime cashflow."),
@@ -1592,7 +1596,12 @@ _INTRADAY_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "wholesale venue: the committed day-ahead dispatch is "
      "re-optimised against the ida_price_eur_per_mwh timeseries "
      "column (two-stage re-dispatch, Eqs. I1-I5). Requires that "
-     "column and mode = 'merchant'. When FALSE the dispatch, KPIs "
+     "column, mode = 'merchant' and a finite positive "
+     "p_grid_export_max_kw. Mutually EXCLUSIVE with (the loader "
+     "rejects the combination, naming it): balancing_enabled = TRUE, "
+     "ppa_enabled = TRUE, any support_scheme other than 'none', "
+     "imbalance_enabled = TRUE, and midlife_resolve_year > 0 — enable "
+     "at most one of these venues. When FALSE the dispatch, KPIs "
      "and outputs are bit-identical to a workbook without the "
      "sheet."),
     ("id_max_deviation_frac_of_cap", 0.25, "-",
@@ -1724,9 +1733,14 @@ _SCENARIO_ENGINE_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "factors - the price paths come solely from the trajectories "
      "sheet you declare (per-leg DAM and per-product balancing "
      "streams supported)."),
-    ("scenario_resolve_years", "1,5,10,15,20,25", "CSV of years",
+    ("scenario_resolve_years", "1,5,10,15,20", "CSV of years",
      "Support years (operating years) for the Tier-2 re-solves; "
-     "ignored unless scenario_projection_mode = resolve."),
+     "ignored unless scenario_projection_mode = resolve. Year 1 is "
+     "always forced in; every entry must satisfy 1 <= year <= "
+     "project_lifecycle_years (an out-of-lifecycle year is rejected). "
+     "If the largest support year is below the lifecycle, the tier-2 "
+     "factors are held flat over the remaining years (a warning is "
+     "logged); add a later support year to re-solve the tail."),
     ("scenario_resolve_resolution", 60, "min",
      "Model-grid resolution of the Tier-2 support-year re-solves. "
      "Hourly (60) by default: a full-year hourly MILP solves in "
@@ -2758,27 +2772,38 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
             f"{key!r} expects a number, got boolean {bool(raw)!r}; "
             "write a numeric value instead (e.g. 1 for 1 %)."
         )
+    # A non-blank cell that cannot be parsed as a number is an input
+    # mistake (a locale decimal comma '7,5', a unit suffix '10 MW', a
+    # stray letter), and silently substituting the key default would
+    # change the headline financial/physical result with only a warning
+    # that is trivially lost in a long run's stdout.  Reject loudly,
+    # naming the key and the offending value — the same fail-fast
+    # contract as the boolean-in-numeric branch above and the
+    # bess_augmentation_years / bess_replacement_year parsers.  A blank /
+    # NaN / empty cell never reaches this branch (``_coerce`` returns the
+    # default for those), so the "blank uses the default" behaviour is
+    # unchanged.
     if key in _INT_KEYS:
         coerced = _coerce(raw, int, default)
         if coerced is _COERCE_FAILED:
-            logger.warning(
-                "Workbook value for %r could not be parsed as int "
-                "(got %r); using default %r.", key, raw, default,
+            raise ValueError(
+                f"{key!r} expects an integer, got {raw!r} which could not "
+                f"be parsed; correct the cell (leave it blank to use the "
+                f"default {default!r})."
             )
-            return default
         return coerced
     coerced = _coerce(raw, float, default)
     if coerced is _COERCE_FAILED:
-        logger.warning(
-            "Workbook value for %r could not be parsed as float "
-            "(got %r); using default %r.", key, raw, default,
+        raise ValueError(
+            f"{key!r} expects a number, got {raw!r} which could not be "
+            f"parsed; correct the cell (leave it blank to use the default "
+            f"{default!r})."
         )
-        return default
     return coerced
 
 
 def _parse_grid_export_max(
-    raw: Any, default: Any, key: str = "p_grid_export_max_kw",
+    raw: Any, key: str = "p_grid_export_max_kw",
 ) -> float:
     """Parse the grid-cap keys (``p_grid_export_max_kw`` and, with the
     same token semantics, ``p_grid_import_max_kw``).
@@ -2787,10 +2812,10 @@ def _parse_grid_export_max(
     of the ``_GRID_EXPORT_UNLIMITED_TOKENS`` strings, case-insensitive).
     A finite positive float is returned unchanged.  Negative or zero
     values are returned as-is so the loader can raise a validation error;
-    unparseable values fall back to ``default`` with a warning (a None
-    default means unlimited).
+    a non-blank cell that cannot be parsed as a number (nor one of the
+    unlimited tokens) raises ``ValueError`` naming the key rather than
+    silently capping at the default.
     """
-    fallback = float("inf") if default is None else float(default)
     if raw is None:
         return float("inf")
     if isinstance(raw, float) and np.isnan(raw):
@@ -2801,21 +2826,25 @@ def _parse_grid_export_max(
             return float("inf")
         try:
             value = float(raw)
-        except ValueError:
-            logger.warning(
-                "Workbook value for %r could not be "
-                "parsed (got %r); using default %r.", key, raw, default,
-            )
-            return fallback
+        except ValueError as exc:
+            # A non-blank, non-token cell that will not parse as a number
+            # (e.g. a unit suffix '10 MW') is an input mistake; silently
+            # capping at the default would change dispatch and revenue
+            # with only a warning.  Fail fast, naming the key.
+            raise ValueError(
+                f"{key!r} expects a number in kW, got {raw!r} which could "
+                "not be parsed; write a number, or leave the cell blank / "
+                "'inf' / 'unlimited' / 'disabled' to remove the cap."
+            ) from exc
     else:
         try:
             value = float(raw)
-        except (TypeError, ValueError):
-            logger.warning(
-                "Workbook value for %r could not be "
-                "parsed (got %r); using default %r.", key, raw, default,
-            )
-            return fallback
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"{key!r} expects a number in kW, got {raw!r} which could "
+                "not be parsed; write a number, or leave the cell blank / "
+                "'inf' / 'unlimited' / 'disabled' to remove the cap."
+            ) from exc
     if np.isinf(value):
         return float("inf")
     return value
@@ -3037,7 +3066,7 @@ def _parse_kv_sheet(
                     "(e.g. 1 for 1 %)."
                 )
             if key in ("p_grid_export_max_kw", "p_grid_import_max_kw"):
-                out[key] = _parse_grid_export_max(raw, defaults[key], key)
+                out[key] = _parse_grid_export_max(raw, key)
             else:
                 out[key] = _parse_value(key, raw, defaults[key])
             continue
@@ -3655,12 +3684,28 @@ def validate_pv_location_fields(pv: dict[str, Any]) -> None:
     pass; whether a field is *required* is decided separately by
     :func:`pvbess_opt.io_read.resolve_pv_source`.
     """
-    lat = _coerce_optional_float(pv.get("latitude"))
-    if lat is not None and not (-90.0 <= lat <= 90.0):
-        raise ValueError(f"'latitude' must be in [-90, 90]; got {lat!r}.")
-    lon = _coerce_optional_float(pv.get("longitude"))
-    if lon is not None and not (-180.0 <= lon <= 180.0):
-        raise ValueError(f"'longitude' must be in [-180, 180]; got {lon!r}.")
+    def _range_check(field: str, lo: float, hi: float) -> None:
+        # A blank / absent cell passes (the field is optional here);
+        # a non-blank cell that will not parse as a number raises the
+        # documented, key-naming error instead of being silently
+        # dropped to None (which would later misreport the field as
+        # *missing* rather than *malformed*).  Mirrors tilt /
+        # weather_year below.
+        raw = pv.get(field)
+        if raw is None or str(raw).strip() == "":
+            return
+        value = _coerce_optional_float(raw)
+        if value is None:
+            raise ValueError(
+                f"{field!r} must be a number in [{lo:g}, {hi:g}]; got {raw!r}."
+            )
+        if not (lo <= value <= hi):
+            raise ValueError(
+                f"{field!r} must be in [{lo:g}, {hi:g}]; got {value!r}."
+            )
+
+    _range_check("latitude", -90.0, 90.0)
+    _range_check("longitude", -180.0, 180.0)
 
     tilt = pv.get("tilt")
     if isinstance(tilt, str) and tilt.strip().lower() == "optimal":
@@ -3676,13 +3721,8 @@ def validate_pv_location_fields(pv: dict[str, Any]) -> None:
                 f"'tilt' must be in [0, 90] or 'optimal'; got {tilt!r}."
             )
 
-    azimuth = _coerce_optional_float(pv.get("azimuth"))
-    if azimuth is not None and not (-180.0 <= azimuth <= 360.0):
-        raise ValueError(f"'azimuth' must be in [-180, 360]; got {azimuth!r}.")
-
-    losses = _coerce_optional_float(pv.get("losses_pct"))
-    if losses is not None and not (0.0 <= losses <= 100.0):
-        raise ValueError(f"'losses_pct' must be in [0, 100]; got {losses!r}.")
+    _range_check("azimuth", -180.0, 360.0)
+    _range_check("losses_pct", 0.0, 100.0)
 
     weather_year = pv.get("weather_year")
     if isinstance(weather_year, str) and weather_year.strip().lower() == "tmy":

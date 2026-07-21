@@ -241,7 +241,7 @@ def test_unlimited_tokens_parse_to_inf(token):
     from pvbess_opt.io import _parse_grid_export_max
 
     assert np.isinf(_parse_grid_export_max(
-        token, None, "p_grid_import_max_kw",
+        token, "p_grid_import_max_kw",
     ))
 
 
