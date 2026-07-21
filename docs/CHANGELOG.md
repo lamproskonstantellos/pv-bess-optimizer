@@ -77,8 +77,8 @@ Pre-delivery release audit (round 2):
 
 - **Rolling horizon.** The daily cycle cap (Eq. E45) is now enforced across
   window seams via a threaded per-window boundary-day budget, so a
-  `commit_hours` that does not divide 24 can no longer cycle a split day up
-  to twice the cap.
+  `commit_hours` that is not a multiple of 24 (window starts that do not
+  land on midnight) can no longer cycle a split day up to twice the cap.
 - **Secrets.** Two residual ENTSO-E token log-leak paths are closed: a
   redaction filter masks the `securityToken` query parameter in urllib3's
   DEBUG request-line log, and `scripts/probe_market_data` scrubs transport
@@ -100,6 +100,64 @@ Pre-delivery release audit (round 2):
   E28a, the uncertainty sensitivity table, README feature/output references
   and the Sphinx inputs page (imbalance keys) corrected; several stale
   docstrings and enum note cells fixed.
+
+Pre-delivery release audit (round 3):
+
+- **Input validation.** A non-blank workbook cell that cannot be parsed as a
+  number now raises a loud, key-naming error instead of silently
+  substituting the key default (a Greek/European decimal comma
+  `discount_rate_pct = 7,5`, a unit suffix `p_grid_export_max_kw = 10 MW`,
+  or a stray letter previously produced a confident-wrong headline number);
+  a blank / empty cell still resolves to the default. `validate_pv_location_fields`
+  now raises on a present-but-unparseable latitude / longitude / azimuth /
+  losses_pct (matching tilt / weather_year) rather than dropping it to None
+  and misreporting the field as *missing*.
+- **Price scenarios.** The shipped default `scenario_resolve_years`
+  (`1,5,10,15,20,25`) overshot the default 20-year lifecycle, so enabling
+  `resolve` mode with the shipped defaults crashed; the default is now
+  `1,5,10,15,20`. Resolve mode logs a warning when the support years do not
+  reach the horizon (Tier-2 factors held flat) or reduce to just year 1
+  (Tier-2 collapses to unity, overriding the reprice cannibalization), and
+  `build_resolve_grid` now rejects a resolve resolution that does not divide
+  the day into whole blocks (e.g. 105 min) with an actionable message.
+- **Duplication.** The canonical balancing product tuples
+  (`PRODUCTS_ALL` / `PRODUCTS_WITH_ACTIVATION`) are now imported from
+  `balancing` by `economics`, the BESS-revenue plot and the theme colour map
+  instead of being re-typed inline (a sixth product could otherwise silently
+  drop out of the per-month balancing allocation — a wrong financial split);
+  the whole-year → native-cadence derivation is single-sourced as
+  `pricedata.store.infer_native_cadence_minutes` (was triplicated across the
+  store loader, the TYNDP adapter and the engine).
+- **Rolling horizon.** Corrected the seam-threading comments (and the
+  round-2 changelog note): the daily-cap threading is inert when **24
+  divides `commit_hours`** (window starts land on midnight), not when
+  `commit_hours` divides 24 — for a divisor like `commit_hours = 12` the
+  boundary day is split and the threading correctly activates. The
+  day-aligned byte-identity test now asserts every calendar day sits exactly
+  at the cap (a threading-induced reduction is caught), with a companion
+  `commit_hours = 12` split-day test.
+- **MILP documentation.** Clarified that surplus-only export in
+  self_consumption is enforced by the `NO_SIM_GRID_IMPORT/EXPORT` binary
+  pair; the `LOAD_PRIORITY_SLACK_DEF/EXPORT` pair (Eqs. S8/S9), with a free
+  unpenalized slack, is a non-binding statement of the same rule (docstring,
+  code comment and `docs/self_consumption_design.md` corrected). The MILP is
+  unchanged.
+- **Packaging.** `tzdata` is now declared in `requirements/base.txt`
+  (`zoneinfo` needs it on the ENTSO-E fetch path on Windows).
+- **Config surface & docs.** `config_json_schema()` now declares the
+  `sizing`, `bm_merit_order` and inline `timeseries` top-level blocks it
+  already accepts; the input-workbook notes gained the intraday
+  mutual-exclusion list, the `bm_soc_headroom_pct` range, the resolve-years
+  lifecycle bound and a clearer `capacity_market_derating_pct` wording; the
+  Sphinx pages gained the `price_resample_policy` key, the price-scenario
+  figures/result sheets, the marketdata/pricedata package API entries, the
+  ten-sheet scenario-override count and the E35 augmentation add-back term;
+  the green-attribution and lifetime-reconciliation docstrings corrected.
+- **Dead code & test hygiene.** Removed an unreachable `n_steps` guard in
+  `resolve_balancing_config` and dead test helpers (`_vlines_in_pdf_axes`,
+  `_read_legend_labels`); the input-workbook style test now asserts the
+  header bottom-border (previously an unused constant); a mis-named
+  "five legend entries" smoke test renamed to what it checks.
 
 ## 1.0.0 (2026-07-06)
 
