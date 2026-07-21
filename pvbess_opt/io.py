@@ -868,7 +868,7 @@ _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "PVGIS only: system losses."),
     ("weather_year", 2019, "year",
      'PVGIS only: non-leap year for a clean 8760, or "tmy".'),
-    ("raddatabase", None, "enum",
+    ("raddatabase", None, "text",
      "PVGIS only: optional radiation-database override (e.g. "
      "'PVGIS-SARAH3' or 'PVGIS-ERA5'). Blank = let PVGIS pick the "
      "regional default for the location."),

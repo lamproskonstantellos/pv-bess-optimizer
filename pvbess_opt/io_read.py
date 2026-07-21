@@ -837,6 +837,23 @@ def config_json_schema() -> dict[str, Any]:
             "scenario_engine.price_scenarios_enabled."
         ),
     }
+    properties["financing"] = {
+        "type": "object",
+        "description": (
+            "Optional convenience block mapped onto economics keys: "
+            "gearing (0..1 → gearing_pct), interest_rate (0..1 → "
+            "debt_interest_rate_pct), tenor_years (→ debt_tenor_years), "
+            "repayment (→ debt_repayment)."
+        ),
+    }
+    properties["grid"] = {
+        "type": "object",
+        "description": (
+            "Optional convenience block mapped onto economics keys: "
+            "co2_intensity (kg/MWh → grid_co2_intensity_kg_per_mwh), "
+            "co2_annual_decline (0..1 → grid_co2_annual_decline_pct)."
+        ),
+    }
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "pvbess-optimizer configuration",
