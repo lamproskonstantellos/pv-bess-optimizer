@@ -73,6 +73,34 @@ Pre-delivery release audit (round 1):
   constants single-sourced; dead code removed; the ADMIE spring-forward DST
   fill aligned with the UTC path.
 
+Pre-delivery release audit (round 2):
+
+- **Rolling horizon.** The daily cycle cap (Eq. E45) is now enforced across
+  window seams via a threaded per-window boundary-day budget, so a
+  `commit_hours` that does not divide 24 can no longer cycle a split day up
+  to twice the cap.
+- **Secrets.** Two residual ENTSO-E token log-leak paths are closed: a
+  redaction filter masks the `securityToken` query parameter in urllib3's
+  DEBUG request-line log, and `scripts/probe_market_data` scrubs transport
+  errors the same way the package does.
+- **KPIs & scenarios.** The balancing-revenue-share denominator now includes
+  PPA and intraday revenue (was overstated with those layers on); the
+  scenario-comparison `balancing_enabled` column reads the parsed run, not
+  the raw override string.
+- **Sizing.** A sizing sweep with `debt_sizing_case = low_price` no longer
+  sizes debt on the base plant for every grid point (falls back to per-point
+  base sizing with a warning).
+- **Price scenarios.** The IDA curve gets the same contiguous-year coverage
+  check as DAM; `cpi_pct` defaults to the schema value (2.0), not 0.0.
+- **Surfaces & hygiene.** The YAML/JSON config can now express a
+  `bm_merit_order` curve; `pd.ExcelFile` handles are closed (a per-read
+  ResourceWarning leak); the five balancing price-column copies are bound by
+  a single test; dead balancing helpers and a dead bool check removed.
+- **Docs.** Merchant audit-invariant count (ten), equation-registry tag
+  E28a, the uncertainty sensitivity table, README feature/output references
+  and the Sphinx inputs page (imbalance keys) corrected; several stale
+  docstrings and enum note cells fixed.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.
