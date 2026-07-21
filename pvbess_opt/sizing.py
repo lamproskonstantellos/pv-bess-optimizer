@@ -363,7 +363,8 @@ def read_sizing_block(path: str | Path) -> dict[str, Any] | None:
         if not path.exists():
             return None
         try:
-            sheets = set(pd.ExcelFile(path).sheet_names)
+            with pd.ExcelFile(path) as _xl:
+                sheets = set(_xl.sheet_names)
         except (ValueError, OSError):
             return None
         if "sizing" not in sheets:

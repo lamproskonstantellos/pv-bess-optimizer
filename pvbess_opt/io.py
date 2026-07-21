@@ -4652,7 +4652,10 @@ def _read_kv_flat(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     """Read the input workbook and return the typed nested dict."""
     xlsx_path = Path(xlsx_path)
-    sheets = {str(name) for name in pd.ExcelFile(xlsx_path).sheet_names}
+    # Close the workbook handle deterministically — a bare pd.ExcelFile(...)
+    # leaks the underlying file (a ResourceWarning on every read).
+    with pd.ExcelFile(xlsx_path) as _xl:
+        sheets = {str(name) for name in _xl.sheet_names}
 
     missing = _V08_REQUIRED_SHEETS - sheets
     if missing:

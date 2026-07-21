@@ -593,7 +593,8 @@ def read_scenarios_block(path: str | Path) -> list[dict[str, Any]] | None:
     if path.suffix.lower() not in (".xlsx", ".xls") or not path.exists():
         return None
     try:
-        sheets = set(pd.ExcelFile(path).sheet_names)
+        with pd.ExcelFile(path) as _xl:
+            sheets = set(_xl.sheet_names)
     except (ValueError, OSError):
         return None
     if "scenarios" not in sheets:

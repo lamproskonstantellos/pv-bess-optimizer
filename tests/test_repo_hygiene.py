@@ -333,3 +333,35 @@ def test_pvbess_version_string_matches_init_version():
     assert match.group(1) == version, (
         f"README badge {match.group(1)!r} != __version__ {version!r}"
     )
+
+
+def test_read_workbook_does_not_leak_file_handle():
+    """A bare ``pd.ExcelFile(path)`` leaks the workbook file handle (a
+    ResourceWarning on every read — historically a large share of the
+    suite's warnings).  Reading the shipped workbook must not emit one."""
+    import gc
+    import warnings
+
+    from pvbess_opt.io import read_workbook
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ResourceWarning)
+        read_workbook(ROOT / "inputs" / "input.xlsx")
+        gc.collect()
+
+
+def test_no_unclosed_excelfile_in_package():
+    """Every ``pd.ExcelFile(...)`` in the package must be a context manager
+    (``with pd.ExcelFile(...)``) so the file handle is closed deterministically."""
+    offenders: list[str] = []
+    for path in (ROOT / "pvbess_opt").rglob("*.py"):
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if "pd.ExcelFile(" in stripped and not stripped.startswith("with "):
+                offenders.append(f"{path.relative_to(ROOT)}:{i}")
+    assert not offenders, (
+        "pd.ExcelFile without a `with` (leaks the file handle): "
+        + ", ".join(offenders)
+    )
