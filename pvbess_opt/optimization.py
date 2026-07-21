@@ -1340,18 +1340,24 @@ def build_model(
         # grid_to_load) into the slack RHS, the constraint reduces to
         # ``grid_to_load <= pv_to_bess + pv_curtail``, i.e. an hour can
         # only export when its load is fully covered without grid import.
-        m.slack = pyo.Var(m.T, domain=pyo.NonNegativeReals)
+        # NB: the component is named ``export_slack`` (not ``slack``) on
+        # purpose — pyomo's APPSI result loader treats a model attribute
+        # literally named ``slack`` as a reserved import Suffix and calls
+        # ``.import_enabled()`` on it, which crashes on a decision Var
+        # (``'IndexedVar' object has no attribute 'import_enabled'``) and
+        # made ``--solver appsi_highs`` unusable in self_consumption mode.
+        m.export_slack = pyo.Var(m.T, domain=pyo.NonNegativeReals)
         m.LOAD_PRIORITY_SLACK_DEF = pyo.Constraint(
             m.T,
             rule=lambda m, t: (
-                m.slack[t]
+                m.export_slack[t]
                 >= pv[t] + m.bess_dis_load[t] + m.bess_dis_grid[t] - load[t]
             ),
         )
         m.LOAD_PRIORITY_EXPORT = pyo.Constraint(
             m.T,
             rule=lambda m, t: (
-                m.pv_to_grid[t] + m.bess_dis_grid[t] <= m.slack[t]
+                m.pv_to_grid[t] + m.bess_dis_grid[t] <= m.export_slack[t]
             ),
         )
 
