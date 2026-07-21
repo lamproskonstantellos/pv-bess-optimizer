@@ -39,6 +39,7 @@ from .io import (
     reject_legacy_bess_capex_key,
     write_workbook,
 )
+from .io import TRAJECTORY_STREAMS as _TRAJECTORY_STREAMS
 
 logger = logging.getLogger(__name__)
 
@@ -821,8 +822,7 @@ def config_json_schema() -> dict[str, Any]:
         "type": "object",
         "description": (
             "Per-year stream multipliers (Eq. E24): mapping of stream "
-            "name (revenue_dam, revenue_retail, balancing_capacity, "
-            "balancing_activation, opex, opex_pv, opex_bess) to a "
+            "name (" + ", ".join(_TRAJECTORY_STREAMS) + ") to a "
             "values list or a {mode: replace|overlay, values: [...]} "
             "block; year-1 value must be 1.0."
         ),

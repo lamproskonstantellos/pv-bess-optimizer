@@ -719,9 +719,9 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "bess_augmentation_mode": frozenset({"top_up", "fixed_kwh"}),
     "debt_repayment": frozenset({"annuity", "linear", "sculpted"}),
     "debt_sizing_mode": frozenset({"manual", "target_dscr"}),
-    # 'p90' and 'low_price' parse (the key surface is stable) but
-    # validation rejects them with guidance until the matching lender
-    # cases are implemented; only 'base' is accepted today.
+    # 'base', 'p90' and 'low_price' are all accepted and implemented
+    # (pvbess_opt.lender.build_lender_cases): each selects the
+    # production/price case the debt schedule is sized against.
     "debt_sizing_case": frozenset({"base", "p90", "low_price"}),
     "ppa_structure": frozenset({"pay_as_produced", "baseload"}),
     "ppa_settlement": frozenset({"physical", "cfd"}),

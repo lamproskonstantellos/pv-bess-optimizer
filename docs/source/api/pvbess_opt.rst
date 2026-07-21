@@ -74,10 +74,20 @@ Economics & cash-flow
 .. automodule:: pvbess_opt.emissions
    :members:
 
+.. automodule:: pvbess_opt.lender
+   :members:
+
 PPA contracts
 ~~~~~~~~~~~~~
 
 .. automodule:: pvbess_opt.ppa
+   :members:
+   :undoc-members:
+
+Intraday venue
+~~~~~~~~~~~~~~
+
+.. automodule:: pvbess_opt.intraday
    :members:
    :undoc-members:
 
@@ -153,6 +163,9 @@ PV resource layer
 .. automodule:: pvbess_opt.resource
    :members:
 
+.. automodule:: pvbess_opt.resource.base
+   :members:
+
 .. automodule:: pvbess_opt.resource.pvgis
    :members:
 
@@ -196,6 +209,12 @@ Plotting
    :members:
 
 .. automodule:: pvbess_opt.plotting.balancing
+   :members:
+
+.. automodule:: pvbess_opt.plotting.intraday
+   :members:
+
+.. automodule:: pvbess_opt.plotting.price_scenarios
    :members:
 
 .. automodule:: pvbess_opt.plotting.degradation
