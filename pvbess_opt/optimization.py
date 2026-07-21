@@ -41,9 +41,10 @@ limit (the asymmetric p_charge_max / p_dis_max pair is not supported):
 Audit invariants
 ----------------
 
-After every solve :func:`verify_dispatch_invariants` checks the nine
-mandatory invariants.  Residuals are returned and logged at INFO; the
-``--strict`` CLI flag turns violations into errors.
+After every solve :func:`verify_dispatch_invariants` checks the ten
+mandatory invariants (invariant_1..invariant_10, the last being the
+Eq. S35 import-cap check).  Residuals are returned and logged at INFO;
+the ``--strict`` CLI flag turns violations into errors.
 
 Module-level tuning constants
 -----------------------------
@@ -535,10 +536,16 @@ def build_model(
 
     Load priority is enforced by the hard ``LOAD_PV_PRIORITY``
     constraint (Section 2 of the spec):
-    ``pv_to_load[t] == min(pv[t], load[t])`` exactly.  The slack-based
-    ``LOAD_PRIORITY_SLACK_DEF`` enforces Section 5 (surplus-only
-    export) — exports are gated by the same slack so an hour with
-    ``grid_to_load > 0`` cannot also export.
+    ``pv_to_load[t] == min(pv[t], load[t])`` exactly.  Surplus-only
+    export (Section 5) is enforced by the ``NO_SIM_GRID_IMPORT`` /
+    ``NO_SIM_GRID_EXPORT`` binary pair: an exporting step forces
+    ``y_grid_io = 0``, which pins ``grid_to_load = grid_to_bess = 0``,
+    so load is fully covered domestically before any export.  The
+    ``LOAD_PRIORITY_SLACK_DEF`` / ``LOAD_PRIORITY_EXPORT`` pair (Eqs.
+    S8/S9) is retained as a non-binding formulation of the same rule —
+    with ``export_slack`` a free non-negative variable that is absent
+    from the objective, it does not by itself restrict the feasible
+    set (the solver simply raises the slack to satisfy S9).
 
     Parameters
     ----------
@@ -1132,11 +1139,12 @@ def build_model(
         # horizon, and only when the window's FIRST calendar day was
         # already partly committed by the previous window) overrides the
         # full daily cap for that boundary day with the budget REMAINING
-        # for it, so a calendar day split across a commit seam
-        # (``commit_hours`` not dividing 24) cannot cycle up to 2x the cap.
-        # ``None`` — the single-solve path and every window whose boundary
-        # day is fresh (``commit_hours`` divides 24) — leaves every day at
-        # the full daily cap, so the disabled path is bit-identical.
+        # for it, so a calendar day split across a commit seam (a window
+        # start that is NOT midnight-aligned — i.e. 24 does not divide
+        # ``commit_hours``) cannot cycle up to 2x the cap.  ``None`` — the
+        # single-solve path and every window whose boundary day is fresh
+        # (start on midnight — 24 divides ``commit_hours``) — leaves every
+        # day at the full daily cap, so the disabled path is bit-identical.
         m.CYC = pyo.ConstraintList()
         _cap_day_full = float(params["max_cycles_per_day"]) * e_cap_param
         for _day_pos, indices in enumerate(day_to_idx.values()):
@@ -1350,17 +1358,22 @@ def build_model(
     # dispatch, so the constraint would be economically non-binding.
     if mode == "self_consumption":
         # Section 5 of the Self-consumption spec — surplus-only export.
-        # Substituting PV_SPLIT (pv = pv_to_load + pv_to_bess + pv_to_grid +
-        # pv_curtail) and LOAD_BAL (load = pv_to_load + bess_dis_load +
-        # grid_to_load) into the slack RHS, the constraint reduces to
-        # ``grid_to_load <= pv_to_bess + pv_curtail``, i.e. an hour can
-        # only export when its load is fully covered without grid import.
-        # NB: the component is named ``export_slack`` (not ``slack``) on
-        # purpose — pyomo's APPSI result loader treats a model attribute
-        # literally named ``slack`` as a reserved import Suffix and calls
-        # ``.import_enabled()`` on it, which crashes on a decision Var
-        # (``'IndexedVar' object has no attribute 'import_enabled'``) and
-        # made ``--solver appsi_highs`` unusable in self_consumption mode.
+        # The LOAD_PRIORITY_SLACK_DEF / LOAD_PRIORITY_EXPORT pair (Eqs.
+        # S8/S9) is a NON-BINDING statement of the rule as written:
+        # ``export_slack`` is a free non-negative variable absent from the
+        # objective, so S9 (export <= slack) can always be met by raising
+        # the slack — the pair does NOT by itself restrict exports.
+        # Surplus-only export is enforced instead by the
+        # NO_SIM_GRID_IMPORT / NO_SIM_GRID_EXPORT binary pair below: an
+        # exporting step pins ``y_grid_io = 0``, forcing
+        # ``grid_to_load = grid_to_bess = 0`` so load is covered
+        # domestically before any export (see docs/self_consumption_design.md
+        # Eqs. S8/S9).  The pair is retained (rather than removed) because
+        # the ``export_slack`` Var name also guards a solver regression:
+        # a Var literally named ``slack`` collides with pyomo's APPSI
+        # result loader (a reserved import Suffix whose ``.import_enabled()``
+        # crashes on a decision Var), which made ``--solver appsi_highs``
+        # unusable in self_consumption mode.
         m.export_slack = pyo.Var(m.T, domain=pyo.NonNegativeReals)
         m.LOAD_PRIORITY_SLACK_DEF = pyo.Constraint(
             m.T,

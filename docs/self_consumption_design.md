@@ -187,17 +187,29 @@ $x^{gl}_t$ at retail.  Active in `self_consumption` only.
 
 $$\sigma_t \ge G_t + x^{bl}_t + x^{bg}_t - L_t \tag{S8}$$
 
-Active in `self_consumption` only.  The slack underpins the
-surplus-only export rule of Section 5 of the MD.
+Active in `self_consumption` only.  **As written this pair (S8/S9) is
+non-binding**: $\sigma_t$ is a free non-negative variable absent from
+the objective (S1), so the solver can always raise it to satisfy S9 —
+the pair does not by itself restrict exports.  The binding surplus-only
+export rule of Section 5 of the MD is enforced by the `NO_SIM` binary
+pair (S17): an exporting step pins $u^{io}_t = 0$, forcing
+$x^{gl}_t = x^{gb}_t = 0$, so load is covered domestically before any
+export.  S8/S9 are retained as the declarative statement of the rule
+(and because the ``export_slack`` Var name guards a `--solver
+appsi_highs` regression — a Var named ``slack`` collides with APPSI's
+reserved import Suffix).
 
 ### LOAD_PRIORITY_EXPORT(t)
 
 $$x^{pg}_t + x^{bg}_t \le \sigma_t \tag{S9}$$
 
-After substituting `PV_SPLIT` and `LOAD_BAL`, the inequality reduces to
-$x^{gl}_t \le x^{pb}_t + x^{pc}_t$: a step can only export when its
-load is fully covered without grid import.  Active in
-`self_consumption` only.
+The intended reading — substituting `PV_SPLIT` and `LOAD_BAL`, the
+inequality reduces to $x^{gl}_t \le x^{pb}_t + x^{pc}_t$ (a step can
+only export when its load is fully covered without grid import) —
+holds only if $\sigma_t$ were pinned to its S8 lower bound.  Because
+the slack is free and unpenalized it is not, so this reduction is NOT
+enforced here; the binding surplus-only guarantee comes from `NO_SIM`
+(S17, see S8's note).  Active in `self_consumption` only.
 
 ### SOC_DYN(t)
 

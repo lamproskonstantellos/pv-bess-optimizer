@@ -586,11 +586,15 @@ def _seam_case():
     return params, ts
 
 
-def _max_daily_discharge_kwh(df: pd.DataFrame) -> float:
+def _daily_discharge_kwh(df: pd.DataFrame) -> pd.Series:
     d = df.copy()
     d["day"] = pd.to_datetime(d["timestamp"]).dt.date
     d["dis"] = d["bess_dis_load_kwh"] + d["bess_dis_grid_kwh"]
-    return float(d.groupby("day")["dis"].sum().max())
+    return d.groupby("day")["dis"].sum()
+
+
+def _max_daily_discharge_kwh(df: pd.DataFrame) -> float:
+    return float(_daily_discharge_kwh(df).max())
 
 
 def test_rh_daily_cap_holds_across_seam_commit_not_dividing_24():
@@ -608,15 +612,36 @@ def test_rh_daily_cap_holds_across_seam_commit_not_dividing_24():
     assert _max_daily_discharge_kwh(df) <= cap_kwh + 1e-3
 
 
-def test_rh_daily_cap_commit_divides_24_is_byte_identical_to_full_cap():
-    """The seam fix must be inert when the commit slice is day-aligned: every
-    boundary day is fresh, so the threaded budget is ``None`` and the daily
-    cap stays at its full value.  A day-aligned commit still cycles once/day
-    and never trips the cap."""
+def test_rh_daily_cap_commit_multiple_of_24_is_inert():
+    """The seam fix must be INERT when every window start is midnight-aligned
+    (24 divides ``commit_hours``): the threaded budget stays ``None`` and each
+    day keeps its full cap.  In this deck the dominant midday arb fills the
+    cap every day, so the correct dispatch discharges EXACTLY the cap on all
+    three days — a threading budget erroneously applied to a boundary day
+    would REDUCE that day below the cap (still <= cap, so the old bound-only
+    assertion could not catch it)."""
     params, ts = _seam_case()
     cap_kwh = params["max_cycles_per_day"] * params["bess_capacity_kwh"]
     df, _ = rolling_horizon_dispatch(
         params, ts, window_hours=36, commit_hours=24,
         forecast_seed=None, solver_name="highs", mip_gap=1e-9,
     )
+    per_day = _daily_discharge_kwh(df)
+    # Every calendar day is exactly at the cap: threading did not shave any.
+    assert np.allclose(per_day.to_numpy(dtype=float), cap_kwh, atol=1e-3)
+
+
+def test_rh_daily_cap_holds_when_commit_is_a_divisor_of_24_not_a_multiple():
+    """``commit_hours = 12`` DIVIDES 24 but 24 does not divide it, so window
+    starts land at midday and split a calendar day across the seam — the
+    threading MUST activate (the sibling comments once mis-stated this case as
+    inert).  Without the boundary-day budget the split day would cycle twice
+    (4000 kWh); the cap must hold at 2000 kWh."""
+    params, ts = _seam_case()
+    cap_kwh = params["max_cycles_per_day"] * params["bess_capacity_kwh"]
+    df, _ = rolling_horizon_dispatch(
+        params, ts, window_hours=36, commit_hours=12,
+        forecast_seed=None, solver_name="highs", mip_gap=1e-9,
+    )
+    # A naive per-window cap would allow ~2x here; threading holds it at 1x.
     assert _max_daily_discharge_kwh(df) <= cap_kwh + 1e-3
