@@ -375,6 +375,30 @@ def test_tax_layer_depreciates_events_like_replacement_tranches():
         base["project_year"] == 4, "depreciation_eur",
     ].iloc[0])
     assert dep_4 == pytest.approx(dep_4_base, rel=1e-12)
+    # Event-year exclusion — the property that makes it a capital event and
+    # not an operating expense: the augmentation cash OUTFLOW must NOT
+    # depress taxable income in its booking year (it is deducted ONLY via
+    # the depreciation tranche above, exactly like the replacement CAPEX).
+    # The booking year's tranche has not yet started (dep_4 == dep_4_base),
+    # so the sole tax-relevant difference vs the no-augmentation baseline
+    # must be the OPERATING effect of the added capacity — i.e. the change
+    # in net cashflow with the capital outflow stripped back out.  Without
+    # the EBITDA add-back the outflow is expensed here AND depreciated,
+    # double-deducting the event.
+    assert aug_4 > 0.0  # guard: the augmentation actually fired
+    ti_4 = float(cf.loc[cf["project_year"] == 4, "taxable_income_eur"].iloc[0])
+    ti_4_base = float(base.loc[
+        base["project_year"] == 4, "taxable_income_eur",
+    ].iloc[0])
+    net_4 = float(cf.loc[cf["project_year"] == 4, "net_cashflow_eur"].iloc[0])
+    net_4_base = float(base.loc[
+        base["project_year"] == 4, "net_cashflow_eur",
+    ].iloc[0])
+    aug_out_4 = float(cf.loc[
+        cf["project_year"] == 4, "augmentation_capex_eur",
+    ].iloc[0])  # negative (an outflow)
+    operating_delta = (net_4 - net_4_base) - aug_out_4
+    assert (ti_4 - ti_4_base) == pytest.approx(operating_delta, abs=1e-6)
 
 
 def test_degradation_report_carries_added_kwh():
