@@ -33,6 +33,8 @@ See :doc:`outputs` for the full reference.  Quick summary::
     │   ├── balancing_reservation_profile.pdf   # balancing on
     │   ├── balancing_mc_distribution.pdf       # balancing on
     │   ├── cfe_duration_curve.pdf              # emissions accounting on
+    │   ├── price_path_fan.pdf                  # price-scenario engine armed
+    │   ├── capture_kpis.pdf                    # price-scenario engine armed
     │   └── rolling_horizon_distribution.pdf    # rolling horizon on
     ├── 05_energy_plots/
     │   ├── energy_sankey.pdf                 # Year-1 energy-flow diagram

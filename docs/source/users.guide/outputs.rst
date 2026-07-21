@@ -14,7 +14,12 @@ A run produces a single result directory under ``results/``.
 * ``03_results.xlsx``: KPIs, monthly KPIs, cashflows (yearly /
   quarterly / monthly), financial KPIs, sensitivity, lifetime yearly
   aggregates, rolling-horizon MC distribution (when active),
-  economic assumptions echo.
+  economic assumptions echo, the ``degradation`` (SOH / cycle-fade)
+  trajectory for BESS projects, the ``debt_schedule`` / ``lender_cases``
+  sheets (debt layer active), and — when the market-data / price-scenario
+  engine is armed — the ``market_data_provenance``,
+  ``scenario_price_paths``, ``scenario_resolve_delta`` and
+  ``price_scenario_ensemble`` sheets.
 * ``04_financial_plots/``: cumulative cashflow, yearly bars, NPV
   waterfall, payback visualisation, monthly cashflow Year-1, NPV /
   IRR tornados, the yearly revenue stack, the BESS revenue waterfall /
@@ -24,7 +29,9 @@ A run produces a single result directory under ``results/``.
   distribution (balancing on), the DSCR profile (levered runs), the
   DA-vs-intraday price duration curves and the intraday net position
   (intraday venue on), the 24/7-CFE duration curve (emissions
-  accounting on) and the rolling-horizon distribution (when active).
+  accounting on), the price-path fan (``price_path_fan.pdf``) and PV
+  capture-price KPIs (``capture_kpis.pdf``) when the price-scenario
+  engine is armed, and the rolling-horizon distribution (when active).
 * ``05_energy_plots/``: the Year-1 energy-flow diagram
   (``energy_sankey.pdf``, every run) and the lifetime summary chart
   (``lifetime_summary_<start>-<end>.pdf``) plus daily / monthly /
