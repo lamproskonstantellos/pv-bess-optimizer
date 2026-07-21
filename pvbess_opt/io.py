@@ -1644,8 +1644,8 @@ _MARKET_DATA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "8760-hour convention). Requires the workbook timeseries to span "
      "one full non-leap year from Jan 1 00:00."),
     ("price_resample_policy", "step_hold", "enum",
-     "Fixed intensive-quantity resampling policy (single accepted "
-     "value). Prices are EUR/MWh levels: coarser native data is "
+     "Fixed intensive-quantity resampling policy; the only accepted value "
+     "is 'step_hold'. Prices are EUR/MWh levels: coarser native data is "
      "step-held onto a finer model grid (an hourly price repeats over "
      "its four quarters, never divided), finer data is averaged onto "
      "a coarser grid with an INFO that intra-period spread is "
@@ -1661,11 +1661,13 @@ _MARKET_DATA_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "workbook columns (override semantics), recorded on the "
      "market_data_provenance results sheet."),
     ("imbalance_source", "file", "enum",
-     "Imbalance price source; same options and override semantics as "
-     "balancing_source ('entsoe' = A85 imbalance prices, 'admie' = GR "
-     "imbalance file). The fetched columns must match the configured "
-     "imbalance_pricing regime (single vs dual) - a mismatch fails "
-     "loudly instead of settling on stale workbook prices."),
+     "Imbalance price source, one of 'file' | 'auto' | 'entsoe' | 'admie' "
+     "(same override semantics as balancing_source): 'file' (default) keeps "
+     "the workbook columns, 'auto' fetches when a token is configured, "
+     "'entsoe' = A85 imbalance prices, 'admie' = GR imbalance file. The "
+     "fetched columns must match the configured imbalance_pricing regime "
+     "(single vs dual) - a mismatch fails loudly instead of settling on "
+     "stale workbook prices."),
     ("intraday_source", "file", "enum",
      "Intraday-auction price source: 'file' (default) keeps the "
      "workbook ida_price_eur_per_mwh column; 'entsoe' fetches the "

@@ -529,8 +529,12 @@ def require_economic_columns(df: pd.DataFrame, *, context: str) -> None:
     Enforces the ordering contract: :func:`compute_kpis` (or
     :func:`add_economic_columns`) must run before the financial pipeline
     so revenue is never silently defaulted to zero.  ``add_economic_columns``
-    always writes the full :data:`ECONOMIC_COLUMNS` set together, so the
-    absence of *all* of them means it was never called.
+    always writes the five DAM/retail columns (the four ``profit_*_eur`` legs
+    plus ``expense_charge_bess_grid_eur``); the remaining
+    :data:`ECONOMIC_COLUMNS` entries (the grid-charging fee, the two PPA
+    columns and the two intraday columns) are conditional on their feature
+    being active.  The always-written five mean the absence of *all* of them
+    is a reliable signal that the function was never called.
     """
     if not any(c in df.columns for c in ECONOMIC_COLUMNS):
         raise ValueError(

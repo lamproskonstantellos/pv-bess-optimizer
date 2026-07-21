@@ -2222,12 +2222,17 @@ def derive_monthly_cashflow(
       End-of-year placement matches the yearly sheet's ``1/(1+r)^y``
       discounting exactly (December of year ``y`` carries that same
       factor), so the monthly and yearly DCFs agree on the event.
-    * ``net_cashflow_eur`` — ``revenue_eur + balancing_revenue_eur +
-      balancing_aggregator_fee_eur + ppa_revenue_eur + opex_eur +
-      capex_eur + devex_eur``. Sums to
-      ``yearly_cf['net_cashflow_eur']`` row-for-row in EVERY operating
-      year, including a BESS-replacement year.  (Year 0 is not part of
-      the monthly frame; the initial outlay stays on the yearly sheet.)
+    * ``net_cashflow_eur`` — the sum of EVERY per-month cash component:
+      the same stream set the yearly ``net_cashflow_eur`` carries
+      (``revenue_eur`` net of the E13 aggregator fee, ``balancing_revenue_eur``
+      and its aggregator fee, the E13c/E13d route-to-market and optimizer
+      fees and floor top-up, grid-charging fee, imbalance cost, toll, state
+      support and clawback, capacity market, levy, curtailment compensation,
+      GO, support settlement, PPA, intraday revenue and fee, OPEX, CAPEX,
+      DEVEX and augmentation).  Sums to ``yearly_cf['net_cashflow_eur']``
+      row-for-row in EVERY operating year, including a BESS-replacement year.
+      (Year 0 is not part of the monthly frame; the initial outlay stays on
+      the yearly sheet.)
     * ``discounted_cf_eur`` — ``net_cashflow_eur`` discounted at
       ``econ['discount_rate_pct']`` to the start of the project,
       end-of-month convention: month ``m`` of year ``y`` lands at

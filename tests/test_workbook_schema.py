@@ -381,3 +381,36 @@ def test_max_injection_profile_missing_logs_info(tmp_path, caplog):
         "max_injection_profile" in rec.getMessage().lower()
         for rec in caplog.records
     )
+
+
+def test_enum_notes_and_unit_labels_agree_with_allowed_values():
+    """Every enum key's note cell must spell out its accepted tokens, and any
+    unit label that lists values (``a | b | c``) must match _ALLOWED_VALUES
+    exactly — so the human-readable guidance can never drift from the parser's
+    accepted set.  ``bidding_zone`` is exempt from the note check: it accepts
+    the whole (large) zone registry and its note points there rather than
+    listing every EIC zone."""
+    from pvbess_opt.io import _ALLOWED_VALUES, _SHEET_ROW_TEMPLATES
+
+    notes: dict[str, str] = {}
+    units: dict[str, str] = {}
+    for rows in _SHEET_ROW_TEMPLATES.values():
+        for key, _default, unit, note in rows:
+            notes[key] = note
+            units[key] = unit
+
+    _LARGE_REGISTRY = {"bidding_zone"}
+    for key, values in _ALLOWED_VALUES.items():
+        if key in units:  # some allowed-value keys are timeseries-only
+            unit = units[key]
+            if "|" in unit:
+                listed = {tok.strip() for tok in unit.split("|")}
+                assert listed == set(values), (
+                    f"{key}: unit label {unit!r} != allowed values {set(values)}"
+                )
+            if key not in _LARGE_REGISTRY:
+                note = notes.get(key, "")
+                missing = [v for v in values if v not in note]
+                assert not missing, (
+                    f"{key}: note omits accepted token(s) {missing}"
+                )

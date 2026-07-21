@@ -303,17 +303,12 @@ def assemble_year_local(
                 )
             values = day_columns[column]
             if steps_per_hour is None:
-                kind = (
-                    "spring" if day == spring
-                    else "fall" if day == fall else "normal"
-                )
-                # Infer the native cadence from the first day's count
-                # (transition days corrected by their +/- one hour).
+                # The cadence is inferred from the FIRST day, which is always
+                # 1 January (expected_days spans the full calendar year in
+                # order and a partial year is rejected above) — never a
+                # DST-transition day, so no +/- one-hour correction applies
+                # here.  The spring/fall re-gridding happens per-day below.
                 n = len(values)
-                if kind == "spring":
-                    n += n // 23
-                elif kind == "fall":
-                    n -= n // 25
                 if n % 24 != 0 or (60 % (n // 24)) != 0:
                     raise MarketDataError(
                         f"{source_name}: cannot infer a whole-minute "
