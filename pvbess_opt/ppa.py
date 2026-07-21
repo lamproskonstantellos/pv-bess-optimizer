@@ -45,9 +45,6 @@ from typing import Any
 import pandas as pd
 
 __all__ = [
-    "PPA_NEGATIVE_PRICE_RULES",
-    "PPA_SETTLEMENTS",
-    "PPA_STRUCTURES",
     "SUPPORT_REF_PERIODS",
     "SUPPORT_SCHEMES",
     "PpaConfig",
@@ -56,9 +53,9 @@ __all__ = [
     "resolve_ppa_config",
 ]
 
-PPA_STRUCTURES: tuple[str, ...] = ("pay_as_produced", "baseload")
-PPA_SETTLEMENTS: tuple[str, ...] = ("physical", "cfd")
-PPA_NEGATIVE_PRICE_RULES: tuple[str, ...] = ("none", "suspend")
+# The ppa_structure / ppa_settlement / ppa_negative_price_rule enums are
+# validated centrally in ``io._ALLOWED_VALUES`` (the input-schema
+# authority); no separate copy is kept here to avoid a silent drift trap.
 #: Reference-period support settlement (Eqs. E55-E57 in
 #: docs/economics_design.md): none (off), the Greek DAPEEP one-way
 #: sliding Feed-in-Premium, or a two-way CfD.

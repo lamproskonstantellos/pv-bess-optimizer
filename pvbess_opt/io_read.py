@@ -39,6 +39,7 @@ from .io import (
     reject_legacy_bess_capex_key,
     write_workbook,
 )
+from .io import TRAJECTORY_STREAMS as _TRAJECTORY_STREAMS
 
 logger = logging.getLogger(__name__)
 
@@ -821,8 +822,7 @@ def config_json_schema() -> dict[str, Any]:
         "type": "object",
         "description": (
             "Per-year stream multipliers (Eq. E24): mapping of stream "
-            "name (revenue_dam, revenue_retail, balancing_capacity, "
-            "balancing_activation, opex, opex_pv, opex_bess) to a "
+            "name (" + ", ".join(_TRAJECTORY_STREAMS) + ") to a "
             "values list or a {mode: replace|overlay, values: [...]} "
             "block; year-1 value must be 1.0."
         ),
@@ -835,6 +835,23 @@ def config_json_schema() -> dict[str, Any]:
             "weight_pct (summing to 100), store_path, notes} entries "
             "read by the pricedata layer; armed by "
             "scenario_engine.price_scenarios_enabled."
+        ),
+    }
+    properties["financing"] = {
+        "type": "object",
+        "description": (
+            "Optional convenience block mapped onto economics keys: "
+            "gearing (0..1 → gearing_pct), interest_rate (0..1 → "
+            "debt_interest_rate_pct), tenor_years (→ debt_tenor_years), "
+            "repayment (→ debt_repayment)."
+        ),
+    }
+    properties["grid"] = {
+        "type": "object",
+        "description": (
+            "Optional convenience block mapped onto economics keys: "
+            "co2_intensity (kg/MWh → grid_co2_intensity_kg_per_mwh), "
+            "co2_annual_decline (0..1 → grid_co2_annual_decline_pct)."
         ),
     }
     return {

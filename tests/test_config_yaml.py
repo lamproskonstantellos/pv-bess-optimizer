@@ -54,6 +54,18 @@ def test_json_schema_validates_a_sample_config():
     assert validate_config(raw, schema) == []
 
 
+def test_json_schema_trajectories_description_lists_every_stream():
+    """The config-schema trajectories description must advertise ALL
+    stream names, including the Eq. E60/E61 split-stream taxonomy — it
+    is the introspectable surface a user reads to discover them.
+    """
+    from pvbess_opt.io import TRAJECTORY_STREAMS
+
+    desc = config_json_schema()["properties"]["trajectories"]["description"]
+    for stream in TRAJECTORY_STREAMS:
+        assert stream in desc, f"trajectory stream {stream!r} missing from schema"
+
+
 def test_json_schema_rejects_bad_values():
     raw = {
         "pv": {"pv_source": "solar", "pv_nameplate_kwp": "lots"},

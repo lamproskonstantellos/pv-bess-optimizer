@@ -218,3 +218,14 @@ def test_script_runs_standalone_without_install(tmp_path: Path) -> None:
         "standalone `python scripts/polish_input_workbook.py` failed:\n"
         + result.stderr
     )
+
+
+def test_parameter_sheets_match_row_templates() -> None:
+    """Every key/value sheet with a canonical row template must be in the
+    polish rebuild list — else a migrated (old) workbook silently never
+    gains a newly added sheet.
+    """
+    from pvbess_opt.io import _SHEET_ROW_TEMPLATES
+    from scripts.polish_input_workbook import _PARAMETER_SHEETS
+
+    assert set(_PARAMETER_SHEETS) == set(_SHEET_ROW_TEMPLATES)

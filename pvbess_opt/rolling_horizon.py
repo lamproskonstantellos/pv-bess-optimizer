@@ -520,6 +520,25 @@ def rolling_horizon_dispatch(
     # return the battery to the year-initial SOC so the realised profit
     # is comparable with the perfect-foresight profit.
     bess_capacity_kwh = float(params.get("bess_capacity_kwh", 0.0) or 0.0)
+
+    # Annual throughput cap (Eq. E46): the MILP applies it per solve, so a
+    # per-window solve would cap each window at the FULL annual budget and
+    # never bind, letting the stitched year exceed the warranty cap and
+    # beat the perfect-foresight benchmark.  Thread the REMAINING budget
+    # across windows the same way SOC is carried; ``None`` when the cap is
+    # off (max_cycles_per_year == 0), which keeps the disabled path
+    # byte-identical.
+    _raw_annual_cycles = params.get("max_cycles_per_year")
+    _max_cycles_per_year = (
+        0.0 if _raw_annual_cycles is None else float(_raw_annual_cycles)
+    )
+    annual_budget_kwh: float | None = (
+        _max_cycles_per_year * bess_capacity_kwh
+        if _max_cycles_per_year > 0.0 and bess_capacity_kwh > 0.0
+        else None
+    )
+    committed_discharge_kwh = 0.0
+
     if bool(params.get("terminal_soc_equal", True)) and bess_capacity_kwh > 0.0:
         year_close_soc_kwh: float | None = (
             float(params.get("initial_soc_frac", 0.0) or 0.0)
@@ -562,6 +581,10 @@ def rolling_horizon_dispatch(
         else:
             window_noisy = window_ts
 
+        window_budget_kwh = (
+            max(annual_budget_kwh - committed_discharge_kwh, 0.0)
+            if annual_budget_kwh is not None else None
+        )
         res_window, _solver = run_scenario(
             params, window_noisy,
             solver_name=solver_name,
@@ -573,6 +596,7 @@ def rolling_horizon_dispatch(
             terminal_soc_target_kwh=(
                 year_close_soc_kwh if win_end == n else None
             ),
+            annual_cycle_budget_kwh=window_budget_kwh,
             **solve_kwargs,
         )
 
@@ -601,6 +625,13 @@ def rolling_horizon_dispatch(
         # frame lines up with ``ts``.
         committed["timestamp"] = ts["timestamp"].iloc[cursor:commit_end_global].values
         committed_chunks.append(committed)
+
+        # Draw down the remaining annual throughput budget by the discharge
+        # actually committed this window (Eq. E46 across window seams).
+        if annual_budget_kwh is not None:
+            committed_discharge_kwh += float(
+                (committed["bess_dis_load_kwh"] + committed["bess_dis_grid_kwh"]).sum()
+            )
 
         # SOC carryover.
         if local_commit_n < len(res_window):

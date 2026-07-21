@@ -92,7 +92,7 @@ $\pi^{\mathrm{DAM}}_t$ and retail price $\pi^{\mathrm{ret}}_t$
 | `soc[t]` | $E_t$ | $\mathbb{R}_{\ge 0}$ (kWh) |
 | `y_charge[t]`, `y_dis[t]` | $u^{c}_t, u^{d}_t$ | $\{0,1\}$ |
 | `y_grid_io[t]` | $u^{io}_t$ | $\{0,1\}$ (this mode only) |
-| `slack[t]` | $\sigma_t$ | $\mathbb{R}_{\ge 0}$ (this mode only) |
+| `export_slack[t]` | $\sigma_t$ | $\mathbb{R}_{\ge 0}$ (this mode only) |
 | `z_pv_active[t]` | $z_t$ | $\{0,1\}$ (only when `allow_bess_grid_charging`) |
 | `r_balancing[k, t]` | $r_{k,t}$ | $\mathbb{R}_{\ge 0}$ kW (only when `balancing_enabled` and a BESS is present) |
 
@@ -531,7 +531,7 @@ Invariant (S27) reports 0: the cap is binding in the curtailed step.
 * Mode carve-outs (enforced by `tests/test_mode_switch_matrix.py`):
   `merchant` drops `LOAD_BAL`, `LOAD_PV_PRIORITY`,
   `LOAD_PRIORITY_SLACK_DEF/EXPORT`, `NO_SIM_GRID_IMPORT/EXPORT`
-  (+ `y_grid_io`, `slack`), the avoided-cost term, and invariants
+  (+ `y_grid_io`, `export_slack`), the avoided-cost term, and invariants
   2, 5, 6, 9; it adds the three load-flow pinning constraints
   (`docs/merchant_design.md`).
 * Mode resolution is centralised in `modes.resolve_mode`; the only

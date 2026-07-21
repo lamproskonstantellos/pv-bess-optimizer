@@ -434,7 +434,23 @@ def apply_price_scenarios(
         raise PriceDataError(
             "price scenarios need project_lifecycle_years >= 1."
         )
-    start_year = int(econ.get("project_start_year", 0) or 0)
+    # Default the start year to the SAME schema value the rest of the
+    # pipeline uses (io.PROJECT_SHEET_DEFAULTS): a blank/zero cell must not
+    # collapse to calendar year 0, which drives the real→nominal / TYNDP
+    # basis bridge (Eq. G-basis) to ~0 and silently zeroes projected
+    # prices.  Lazy import keeps pricedata decoupled from the heavy io
+    # module and sidesteps any import cycle.
+    from pvbess_opt.io import PROJECT_SHEET_DEFAULTS
+
+    start_year = int(
+        econ.get("project_start_year")
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
+    if start_year <= 0:
+        raise PriceDataError(
+            "price scenarios need a positive project_start_year (got "
+            f"{start_year!r}); set project_start_year on the project sheet."
+        )
     dt_minutes = _infer_dt_minutes(ts)
     engine_basis = str(econ.get("price_basis", "nominal") or "nominal")
     engine_base_year = int(econ.get("price_base_year", 0) or 0)

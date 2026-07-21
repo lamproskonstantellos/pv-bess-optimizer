@@ -44,14 +44,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from pvbess_opt.balancing import PRODUCTS_ALL
 from pvbess_opt.marketdata import resample_intensive
 
 logger = logging.getLogger(__name__)
 
 #: Balancing products a store may price (FCR carries no activation).
-BALANCING_PRODUCTS: tuple[str, ...] = (
-    "fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn",
-)
+#: Single-sourced from :data:`pvbess_opt.balancing.PRODUCTS_ALL` so the
+#: pricing layer and the MILP/KPI layer can never disagree on the set.
+BALANCING_PRODUCTS: tuple[str, ...] = PRODUCTS_ALL
 
 #: Providers accepted on the ``price_scenarios`` sheet.  ``file`` reads
 #: a ready-made store directory; ``parametric`` / ``tyndp`` generate or

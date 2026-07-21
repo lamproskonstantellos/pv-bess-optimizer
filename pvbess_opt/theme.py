@@ -346,21 +346,21 @@ FINANCIAL_COLORS: dict[str, str] = {
     # (Eq. E39); rendered dashed, only while the tax layer is on.
     "cumulative_dcf_post_tax": "#5C6BC0",  # Material indigo 400
     # PPA contract leg (pay-as-produced strike revenue; a CfD leg may
-    # render negative).  Matches MERCHANT_COLORS["PPA revenue"].
-    "ppa_revenue":      "#5D4037",  # Material brown 700
+    # render negative).  Single-sourced from MERCHANT_COLORS so the stream
+    # reads identically across both plot families.
+    "ppa_revenue":      MERCHANT_COLORS["PPA revenue"],
     # Aggregate balancing-revenue marker used by plots that surface the
     # FCR / aFRR / mFRR products as a single roll-up (e.g. the Year-1
     # monthly cash-flow stack).  Distinct from every per-product hex.
     "balancing_revenue": "#00796B",  # Material teal 700
-    # Balancing-product segments — colours match the per-product
-    # palette in :data:`BM_COLOURS` so the same product reads as the
-    # same colour on the revenue-stack plot and on the balancing
-    # revenue waterfall / capacity-vs-activation split plots.
-    "bm_fcr":      "#1f77b4",
-    "bm_afrr_up":  "#ff7f0e",
-    "bm_afrr_dn":  "#ffbb78",
-    "bm_mfrr_up":  "#2ca02c",
-    "bm_mfrr_dn":  "#98df8a",
+    # Balancing-product segments — derived from :data:`BM_COLOURS` (defined
+    # once) so the same product reads as the same colour on the revenue-
+    # stack plot and on the balancing waterfall / capacity-vs-activation
+    # split plots; a single-sourced hue can never drift between the two.
+    **{
+        f"bm_{_p}": BM_COLOURS[_p]
+        for _p in ("fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+    },
     # Foreground net-revenue line — near-black (Material grey 900),
     # IEEE publication-style emphasis colour.  High contrast against
     # every saturated stack colour above; white-edged markers keep it

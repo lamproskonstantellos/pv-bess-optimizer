@@ -176,3 +176,38 @@ def test_run_scenario_stashes_achieved_gap_on_frame():
     gap = res.attrs.get("solver_gap_achieved")
     assert gap is not None
     assert 0.0 <= gap < 1e-2  # near the requested 1e-4
+
+
+def _appsi_highs_available() -> bool:
+    try:
+        from pyomo.contrib.appsi.solvers.highs import Highs
+        return bool(Highs().available())
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(
+    not _appsi_highs_available(), reason="appsi_highs solver not available",
+)
+def test_appsi_highs_solves_self_consumption_without_slack_collision():
+    """Regression: a decision Var literally named ``slack`` collides with
+    pyomo's APPSI reserved import Suffix (the loader calls
+    ``.import_enabled()`` on it), crashing every self_consumption solve
+    under ``--solver appsi_highs``.  The Var is named ``export_slack``.
+    """
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from conftest import _make_short_ts, _short_params
+
+    from pvbess_opt.optimization import build_model, run_scenario
+
+    params = _short_params("self_consumption")
+    ts = _make_short_ts(24, with_load=True)
+    model = build_model(params, ts)
+    assert not hasattr(model, "slack")   # reserved APPSI suffix name
+    assert hasattr(model, "export_slack")
+    res, resolved = run_scenario(params, ts, solver_name="appsi_highs")
+    assert resolved == "appsi_highs"
+    assert len(res) == 24

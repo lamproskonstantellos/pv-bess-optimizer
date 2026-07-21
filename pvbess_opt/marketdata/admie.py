@@ -223,7 +223,11 @@ def _nominal_day(
         return values
     if kind == "spring" and len(values) == nominal - steps_per_hour:
         at = _DST_HOUR * steps_per_hour
-        fill = values[at - steps_per_hour:at]
+        # Flat last-value fill for the skipped local hour, matching the
+        # normative UTC-path contract (base.sample_local_year, rule 3):
+        # repeat the single step before the hole, not the whole preceding
+        # hour block — the two differ only at sub-hourly cadence.
+        fill = np.repeat(values[at - 1:at], steps_per_hour)
         return np.concatenate([values[:at], fill, values[at:]])
     if kind == "fall" and len(values) == nominal + steps_per_hour:
         drop_from = (_DST_HOUR + 1) * steps_per_hour
