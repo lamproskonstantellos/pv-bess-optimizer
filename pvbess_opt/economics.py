@@ -72,6 +72,7 @@ import numpy as np
 import pandas as pd
 
 from .availability import availability_factor
+from .balancing import PRODUCTS_ALL, PRODUCTS_WITH_ACTIVATION
 from .constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOE_LOW_EUR_PER_MWH,
@@ -1161,9 +1162,11 @@ def build_yearly_cashflow(
     # Per-product balancing split (Eq. E61) — same gating.  The
     # per-product Year-1 bases are the bm_<product>_*_revenue_eur KPI
     # keys (kpis._compute_balancing_kpis); their sum reconciles to the
-    # aggregate total within KPI rounding.
-    _BM_CAP_PRODUCTS = ("fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
-    _BM_ACT_PRODUCTS = ("afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+    # aggregate total within KPI rounding.  The product taxonomy is the
+    # canonical balancing tuples (single source of truth) so a new
+    # product cannot silently drop out of the per-month allocation.
+    _BM_CAP_PRODUCTS = PRODUCTS_ALL
+    _BM_ACT_PRODUCTS = PRODUCTS_WITH_ACTIVATION
     _split_bm_cap = bool(trajectories) and any(
         f"balancing_capacity_{p}" in (trajectories or {})
         for p in _BM_CAP_PRODUCTS
@@ -2318,7 +2321,7 @@ def derive_monthly_cashflow(
     # reservation is identically zero (e.g. balancing toggled on with no
     # bids).  The chosen allocation matches the per-product weighting in
     # ``plot_bess_revenue_by_month``.
-    balancing_products = ("fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+    balancing_products = PRODUCTS_ALL
     total_reservation = pd.Series(0.0, index=res.index, dtype=float)
     any_reservation_column = False
     for product in balancing_products:

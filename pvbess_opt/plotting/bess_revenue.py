@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from ..balancing import PRODUCTS_ALL, PRODUCTS_WITH_ACTIVATION
 from ..theme import BM_COLOURS, financial_color
 from ._currency import euro_axis_formatter, resolve_currency_format
 from .helpers import title_prefix
@@ -270,10 +271,9 @@ def plot_bess_capacity_vs_activation_split(
     a side-by-side (capacity, activation) pair.
     """
     out_path = Path(out_path)
-    products = ["fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn"]
+    products = list(PRODUCTS_ALL)
     labels = ["FCR", "aFRR-up", "aFRR-down", "mFRR-up", "mFRR-down"]
-    has_activation = {"fcr": False, "afrr_up": True, "afrr_dn": True,
-                      "mfrr_up": True, "mfrr_dn": True}
+    has_activation = {p: p in PRODUCTS_WITH_ACTIVATION for p in PRODUCTS_ALL}
     cap = [
         float(year1_kpis.get(f"bm_{p}_capacity_revenue_eur", 0.0) or 0.0)
         for p in products
