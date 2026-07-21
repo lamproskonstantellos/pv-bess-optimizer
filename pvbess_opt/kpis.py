@@ -1167,6 +1167,15 @@ def _compute_balancing_kpis(
                 "expense_grid_charging_fee_eur", pd.Series(0.0),
             ).sum()
         )
+        # The PPA contract leg (Eq. P-family) and the intraday spread net
+        # of its venue fee (Eqs. I1-I5) are non-balancing revenue the
+        # project earns and both feed profit_total_eur, so they belong in
+        # the denominator too.  Absent columns (no PPA / no intraday venue)
+        # sum to 0 via res.get(..., 0), so a run without those layers is
+        # bit-identical to before.
+        + float(res.get("revenue_pv_ppa_eur", pd.Series(0.0)).sum())
+        + float(res.get("id_revenue_eur", pd.Series(0.0)).sum())
+        - float(res.get("id_fee_eur", pd.Series(0.0)).sum())
     )
     # The construction is safe today because balancing revenue does NOT
     # enter ``profit_*_eur`` (those columns are driven by DAM / retail
