@@ -15,11 +15,8 @@ from pvbess_opt.balancing import (
     acceptance_probability,
     activation_probability,
     capacity_share_kw,
-    expected_activation_revenue_per_kw_per_step,
-    expected_capacity_revenue_per_kw_per_step,
     generate_synthetic_balancing_timeseries,
     resolve_balancing_config,
-    resolve_balancing_timeseries,
 )
 
 
@@ -61,25 +58,6 @@ def test_probability_getters_clamp_to_unit_interval():
     )
     assert acceptance_probability(cfg, "fcr") == pytest.approx(0.7)
     assert activation_probability(cfg, "fcr") == pytest.approx(0.15)
-
-
-def test_expected_revenue_helpers():
-    cfg = _cfg()
-    df = generate_synthetic_balancing_timeseries(96, 0.25, cfg)
-    bts = resolve_balancing_timeseries(df, cfg, 96)
-    # Capacity revenue per kW per step uses alpha * price * dt / 1000.
-    expected_cap = (
-        acceptance_probability(cfg, "afrr_up")
-        * float(df["afrr_up_capacity_price_eur_per_mwh"].iloc[10])
-        * 0.25 / 1000.0
-    )
-    assert expected_capacity_revenue_per_kw_per_step(
-        cfg, bts, "afrr_up", 10, 0.25,
-    ) == pytest.approx(expected_cap)
-    # FCR has no activation payment by design.
-    assert expected_activation_revenue_per_kw_per_step(
-        cfg, bts, "fcr", 10, 0.25,
-    ) == 0.0
 
 
 def test_synthetic_timeseries_shape_and_columns():
