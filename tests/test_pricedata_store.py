@@ -186,6 +186,23 @@ def test_ida_column_loads_when_present(tmp_path):
     assert (deck.ida[1] == 55.0).all()
 
 
+def test_ida_interior_year_gap_is_a_hard_error(tmp_path):
+    """The IDA column gets the same contiguous-from-1 coverage check as DAM:
+    an IDA populated for years 1 and 3 but blank for year 2 (dropna silently
+    removes the empty year) must be rejected, not loaded with a hidden gap."""
+    store = _write_store(
+        tmp_path,
+        dam_years={
+            1: np.full(HOURS, 50.0),
+            2: np.full(HOURS, 48.0),
+            3: np.full(HOURS, 46.0),
+        },
+        ida_years={1: np.full(HOURS, 40.0), 3: np.full(HOURS, 38.0)},
+    )
+    with pytest.raises(PriceDataError, match=r"ida.*contiguous|contiguous"):
+        _load(store)
+
+
 # ---------------------------------------------------------------------------
 # Calendar / resample rules
 # ---------------------------------------------------------------------------
@@ -647,3 +664,22 @@ def test_parametric_capture_deepens_negative_prices(tmp_path):
     expected = daily_mean * 0.9 + (-5.0 - daily_mean)
     assert deck.dam[2][12] == pytest.approx(expected)
     assert deck.dam[2][12] < deck.dam[1][12]
+
+
+# ---------------------------------------------------------------------------
+# cpi_pct default (schema value, not a bare 0.0)
+# ---------------------------------------------------------------------------
+
+
+def test_cpi_pct_defaults_to_schema_value_not_zero():
+    """A MISSING cpi_pct must default to the schema value (2.0), not 0.0, so a
+    real-/TYNDP-basis store is never silently deflated at 0 % CPI; an explicit
+    0.0 must be preserved (a valid 'no inflation' choice)."""
+    from pvbess_opt.io import SCENARIO_ENGINE_SHEET_DEFAULTS
+    from pvbess_opt.pricedata.ensemble import _cpi_pct
+
+    schema = float(SCENARIO_ENGINE_SHEET_DEFAULTS["cpi_pct"])
+    assert schema == 2.0
+    assert _cpi_pct({}) == schema  # missing -> schema default
+    assert _cpi_pct({"cpi_pct": 0.0}) == 0.0  # explicit zero preserved
+    assert _cpi_pct({"cpi_pct": 3.5}) == 3.5  # explicit value honoured

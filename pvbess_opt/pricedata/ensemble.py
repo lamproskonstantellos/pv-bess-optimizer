@@ -142,7 +142,7 @@ def run_price_scenario_ensemble(
                 engine_base_year=int(
                     econ_base.get("price_base_year", 0) or 0,
                 ),
-                cpi_pct=float(econ_base.get("cpi_pct", 0.0) or 0.0),
+                cpi_pct=_cpi_pct(econ_base),
             )
             generated, _paths = derive_reprice_trajectories(
                 deck, res, n_years=n_years,
@@ -242,3 +242,18 @@ def _start_year(econ: dict[str, Any]) -> int:
             f"{start_year!r}); set project_start_year on the project sheet."
         )
     return start_year
+
+
+def _cpi_pct(econ: dict[str, Any]) -> float:
+    """CPI deflator rate with the pipeline-wide schema default.
+
+    Mirrors ``engine.apply_price_scenarios``: a MISSING cpi_pct defaults to
+    the schema value (2.0), not 0.0, so a real-/TYNDP-basis store is never
+    silently deflated at 0 % CPI.  An explicit 0.0 is preserved.
+    """
+    from pvbess_opt.io import SCENARIO_ENGINE_SHEET_DEFAULTS
+
+    cpi = econ.get("cpi_pct")
+    return float(
+        SCENARIO_ENGINE_SHEET_DEFAULTS["cpi_pct"] if cpi is None else cpi
+    )

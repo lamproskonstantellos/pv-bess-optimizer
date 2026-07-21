@@ -440,7 +440,7 @@ def apply_price_scenarios(
     # basis bridge (Eq. G-basis) to ~0 and silently zeroes projected
     # prices.  Lazy import keeps pricedata decoupled from the heavy io
     # module and sidesteps any import cycle.
-    from pvbess_opt.io import PROJECT_SHEET_DEFAULTS
+    from pvbess_opt.io import PROJECT_SHEET_DEFAULTS, SCENARIO_ENGINE_SHEET_DEFAULTS
 
     start_year = int(
         econ.get("project_start_year")
@@ -454,7 +454,15 @@ def apply_price_scenarios(
     dt_minutes = _infer_dt_minutes(ts)
     engine_basis = str(econ.get("price_basis", "nominal") or "nominal")
     engine_base_year = int(econ.get("price_base_year", 0) or 0)
-    cpi_pct = float(econ.get("cpi_pct", 0.0) or 0.0)
+    # Default a MISSING cpi_pct to the schema value (2.0), not 0.0: a bare
+    # `econ.get('cpi_pct', 0.0) or 0.0` diverges from the schema default and
+    # would deflate a real-/TYNDP-basis store at 0 % CPI for any caller that
+    # bypasses read_economic_params.  An explicit 0.0 is preserved (a valid
+    # "no inflation" choice), so `... or SCHEMA` is deliberately NOT used.
+    _cpi = econ.get("cpi_pct")
+    cpi_pct = float(
+        SCENARIO_ENGINE_SHEET_DEFAULTS["cpi_pct"] if _cpi is None else _cpi
+    )
 
     requested = str(econ.get("debt_sizing_scenario", "") or "").strip()
     names = [str(entry["name"]) for entry in scenarios]
