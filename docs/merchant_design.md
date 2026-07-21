@@ -152,10 +152,12 @@ scaling, LCOE/LCOS and debt algebra are mode-agnostic.
   `pv_direct_to_load_mwh`, `bess_to_load_mwh` and every
   `load_coverage_*` / `*_self_consumption_frac` ratio report 0
   (`kpis.compute_kpis` merchant branch).
-* Invariants (S21-S29): 1, 3, 4, 7, 8 are live; **2, 5, 6, 9 are
-  identically zero** (their flows/constraints do not exist, and
+* Invariants (S21-S29, S36): 1, 3, 4, 7, 8 are live and 10 is live when a
+  finite `p_grid_import_max_kw` caps grid-to-BESS charging (S36, vacuously
+  0.0 when the cap is unlimited); **2, 5, 6, 9 are identically zero**
+  (their flows/constraints do not exist, and
   `verify_dispatch_invariants(mode="merchant")` reports them as 0.0
-  so the nine-key contract is stable across modes).
+  so the ten-key contract is stable across modes).
 * Dispatch metrics (`pv_generation_mwh`, export/import MWh, cycles,
   SOC stats, curtailment) and `profit_total_eur` as in the SC doc.
 
@@ -175,7 +177,7 @@ scaling, LCOE/LCOS and debt algebra are mode-agnostic.
 
 * `tests/test_asset_modes.py`, `tests/test_mode_switch_matrix.py`:
   pinning constraints and mode carve-outs per asset configuration.
-* `tests/test_realscale_all_combos.py`: energy balance + all nine
+* `tests/test_realscale_all_combos.py`: energy balance + all ten
   invariants for merchant × {hybrid, pv_only, bess_only} (1-day fast,
   full-year slow lane).
 * `tests/test_dispatch_matrix_robustness.py`: dispatch sanity across

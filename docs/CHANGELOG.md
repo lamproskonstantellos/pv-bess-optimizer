@@ -45,6 +45,34 @@
   default — bit-identical when off.  Design:
   `docs/market_scenarios_design.md` (Equations G1-G7).
 
+### Fixed
+
+Pre-delivery release audit (round 1):
+
+- **Secrets.** The ENTSO-E API token can no longer reach a log or the
+  shareable `01_inputs` snapshot: `entsoe._http_get` re-raises transport
+  errors scrubbed (the token-bearing exception dropped from the chain), and
+  a `file`-source run blanks the workbook token cell via
+  `marketdata.blank_entsoe_token`.
+- **Tax layer.** Augmentation CAPEX is subtracted from EBITDA so it is
+  deducted only through its depreciation tranche, never double-counted;
+  `bess_augmentation_years` with `corporate_tax_rate_pct > 0` previously
+  overstated post-tax NPV/IRR.
+- **Price scenarios.** `project_start_year` defaults to the schema value
+  (2026) and raises on a non-positive year, instead of collapsing a
+  blank/zero cell to calendar year 0 and silently zeroing every projected
+  real-/TYNDP-basis curve.
+- **Rolling horizon.** The annual throughput cap (Eq. E46) is threaded as a
+  remaining per-window budget so it binds across window seams; a stitched
+  year can no longer exceed the warranty cap and beat the perfect-foresight
+  benchmark.
+- **Solver.** The self-consumption slack `Var` is renamed `export_slack`,
+  fixing an `appsi_highs` crash on APPSI's reserved-name import suffix.
+- **Docs & hygiene.** Equation-registry suffix list, audit-invariant count,
+  Sphinx module list and config-schema stream list corrected; duplicated
+  constants single-sourced; dead code removed; the ADMIE spring-forward DST
+  fill aligned with the UTC path.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

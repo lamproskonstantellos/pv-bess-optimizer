@@ -16,7 +16,7 @@ namespace; a tag, once merged, is never reused or renumbered.
 
 | Namespace | Owner document | Scope | Highest allocated |
 |---|---|---|---|
-| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E61 (+ suffixed E8a, E13b-E13d, E24a, E25a, E29a, E30a, E31a, E40a) |
+| E | `economics_design.md` | cashflow, fees, KPIs, LCOE/LCOS | E61 (+ suffixed E8a, E13b-E13d, E24a, E25a, E28a, E29a, E30a, E31a, E40a) |
 | U | `uncertainty_design.md` | forecast noise, Monte Carlo, foresight | U12 (+ suffixed U8a) |
 | P | `ppa_design.md` | PPA settlement and dispatch coupling | P11 |
 | S | `self_consumption_design.md` | system/dispatch constraints (shared with merchant mode) | S36 |
