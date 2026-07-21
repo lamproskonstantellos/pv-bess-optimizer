@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from .engine import (
+    _infer_dt_minutes,
     build_scenario_deck,
     derive_reprice_trajectories,
     merge_auto_trajectories,
@@ -132,7 +133,7 @@ def run_price_scenario_ensemble(
             deck = build_scenario_deck(
                 entry,
                 base_dir=base_dir, ts=ts, n_steps=len(ts),
-                dt_minutes=_dt_minutes_from_frame(ts),
+                dt_minutes=_infer_dt_minutes(ts),
                 n_years=n_years,
                 start_year=_start_year(econ_base),
                 engine_basis=str(
@@ -220,16 +221,6 @@ def run_price_scenario_ensemble(
     return EnsembleResult(
         table=table, stats=stats, summary_lines=summary_lines,
     )
-
-
-def _dt_minutes_from_frame(ts: pd.DataFrame) -> int:
-    n_steps = len(ts)
-    if n_steps == 0 or n_steps % 365 != 0:
-        raise PriceDataError(
-            f"ensemble needs a whole non-leap-year timeseries; got "
-            f"{n_steps} steps."
-        )
-    return (24 * 60) // (n_steps // 365)
 
 
 def _start_year(econ: dict[str, Any]) -> int:

@@ -175,11 +175,6 @@ class PriceSegment:
     resolution_minutes: int
     values: list[float]
 
-    def end_utc(self) -> datetime:
-        return self.start_utc + pd.Timedelta(
-            minutes=self.resolution_minutes * len(self.values)
-        )
-
 
 @dataclass
 class MarketSeries:
