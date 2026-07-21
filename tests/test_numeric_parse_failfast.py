@@ -6,7 +6,7 @@ NON-blank cell that cannot be parsed as a number MUST raise a loud,
 key-naming error rather than silently substituting the default and
 producing a confident-wrong financial/physical result.
 
-Regression for the round-3 audit finding: ``_parse_value`` /
+Regression for the audit finding: ``_parse_value`` /
 ``_parse_grid_export_max`` / ``validate_pv_location_fields`` previously
 warned-and-defaulted on unparseable numeric input.
 """

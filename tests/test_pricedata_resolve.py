@@ -287,7 +287,7 @@ def test_linear_interp_is_selectable():
 
 
 # ---------------------------------------------------------------------------
-# Round-3 audit regressions: shipped-default consistency, resolution guard,
+# Audit regressions: shipped-default consistency, resolution guard,
 # and under-coverage warnings (resolve mode robustness).
 # ---------------------------------------------------------------------------
 
