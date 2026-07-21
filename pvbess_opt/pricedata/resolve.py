@@ -108,6 +108,18 @@ def build_resolve_grid(
             f"scenario_resolve_resolution = {resolution_minutes} min is "
             f"not a multiple of the workbook cadence ({dt_minutes} min)."
         )
+    # The resolution must divide the day into whole blocks, otherwise a
+    # whole-year deck curve does not resample onto an integer number of
+    # blocks and the downstream intensive resample raises a raw
+    # marketdata-layer error.  Catch it here with a scenario-specific
+    # message (e.g. 105 min is a multiple of a 15-min cadence but does
+    # not divide 1440).
+    if (24 * 60) % resolution_minutes != 0:
+        raise PriceDataError(
+            f"scenario_resolve_resolution = {resolution_minutes} min does "
+            "not divide the 1440-minute day into whole blocks; choose a "
+            "resolution that divides 1440 (e.g. 15, 30, 60, 120, 240)."
+        )
     keep = [
         column for column in
         ("timestamp", "pv_kwh", "load_kwh", "dam_price_eur_per_mwh",
@@ -157,6 +169,26 @@ def derive_resolve_trajectories(
     from pvbess_opt.kpis import compute_kpis
     from pvbess_opt.lifetime import factors_for_year
     from pvbess_opt.optimization import run_scenario
+
+    # The Tier-2 factors are held flat past the last support year, and
+    # collapse to unity when year 1 is the only support point.  Either
+    # silently overrides the Tier-1 reprice cannibalization, so warn
+    # (the store loader logs an analogous hold_last note).
+    if support_years and max(support_years) < n_years:
+        logger.warning(
+            "[pricedata] resolve support years reach only year %d of a "
+            "%d-year horizon; the Tier-2 DAM factors are held flat over "
+            "years %d..%d — add a later support year to re-solve the tail.",
+            max(support_years), n_years, max(support_years) + 1, n_years,
+        )
+    if support_years == [1]:
+        logger.warning(
+            "[pricedata] resolve support years reduce to just year 1: no "
+            "interior re-solve runs, so every Tier-2 DAM factor collapses "
+            "to 1.0 and overrides the Tier-1 reprice cannibalization with a "
+            "flat path. Use scenario_projection_mode = 'reprice' for a "
+            "price-path projection without re-solves."
+        )
 
     dt_minutes = int(params.get("dt_minutes", 0) or 0)
     grid = build_resolve_grid(ts, dt_minutes, resolution_minutes)
