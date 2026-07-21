@@ -1783,6 +1783,23 @@ def solve_model(
     return model, resolved, achieved_gap
 
 
+#: The nine balancing price columns model_to_dataframe re-attaches to the
+#: dispatch frame.  Spelled here (not inline) so the cross-module binding test
+#: (tests/test_cross_module_consistency.py) can pin it to the canonical
+#: balancing product lists alongside the io / entsoe / rolling-horizon copies.
+_MODEL_BALANCING_PRICE_COLUMNS: tuple[str, ...] = (
+    "fcr_capacity_price_eur_per_mwh",
+    "afrr_up_capacity_price_eur_per_mwh",
+    "afrr_dn_capacity_price_eur_per_mwh",
+    "mfrr_up_capacity_price_eur_per_mwh",
+    "mfrr_dn_capacity_price_eur_per_mwh",
+    "afrr_up_activation_price_eur_per_mwh",
+    "afrr_dn_activation_price_eur_per_mwh",
+    "mfrr_up_activation_price_eur_per_mwh",
+    "mfrr_dn_activation_price_eur_per_mwh",
+)
+
+
 def model_to_dataframe(
     model: pyo.ConcreteModel,
     ts: pd.DataFrame,
@@ -1949,17 +1966,7 @@ def model_to_dataframe(
             bess_present=float(params.get("bess_power_kw", 0.0) or 0.0) > 0.0,
         )
         if balancing_ts_view is not None:
-            for col in (
-                "fcr_capacity_price_eur_per_mwh",
-                "afrr_up_capacity_price_eur_per_mwh",
-                "afrr_dn_capacity_price_eur_per_mwh",
-                "mfrr_up_capacity_price_eur_per_mwh",
-                "mfrr_dn_capacity_price_eur_per_mwh",
-                "afrr_up_activation_price_eur_per_mwh",
-                "afrr_dn_activation_price_eur_per_mwh",
-                "mfrr_up_activation_price_eur_per_mwh",
-                "mfrr_dn_activation_price_eur_per_mwh",
-            ):
+            for col in _MODEL_BALANCING_PRICE_COLUMNS:
                 res[col] = getattr(balancing_ts_view, col)
 
     if round_output:
