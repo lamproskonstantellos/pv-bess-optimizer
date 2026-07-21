@@ -333,3 +333,24 @@ def test_explicit_entsoe_for_greece_is_an_error():
 def test_unknown_source_token_is_an_error():
     with pytest.raises(MarketDataError, match="not one of"):
         resolve_dataset_source("balancing", "vnb", GR)
+
+
+def test_nominal_day_spring_fill_is_flat_last_value():
+    """Sub-hourly spring-forward fill repeats the LAST step (flat),
+    matching base.sample_local_year (rule 3) — not the whole preceding
+    hour block (the two differ only at sub-hourly cadence).
+    """
+    sph = 2  # 30-min cadence
+    nominal = 24 * sph
+    # 23-hour local day, unique value per step so block-repeat and
+    # flat-fill are distinguishable.
+    raw = np.arange(nominal - sph, dtype=float)
+    filled = admie_mod._nominal_day(raw, sph, kind="spring", source_name="t")
+    assert len(filled) == nominal
+    at = admie_mod._DST_HOUR * sph
+    last_before = raw[at - 1]
+    # The inserted hour must be a flat repeat of the single prior step.
+    assert (filled[at:at + sph] == last_before).all()
+    # Surrounding data untouched.
+    assert (filled[:at] == raw[:at]).all()
+    assert (filled[at + sph:] == raw[at:]).all()
