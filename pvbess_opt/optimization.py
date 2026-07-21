@@ -519,6 +519,7 @@ def build_model(
     terminal_soc_free: bool | None = None,
     terminal_soc_target_kwh: float | None = None,
     annual_cycle_budget_kwh: float | None = None,
+    first_day_cycle_budget_kwh: float | None = None,
 ) -> pyo.ConcreteModel:
     """Construct the Pyomo MILP.
 
@@ -1126,10 +1127,24 @@ def build_model(
         # and the pinned schedule stays feasible.  Inactive venue (or a
         # cap-respecting deterministic commitment) leaves the cap
         # bit-identical.
+        #
+        # ``first_day_cycle_budget_kwh`` (supplied only by the rolling
+        # horizon, and only when the window's FIRST calendar day was
+        # already partly committed by the previous window) overrides the
+        # full daily cap for that boundary day with the budget REMAINING
+        # for it, so a calendar day split across a commit seam
+        # (``commit_hours`` not dividing 24) cannot cycle up to 2x the cap.
+        # ``None`` — the single-solve path and every window whose boundary
+        # day is fresh (``commit_hours`` divides 24) — leaves every day at
+        # the full daily cap, so the disabled path is bit-identical.
         m.CYC = pyo.ConstraintList()
-        for indices in day_to_idx.values():
+        _cap_day_full = float(params["max_cycles_per_day"]) * e_cap_param
+        for _day_pos, indices in enumerate(day_to_idx.values()):
             lhs = sum(m.bess_dis_load[t] + m.bess_dis_grid[t] for t in indices)
-            _cap_day = float(params["max_cycles_per_day"]) * e_cap_param
+            if _day_pos == 0 and first_day_cycle_budget_kwh is not None:
+                _cap_day = float(first_day_cycle_budget_kwh)
+            else:
+                _cap_day = _cap_day_full
             if intraday_active:
                 assert intraday_data is not None
                 _cap_day = max(
@@ -1966,6 +1981,7 @@ def run_scenario(
     terminal_soc_free: bool | None = ...,
     terminal_soc_target_kwh: float | None = ...,
     annual_cycle_budget_kwh: float | None = ...,
+    first_day_cycle_budget_kwh: float | None = ...,
     return_unrounded: Literal[False] = ...,
 ) -> tuple[pd.DataFrame, str]: ...
 @overload
@@ -1981,6 +1997,7 @@ def run_scenario(
     terminal_soc_free: bool | None = ...,
     terminal_soc_target_kwh: float | None = ...,
     annual_cycle_budget_kwh: float | None = ...,
+    first_day_cycle_budget_kwh: float | None = ...,
     return_unrounded: Literal[True],
 ) -> tuple[pd.DataFrame, str, pd.DataFrame]: ...
 def run_scenario(
@@ -1995,6 +2012,7 @@ def run_scenario(
     terminal_soc_free: bool | None = None,
     terminal_soc_target_kwh: float | None = None,
     annual_cycle_budget_kwh: float | None = None,
+    first_day_cycle_budget_kwh: float | None = None,
     return_unrounded: bool = False,
 ) -> tuple[pd.DataFrame, str] | tuple[pd.DataFrame, str, pd.DataFrame]:
     """Build, solve and extract dispatch for a single scenario.
@@ -2016,6 +2034,7 @@ def run_scenario(
         terminal_soc_free=terminal_soc_free,
         terminal_soc_target_kwh=terminal_soc_target_kwh,
         annual_cycle_budget_kwh=annual_cycle_budget_kwh,
+        first_day_cycle_budget_kwh=first_day_cycle_budget_kwh,
     )
     solved, resolved, achieved_gap = solve_model(
         model, solver_name,

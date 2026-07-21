@@ -1489,15 +1489,13 @@ def _resolve_uncertainty_config(
 ) -> dict[str, Any]:
     """Merge CLI overrides on top of the workbook ``# uncertainty`` group."""
     enabled = bool(config.rolling_horizon) or bool(econ.get("uncertainty_enabled", False))
-    if enabled and float(econ.get("max_cycles_per_year", 0.0) or 0.0) > 0.0:
-        # Eq. E46 is a year-long constraint; rolling-horizon windows
-        # solve sub-year horizons, so the annual cap binds only in the
-        # deterministic Year-1 solve (documented design choice).
-        logger.warning(
-            "[cycles] max_cycles_per_year is enforced in the "
-            "deterministic Year-1 solve only; rolling-horizon windows "
-            "solve sub-year horizons and carry the daily cap alone."
-        )
+    # NB: both throughput caps are now enforced ACROSS rolling-horizon
+    # window seams — the annual cap (Eq. E46) via ``annual_cycle_budget_kwh``
+    # and the daily cap (Eq. E45) via ``first_day_cycle_budget_kwh`` (both
+    # threaded in ``rolling_horizon_dispatch``), so no caveat warning is
+    # emitted here.  The caps bind on the Year-1 stitched dispatch; projected
+    # years scale that template down on the fade curve, so they stay within
+    # both caps by construction.
     compare = (
         bool(config.compare_uncertainty_sources)
         or bool(econ.get("uncertainty_compare_sources", False))

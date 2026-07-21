@@ -539,6 +539,26 @@ def rolling_horizon_dispatch(
     )
     committed_discharge_kwh = 0.0
 
+    # Daily cycle cap (Eq. E45) across window seams.  build_model applies
+    # the cap per calendar day WITHIN a window, so a day split across a
+    # commit seam (``commit_hours`` not dividing 24) is capped twice — the
+    # early hours in one window, the late hours in the next — and can cycle
+    # up to 2x the cap.  Track the discharge already committed on each
+    # calendar day and pass the REMAINING budget for the window's boundary
+    # day to build_model.  ``None`` when the cap is off or the boundary day
+    # is still fresh (every window when ``commit_hours`` divides 24), which
+    # keeps the disabled / day-aligned path byte-identical.
+    _raw_daily_cycles = params.get("max_cycles_per_day")
+    _max_cycles_per_day = (
+        0.0 if _raw_daily_cycles is None else float(_raw_daily_cycles)
+    )
+    daily_cap_kwh: float | None = (
+        _max_cycles_per_day * bess_capacity_kwh
+        if _max_cycles_per_day > 0.0 and bess_capacity_kwh > 0.0
+        else None
+    )
+    committed_discharge_by_day: dict[Any, float] = {}
+
     if bool(params.get("terminal_soc_equal", True)) and bess_capacity_kwh > 0.0:
         year_close_soc_kwh: float | None = (
             float(params.get("initial_soc_frac", 0.0) or 0.0)
@@ -585,6 +605,21 @@ def rolling_horizon_dispatch(
             max(annual_budget_kwh - committed_discharge_kwh, 0.0)
             if annual_budget_kwh is not None else None
         )
+        # Remaining daily budget for the window's boundary (first) calendar
+        # day.  Only threaded when that day was already partly committed by
+        # a previous window (a seam falls inside it); a fresh boundary day
+        # passes ``None`` so a window whose start is day-aligned
+        # (``commit_hours`` divides 24) is byte-identical to the pre-fix run.
+        first_day_budget_kwh: float | None = None
+        if daily_cap_kwh is not None:
+            _boundary_day = window_ts["timestamp"].iloc[0]
+            _boundary_key = (
+                _boundary_day.date()
+                if hasattr(_boundary_day, "date") else _boundary_day
+            )
+            _committed_today = committed_discharge_by_day.get(_boundary_key, 0.0)
+            if _committed_today > 0.0:
+                first_day_budget_kwh = max(daily_cap_kwh - _committed_today, 0.0)
         res_window, _solver = run_scenario(
             params, window_noisy,
             solver_name=solver_name,
@@ -597,6 +632,7 @@ def rolling_horizon_dispatch(
                 year_close_soc_kwh if win_end == n else None
             ),
             annual_cycle_budget_kwh=window_budget_kwh,
+            first_day_cycle_budget_kwh=first_day_budget_kwh,
             **solve_kwargs,
         )
 
@@ -632,6 +668,21 @@ def rolling_horizon_dispatch(
             committed_discharge_kwh += float(
                 (committed["bess_dis_load_kwh"] + committed["bess_dis_grid_kwh"]).sum()
             )
+
+        # Accumulate committed discharge per calendar day so the next
+        # window that shares this window's trailing day (a seam inside it)
+        # sees the REMAINING daily budget (Eq. E45 across window seams).
+        if daily_cap_kwh is not None:
+            _dis_committed = (
+                committed["bess_dis_load_kwh"] + committed["bess_dis_grid_kwh"]
+            ).astype(float)
+            _day_keys = committed["timestamp"].apply(
+                lambda t: t.date() if hasattr(t, "date") else t
+            )
+            for _day_key, _dis_day in _dis_committed.groupby(_day_keys).sum().items():
+                committed_discharge_by_day[_day_key] = (
+                    committed_discharge_by_day.get(_day_key, 0.0) + float(_dis_day)
+                )
 
         # SOC carryover.
         if local_commit_n < len(res_window):

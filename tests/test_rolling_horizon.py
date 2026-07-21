@@ -548,3 +548,75 @@ def test_reachable_year_close_target_reports_zero_shortfall(
     assert float(kpis["year_close_soc_shortfall_kwh"]) == pytest.approx(
         0.0, abs=1.0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Daily cycle cap across window seams (commit_hours not dividing 24)
+# ---------------------------------------------------------------------------
+
+
+def _seam_case():
+    """A 3-day merchant deck whose morning arbitrage strictly dominates the
+    evening one, so a window that commits the morning cycle uses that day's
+    whole daily budget — and a naive per-window daily cap would let the next
+    window run a second cycle on the same day across the commit seam."""
+    ndays, n = 3, 24 * 3
+    price = np.zeros(n)
+    for d in range(ndays):
+        b = d * 24
+        price[b + 0:b + 9] = 10.0     # cheap morning
+        price[b + 9:b + 18] = 200.0   # rich midday (dominant arb, committed)
+        price[b + 18:b + 21] = 10.0   # cheap evening
+        price[b + 21:b + 24] = 100.0  # rich night (second arb, next window)
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=n, freq="h"),
+        "pv_kwh": np.zeros(n),
+        "dam_price_eur_per_mwh": price,
+    })
+    params = dict(
+        dt_minutes=60, efficiency_charge=1.0, efficiency_discharge=1.0,
+        soc_min_frac=0.0, soc_max_frac=1.0, initial_soc_frac=0.0,
+        terminal_soc_equal=False, max_cycles_per_day=1.0, max_cycles_per_year=0.0,
+        p_grid_export_max_kw=1e6, pv_nameplate_kwp=0.0,
+        bess_power_kw=2000.0, bess_capacity_kwh=2000.0,
+        bess_wear_cost_eur_per_mwh=0.0, retail_tariff_eur_per_mwh=0.0,
+        mode="merchant", allow_bess_grid_charging=True, show_titles=False,
+        unavailability_pct=0.0,
+    )
+    return params, ts
+
+
+def _max_daily_discharge_kwh(df: pd.DataFrame) -> float:
+    d = df.copy()
+    d["day"] = pd.to_datetime(d["timestamp"]).dt.date
+    d["dis"] = d["bess_dis_load_kwh"] + d["bess_dis_grid_kwh"]
+    return float(d.groupby("day")["dis"].sum().max())
+
+
+def test_rh_daily_cap_holds_across_seam_commit_not_dividing_24():
+    """Regression: with ``commit_hours`` not dividing 24 a calendar day is
+    split across a window seam.  Before the seam-threaded daily budget the
+    split day cycled twice (4000 kWh vs the 1-cycle 2000 kWh cap); the cap
+    must now hold on every calendar day."""
+    params, ts = _seam_case()
+    e_cap = params["bess_capacity_kwh"]
+    cap_kwh = params["max_cycles_per_day"] * e_cap
+    df, _ = rolling_horizon_dispatch(
+        params, ts, window_hours=36, commit_hours=18,
+        forecast_seed=None, solver_name="highs", mip_gap=1e-9,
+    )
+    assert _max_daily_discharge_kwh(df) <= cap_kwh + 1e-3
+
+
+def test_rh_daily_cap_commit_divides_24_is_byte_identical_to_full_cap():
+    """The seam fix must be inert when the commit slice is day-aligned: every
+    boundary day is fresh, so the threaded budget is ``None`` and the daily
+    cap stays at its full value.  A day-aligned commit still cycles once/day
+    and never trips the cap."""
+    params, ts = _seam_case()
+    cap_kwh = params["max_cycles_per_day"] * params["bess_capacity_kwh"]
+    df, _ = rolling_horizon_dispatch(
+        params, ts, window_hours=36, commit_hours=24,
+        forecast_seed=None, solver_name="highs", mip_gap=1e-9,
+    )
+    assert _max_daily_discharge_kwh(df) <= cap_kwh + 1e-3
