@@ -72,6 +72,49 @@ def test_run_returns_populated_results(tmp_path):
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_run_snapshot_exists_and_scrubs_entsoe_token(tmp_path):
+    """End-to-end lock on the round-1 secret-scrub path: a workbook that
+    carries an ENTSO-E token in its market_data cell must produce a
+    01_inputs snapshot with the token blanked (no fetch happened, so the
+    blank_entsoe_token branch runs) and an assumptions_summary that never
+    prints the token."""
+    import openpyxl
+
+    short = _short_workbook(tmp_path)
+    # Inject a token into the market_data.entsoe_token cell.
+    token = "SECRET-TOKEN-1234567890-abcdef"
+    wb = openpyxl.load_workbook(short)
+    ws = wb["market_data"]
+    for row in ws.iter_rows(min_row=2, max_col=2):
+        if str(row[0].value).strip() == "entsoe_token":
+            row[1].value = token
+            break
+    wb.save(short)
+
+    config = RunConfig(
+        excel=short, solver="highs", outdir=tmp_path / "results",
+        mip_gap=0.05, time_limit=180,
+    )
+    result = run(config)
+
+    snapshot = result.out_dir / "01_inputs" / "input_snapshot.xlsx"
+    assert snapshot.exists(), "01_inputs/input_snapshot.xlsx must be written"
+    snap_wb = openpyxl.load_workbook(snapshot)
+    snap_ws = snap_wb["market_data"]
+    token_cell = None
+    for row in snap_ws.iter_rows(min_row=2, max_col=2):
+        if str(row[0].value).strip() == "entsoe_token":
+            token_cell = row[1].value
+            break
+    assert token_cell in (None, ""), (
+        f"snapshot entsoe_token must be scrubbed, got {token_cell!r}"
+    )
+    summary = result.out_dir / "01_inputs" / "assumptions_summary.txt"
+    assert summary.exists()
+    assert token not in summary.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_cli_main_smoke(tmp_path):
     from pvbess_opt import cli
 
