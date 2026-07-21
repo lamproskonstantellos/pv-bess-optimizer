@@ -72,7 +72,18 @@ def _http_get(params: dict[str, str], timeout: float) -> tuple[int, bytes]:
     """One GET against the API; tests monkeypatch this symbol."""
     import requests
 
-    resp = requests.get(ENTSOE_API_URL, params=params, timeout=timeout)
+    try:
+        resp = requests.get(ENTSOE_API_URL, params=params, timeout=timeout)
+    except requests.RequestException as exc:
+        # The request URL carries the ``securityToken`` query parameter, so
+        # a transport-level failure embeds the full token in the original
+        # exception's message.  Re-raise a scrubbed error and drop the
+        # token-bearing exception from the chain (``from None``) so it can
+        # never surface in a traceback or ``logger.exception`` log.
+        raise MarketDataError(
+            "ENTSO-E request failed at the transport layer "
+            f"({type(exc).__name__}); check network connectivity and retry."
+        ) from None
     return resp.status_code, resp.content
 
 
