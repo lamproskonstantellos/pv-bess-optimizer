@@ -312,6 +312,39 @@ def test_baseload_leg_not_derated():
     assert derated_pap["revenue_pv_ppa_eur"] == pytest.approx(18_000.0)
 
 
+def test_baseload_profit_total_derates_only_market_portion():
+    """profit_total_eur EMBEDS the production-decoupled baseload leg, so
+    a uniform derate would shrink the exempt leg inside the total and
+    break ``profit_total == sum(derated components)`` (tripping the
+    cashflow's revenue-split reconciliation guard).  Only the market
+    portion may scale; the leg stays at its Year-1 value."""
+    kpis = _kpis()
+    factor = 0.9  # unavailability 10 %
+    derated = apply_unavailability_derate(kpis, 10.0)
+    leg = kpis["revenue_pv_ppa_eur"]            # 20_000, exempt
+    market = kpis["profit_total_eur"] - leg     # 145_000, derates
+    expected = leg + factor * market            # 150_500, NOT 148_500
+    assert derated["profit_total_eur"] == pytest.approx(expected)
+    # The identity the reconciliation guard checks: profit_total equals
+    # the sum of the individually-derated components.
+    components = (
+        derated["profit_load_from_pv_eur"]
+        + derated["profit_load_from_bess_eur"]
+        + derated["profit_export_from_pv_eur"]
+        + derated["profit_export_from_bess_eur"]
+        - derated["expense_charge_bess_grid_eur"]
+        + derated["revenue_pv_ppa_eur"]
+    )
+    assert derated["profit_total_eur"] == pytest.approx(components)
+    # A pay-as-produced total (no marker) still derates uniformly.
+    pap = dict(_kpis())
+    pap.pop("ppa_baseload_shortfall_mwh")
+    pap.pop("ppa_baseload_excess_mwh")
+    assert apply_unavailability_derate(pap, 10.0)[
+        "profit_total_eur"
+    ] == pytest.approx(factor * kpis["profit_total_eur"])
+
+
 def test_lifetime_frame_skips_pv_fade_on_baseload_leg():
     from pvbess_opt.lifetime import build_lifetime_dispatch
 
