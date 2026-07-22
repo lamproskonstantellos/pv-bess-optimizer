@@ -18,6 +18,8 @@ import pytest
 
 from pvbess_opt.io import (
     _parse_grid_export_max,
+    _parse_pv_tilt,
+    _parse_pv_weather_year,
     _parse_value,
     validate_pv_location_fields,
 )
@@ -90,3 +92,43 @@ def test_blank_location_field_passes(field):
     # Blank / absent is optional and must not raise.
     validate_pv_location_fields({field: ""})
     validate_pv_location_fields({field: None})
+
+
+# --- hybrid numeric-or-sentinel PV keys (tilt / weather_year) --------------
+# These route through bespoke parsers (a number OR the sentinel 'optimal' /
+# 'tmy'). The parser runs BEFORE validate_pv_location_fields, so a
+# warn-and-default parser silently pre-empts the validator's reject branch on
+# a PVGIS-fetch run, changing the fetched PV profile and every downstream
+# number. They must fail fast at parse time like their sibling numeric keys.
+
+
+def test_unparseable_tilt_raises_naming_the_key():
+    with pytest.raises(ValueError, match="tilt"):
+        _parse_value("tilt", "45xyz", "optimal")
+    with pytest.raises(ValueError, match="tilt"):
+        _parse_pv_tilt("south-ish", "optimal")
+
+
+def test_unparseable_weather_year_raises_naming_the_key():
+    with pytest.raises(ValueError, match="weather_year"):
+        _parse_value("weather_year", "twentynineteen", 2019)
+    with pytest.raises(ValueError, match="weather_year"):
+        _parse_pv_weather_year("last year", 2019)
+
+
+def test_tilt_sentinel_and_number_still_parse():
+    assert _parse_value("tilt", "optimal", "optimal") == "optimal"
+    assert _parse_value("tilt", "  OPTIMAL ", "optimal") == "optimal"
+    assert _parse_value("tilt", "30", "optimal") == 30.0
+
+
+def test_weather_year_sentinel_and_number_still_parse():
+    assert _parse_value("weather_year", "tmy", 2019) == "tmy"
+    assert _parse_value("weather_year", "2020", 2019) == 2020
+
+
+@pytest.mark.parametrize("blank", [None, float("nan"), "", "   "])
+def test_blank_tilt_and_weather_year_still_default(blank):
+    # The bit-identity basis: a blank cell keeps the default (unchanged).
+    assert _parse_value("tilt", blank, "optimal") == "optimal"
+    assert _parse_value("weather_year", blank, 2019) == 2019
