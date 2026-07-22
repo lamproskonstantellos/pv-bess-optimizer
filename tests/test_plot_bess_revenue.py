@@ -214,16 +214,10 @@ def test_monthly_energy_fee_uses_net_dam_base_like_waterfall(
     assert abs(captured["energy_fee"] - (-5_000.0)) > 1.0
 
 
-def test_monthly_dam_bars_reconcile_to_derated_waterfall_base(
-    tmp_path: Path, monkeypatch,
-):
-    """The dispatch frame is un-derated but the waterfall and KPI totals use
-    the availability/curtailment-derated year1_kpis.  The monthly DAM bars
-    must sum to the derated KPI base (profit_export_from_bess − charge), not
-    the raw dispatch sum, so the monthly figure and the waterfall agree."""
+def _month_bar_spy(monkeypatch, br):
+    """Install a save_figure spy that sums each stacked container's heights
+    by legend label; returns the captured dict."""
     import matplotlib.pyplot as plt
-
-    import pvbess_opt.plotting.bess_revenue as br
 
     captured: dict[str, float] = {}
 
@@ -237,6 +231,20 @@ def test_monthly_dam_bars_reconcile_to_derated_waterfall_base(
         return out_path
 
     monkeypatch.setattr(br, "save_figure", _spy)
+    return captured
+
+
+def test_monthly_dam_bars_reconcile_to_derated_waterfall_base(
+    tmp_path: Path, monkeypatch,
+):
+    """The dispatch frame is un-derated but the waterfall and KPI totals use
+    the availability-derated year1_kpis.  The monthly DAM bars must sum to the
+    canonical ``revenue_bess_dam_eur`` KPI the waterfall draws (here equal to
+    profit_export_from_bess − charge under availability), not the raw dispatch
+    sum, so the monthly figure and the waterfall agree."""
+    import pvbess_opt.plotting.bess_revenue as br
+
+    captured = _month_bar_spy(monkeypatch, br)
 
     n = 96 * 30
     ts = pd.date_range("2026-01-01", periods=n, freq="15min").append(
@@ -250,8 +258,10 @@ def test_monthly_dam_bars_reconcile_to_derated_waterfall_base(
         "expense_charge_bess_grid_eur": np.full(total, 40_000.0 / total),
         "bess_dis_grid_kwh": np.full(total, 0.0),
     })
-    # Derated KPIs (a 4 % derate on the 60k net): the waterfall's DAM base.
+    # Availability-only derate (4 % on the 60k net): revenue_bess_dam_eur and
+    # profit_export − charge coincide, both 57_600.
     year1_kpis = {
+        "revenue_bess_dam_eur": 57_600.0,
         "profit_export_from_bess_eur": 96_000.0,
         "expense_charge_bess_grid_eur": 38_400.0,
     }
@@ -264,6 +274,54 @@ def test_monthly_dam_bars_reconcile_to_derated_waterfall_base(
         57_600.0, abs=1.0,
     )
     assert abs(captured.get(br._BESS_DAM_LABEL, 0.0) - 60_000.0) > 1.0
+
+
+def test_monthly_dam_bars_track_dam_kpi_not_fee_base_under_curtailment(
+    tmp_path: Path, monkeypatch,
+):
+    """Under the exogenous-curtailment derate the canonical DAM KPI
+    (``revenue_bess_dam_eur``, scaled monolithically by 1−q) diverges from the
+    energy/optimizer fee base (``profit_export_from_bess − expense_charge``,
+    whose withdrawal leg is curtailment-exempt).  The waterfall draws its DAM
+    bar from ``revenue_bess_dam_eur`` (03_results.xlsx / SUMMARY.md), so the
+    monthly DAM bars must reconcile to THAT — not to the fee base and not to
+    the raw dispatch sum."""
+    import pvbess_opt.plotting.bess_revenue as br
+
+    captured = _month_bar_spy(monkeypatch, br)
+
+    n = 96 * 30
+    ts = pd.date_range("2026-01-01", periods=n, freq="15min").append(
+        pd.date_range("2026-02-01", periods=n, freq="15min")
+    )
+    total = len(ts)
+    # Raw dispatch: gross export 100k, grid charge 40k.
+    res = pd.DataFrame({
+        "timestamp": ts,
+        "profit_export_from_bess_eur": np.full(total, 100_000.0 / total),
+        "expense_charge_bess_grid_eur": np.full(total, 40_000.0 / total),
+        "bess_dis_grid_kwh": np.full(total, 0.0),
+    })
+    # Availability a=0.99, curtailment q=0.10:
+    #   profit_export = a·(1−q)·100k = 89_100  (curtailment-derated)
+    #   expense_charge = a·40k        = 39_600  (curtailment-EXEMPT withdrawal)
+    #   revenue_bess_dam = a·(1−q)·(100k−40k) = 53_460  (monolithic)
+    #   fee base = profit_export − expense_charge      = 49_500  (diverges)
+    year1_kpis = {
+        "revenue_bess_dam_eur": 53_460.0,
+        "profit_export_from_bess_eur": 89_100.0,
+        "expense_charge_bess_grid_eur": 39_600.0,
+    }
+    br.plot_bess_revenue_by_month(
+        res, year1_kpis, tmp_path / "m.pdf",
+        econ={"currency_format": "auto"},
+    )
+    dam_bar = captured.get(br._BESS_DAM_LABEL, 0.0)
+    # DAM bars reconcile to the canonical DAM KPI (53_460), NOT the fee base
+    # (49_500) and NOT the raw dispatch net (60_000).
+    assert dam_bar == pytest.approx(53_460.0, abs=1.0)
+    assert abs(dam_bar - 49_500.0) > 1.0
+    assert abs(dam_bar - 60_000.0) > 1.0
 
 
 def test_plot_bess_revenue_by_month_smoke(tmp_path: Path):
