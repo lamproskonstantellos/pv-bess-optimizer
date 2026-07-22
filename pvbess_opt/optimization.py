@@ -1685,10 +1685,41 @@ def build_model(
         profit_eur = profit_eur + m.intraday_margin_expr - id_tiebreak_term
 
     if hasattr(m, "year_close_shortfall"):
-        # Missing the year-close SOC target costs far more than any
-        # energy price, so the shortfall stays at its physical minimum.
+        # Missing the year-close SOC target must cost more than any per-kWh
+        # value the solver could earn by draining terminal SOC, so the
+        # shortfall stays at its physical minimum.  A FIXED 10.0 EUR/kWh
+        # equals a price of 10000 EUR/MWh, so a price above 10000/eta_d
+        # (reachable within EU technical price caps) made abandoning a
+        # REACHABLE closed-cycle target profitable — biasing the
+        # rolling-horizon foresight benchmark and mis-attributing the
+        # warning.  Scale the penalty to strictly dominate the largest
+        # price magnitude in the problem: draining 1 kWh of terminal SOC
+        # earns at most max_price*eta_d/1000 <= max_price/1000 EUR, so
+        # max_price/1000 is a sufficient per-kWh bound; 2x + 1 keeps a
+        # margin.  For any realistic deck (max |price| <= 4500 EUR/MWh) the
+        # scaled value stays below 10.0, so the constant still governs and
+        # the objective is unchanged; and when the target is held the
+        # shortfall is 0, so the coefficient never affects a non-leaking
+        # optimum.
+        _price_values: list[float] = [
+            abs(float(v))
+            for d in (dam_price, retail_price, pv_export_price)
+            for v in d.values()
+        ]
+        for _price_col in ts.columns:
+            if str(_price_col).endswith("_price_eur_per_mwh"):
+                _price_values.extend(
+                    abs(float(x))
+                    for x in ts[_price_col].to_numpy(dtype=float)
+                    if pd.notna(x)
+                )
+        _max_abs_price = max(_price_values, default=0.0)
+        _shortfall_penalty = max(
+            YEAR_CLOSE_SHORTFALL_PENALTY_EUR_PER_KWH,
+            _max_abs_price / 1000.0 * 2.0 + 1.0,
+        )
         profit_eur = profit_eur - (
-            YEAR_CLOSE_SHORTFALL_PENALTY_EUR_PER_KWH * m.year_close_shortfall
+            _shortfall_penalty * m.year_close_shortfall
         )
 
     m.OBJ = pyo.Objective(

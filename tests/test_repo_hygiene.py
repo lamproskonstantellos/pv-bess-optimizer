@@ -335,6 +335,58 @@ def test_pvbess_version_string_matches_init_version():
     )
 
 
+def test_shipped_workbook_notes_match_templates():
+    """The shipped ``inputs/input.xlsx`` note / unit cells must equal the
+    canonical ``io._SHEET_ROW_TEMPLATES``.  An ``io.py`` note edit that is
+    not followed by ``python scripts/polish_input_workbook.py
+    inputs/input.xlsx`` leaves the client reading stale guidance (this has
+    silently shipped twice); this guard fails loudly until the workbook is
+    re-polished."""
+    import openpyxl
+
+    from pvbess_opt.io import _SHEET_ROW_TEMPLATES
+
+    wb = openpyxl.load_workbook(ROOT / "inputs" / "input.xlsx")
+    drift: list[str] = []
+    for sheet_name, template in _SHEET_ROW_TEMPLATES.items():
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        header = [c.value for c in ws[1]]
+        col = {
+            str(h).strip().lower(): i
+            for i, h in enumerate(header) if h is not None
+        }
+        key_i, unit_i, note_i = (
+            col.get("key"), col.get("unit"), col.get("notes"),
+        )
+        if key_i is None or unit_i is None or note_i is None:
+            drift.append(f"{sheet_name}: missing key/unit/notes header")
+            continue
+        wb_notes: dict[object, object] = {}
+        wb_units: dict[object, object] = {}
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if row and row[key_i] is not None:
+                wb_notes[row[key_i]] = row[note_i]
+                wb_units[row[key_i]] = row[unit_i]
+        for key, _default, unit, notes in template:
+            if wb_notes.get(key) != notes:
+                drift.append(
+                    f"{sheet_name}!{key} note: workbook "
+                    f"{wb_notes.get(key)!r} != template {notes!r}"
+                )
+            if wb_units.get(key) != unit:
+                drift.append(
+                    f"{sheet_name}!{key} unit: workbook "
+                    f"{wb_units.get(key)!r} != template {unit!r}"
+                )
+    assert not drift, (
+        "inputs/input.xlsx notes/units drifted from io._SHEET_ROW_TEMPLATES; "
+        "re-run `python scripts/polish_input_workbook.py inputs/input.xlsx`:\n"
+        + "\n".join(drift)
+    )
+
+
 def test_read_workbook_does_not_leak_file_handle():
     """A bare ``pd.ExcelFile(path)`` leaks the workbook file handle (a
     ResourceWarning on every read — historically a large share of the
