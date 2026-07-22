@@ -560,8 +560,13 @@ def _scale_revenue(
     if has_streams:
         # Recover each stream's per-year gross from its base net the same way
         # as the total (net / one_minus_f_year), then scale by the driver.
+        # At a 100 % energy-aggregator fee (frac == 1) one_minus_f_year is 0
+        # in the fee-applied years and the stream net is 0 there too, so guard
+        # the 0/0 (as the gross division above does) to resolve the split to 0
+        # -- retail + dam == revenue_eur == 0 still holds -- rather than NaN.
+        _omf = one_minus_f_year.where(one_minus_f_year.abs() > 1e-12, 1.0)
         retail_gross = float(factor) * (
-            df["revenue_retail_eur"].astype(float) / one_minus_f_year
+            df["revenue_retail_eur"].astype(float) / _omf
         )
         dam_gross = gross - retail_gross
         nonzero = gross.abs() > 1e-12
