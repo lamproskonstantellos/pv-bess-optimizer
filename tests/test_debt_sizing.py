@@ -469,6 +469,35 @@ def test_validation_sizing_keys_inert_in_manual_mode():
     validate_workbook_params(typed, dt_minutes=60)
 
 
+def test_validation_rejects_tenor_outliving_project_when_levered():
+    # A debt tenor beyond the project lifecycle would draw the full debt
+    # at Year 0 but never repay the post-horizon amortization, silently
+    # inflating the equity IRR / DSCR.  Rejected loudly when a debt layer
+    # runs (manual gearing OR target-DSCR sizing).
+    lev = _typed_with_econ(gearing_pct=60.0, debt_tenor_years=15)
+    lev["project"]["project_lifecycle_years"] = 10
+    with pytest.raises(ValueError, match="debt_tenor_years"):
+        validate_workbook_params(lev, dt_minutes=60)
+
+    sized = _typed_with_econ(debt_sizing_mode="target_dscr",
+                             debt_tenor_years=15)
+    sized["project"]["project_lifecycle_years"] = 10
+    with pytest.raises(ValueError, match="debt_tenor_years"):
+        validate_workbook_params(sized, dt_minutes=60)
+
+
+def test_validation_allows_tenor_within_lifecycle_and_all_equity():
+    # tenor == lifecycle is fine; tenor > lifecycle is inert with no debt
+    # layer (all-equity: gearing 0, manual) since no debt is ever drawn.
+    ok = _typed_with_econ(gearing_pct=60.0, debt_tenor_years=10)
+    ok["project"]["project_lifecycle_years"] = 10
+    validate_workbook_params(ok, dt_minutes=60)
+
+    all_equity = _typed_with_econ(gearing_pct=0.0, debt_tenor_years=15)
+    all_equity["project"]["project_lifecycle_years"] = 5
+    validate_workbook_params(all_equity, dt_minutes=60)
+
+
 def _summary(fin: dict, tmp_path) -> str:
     out = tmp_path / "SUMMARY.md"
     write_summary_md(

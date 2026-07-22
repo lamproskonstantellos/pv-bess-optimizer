@@ -1329,7 +1329,11 @@ $$\mathrm{annuity}: \; s = B\,\frac{r_d}{1-(1+r_d)^{-T_d}}; \qquad
 \mathrm{linear}: \; P_y = B/T_d, \; s_y = P_y + r_d B_{y-1} \tag{E20}$$
 
 Equity cashflow: $\mathrm{CF}^{eq}_0 = \mathrm{CF}_0 + B$;
-$\mathrm{CF}^{eq}_y = \mathrm{CF}_y - s_y$ for $y \le T_d$.  KPIs:
+$\mathrm{CF}^{eq}_y = \mathrm{CF}_y - s_y$ for $y \le T_d$ (the tenor must
+satisfy $T_d \le Y$, so the loan amortizes within the project horizon —
+the loader rejects $T_d > Y$ when the debt layer is active; otherwise the
+post-horizon service would be dropped and the outstanding principal left
+unrepaid, inflating the equity IRR / DSCR).  KPIs:
 `equity_irr_pct` = IRR of $\mathrm{CF}^{eq}$,
 `min_dscr` $= \min_y \mathrm{CF}_y / s_y$ and
 `avg_dscr` $= \mathrm{mean}_y\, \mathrm{CF}_y / s_y$ over
