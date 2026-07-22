@@ -43,6 +43,31 @@ def test_amortization_empty_without_debt_or_tenor():
     assert _amortization_schedule(1000.0, 0.05, 0, "annuity") == []
 
 
+def test_sculpted_schedule_caps_principal_at_balance_on_ramp_cfads():
+    """A ramp-shaped CFADS (thin early years, thick later years) inflates
+    the balance carried into the thick years; the sculpted service there
+    must not repay MORE principal than is outstanding, or sum(principal)
+    exceeds the debt drawn and later years book phantom service against a
+    zeroed balance (over-stating debt_service_eur / avg_dscr)."""
+    debt, rate, tenor = 490.0, 0.06, 15
+    cfads = [7.9, 6.5, 7.8, 6.5, 190.3, 192.6, 183.7, 197.7, 191.5,
+             164.1, 177.3, 173.8, 191.9, 191.3, 161.7]
+    sched = _amortization_schedule(debt, rate, tenor, "sculpted", cfads=cfads)
+    # sum(principal) == debt (the branch's stated invariant).
+    assert sum(r["principal_eur"] for r in sched) == pytest.approx(
+        debt, rel=1e-9,
+    )
+    # No year repays more principal than the balance it started with, and
+    # no service is booked once the balance is retired.
+    bal = debt
+    for r in sched:
+        assert r["principal_eur"] <= bal + 1e-9
+        if bal <= 1e-9:
+            assert r["debt_service_eur"] == pytest.approx(0.0, abs=1e-9)
+        bal = r["debt_balance_eur"]
+    assert sched[-1]["debt_balance_eur"] == pytest.approx(0.0, abs=1e-6)
+
+
 def test_equity_irr_exceeds_project_irr_on_positive_spread():
     net_cf = np.array([-1000.0] + [200.0] * 10)
     project_irr = calculate_irr(net_cf) * 100.0

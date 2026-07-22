@@ -241,6 +241,15 @@ def _amortization_schedule(
             interest = balance * rate
             svc = cf[year - 1] / dscr_impl if dscr_impl > 0.0 else 0.0
             principal = max(0.0, svc - interest)
+            if principal > balance:
+                # On a ramp-shaped CFADS (thin early years inflating the
+                # balance carried into thick later years) the sculpted
+                # service can imply a principal larger than the outstanding
+                # balance.  Cap it — otherwise sum(principal) exceeds the
+                # debt drawn and later years book phantom service against a
+                # zeroed balance, over-stating debt_service_eur / avg_dscr.
+                principal = balance
+                svc = principal + interest
             if year == tenor and dscr_impl > 0.0:
                 # Final-year cent sweep: the principal clamp above can
                 # leave a residual; retiring the remaining balance
