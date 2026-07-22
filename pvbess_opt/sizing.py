@@ -105,8 +105,18 @@ def evaluate_sizing_point(
     point: tuple[float, float, float],
     *,
     solver_opts: dict[str, Any],
+    base_dir: Path | None = None,
 ) -> dict[str, float]:
-    """Solve one size point and return its frontier row (sizes + KPIs)."""
+    """Solve one size point and return its frontier row (sizes + KPIs).
+
+    ``base_dir`` anchors relative price-scenario ``store_path`` entries.  For a
+    structured (YAML/JSON) config ``base_xlsx`` is a throwaway workbook
+    materialized into the sweep's temp dir, so the caller threads the ORIGINAL
+    config directory here — mirroring ``pipeline.run`` and
+    ``scenarios.run_scenarios`` so all three dispatch surfaces resolve relative
+    stores against the config, not the temp dir.  None means ``base_xlsx``'s
+    own directory (correct for a genuine workbook input).
+    """
     from .availability import apply_operating_derates
     from .kpis import compute_kpis
     from .optimization import run_scenario
@@ -140,6 +150,7 @@ def evaluate_sizing_point(
     bundle = _build_financials(
         Path(base_xlsx), params, ts_pt, kpis, res,
         solver_opts=solver_opts, in_sizing_sweep=True,
+        base_dir=base_dir,
     )
     fin = bundle.get("fin_kpis") or {}
 
@@ -170,11 +181,18 @@ def run_sizing_sweep(
     grid: list[tuple[float, float, float]],
     *,
     solver_opts: dict[str, Any],
+    base_dir: Path | None = None,
 ) -> pd.DataFrame:
-    """Evaluate every grid point and return the ranked efficient frontier."""
+    """Evaluate every grid point and return the ranked efficient frontier.
+
+    ``base_dir`` (the original config directory) is threaded to every point so
+    relative price-scenario stores resolve against the config, not the
+    materialization temp dir.
+    """
     rows = [
         evaluate_sizing_point(
-            base_params, base_ts, base_pv, base_xlsx, pt, solver_opts=solver_opts,
+            base_params, base_ts, base_pv, base_xlsx, pt,
+            solver_opts=solver_opts, base_dir=base_dir,
         )
         for pt in grid
     ]
@@ -410,7 +428,7 @@ def run_sizing(config: Any, sizing_block: dict[str, Any]) -> SizingResult:
     apply_ieee_style()
     frontier = run_sizing_sweep(
         base_params, base_ts, base_typed["pv"], base_xlsx, grid,
-        solver_opts=solver_opts,
+        solver_opts=solver_opts, base_dir=src.parent,
     )
     # The per-point financials have consumed the materialised base workbook;
     # drop the temp dir before assembling outputs so a sweep does not leak it.
