@@ -16,6 +16,7 @@ from __future__ import annotations
 import itertools
 import json
 import logging
+import shutil
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -411,6 +412,9 @@ def run_sizing(config: Any, sizing_block: dict[str, Any]) -> SizingResult:
         base_params, base_ts, base_typed["pv"], base_xlsx, grid,
         solver_opts=solver_opts,
     )
+    # The per-point financials have consumed the materialised base workbook;
+    # drop the temp dir before assembling outputs so a sweep does not leak it.
+    shutil.rmtree(tmp, ignore_errors=True)
     marginal = compute_marginal_value_of_storage(frontier)
     breakeven = _breakeven_for_best_group(frontier)
     result = SizingResult(

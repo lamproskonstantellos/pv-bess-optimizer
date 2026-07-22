@@ -114,6 +114,127 @@ def test_run_snapshot_exists_and_scrubs_entsoe_token(tmp_path):
     assert token not in summary.read_text(encoding="utf-8")
 
 
+def test_structured_config_anchors_stores_to_config_dir_not_temp(
+    tmp_path, monkeypatch,
+):
+    """A structured (YAML/JSON) config is materialized to a throwaway temp
+    workbook, so ``config.excel`` no longer sits beside the config's own
+    price-scenario stores.  ``run`` must thread the ORIGINAL config directory
+    as ``base_dir`` so a relative ``store_path`` resolves against it (mirroring
+    ``scenarios.run_scenarios``), never the materialization temp dir — which
+    would break the documented relative-store feature with a FileNotFound
+    pointing at a random temp path the user never created."""
+    import pvbess_opt.pipeline as pipeline
+
+    cfg_dir = tmp_path / "project"
+    cfg_dir.mkdir()
+    cfg = cfg_dir / "config.yaml"
+    cfg.write_text("# structured config\n", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    # Stub the heavy materialize/read path: this test pins only the base_dir
+    # threading, not the solve.  materialize_to_xlsx returns a path INSIDE the
+    # real mkdtemp temp dir, so config.excel's parent is the temp dir.
+    monkeypatch.setattr(pipeline, "is_structured_config", lambda _p: True)
+    monkeypatch.setattr(
+        pipeline, "materialize_to_xlsx",
+        lambda _src, dst: Path(dst) / "materialized.xlsx",
+    )
+    monkeypatch.setattr(pipeline, "read_inputs", lambda _p: ({}, None))
+    monkeypatch.setattr(pipeline, "apply_ieee_style", lambda: None)
+    monkeypatch.setattr(pipeline, "set_show_titles", lambda _v: None)
+
+    sentinel = object()
+
+    def _fake_run_one(
+        params, ts, config, base_name, timestamp, base_dir=None,
+    ):
+        captured["base_dir"] = base_dir
+        captured["excel_parent"] = Path(config.excel).parent
+        return sentinel
+
+    monkeypatch.setattr(pipeline, "_run_one", _fake_run_one)
+
+    result = pipeline.run(RunConfig(excel=cfg, outdir=tmp_path / "out"))
+    assert result is sentinel
+    # base_dir is the config's OWN directory ...
+    assert captured["base_dir"] == cfg_dir
+    # ... and specifically NOT the materialization temp dir.
+    assert captured["base_dir"] != captured["excel_parent"]
+
+
+def test_structured_config_temp_workbook_is_cleaned_up(tmp_path, monkeypatch):
+    """The throwaway workbook a structured config is materialized into has no
+    consumer once the run has read it and copied its snapshot; ``run`` must
+    remove the temp dir so batch/sweep invocations do not leak one per run."""
+    import tempfile as _tempfile
+
+    import pvbess_opt.pipeline as pipeline
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("# structured config\n", encoding="utf-8")
+
+    made: list[Path] = []
+    _real_mkdtemp = _tempfile.mkdtemp
+
+    def _tracking_mkdtemp(*a, **k):
+        d = _real_mkdtemp(*a, **k)
+        made.append(Path(d))
+        return d
+
+    monkeypatch.setattr(pipeline.tempfile, "mkdtemp", _tracking_mkdtemp)
+    monkeypatch.setattr(pipeline, "is_structured_config", lambda _p: True)
+    monkeypatch.setattr(
+        pipeline, "materialize_to_xlsx",
+        lambda _src, dst: Path(dst) / "materialized.xlsx",
+    )
+    monkeypatch.setattr(pipeline, "read_inputs", lambda _p: ({}, None))
+    monkeypatch.setattr(pipeline, "apply_ieee_style", lambda: None)
+    monkeypatch.setattr(pipeline, "set_show_titles", lambda _v: None)
+    monkeypatch.setattr(pipeline, "_run_one", lambda *a, **k: object())
+
+    pipeline.run(RunConfig(excel=cfg, outdir=tmp_path / "out"))
+
+    assert made, "run() should have created a materialization temp dir"
+    assert not made[0].exists(), (
+        f"materialization temp dir {made[0]} must be removed after the run"
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_soh_plot_failure_does_not_abort_completed_run(tmp_path, monkeypatch):
+    """A figure must never turn an otherwise-complete run into a reported
+    failure: 03_results.xlsx and SUMMARY.md are written before any plot, so a
+    raise inside ``plot_soh_trajectory`` (the one call that used to be
+    unguarded, unlike its siblings) must be logged and swallowed, and the run
+    must still return populated Results with the workbook on disk."""
+    import pvbess_opt.pipeline as pipeline
+
+    short = _short_workbook(tmp_path)
+    called = {"n": 0}
+
+    def _boom(*_a, **_k):
+        called["n"] += 1
+        raise RuntimeError("synthetic SOH-trajectory plot failure")
+
+    monkeypatch.setattr(pipeline, "plot_soh_trajectory", _boom)
+
+    result = run(RunConfig(
+        excel=short, solver="highs", outdir=tmp_path / "results",
+        mip_gap=0.05, time_limit=180,
+    ))
+    # The guarded plot was actually reached (the projection spans the
+    # lifecycle regardless of the one-day dispatch slice) ...
+    assert called["n"] >= 1, "plot_soh_trajectory must have been reached"
+    # ... yet the run completed and the primary outputs are on disk.
+    assert isinstance(result, Results)
+    assert result.kpis
+    assert (result.out_dir / "03_results.xlsx").exists()
+    assert (result.out_dir / "00_summary" / "SUMMARY.md").exists()
+
+
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_cli_main_smoke(tmp_path):
     from pvbess_opt import cli

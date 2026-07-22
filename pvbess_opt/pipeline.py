@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import shutil
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -678,27 +679,33 @@ def _low_price_sizing_cashflow(
         "scenario_engine": {"price_scenarios_enabled": False},
     })
     tmp = Path(tempfile.mkdtemp(prefix="pvbess_lowprice_"))
-    deck_xlsx = tmp / "low_price_case.xlsx"
-    write_workbook(typed, deck_xlsx)
-    deck_params, deck_ts = read_inputs(deck_xlsx)
-    logger.info(
-        "[debt sizing] low_price case: re-dispatching the year with "
-        "price deck %r.",
-        deck,
-    )
-    res, _solver, _res_full = run_scenario(
-        deck_params, deck_ts, return_unrounded=True,
-        **(solver_opts or {}),
-    )
-    deck_kpis = compute_kpis(res, deck_params, verify_balance=False)
-    deck_kpis = apply_operating_derates(deck_kpis, deck_params)
-    bundle = _build_financials(
-        deck_xlsx, deck_params, deck_ts, deck_kpis, res,
-        solver_opts=solver_opts,
-    )
-    deck_cf = bundle["yearly_cf"]
-    assert isinstance(deck_cf, pd.DataFrame)
-    return deck_cf
+    try:
+        deck_xlsx = tmp / "low_price_case.xlsx"
+        write_workbook(typed, deck_xlsx)
+        deck_params, deck_ts = read_inputs(deck_xlsx)
+        logger.info(
+            "[debt sizing] low_price case: re-dispatching the year with "
+            "price deck %r.",
+            deck,
+        )
+        res, _solver, _res_full = run_scenario(
+            deck_params, deck_ts, return_unrounded=True,
+            **(solver_opts or {}),
+        )
+        deck_kpis = compute_kpis(res, deck_params, verify_balance=False)
+        deck_kpis = apply_operating_derates(deck_kpis, deck_params)
+        bundle = _build_financials(
+            deck_xlsx, deck_params, deck_ts, deck_kpis, res,
+            solver_opts=solver_opts,
+        )
+        deck_cf = bundle["yearly_cf"]
+        assert isinstance(deck_cf, pd.DataFrame)
+        return deck_cf
+    finally:
+        # The deck workbook has no consumer past the cashflow it produced;
+        # drop the temp dir so a target-DSCR sizing sweep does not leak one
+        # low_price case per grid point.
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _build_financials(
@@ -1588,8 +1595,18 @@ def _run_one(
     config: RunConfig,
     base_name: str,
     timestamp: str,
+    base_dir: Path | None = None,
 ) -> Results:
-    """Solve, post-process, archive and plot a single scenario."""
+    """Solve, post-process, archive and plot a single scenario.
+
+    ``base_dir`` anchors relative price-scenario ``store_path`` references.
+    A structured (YAML/JSON) config is materialized to a throwaway temp
+    workbook, so ``config.excel`` no longer sits beside the config's own
+    stores; the caller threads the original config directory here so those
+    relative stores resolve against it, mirroring ``scenarios.run_scenarios``.
+    Defaults to ``config.excel``'s parent for a genuine workbook input.
+    """
+    _base_dir = base_dir or Path(config.excel).parent
     slug = _scenario_slug(params)
     set_scenario_label(slug)
     set_project_mode_label(_project_mode_label(params))
@@ -2051,6 +2068,7 @@ def _run_one(
                 "time_limit_seconds": config.time_limit,
                 "tee": config.tee,
             },
+            base_dir=_base_dir,
         )
         econ = bundle["econ"]
 
@@ -2138,7 +2156,7 @@ def _run_one(
         if _ps_application is not None:
             ensemble_result = run_price_scenario_ensemble(
                 econ, kpis, bundle.get("capacities") or {}, ts, res,
-                base_dir=Path(config.excel).parent,
+                base_dir=_base_dir,
                 applied_trajectories=_ps_application.applied_trajectories,
                 applied_name=_ps_application.applied,
                 lifetime_yearly=bundle.get("lifetime_yearly"),
@@ -2207,9 +2225,16 @@ def _run_one(
             logger.exception("Balancing plot generation failed")
 
         if degradation_df is not None and not degradation_df.empty:
-            plot_soh_trajectory(
-                degradation_df, layout["financial_plots"] / "soh_trajectory.pdf",
-            )
+            # A figure must never turn an otherwise-complete run (03_results.xlsx
+            # and SUMMARY.md are already on disk) into a reported failure, so
+            # this plot is guarded like every one of its siblings below.
+            try:
+                plot_soh_trajectory(
+                    degradation_df,
+                    layout["financial_plots"] / "soh_trajectory.pdf",
+                )
+            except Exception:
+                logger.exception("SOH trajectory plot generation failed")
         # The annual energy-flow diagram needs only the dispatch frame,
         # so it renders for every run in both modes; the CFE view stays
         # tied to the emissions configuration.
@@ -2335,15 +2360,29 @@ def run(config: RunConfig) -> Results:
     """
     src = Path(config.excel)
     base_name = src.stem
+    tmp_dir: Path | None = None
     if is_structured_config(src):
         tmp_dir = Path(tempfile.mkdtemp(prefix="pvbess_cfg_"))
         run_config = replace(config, excel=materialize_to_xlsx(src, tmp_dir))
     else:
         run_config = config
-    params, ts = read_inputs(run_config.excel)
-    apply_ieee_style()
-    set_show_titles(params.get("show_titles", False))
-    if run_config.mode is not None:
-        params["mode"] = run_config.mode
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return _run_one(params, ts, run_config, base_name, timestamp)
+    try:
+        params, ts = read_inputs(run_config.excel)
+        apply_ieee_style()
+        set_show_titles(params.get("show_titles", False))
+        if run_config.mode is not None:
+            params["mode"] = run_config.mode
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Anchor relative price-scenario stores against the ORIGINAL config
+        # directory, not the throwaway materialization temp dir (a genuine
+        # workbook input has src == run_config.excel, so this is a no-op).
+        return _run_one(
+            params, ts, run_config, base_name, timestamp,
+            base_dir=src.parent,
+        )
+    finally:
+        # The materialized workbook has no consumer once the run has read it
+        # and copied its shareable snapshot into 01_inputs; drop the temp dir
+        # so batch/sweep invocations do not leak one dir per run.
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
