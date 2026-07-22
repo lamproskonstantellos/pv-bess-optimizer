@@ -137,7 +137,8 @@ def evaluate_sizing_point(
     kpis = compute_kpis(res, params, verify_balance=False)
     kpis = apply_operating_derates(kpis, params)
     bundle = _build_financials(
-        Path(base_xlsx), params, ts_pt, kpis, res, in_sizing_sweep=True,
+        Path(base_xlsx), params, ts_pt, kpis, res,
+        solver_opts=solver_opts, in_sizing_sweep=True,
     )
     fin = bundle.get("fin_kpis") or {}
 
