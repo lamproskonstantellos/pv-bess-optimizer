@@ -214,6 +214,58 @@ def test_monthly_energy_fee_uses_net_dam_base_like_waterfall(
     assert abs(captured["energy_fee"] - (-5_000.0)) > 1.0
 
 
+def test_monthly_dam_bars_reconcile_to_derated_waterfall_base(
+    tmp_path: Path, monkeypatch,
+):
+    """The dispatch frame is un-derated but the waterfall and KPI totals use
+    the availability/curtailment-derated year1_kpis.  The monthly DAM bars
+    must sum to the derated KPI base (profit_export_from_bess − charge), not
+    the raw dispatch sum, so the monthly figure and the waterfall agree."""
+    import matplotlib.pyplot as plt
+
+    import pvbess_opt.plotting.bess_revenue as br
+
+    captured: dict[str, float] = {}
+
+    def _spy(out_path):
+        ax = plt.gca()
+        for container in ax.containers:
+            lbl = container.get_label()
+            captured[lbl] = captured.get(lbl, 0.0) + float(
+                sum(b.get_height() for b in container)
+            )
+        return out_path
+
+    monkeypatch.setattr(br, "save_figure", _spy)
+
+    n = 96 * 30
+    ts = pd.date_range("2026-01-01", periods=n, freq="15min").append(
+        pd.date_range("2026-02-01", periods=n, freq="15min")
+    )
+    total = len(ts)
+    # Raw dispatch: gross export 100k, grid charge 40k => raw net DAM 60k.
+    res = pd.DataFrame({
+        "timestamp": ts,
+        "profit_export_from_bess_eur": np.full(total, 100_000.0 / total),
+        "expense_charge_bess_grid_eur": np.full(total, 40_000.0 / total),
+        "bess_dis_grid_kwh": np.full(total, 0.0),
+    })
+    # Derated KPIs (a 4 % derate on the 60k net): the waterfall's DAM base.
+    year1_kpis = {
+        "profit_export_from_bess_eur": 96_000.0,
+        "expense_charge_bess_grid_eur": 38_400.0,
+    }
+    br.plot_bess_revenue_by_month(
+        res, year1_kpis, tmp_path / "m.pdf",
+        econ={"currency_format": "auto"},
+    )
+    # DAM bars sum to the derated base 57_600, not the raw 60_000.
+    assert captured.get(br._BESS_DAM_LABEL) == pytest.approx(
+        57_600.0, abs=1.0,
+    )
+    assert abs(captured.get(br._BESS_DAM_LABEL, 0.0) - 60_000.0) > 1.0
+
+
 def test_plot_bess_revenue_by_month_smoke(tmp_path: Path):
     n = 96 * 30  # one month at 15 min cadence
     rng = pd.date_range("2026-01-01", periods=n, freq="15min")

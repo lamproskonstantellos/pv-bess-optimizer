@@ -354,6 +354,21 @@ def plot_bess_revenue_by_month(
          - res_year1.get("expense_charge_bess_grid_eur", 0.0).astype(float)).to_numpy(),
         index=months.to_numpy(),
     ).groupby(level=0).sum().reindex(range(1, 13), fill_value=0.0)
+    # The dispatch frame is un-derated, but the waterfall and every KPI
+    # total use the availability/curtailment-derated ``year1_kpis``.  Scale
+    # the per-month DAM margin so its annual sum matches the derated KPI
+    # base the waterfall draws (profit_export_from_bess − charge), so the
+    # monthly bars (and the fees derived from them) reconcile to the
+    # waterfall instead of diverging by the derate factor.  Skipped when the
+    # KPI base is absent (a raw dispatch-only caller keeps the raw scale).
+    if "profit_export_from_bess_eur" in year1_kpis:
+        _dam_kpi = (
+            float(year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0)
+            - float(year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0)
+        )
+        _dam_raw = float(by_month_dam.sum())
+        if abs(_dam_raw) > 1e-9:
+            by_month_dam = by_month_dam * (_dam_kpi / _dam_raw)
 
     bm_per_month: dict[str, np.ndarray] = {}
     for key, label, _colour_key in _BM_PRODUCTS:
@@ -458,6 +473,15 @@ def plot_bess_revenue_by_month(
         ).to_numpy() / 1000.0
     else:
         bess_export_monthly_mwh = np.zeros(12)
+    # Match the waterfall's derated export base (year1_kpis['bess_export_mwh'])
+    # so the route-to-market fee reconciles too; skipped when absent (raw).
+    if "bess_export_mwh" in year1_kpis:
+        _export_raw = float(bess_export_monthly_mwh.sum())
+        if abs(_export_raw) > 1e-9:
+            bess_export_monthly_mwh = bess_export_monthly_mwh * (
+                float(year1_kpis.get("bess_export_mwh", 0.0) or 0.0)
+                / _export_raw
+            )
     rtm_fee_arr = -rtm_rate * bess_export_monthly_mwh
     margin_monthly = np.asarray(by_month_dam.to_numpy(), dtype=float)
     pos_margin = np.maximum(margin_monthly, 0.0)
