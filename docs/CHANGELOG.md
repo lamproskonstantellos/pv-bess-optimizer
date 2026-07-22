@@ -236,6 +236,41 @@ Pre-delivery release audit (round 5):
   those two informational columns; the degenerate divisor is now guarded so
   the split resolves to zero (headline NPV/IRR were already correct).
 
+Pre-delivery release audit (round 6):
+
+- **Sculpted debt over-repayment.** The `sculpted` amortization schedule
+  computed `principal = max(0, service − interest)` without capping it at
+  the outstanding balance. On a ramp-shaped CFADS (thin early years, thick
+  later years — reachable via any phased-in contract stream, e.g. a
+  toll / support / capacity `year_from` window, or a rising price curve)
+  the sculpted service in the thick years implied a principal larger than
+  the balance, so `sum(principal)` exceeded the debt drawn (≈28 % over in
+  the repro), the loan closed out early, and later years booked phantom
+  `debt_service_eur` against a zeroed balance — over-stating the
+  debt-schedule sheet and `avg_dscr`. Principal is now capped at the
+  balance, restoring `sum(principal) == debt`. `annuity` / `linear` were
+  already immune; the shipped default (all-equity) draws no debt.
+- **Year-close SOC penalty.** The rolling-horizon year-close SOC soft-pin
+  penalty was a fixed `10.0 EUR/kWh`, exactly a price of 10000 EUR/MWh.
+  Above `10000 / eta_d` (within EU technical price caps, and
+  balancing / imbalance prices are unbounded) the solver profitably
+  abandoned a REACHABLE closed-cycle target to arbitrage, biasing the
+  perfect-foresight benchmark and mis-attributing the shortfall warning.
+  The penalty now scales to strictly dominate the largest price magnitude
+  in the problem (floored at the old 10.0), so it is inert for any
+  realistic deck (max |price| ≤ 4500 EUR/MWh) and fixes only the extreme
+  case.
+- **Shipped workbook notes.** `inputs/input.xlsx` had not been re-polished
+  after the round-4 `optimizer_margin_basis` and round-5 `debt_tenor_years`
+  note edits, so a client configuring from the (stale) note cells could set
+  `optimizer_margin_basis = dam_plus_balancing` with the floor off and
+  silently over-state NPV. The workbook is re-polished (0 value changes,
+  the two notes corrected, all 18 sheets preserved, so the computed
+  `03_results.xlsx` is unchanged), and a new test
+  (`test_shipped_workbook_notes_match_templates`) fails whenever a shipped
+  note / unit drifts from `io._SHEET_ROW_TEMPLATES`, so a future note edit
+  cannot ship stale again.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.
