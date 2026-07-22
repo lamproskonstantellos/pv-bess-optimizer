@@ -384,6 +384,50 @@ def test_validation_and_toll_overlap_warning(caplog):
     assert "full floor top-up" not in caplog.text
 
 
+def test_margin_basis_ignored_warning_when_floor_disabled(caplog):
+    """optimizer_margin_basis='dam_plus_balancing' governs only the
+    floor+share structure (E30a); the plain E13d share (floor disabled)
+    always uses the DAM (+ intraday) base and ignores it, so the loader
+    must WARN rather than let the silently-ignored basis over-state NPV."""
+    _marker = "optimizer_margin_basis='dam_plus_balancing' is set while"
+    # Floor disabled + active share: the basis silently no-ops -> warns.
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
+        validate_workbook_params(
+            _typed(
+                optimizer_margin_basis="dam_plus_balancing",
+                optimizer_floor_enabled=False,
+                optimizer_revenue_share_pct=15.0,
+            ),
+            dt_minutes=15,
+        )
+    assert _marker in caplog.text
+    # Floor ENABLED: the basis takes effect -> no warning.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
+        validate_workbook_params(
+            _typed(
+                optimizer_margin_basis="dam_plus_balancing",
+                optimizer_floor_enabled=True,
+                optimizer_floor_eur_per_kw_year=FLOOR_RATE,
+                optimizer_revenue_share_pct=15.0,
+            ),
+            dt_minutes=15,
+        )
+    assert _marker not in caplog.text
+    # No active share: nothing is over-stated, so no warning.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
+        validate_workbook_params(
+            _typed(
+                optimizer_margin_basis="dam_plus_balancing",
+                optimizer_floor_enabled=False,
+                optimizer_revenue_share_pct=0.0,
+            ),
+            dt_minutes=15,
+        )
+    assert _marker not in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # KPI, SUMMARY, theme and LCOE/LCOS invariance
 # ---------------------------------------------------------------------------

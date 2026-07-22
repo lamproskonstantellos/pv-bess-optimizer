@@ -159,6 +159,52 @@ Pre-delivery release audit (round 3):
   header bottom-border (previously an unused constant); a mis-named
   "five legend entries" smoke test renamed to what it checks.
 
+Pre-delivery release audit (round 4):
+
+- **Input validation.** The PVGIS-geometry keys `tilt` and `weather_year`
+  now fail fast on a non-blank cell that is neither a number nor their
+  sentinel (`optimal` / `tmy`), matching the numeric-cell contract of their
+  sibling keys (`latitude` / `longitude` / …). Previously their bespoke
+  parsers warned-and-defaulted, and because the parser runs before
+  `validate_pv_location_fields`, that validator's reject branch never saw
+  the malformed value — a `tilt = 45xyz` on a PVGIS-fetch run silently used
+  `optimal`, changing the fetched PV profile and every downstream number. A
+  blank cell still resolves to the default.
+- **Scenario batch (crash).** A scenario batch over a base config that uses
+  `debt_sizing_case = low_price` + `debt_sizing_mode = target_dscr` no longer
+  raises `price deck 'low' matches no variant`: scenario materialisation now
+  preserves the debt-sizing deck's `<column>__<deck>` variant columns (it
+  stripped all variants), which the nested low_price re-dispatch re-reads.
+  The sizing sweep got its guard in an earlier round; the scenario path had
+  none. `evaluate_scenario` / `evaluate_sizing_point` also now thread
+  `solver_opts` into `_build_financials`, so nested re-solves honour
+  `--solver` / `--mip-gap` / `--time-limit`.
+- **Post-tax equity IRR (sculpted debt).** `equity_irr_post_tax_pct` now
+  services the same committed debt schedule the debt sheet and the tax-shield
+  interest use (sculpted on pre-tax CFADS), instead of re-sculpting the
+  service on post-tax CFADS. Debt service is a fixed contractual obligation,
+  identical in the pre-tax and post-tax views of one run; re-sculpting it
+  silently re-timed the service and biased the levered post-tax equity IRR
+  for `debt_repayment = sculpted` (inert for annuity/linear and all-equity).
+- **Availability derate (baseload PPA).** `profit_total_eur` now derates only
+  its market portion when a baseload PPA is active: the total embeds the
+  production-decoupled contract leg, which is (correctly) exempt from the
+  unavailability derate, so a uniform scale shrank the exempt leg inside the
+  total — breaking `profit_total == Σ(derated components)` and firing a
+  spurious "revenue split drift" log every run (NPV/IRR were already correct,
+  built from the components).
+- **Config surface & docs.** The `optimizer_margin_basis` note now states it
+  governs only the floor+share structure (Eq. E30a); the loader warns when
+  `dam_plus_balancing` is set with the floor disabled (the plain E13d share
+  ignores it, so it would silently over-state NPV). The README output
+  reference lists the price-scenario figures (`price_path_fan`,
+  `capture_kpis`); the E14 replacement-CAPEX formula and the E52 enumeration
+  gained the `(1+ob)` overbuild factor the code already applies.
+- **Duplication.** `io._MERIT_ORDER_PRODUCTS` is now derived from
+  `balancing.PRODUCTS_WITH_ACTIVATION` (was a hand-maintained copy of the
+  same set — a latent drift risk if a new activation-carrying product is
+  added), completing the round-3 single-sourcing of the product tuples.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

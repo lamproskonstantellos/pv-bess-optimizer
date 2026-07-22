@@ -240,16 +240,36 @@ def apply_unavailability_derate(
     # (shortfall RISES with unavailability; the exact correction needs
     # per-step recomputation — the bess_utilization_diagnostics
     # precedent).
-    if "ppa_baseload_shortfall_mwh" in kpis:
+    _baseload_ppa = "ppa_baseload_shortfall_mwh" in kpis
+    if _baseload_ppa:
+        # ``profit_total_eur`` EMBEDS the production-decoupled PPA leg
+        # (profit_total = retail + dam + ppa - grid_charge + id_net), so
+        # a uniform derate would silently shrink the exempt leg inside
+        # the total — breaking ``profit_total == sum(components)`` and
+        # tripping the cashflow's revenue-split reconciliation guard.
+        # Exempt it here and recompose it below so only its market
+        # portion scales (mirrors the curtailment path).
         derated_keys = tuple(
             k for k in derated_keys
-            if k not in ("revenue_pv_ppa_eur", "ppa_covered_dam_value_eur")
+            if k not in (
+                "revenue_pv_ppa_eur", "ppa_covered_dam_value_eur",
+                "profit_total_eur",
+            )
         )
     factor = availability_factor(unavailability_pct)
     out = dict(kpis)
     for key in derated_keys:
         if key in out and isinstance(out[key], (int, float)):
             out[key] = float(out[key]) * factor
+    if _baseload_ppa and "profit_total_eur" in out:
+        # Only the market portion (everything but the exempt baseload
+        # leg) derates; the leg itself stays at its production-decoupled
+        # Year-1 value.  ``ppa_covered_dam_value_eur`` is a shadow value,
+        # not part of profit_total, so only the leg is carved out.
+        _leg = float(kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0)
+        out["profit_total_eur"] = (
+            _leg + factor * (float(kpis["profit_total_eur"]) - _leg)
+        )
     # Per-month list keys scale element-wise with the same factor so
     # the cashflow projection they feed matches the scalar totals.
     for key in _DERATED_LIST_KEYS:

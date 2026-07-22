@@ -186,28 +186,63 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
             )
 
 
-def _strip_price_deck_variants(ts: pd.DataFrame) -> pd.DataFrame:
+def _debt_sizing_deck_to_keep(econ: dict[str, Any] | None) -> str | None:
+    """The price-deck name a scenario must keep for its debt sizing.
+
+    A base workbook with ``debt_sizing_case = low_price`` and
+    ``debt_sizing_mode = target_dscr`` re-dispatches the named
+    ``debt_sizing_deck`` (default ``low``) inside ``_build_financials``.
+    That re-dispatch re-reads the MATERIALISED scenario workbook, so its
+    ``<col>__<deck>`` variant columns must survive materialisation
+    (stripping them all crashes the batch — the sizing sweep got its
+    guard in an earlier round, the scenario batch did not).  Returns the
+    deck name to preserve, or None when no deck re-dispatch will run.
+    """
+    if not isinstance(econ, dict):
+        return None
+    case = str(econ.get("debt_sizing_case", "base") or "base").strip().lower()
+    mode = str(
+        econ.get("debt_sizing_mode", "manual") or "manual"
+    ).strip().lower()
+    if case == "low_price" and mode == "target_dscr":
+        return str(econ.get("debt_sizing_deck", "low") or "low").strip().lower()
+    return None
+
+
+def _strip_price_deck_variants(
+    ts: pd.DataFrame, *, keep_deck: str | None = None,
+) -> pd.DataFrame:
     """Drop every ``<base>__<deck>`` variant column from ``ts``.
 
     Variant columns are inert in a normal run; the per-scenario MILP
     never sees them (smaller materialized workbooks, and the balancing
     scalar fallback on the re-read operates on the canonical columns
-    the deck resolution produced).
+    the deck resolution produced).  ``keep_deck`` preserves the
+    ``<base>__<keep_deck>`` columns so a downstream low_price debt-sizing
+    re-dispatch (which re-reads the materialised workbook) can still
+    resolve its deck.
     """
-    variants = [c for c in ts.columns if "__" in str(c)]
+    _keep = None if keep_deck is None else f"__{keep_deck}"
+    variants = [
+        c for c in ts.columns
+        if "__" in str(c) and not (_keep is not None and str(c).endswith(_keep))
+    ]
     return ts.drop(columns=variants) if variants else ts
 
 
 def _apply_price_deck(
     ts: pd.DataFrame, deck: str, *, scenario_name: str,
+    keep_deck: str | None = None,
 ) -> pd.DataFrame:
     """Resolve a named price deck onto the canonical price columns.
 
     Copies every ``<base>__<deck>`` variant onto ``<base>`` (partial
     decks allowed: a canonical column without a variant for this deck
-    keeps its base values, INFO-logged), then strips ALL variant
-    columns.  Raises when the deck matches no variant column — the
-    batch runner calls this fail-fast before any solver time is spent.
+    keeps its base values, INFO-logged), then strips the variant
+    columns (except ``keep_deck``, preserved for a downstream low_price
+    debt-sizing re-dispatch).  Raises when the deck matches no variant
+    column — the batch runner calls this fail-fast before any solver
+    time is spent.
     """
     from .io import PRICE_DECK_BASE_COLUMNS
 
@@ -235,7 +270,7 @@ def _apply_price_deck(
             f"<column>__{deck} variant column in the base timeseries; "
             f"decks available: {available or 'none'}."
         )
-    return _strip_price_deck_variants(ts)
+    return _strip_price_deck_variants(ts, keep_deck=keep_deck)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -338,14 +373,21 @@ def _apply_scenario_overrides(
     # the balancing scalar fallback on the re-read sees the deck values
     # in the canonical columns; without a deck the inert variant
     # columns are stripped so the per-scenario MILP never sees them.
+    # Preserve the debt-sizing deck's variants (if the base config runs a
+    # low_price target-DSCR sizing) so the nested re-dispatch — which
+    # re-reads THIS materialised workbook — can still resolve its deck.
+    _keep_deck = _debt_sizing_deck_to_keep(typed.get("economics"))
     deck = scenario.get("price_deck")
     if deck is not None and "ts" in typed:
         typed["ts"] = _apply_price_deck(
             typed["ts"], str(deck),
             scenario_name=str(scenario.get("name", "<unnamed>")),
+            keep_deck=_keep_deck,
         )
     elif "ts" in typed:
-        typed["ts"] = _strip_price_deck_variants(typed["ts"])
+        typed["ts"] = _strip_price_deck_variants(
+            typed["ts"], keep_deck=_keep_deck,
+        )
 
     # The base PV profile is already resolved; scenarios rescale it by
     # nameplate through the standard read path, so force file mode.
@@ -403,7 +445,8 @@ def evaluate_scenario(
     # store_path entries against the ORIGINAL workbook's directory,
     # never the throwaway temp dir the scenario materialised into.
     bundle = _build_financials(
-        xlsx, params, ts, kpis, res, base_dir=base_dir,
+        xlsx, params, ts, kpis, res,
+        solver_opts=solver_opts, base_dir=base_dir,
     )
     fin = bundle.get("fin_kpis") or {}
 

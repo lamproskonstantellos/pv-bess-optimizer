@@ -289,3 +289,34 @@ def test_low_price_debt_sizing_falls_back_to_base_in_sizing_sweep(
     )
     # Debt is still sized — on the point's own (base) cashflow.
     assert bundle["econ"].get("_sized_debt_eur") is not None
+
+
+@pytest.mark.skipif(not _highs_available(), reason="requires HiGHS")
+def test_scenario_batch_over_low_price_base_does_not_crash():
+    """Regression (audit): a scenario batch whose BASE config uses
+    debt_sizing_case='low_price' + target_dscr must not strip the
+    debt-sizing deck's ``<col>__<deck>`` variant columns during
+    materialisation.  The nested low_price re-dispatch re-reads the
+    materialised scenario workbook, so stripping the variant made the
+    whole batch raise ``price deck 'low' matches no variant``.  Unlike
+    the sizing sweep (which correctly falls back), the scenario's plant
+    is fixed, so the deck-based sizing is valid and must run."""
+    from pvbess_opt.scenarios import evaluate_scenario
+
+    base_typed = _typed_with_deck()
+    # A plain scenario naming no price_deck (the reported crash path);
+    # this used to strip the '__low' variant the nested sizing needs.
+    row = evaluate_scenario(base_typed, {"name": "plain"}, solver_opts={})
+    assert row["name"] == "plain"
+    assert np.isfinite(row["npv_eur"])
+    # And a scenario that DOES name a deck (different from the sizing
+    # deck) must still preserve the sizing deck's variant.
+    base_typed2 = _typed_with_deck()
+    base_typed2["ts"]["dam_price_eur_per_mwh__high"] = (
+        base_typed2["ts"]["dam_price_eur_per_mwh"].astype(float) * 1.2
+    )
+    row2 = evaluate_scenario(
+        base_typed2, {"name": "high-deck", "price_deck": "high"},
+        solver_opts={},
+    )
+    assert np.isfinite(row2["npv_eur"])

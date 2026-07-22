@@ -80,7 +80,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .balancing import resolve_balancing_config
+from .balancing import PRODUCTS_WITH_ACTIVATION, resolve_balancing_config
 from .constants import (
     BENCHMARK_LCOE_HIGH_EUR_PER_MWH,
     BENCHMARK_LCOE_LOW_EUR_PER_MWH,
@@ -1077,12 +1077,14 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "of life (default, preserving the whole-life behaviour). After "
      "the term neither share nor floor applies."),
     ("optimizer_margin_basis", "dam", "dam | dam_plus_balancing",
-     "Margin base for share and floor: 'dam' (default; the BESS DAM "
-     "trading margin, the E13d base) or 'dam_plus_balancing' (adds "
-     "balancing net of the BSP fee, i.e. the full E25a base - "
+     "Margin base for the FLOOR+SHARE structure only (Eq. E30a): 'dam' "
+     "(default; the BESS DAM trading margin) or 'dam_plus_balancing' "
+     "(adds balancing net of the BSP fee, the full E25a base - "
      "optimizers routinely manage ancillary revenue too). The share "
-     "applies AFTER the BSP fee; fees never compound. Default keeps "
-     "results bit-identical."),
+     "applies AFTER the BSP fee; fees never compound. ONLY takes effect "
+     "when optimizer_floor_enabled = TRUE; the plain E13d share "
+     "(floor disabled) always uses the DAM (+ intraday) base and "
+     "ignores this key. Default keeps results bit-identical."),
     ("balancing_aggregator_fee_pct_revenue", 0.0, "%",
      "Optional, separate route-to-market (BSP / balancing-aggregator) fee on "
      "GROSS balancing revenue (capacity + activation). Default 0 = fee-free, "
@@ -2662,11 +2664,19 @@ def _parse_pv_tilt(raw: Any, default: Any) -> Any:
             return "optimal"
     coerced = _coerce(raw, float, default)
     if coerced is _COERCE_FAILED:
-        logger.warning(
-            "Workbook value for 'tilt' could not be parsed as a number or "
-            "'optimal' (got %r); using default %r.", raw, default,
+        # A non-blank cell that is neither 'optimal' nor a number is an
+        # input mistake; silently substituting the default would change
+        # the fetched PV profile (and every downstream number) with only
+        # a warning trivially lost in a long run's stdout.  Fail fast,
+        # naming the key — the same contract as the numeric keys in
+        # _parse_value and the (post-parse) range check in
+        # validate_pv_location_fields, which never sees the raw value
+        # because this parser runs first.  Blank/NaN/'' still default.
+        raise ValueError(
+            f"'tilt' expects a number in [0, 90] or 'optimal', got {raw!r} "
+            "which could not be parsed; correct the cell (leave it blank "
+            f"to use the default {default!r})."
         )
-        return default
     return coerced
 
 
@@ -2684,11 +2694,14 @@ def _parse_pv_weather_year(raw: Any, default: Any) -> Any:
             return "tmy"
     coerced = _coerce(raw, int, default)
     if coerced is _COERCE_FAILED:
-        logger.warning(
-            "Workbook value for 'weather_year' could not be parsed as a year "
-            "or 'tmy' (got %r); using default %r.", raw, default,
+        # Fail fast on a non-blank value that is neither 'tmy' nor a year
+        # (mirrors _parse_pv_tilt and the numeric-key contract); a blank
+        # cell still resolves to the default.
+        raise ValueError(
+            f"'weather_year' expects a calendar year or 'tmy', got {raw!r} "
+            "which could not be parsed; correct the cell (leave it blank "
+            f"to use the default {default!r})."
         )
-        return default
     return coerced
 
 
@@ -2883,10 +2896,10 @@ BESS_REPLACEMENT_AUTO = "auto"
 
 
 #: Products a merit-order activation curve may target (Eq. B10):
-#: FCR is capacity-only, so it carries no activation curve.
-_MERIT_ORDER_PRODUCTS: frozenset[str] = frozenset({
-    "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn",
-})
+#: FCR is capacity-only, so it carries no activation curve.  Single-sourced
+#: from :data:`pvbess_opt.balancing.PRODUCTS_WITH_ACTIVATION` (same set) so a
+#: new activation-carrying product cannot drift the two definitions apart.
+_MERIT_ORDER_PRODUCTS: frozenset[str] = frozenset(PRODUCTS_WITH_ACTIVATION)
 
 
 def parse_merit_order_sheet(
@@ -4326,6 +4339,23 @@ def validate_workbook_params(
             f"'dam_plus_balancing'; got {_margin_basis!r}."
         )
     _floor_enabled = bool(economics.get("optimizer_floor_enabled", False))
+    # optimizer_margin_basis governs only the floor+share structure (Eq.
+    # E30a); the plain E13d share (floor disabled) always uses the DAM
+    # (+ intraday) base.  Warn (not raise) when a user set
+    # 'dam_plus_balancing' with an active plain share, so the silently
+    # ignored basis (and the over-stated NPV it implies) is visible.
+    if (
+        _margin_basis == "dam_plus_balancing"
+        and not _floor_enabled
+        and _opt_pct > 0.0
+    ):
+        logger.warning(
+            "optimizer_margin_basis='dam_plus_balancing' is set while "
+            "optimizer_floor_enabled=FALSE: the plain optimizer share "
+            "(Eq. E13d) uses the DAM (+ intraday) base only, so balancing "
+            "revenue is NOT included and this key is ignored. Enable "
+            "optimizer_floor_enabled to apply the basis (Eq. E30a)."
+        )
 
     # State support with two-way clawback (Eqs. E31/E31a): non-negative
     # levels over a valid support window; the netting share shares the
