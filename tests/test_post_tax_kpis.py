@@ -169,6 +169,57 @@ def test_levered_equity_irr_and_rate_continuity():
     )
 
 
+def test_sculpted_post_tax_equity_irr_services_committed_schedule():
+    """Under ``sculpted`` repayment the post-tax equity IRR must net the
+    post-tax project cashflow against the SAME committed debt service the
+    debt sheet and the tax-shield interest use (sculpted on PRE-tax
+    CFADS) — debt service is a fixed contractual obligation, identical in
+    both views of one run.  Re-sculpting it on post-tax CFADS silently
+    re-times the service and biases the IRR."""
+    from pvbess_opt.economics import (
+        _amortization_schedule,
+        _cfads_for_schedule,
+        _financing_params,
+        _resolved_debt_eur,
+    )
+
+    lev = dict(gearing_pct=60.0, debt_interest_rate_pct=6.0,
+               debt_tenor_years=6, debt_repayment="sculpted")
+    econ = _tax_econ(**lev)
+    cf = build_yearly_cashflow(_kpis(), econ, _caps())
+    fin = compute_financial_kpis(cf, econ)
+
+    _g, rate, tenor, repayment = _financing_params(econ)
+    net_cf = cf["net_cashflow_eur"].to_numpy(dtype=float)
+    post_tax = cf["net_cashflow_post_tax_eur"].to_numpy(dtype=float)
+    debt = _resolved_debt_eur(econ, -float(net_cf[0]))
+    assert debt > 0.0
+
+    def _equity_irr(schedule_cf: np.ndarray) -> float:
+        sched = _amortization_schedule(
+            debt, rate, tenor, repayment,
+            cfads=_cfads_for_schedule(schedule_cf, tenor, repayment),
+        )
+        eq = post_tax.copy()
+        eq[0] += debt
+        for row in sched:
+            y = int(row["year"])
+            if y < eq.size:
+                eq[y] -= float(row["debt_service_eur"])
+        return calculate_irr(eq) * 100.0
+
+    committed = _equity_irr(net_cf)      # correct: sculpt on pre-tax
+    resculpted = _equity_irr(post_tax)   # the old, buggy behaviour
+    # The two genuinely differ (depreciation + tax make post-tax CFADS
+    # non-proportional to pre-tax), so this test discriminates.
+    assert abs(committed - resculpted) > 1e-3
+    # (reported KPI is rounded to 4 dp, so the tolerance sits well above
+    # rounding but far below the ~0.8 pp bug gap above.)
+    assert fin["equity_irr_post_tax_pct"] == pytest.approx(
+        committed, abs=1e-3,
+    )
+
+
 def test_pre_tax_baseline_untouched():
     base = compute_financial_kpis(
         build_yearly_cashflow(_kpis(), _econ(), _caps()), _econ(),

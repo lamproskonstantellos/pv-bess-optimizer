@@ -296,6 +296,7 @@ def _cfads_for_schedule(
 
 def _leverage_kpis(
     net_cashflow_eur: np.ndarray, econ: dict[str, Any],
+    *, schedule_source_cf: np.ndarray | None = None,
 ) -> tuple[float, float, float]:
     """Return ``(equity_irr_pct, min_dscr, avg_dscr)``; NaNs when all-equity.
 
@@ -305,6 +306,16 @@ def _leverage_kpis(
     debt service over the tenor.  DSCR is the operating cashflow over
     the debt service per year; under the ``sculpted`` profile min and
     avg coincide by construction (Eq. E40).
+
+    ``schedule_source_cf`` overrides the cashflow the ``sculpted`` profile
+    shapes its debt service on, WITHOUT changing the equity flow that
+    nets against ``net_cashflow_eur``.  The post-tax equity IRR passes the
+    pre-tax cashflow here so it services the same committed (pre-tax-
+    sculpted) schedule the debt sheet and the tax-shield interest use —
+    debt service is a fixed contractual obligation, identical in the
+    pre-tax and post-tax views of one run, so re-sculpting it on post-tax
+    CFADS would silently mis-time the service and bias the IRR.  Inert for
+    ``annuity`` / ``linear`` (CFADS-independent) and when unset.
     """
     _gearing, rate, tenor, repayment = _financing_params(econ)
     net_cf = np.asarray(net_cashflow_eur, dtype=float)
@@ -316,9 +327,13 @@ def _leverage_kpis(
     debt = _resolved_debt_eur(econ, initial_investment)
     if debt <= 0.0:
         return float("nan"), float("nan"), float("nan")
+    _sched_cf = (
+        net_cf if schedule_source_cf is None
+        else np.asarray(schedule_source_cf, dtype=float)
+    )
     schedule = _amortization_schedule(
         debt, rate, tenor, repayment,
-        cfads=_cfads_for_schedule(net_cf, tenor, repayment),
+        cfads=_cfads_for_schedule(_sched_cf, tenor, repayment),
     )
     if not schedule:
         return float("nan"), float("nan"), float("nan")
@@ -3136,9 +3151,16 @@ def compute_financial_kpis(
         irr_post_tax_pct = (
             float("nan") if np.isnan(_irr_pt) else _irr_pt * 100.0
         )
-        # Post-tax equity flows (Eq. E39): the E20 schedule applied to
-        # the post-tax project cashflow; NaN when all-equity.
-        equity_irr_post_tax_pct, _, _ = _leverage_kpis(cf_pt_array, econ)
+        # Post-tax equity flows (Eq. E39): the post-tax project cashflow
+        # net of the SAME committed debt service the pre-tax view uses.
+        # Passing the pre-tax ``cf_array`` as the schedule source keeps a
+        # ``sculpted`` profile shaped on pre-tax CFADS (matching the debt
+        # sheet and the tax-shield interest), so the fixed contractual
+        # service is not silently re-timed on post-tax CFADS.  NaN when
+        # all-equity; inert for annuity/linear.
+        equity_irr_post_tax_pct, _, _ = _leverage_kpis(
+            cf_pt_array, econ, schedule_source_cf=cf_array,
+        )
         payback_post_tax = _payback_year(
             project_years,
             df["cumulative_cf_post_tax_eur"].to_numpy(dtype=float),
