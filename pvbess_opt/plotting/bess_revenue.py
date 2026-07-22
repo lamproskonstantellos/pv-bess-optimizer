@@ -332,11 +332,12 @@ def plot_bess_revenue_by_month(
 ) -> Path:
     """Twelve stacked bars showing per-month BESS revenue breakdown.
 
-    The DAM-arbitrage segment is computed per-month from the dispatch
-    frame (``profit_export_from_bess_eur`` minus
-    ``expense_charge_bess_grid_eur``).  Each balancing product's annual
-    revenue is allocated to months in proportion to the per-step
-    reservation profile so the per-month breakdown reflects when
+    The DAM-arbitrage segment is shaped per-month from the dispatch frame
+    (``profit_export_from_bess_eur`` minus ``expense_charge_bess_grid_eur``)
+    and rescaled so its annual sum matches ``revenue_bess_dam_eur`` — the
+    same derated KPI the waterfall's DAM bar draws.  Each balancing
+    product's annual revenue is allocated to months in proportion to the
+    per-step reservation profile so the per-month breakdown reflects when
     capacity was reserved, not a flat split.  When the route-to-market
     fees are on, their exact monthly shares (flat percentages of the
     gross monthly DAM export revenue and of the monthly balancing
@@ -349,11 +350,41 @@ def plot_bess_revenue_by_month(
 
     ts = pd.to_datetime(res_year1["timestamp"])
     months = ts.dt.month
-    by_month_dam = pd.Series(
+    # Per-month raw DAM margin (profit_export_from_bess − expense_charge_bess_grid),
+    # the only monthly signal the dispatch frame carries.  Two derated annual
+    # totals are drawn from this single monthly shape:
+    #   * the displayed DAM bar reconciles to ``revenue_bess_dam_eur`` — the
+    #     canonical KPI the waterfall's DAM bar draws (its ``bess_dam``) and
+    #     that ships in 03_results.xlsx / SUMMARY.md; and
+    #   * the energy-aggregator / optimizer fee base reconciles to
+    #     ``profit_export_from_bess − expense_charge_bess_grid`` — the base the
+    #     waterfall's fee steps use.
+    # The two coincide under the availability derate but DIVERGE under the
+    # exogenous-curtailment derate, which scales the DAM revenue monolithically
+    # yet leaves the grid-charging withdrawal exempt.  Scaling them
+    # independently keeps every monthly bar reconciled to the waterfall in both
+    # regimes; a raw dispatch-only caller (no derated KPIs) keeps the raw scale.
+    by_month_raw = pd.Series(
         (res_year1.get("profit_export_from_bess_eur", 0.0).astype(float)
          - res_year1.get("expense_charge_bess_grid_eur", 0.0).astype(float)).to_numpy(),
         index=months.to_numpy(),
     ).groupby(level=0).sum().reindex(range(1, 13), fill_value=0.0)
+    _raw_dam_sum = float(by_month_raw.sum())
+
+    by_month_dam = by_month_raw.copy()
+    if "revenue_bess_dam_eur" in year1_kpis and abs(_raw_dam_sum) > 1e-9:
+        by_month_dam = by_month_raw * (
+            float(year1_kpis.get("revenue_bess_dam_eur", 0.0) or 0.0)
+            / _raw_dam_sum
+        )
+
+    by_month_margin_series = by_month_raw.copy()
+    if "profit_export_from_bess_eur" in year1_kpis and abs(_raw_dam_sum) > 1e-9:
+        by_month_margin_series = by_month_raw * (
+            (float(year1_kpis.get("profit_export_from_bess_eur", 0.0) or 0.0)
+             - float(year1_kpis.get("expense_charge_bess_grid_eur", 0.0) or 0.0))
+            / _raw_dam_sum
+        )
 
     bm_per_month: dict[str, np.ndarray] = {}
     for key, label, _colour_key in _BM_PRODUCTS:
@@ -417,7 +448,7 @@ def plot_bess_revenue_by_month(
     # negative-margin months and break the annual reconciliation with the
     # waterfall).  Charging a fee on GROSS export here would disagree with
     # the waterfall (and the cashflow) whenever grid charging is non-zero.
-    margin_monthly = np.asarray(by_month_dam.to_numpy(), dtype=float)
+    margin_monthly = np.asarray(by_month_margin_series.to_numpy(), dtype=float)
     pos_margin = np.maximum(margin_monthly, 0.0)
     _pos_sum = float(pos_margin.sum())
 
@@ -458,8 +489,17 @@ def plot_bess_revenue_by_month(
         ).to_numpy() / 1000.0
     else:
         bess_export_monthly_mwh = np.zeros(12)
+    # Match the waterfall's derated export base (year1_kpis['bess_export_mwh'])
+    # so the route-to-market fee reconciles too; skipped when absent (raw).
+    if "bess_export_mwh" in year1_kpis:
+        _export_raw = float(bess_export_monthly_mwh.sum())
+        if abs(_export_raw) > 1e-9:
+            bess_export_monthly_mwh = bess_export_monthly_mwh * (
+                float(year1_kpis.get("bess_export_mwh", 0.0) or 0.0)
+                / _export_raw
+            )
     rtm_fee_arr = -rtm_rate * bess_export_monthly_mwh
-    margin_monthly = np.asarray(by_month_dam.to_numpy(), dtype=float)
+    margin_monthly = np.asarray(by_month_margin_series.to_numpy(), dtype=float)
     pos_margin = np.maximum(margin_monthly, 0.0)
     annual_opt_fee = -opt_frac * max(float(margin_monthly.sum()), 0.0)
     if pos_margin.sum() > 1e-9:

@@ -271,6 +271,41 @@ Pre-delivery release audit (round 6):
   note / unit drifts from `io._SHEET_ROW_TEMPLATES`, so a future note edit
   cannot ship stale again.
 
+Pre-delivery release audit (round 7):
+
+- **Monthly BESS-revenue plot base.** `plot_bess_revenue_by_month` sourced
+  its DAM bar from the un-derated dispatch frame while the waterfall and the
+  `03_results.xlsx` / `SUMMARY.md` KPIs use the derated `year1_kpis`, so under
+  any operating derate the figure over-stated the DAM segment. The bars are
+  now rescaled to the derated KPIs; crucially the displayed DAM bar
+  reconciles to the canonical `revenue_bess_dam_eur` the waterfall draws,
+  while the energy-aggregator / optimizer fee base keeps
+  `profit_export_from_bess − expense_charge_bess_grid`. The two coincide under
+  the availability derate but diverge under the exogenous-curtailment derate
+  (which scales the DAM revenue monolithically yet leaves the grid-charging
+  withdrawal exempt), so scaling them independently keeps every monthly bar
+  reconciled to the waterfall in both regimes. Plotting only —
+  `03_results.xlsx` is unchanged.
+- **Structured-config price-scenario stores.** A structured (YAML/JSON) config
+  is materialized to a throwaway temp workbook before solving, and the single
+  run path then resolved relative price-scenario `store_path` entries against
+  that temp dir instead of the config's own directory — so a documented
+  relative store failed with a `FileNotFound` pointing at a random temp path.
+  `run` now threads the original config directory as `base_dir` through
+  `_run_one` into the financial build and the price-scenario ensemble,
+  mirroring `scenarios.run_scenarios` (an Excel input is unaffected: the
+  config sits beside its own stores). The materialization temp dir is also now
+  removed after the run.
+- **Non-fatal SOH plot.** Every post-results figure is wrapped so a plotting
+  bug can never turn an otherwise-complete run (`03_results.xlsx` and
+  `SUMMARY.md` already on disk) into a reported failure — except
+  `plot_soh_trajectory`, which was left unguarded. It now matches its
+  siblings: a raise is logged and swallowed.
+- **Temp-workbook cleanup.** The scenario-batch, sizing-sweep and low-price
+  debt-sizing paths created materialization temp dirs with `mkdtemp` and never
+  removed them, leaking one dir per scenario / grid point / sizing call. Each
+  path now drops its temp dir once the workbook has been consumed.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

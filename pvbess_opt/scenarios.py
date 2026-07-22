@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import shutil
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -432,22 +433,27 @@ def evaluate_scenario(
 
     typed = _apply_scenario_overrides(base_typed, scenario)
     tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_"))
-    xlsx = tmp / "scenario.xlsx"
-    write_workbook(typed, xlsx)
+    try:
+        xlsx = tmp / "scenario.xlsx"
+        write_workbook(typed, xlsx)
 
-    params, ts = read_inputs(xlsx)
-    res, _solver, _res_full = run_scenario(
-        params, ts, return_unrounded=True, **solver_opts,
-    )
-    kpis = compute_kpis(res, params, verify_balance=False)
-    kpis = apply_operating_derates(kpis, params)
-    # base_dir: an armed price-scenario engine resolves relative
-    # store_path entries against the ORIGINAL workbook's directory,
-    # never the throwaway temp dir the scenario materialised into.
-    bundle = _build_financials(
-        xlsx, params, ts, kpis, res,
-        solver_opts=solver_opts, base_dir=base_dir,
-    )
+        params, ts = read_inputs(xlsx)
+        res, _solver, _res_full = run_scenario(
+            params, ts, return_unrounded=True, **solver_opts,
+        )
+        kpis = compute_kpis(res, params, verify_balance=False)
+        kpis = apply_operating_derates(kpis, params)
+        # base_dir: an armed price-scenario engine resolves relative
+        # store_path entries against the ORIGINAL workbook's directory,
+        # never the throwaway temp dir the scenario materialised into.
+        bundle = _build_financials(
+            xlsx, params, ts, kpis, res,
+            solver_opts=solver_opts, base_dir=base_dir,
+        )
+    finally:
+        # The scenario workbook has no consumer past its comparison row;
+        # drop the temp dir so a batch does not leak one dir per scenario.
+        shutil.rmtree(tmp, ignore_errors=True)
     fin = bundle.get("fin_kpis") or {}
 
     row: dict[str, Any] = {
@@ -666,6 +672,9 @@ def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResul
     tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_base_"))
     base_xlsx = materialize_to_xlsx(src, tmp) if is_structured_config(src) else src
     base_typed = read_workbook(base_xlsx)
+    # The materialised base workbook is fully in ``base_typed`` now and each
+    # scenario re-materialises its own; drop the temp dir so it does not leak.
+    shutil.rmtree(tmp, ignore_errors=True)
     # Apply the CLI ``--mode`` override to the batch base, mirroring
     # ``pipeline.run`` and ``sizing.run_sizing`` so the three dispatch
     # surfaces agree.  Per-scenario ``project.mode`` targets still override
