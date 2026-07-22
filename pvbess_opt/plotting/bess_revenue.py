@@ -408,15 +408,30 @@ def plot_bess_revenue_by_month(
         bal_fee_frac = max(0.0, min(1.0, float(
             econ.get("balancing_aggregator_fee_pct_revenue", 0.0) or 0.0)
             / 100.0))
-    dam_gross_monthly = pd.Series(
-        res_year1.get("profit_export_from_bess_eur", 0.0)
-        .astype(float).to_numpy(),
-        index=months.to_numpy(),
-    ).groupby(level=0).sum().reindex(range(1, 13), fill_value=0.0).to_numpy()
+    # The battery's monthly DAM margin, NET of grid charging — the same
+    # base the waterfall's energy-aggregator-fee step uses
+    # (profit_export_from_bess - expense_charge_bess_grid).  Both the
+    # energy-aggregator fee and the optimizer share are flat percentages of
+    # this net margin with an ANNUAL zero-clamp, so each is allocated over
+    # the positive-margin months (a per-month clamp would over-charge
+    # negative-margin months and break the annual reconciliation with the
+    # waterfall).  Charging a fee on GROSS export here would disagree with
+    # the waterfall (and the cashflow) whenever grid charging is non-zero.
+    margin_monthly = np.asarray(by_month_dam.to_numpy(), dtype=float)
+    pos_margin = np.maximum(margin_monthly, 0.0)
+    _pos_sum = float(pos_margin.sum())
+
+    def _allocate_annual_margin_fee(annual_fee: float) -> np.ndarray:
+        if _pos_sum > 1e-9:
+            return annual_fee * pos_margin / _pos_sum
+        return np.full(12, annual_fee / 12.0)
+
     bm_monthly_total = np.sum(
         [bm_per_month[label] for _k, label, _c in _BM_PRODUCTS], axis=0,
     )
-    energy_fee_arr = -energy_fee_frac * np.maximum(dam_gross_monthly, 0.0)
+    energy_fee_arr = _allocate_annual_margin_fee(
+        -energy_fee_frac * max(float(margin_monthly.sum()), 0.0)
+    )
     bal_fee_arr = -bal_fee_frac * np.maximum(bm_monthly_total, 0.0)
     # Structural market-access fees, monthly:
     # * route-to-market — exact per month (rate x the month's exported MWh),
