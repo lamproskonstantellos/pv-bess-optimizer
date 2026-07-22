@@ -212,9 +212,9 @@ $$\mathrm{capex}^{\mathrm{BESS}}_0 = -c_{\mathrm{bess}}
 (1 + ob)\, E_N \tag{E52}$$
 
 Dispatch always solves at nameplate — the overbuild changes only the
-factor curve (through the E50 clamp), Year-0 CAPEX, the depreciation
-base and the LCOS numerator.  Zero defaults are bit-identical for
-both surfaces.  Note for sizing sweeps: `sizing.py` re-runs the
+factor curve (through the E50 clamp), Year-0 CAPEX, the replacement
+CAPEX (E14), the depreciation base and the LCOS numerator.  Zero
+defaults are bit-identical for both surfaces.  Note for sizing sweeps: `sizing.py` re-runs the
 Year-1 dispatch only, so augmentation affects the frontier ranking
 solely through the NPV of the factor curve and event CAPEX (no code
 interaction; recorded here).
@@ -806,7 +806,12 @@ service).
 OPEX, replacement CAPEX, and the net cashflow:
 
 $$O_y = -\left(o^{PV}\,\mathrm{kWp} + o^{B} P^{B}\right)(1+i_{\mathrm{opex}})^{y-1}, \qquad
-C_y = \begin{cases} c^{B} E^{\mathrm{cap}} \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
+C_y = \begin{cases} c^{B} E^{\mathrm{cap}} (1+ob) \cdot p_r/100 \cdot (-1) & y = y_r \\ 0 & \text{else} \end{cases} \tag{E14}$$
+
+($ob$ = `bess_overbuild_pct`/100: the replacement renews the overbuilt
+block, so its CAPEX is $p_r\%$ of the overbuild-inclusive Year-0 BESS
+CAPEX (E52), matching the depreciation replacement tranche and the LCOS
+replacement term; $ob = 0$ by default recovers the nameplate form.)
 
 $$\mathrm{CF}_y = \underbrace{\left(R^{\mathrm{ret}}_y + R^{\mathrm{DAM}}_y + F_y\right)}_{\texttt{revenue\_eur}} + \underbrace{R^{\mathrm{bm}}_y}_{\text{gross}} + F^{\mathrm{bm}}_y + F^{\mathrm{rtm}}_y + F^{\mathrm{opt}}_y + F^{\mathrm{chg}}_y + L_y + R^{\mathrm{PPA}}_y + O_y + C_y + V_y \tag{E15}$$
 

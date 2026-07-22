@@ -483,8 +483,10 @@ Each run writes a self-contained folder
                      cumulative + monthly cashflow, payback, NPV/IRR
                      tornados, NPV waterfall, LCOE/LCOS, SOH, plus the
                      DSCR profile (levered runs), the intraday venue
-                     figures (intraday runs), and the 24/7-CFE duration
-                     curve when emissions accounting is on (full list
+                     figures (intraday runs), the 24/7-CFE duration
+                     curve when emissions accounting is on, and the
+                     price-scenario figures (price-path fan + capture-KPI
+                     panel) when the scenario engine is armed (full list
                      below)
 05_energy_plots/     Year-1 energy-flow diagram (every run) and the
                      lifetime summary chart, plus daily / monthly /
@@ -595,6 +597,9 @@ Generated under `results/<run>/04_financial_plots/`:
   intraday net position, emitted only when the intraday venue ran.
 * 24/7 carbon-free energy duration curve, emitted only when emissions
   accounting is on (`grid_co2_intensity_kg_per_mwh > 0`).
+* Price-scenario figures — the multi-year price-path fan and the
+  capture-KPI panel — emitted only when the price-scenario engine is
+  armed (`scenario_engine` sheet enabled).
 
 Energy plots under `results/<run>/05_energy_plots/`: the Year-1
 energy-flow diagram (PV / BESS / grid / load flows, rendered for every
