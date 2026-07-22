@@ -48,6 +48,7 @@ from .store import (
     BALANCING_PRODUCTS,
     PriceDataError,
     ScenarioDeck,
+    infer_native_cadence_minutes,
     load_scenario_store,
     stub_provider_error,
 )
@@ -587,19 +588,7 @@ def apply_price_scenarios(
 
 def _infer_dt_minutes(ts: pd.DataFrame) -> int:
     """Model cadence from the frame length (whole non-leap year)."""
-    n_steps = len(ts)
-    if n_steps == 0 or n_steps % 365 != 0:
-        raise PriceDataError(
-            f"price scenarios need a whole non-leap-year timeseries; "
-            f"got {n_steps} steps."
-        )
-    steps_per_day = n_steps // 365
-    if (24 * 60) % steps_per_day != 0:
-        raise PriceDataError(
-            f"{steps_per_day} steps/day does not divide the day into "
-            "whole minutes."
-        )
-    return (24 * 60) // steps_per_day
+    return infer_native_cadence_minutes(len(ts), "price-scenario timeseries")
 
 
 def merge_auto_trajectories(

@@ -546,8 +546,9 @@ def rolling_horizon_dispatch(
     # up to 2x the cap.  Track the discharge already committed on each
     # calendar day and pass the REMAINING budget for the window's boundary
     # day to build_model.  ``None`` when the cap is off or the boundary day
-    # is still fresh (every window when ``commit_hours`` divides 24), which
-    # keeps the disabled / day-aligned path byte-identical.
+    # is still fresh (every window when 24 divides ``commit_hours``, i.e.
+    # every window start lands on midnight), which keeps the disabled /
+    # day-aligned path byte-identical.
     _raw_daily_cycles = params.get("max_cycles_per_day")
     _max_cycles_per_day = (
         0.0 if _raw_daily_cycles is None else float(_raw_daily_cycles)
@@ -609,7 +610,8 @@ def rolling_horizon_dispatch(
         # day.  Only threaded when that day was already partly committed by
         # a previous window (a seam falls inside it); a fresh boundary day
         # passes ``None`` so a window whose start is day-aligned
-        # (``commit_hours`` divides 24) is byte-identical to the pre-fix run.
+        # (start lands on midnight — i.e. 24 divides ``commit_hours``) is
+        # byte-identical to the pre-fix run.
         first_day_budget_kwh: float | None = None
         if daily_cap_kwh is not None:
             _boundary_day = window_ts["timestamp"].iloc[0]

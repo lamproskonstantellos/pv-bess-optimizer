@@ -759,10 +759,16 @@ def aggregate_lifetime_to_yearly(lifetime_df: pd.DataFrame) -> pd.DataFrame:
     expense, BEFORE the aggregator fee (the fee is a project-level
     deduction applied only in the cashflow).  It reconciles against the
     cashflow as ``revenue_eur - aggregator_fee_eur`` (the fee column is
-    signed negative) whenever ``retail_inflation_pct`` and
-    ``dam_inflation_pct`` are zero; with non-zero indexation the
-    cashflow escalates per stream while this frame stays at Year-1
-    prices by construction.  It also deliberately **excludes**
+    signed negative) whenever the cashflow applies NO revenue-side
+    escalation — i.e. ``retail_inflation_pct`` and ``dam_inflation_pct``
+    are zero AND no replace-mode price trajectory is supplied for a
+    revenue stream (``revenue_retail`` / ``revenue_dam`` / the split
+    legs ``revenue_dam_pv`` / ``revenue_dam_bess_export`` /
+    ``expense_dam_bess_charge``) AND no toll ``zeroed`` years apply.
+    Any of those escalates (or zeroes) the cashflow's revenue per year
+    while this frame stays at Year-1 prices by construction, so the
+    identity holds only at Year 1 under them.  It also deliberately
+    **excludes**
     balancing revenue — the lifetime frame is per-step physics, while
     balancing settles per window via reservation × probability × price
     (see :func:`pvbess_opt.economics.build_yearly_cashflow`).  Callers

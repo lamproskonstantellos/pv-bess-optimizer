@@ -1213,12 +1213,17 @@ booking, Eq. E4) over $N_{\mathrm{BESS}}$ years.  $N_a = 0$ ⇒ no
 claim; tranches truncate at the horizon $Y$ (unclaimed depreciation is
 lost — no terminal write-off).
 
-$$\mathrm{EBITDA}_y = \mathrm{CF}_y - C_y - V_y \;\; (y \ge 1),
+$$\mathrm{EBITDA}_y = \mathrm{CF}_y - C_y - V_y - A_y \;\; (y \ge 1),
 \qquad \mathrm{EBITDA}_0 = 0 \tag{E35}$$
 
 — the operating net before investment events: revenue net of every
 E13-family fee and the E33 levy (the levy is therefore deductible by
 construction), plus balancing, PPA, the contracted streams and OPEX.
+$C_y$ is the `capex_eur` column (Year-0 CAPEX and the replacement
+tranche), $V_y$ the `devex_eur` column, and $A_y$ the separate
+`augmentation_capex_eur` column (Eq. E51): every capital event is added
+back out of EBITDA so it is expensed only through its depreciation
+tranche, never twice.
 
 $$\mathrm{TI}_y = \mathrm{EBITDA}_y - \mathrm{DEP}_y - \mathrm{INT}_y,
 \qquad \mathrm{TB}_y = \max\!\left(0,\, \mathrm{TI}_y -

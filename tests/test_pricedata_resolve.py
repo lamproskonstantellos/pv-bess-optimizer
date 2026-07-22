@@ -284,3 +284,60 @@ def test_linear_interp_is_selectable():
         {1: 1.0, 3: 0.5}, 3, interp="linear", stream="s",
     )
     assert values == pytest.approx([1.0, 0.75, 0.5])
+
+
+# ---------------------------------------------------------------------------
+# Audit regressions: shipped-default consistency, resolution guard,
+# and under-coverage warnings (resolve mode robustness).
+# ---------------------------------------------------------------------------
+
+
+def test_default_resolve_years_consistent_with_default_lifecycle():
+    # Regression: the shipped default resolve-years set must not overshoot
+    # the shipped default lifecycle, else resolve mode crashes out of the
+    # box (parse_support_years rejects a year beyond the lifecycle).
+    from pvbess_opt.io import (
+        PROJECT_SHEET_DEFAULTS,
+        SCENARIO_ENGINE_SHEET_DEFAULTS,
+    )
+
+    parse_support_years(
+        SCENARIO_ENGINE_SHEET_DEFAULTS["scenario_resolve_years"],
+        int(PROJECT_SHEET_DEFAULTS["project_lifecycle_years"]),
+    )  # must not raise
+
+
+def test_grid_rejects_resolution_not_dividing_the_day():
+    # 105 min is a multiple of the 15-min cadence but does not divide 1440,
+    # so a whole-year deck would not resample onto integer blocks.
+    with pytest.raises(PriceDataError, match="whole blocks"):
+        build_resolve_grid(_ts_15min(), 15, 105)
+
+
+def _patch_fake_milp(monkeypatch):
+    import pvbess_opt.optimization as optimization_mod
+
+    monkeypatch.setattr(optimization_mod, "run_scenario", _fake_run_scenario)
+    monkeypatch.setattr(
+        "pvbess_opt.kpis.compute_kpis", lambda _res, _params, **_kw: {},
+    )
+
+
+def test_resolve_warns_when_support_years_undercover_horizon(monkeypatch, caplog):
+    _patch_fake_milp(monkeypatch)
+    with caplog.at_level(logging.WARNING):
+        derive_resolve_trajectories(
+            _deck(50.0), _params(), _hourly_year_ts(), _econ(),
+            n_years=5, support_years=[1, 2], resolution_minutes=60,
+        )
+    assert any("held flat" in r.message for r in caplog.records)
+
+
+def test_resolve_warns_when_support_reduces_to_year_one(monkeypatch, caplog):
+    _patch_fake_milp(monkeypatch)
+    with caplog.at_level(logging.WARNING):
+        derive_resolve_trajectories(
+            _deck(50.0), _params(), _hourly_year_ts(), _econ(),
+            n_years=3, support_years=[1], resolution_minutes=60,
+        )
+    assert any("collapses" in r.message for r in caplog.records)

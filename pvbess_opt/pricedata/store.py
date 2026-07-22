@@ -67,6 +67,31 @@ class PriceDataError(ValueError):
     """A price-scenario store, adapter, or validation failure."""
 
 
+def infer_native_cadence_minutes(n_steps: int, source: str) -> int:
+    """Native minutes-per-step of a whole non-leap-year price curve.
+
+    A whole-year curve carries 365 equal daily blocks and the block size
+    must divide the day into whole minutes.  Single source of truth for
+    the length → cadence derivation shared by the store loader, the
+    TYNDP adapter, and the engine's workbook-cadence check; ``source``
+    prefixes the error so the failing curve is named.  Raises
+    :class:`PriceDataError` on a non-whole-year length or a cadence that
+    does not divide the day.
+    """
+    if n_steps == 0 or n_steps % 365 != 0:
+        raise PriceDataError(
+            f"{source}: {n_steps} steps is not a whole non-leap year at any "
+            "cadence (need a multiple of 365 daily blocks)."
+        )
+    steps_per_day = n_steps // 365
+    if (24 * 60) % steps_per_day != 0:
+        raise PriceDataError(
+            f"{source}: {steps_per_day} steps/day does not divide the day "
+            "into whole minutes."
+        )
+    return (24 * 60) // steps_per_day
+
+
 @dataclass
 class ScenarioDeck:
     """One scenario's loaded price paths, on the engine basis.
@@ -187,19 +212,9 @@ def _curves_from_table(
                 f"{source}: year {y} column {column!r} carries NaN "
                 "prices."
             )
-        if len(values) % 365 != 0:
-            raise PriceDataError(
-                f"{source}: year {y} carries {len(values)} steps, not a "
-                "whole non-leap year at any cadence (need a multiple "
-                "of 365 daily blocks)."
-            )
-        native_steps_per_day = len(values) // 365
-        if (24 * 60) % native_steps_per_day != 0:
-            raise PriceDataError(
-                f"{source}: year {y}: {native_steps_per_day} steps/day "
-                "does not divide the day into whole minutes."
-            )
-        native_minutes = (24 * 60) // native_steps_per_day
+        native_minutes = infer_native_cadence_minutes(
+            len(values), f"{source}: year {y}",
+        )
         notes: set[str] = set()
         curve = resample_intensive(
             values, native_minutes, dt_minutes,

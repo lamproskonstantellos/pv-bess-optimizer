@@ -265,8 +265,10 @@ def attribute_green_discharge(
         ``soc_green_kwh``
 
     Single running balance: PV charge adds to green stock; discharge
-    draws proportionally from green stock first.  Initial SOC is treated
-    as green (worst-case for reporting honesty).
+    draws proportionally from green stock first.  Initial SOC is
+    optimistically credited as green (a simplifying convention; it
+    slightly OVERSTATES the green metrics when the starting SOC is in
+    fact grid-charged — the generous, not the conservative, choice).
     """
     eta_c = float(params.get("efficiency_charge", 1.0))
     eta_d = float(params.get("efficiency_discharge", 1.0))

@@ -14,12 +14,16 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
+from pvbess_opt.theme import HEADER_BORDER_HEX
+
 ROOT = Path(__file__).resolve().parent.parent
 WORKBOOK = ROOT / "inputs" / "input.xlsx"
 
 EXPECTED_HEADER_FILL = "1F3864"
 EXPECTED_HEADER_FONT = "FFFFFF"
-EXPECTED_HEADER_BORDER = "BFBFBF"
+# Single-sourced from the styler so the check cannot drift from what the
+# workbook writer applies.
+EXPECTED_HEADER_BORDER = HEADER_BORDER_HEX
 FORBIDDEN_FILL_HEX = "FFF2CC"
 
 
@@ -80,6 +84,18 @@ def test_header_row_has_global_accent(workbook, sheet_name):
         assert font_rgb == EXPECTED_HEADER_FONT, (
             f"{sheet_name}!{cell.coordinate}: font color={font_rgb!r}, "
             f"expected {EXPECTED_HEADER_FONT!r}"
+        )
+        bottom = cell.border.bottom
+        assert bottom is not None and bottom.style == "thin", (
+            f"{sheet_name}!{cell.coordinate}: header bottom border "
+            f"style={getattr(bottom, 'style', None)!r}, expected 'thin'"
+        )
+        border_rgb = _normalise_rgb(
+            getattr(getattr(bottom, "color", None), "rgb", None)
+        )
+        assert border_rgb == EXPECTED_HEADER_BORDER, (
+            f"{sheet_name}!{cell.coordinate}: bottom border={border_rgb!r}, "
+            f"expected {EXPECTED_HEADER_BORDER!r}"
         )
 
 

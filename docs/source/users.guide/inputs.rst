@@ -1168,7 +1168,10 @@ loader says so.
 
 Each scenario runs through the same path as a standalone run, so its
 results match running it alone.  Every override target must name a real
-workbook key: any ``<sheet>.<key>`` from the seven parameter sheets, the
+workbook key: any ``<sheet>.<key>`` from the ten parameter sheets
+(``project``, ``pv``, ``bess``, ``economics``, ``simulation``,
+``balancing``, ``ppa``, ``intraday``, ``market_data``,
+``scenario_engine``), the
 short aliases above, or the bare specials.  An unknown target raises a
 ``ValueError`` naming the scenario and the offending key *before* any
 solver time is spent: a typo'd override would otherwise silently produce
@@ -1287,7 +1290,11 @@ Three optional sheets, shipped inert, documented in full in
   ``auto`` (per-zone registry: GR resolves to the ADMIE file API,
   every other zone to ENTSO-E) or an explicit provider.  Fetches
   cache on disk (``market_cache_dir``; ``market_fetch_mode``:
-  ``cache_first`` / ``refresh`` / ``offline``).  The API token comes
+  ``cache_first`` / ``refresh`` / ``offline``).
+  ``price_resample_policy`` (default ``step_hold``) sets how a fetched
+  series whose cadence differs from the model grid is aligned: a coarser
+  series is step-held (the block price repeats across the finer steps)
+  and a finer series is mean-averaged onto the grid.  The API token comes
   from the ``entsoe_token`` cell or the environment variable named by
   ``entsoe_token_env`` — the shipped template keeps the cell empty;
   never commit a token.  Bypassed columns are recorded on the results

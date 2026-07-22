@@ -7,6 +7,8 @@ from typing import Any
 
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+from .balancing import PRODUCTS_ALL
+
 __all__ = [
     "ALL_LABELS",
     "ALPHA_STACK_AREAS",
@@ -359,7 +361,7 @@ FINANCIAL_COLORS: dict[str, str] = {
     # split plots; a single-sourced hue can never drift between the two.
     **{
         f"bm_{_p}": BM_COLOURS[_p]
-        for _p in ("fcr", "afrr_up", "afrr_dn", "mfrr_up", "mfrr_dn")
+        for _p in PRODUCTS_ALL
     },
     # Foreground net-revenue line — near-black (Material grey 900),
     # IEEE publication-style emphasis colour.  High contrast against

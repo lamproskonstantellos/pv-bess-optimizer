@@ -193,8 +193,6 @@ def resolve_balancing_config(raw: dict[str, Any]) -> BalancingConfig:
     fields_by_name = {f.name: f for f in fields(BalancingConfig)}
     kwargs: dict[str, Any] = {}
     for name, fld in fields_by_name.items():
-        if name == "n_steps":
-            continue
         if name not in raw:
             continue
         value = raw[name]

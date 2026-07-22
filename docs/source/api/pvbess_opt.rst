@@ -127,6 +127,9 @@ Sizing & scenarios
 Market data ingestion
 ~~~~~~~~~~~~~~~~~~~~~
 
+.. automodule:: pvbess_opt.marketdata
+   :members:
+
 .. automodule:: pvbess_opt.marketdata.base
    :members:
 
@@ -141,6 +144,9 @@ Market data ingestion
 
 Price scenarios
 ~~~~~~~~~~~~~~~
+
+.. automodule:: pvbess_opt.pricedata
+   :members:
 
 .. automodule:: pvbess_opt.pricedata.store
    :members:

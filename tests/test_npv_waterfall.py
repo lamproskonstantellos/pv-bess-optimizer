@@ -49,18 +49,12 @@ def _yearly_cf() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _read_legend_labels(fig) -> set[str]:
-    ax = fig.axes[0]
-    _handles, labels = ax.get_legend_handles_labels()
-    return set(labels)
-
-
-def test_npv_waterfall_renders_with_five_legend_entries(tmp_path: Path):
+def test_npv_waterfall_writes_pdf(tmp_path: Path):
+    # Smoke test: the figure renders and the PDF is written to disk.
+    # The legend contents are verified by
+    # ``test_npv_waterfall_legend_has_all_components`` below.
     out = plot_npv_waterfall(_yearly_cf(), tmp_path / "waterfall.pdf")
     assert out.exists()
-    # Inspect the most recent figure (plot_npv_waterfall closes via
-    # save_figure; rebuild a quick check via direct call into the
-    # function and pulling from plt.get_fignums()).
 
 
 def _render_npv_waterfall(tmp_path: Path):

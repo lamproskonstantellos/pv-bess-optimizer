@@ -51,18 +51,6 @@ def _yearly_cf() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _vlines_in_pdf_axes(out_path: Path) -> int:
-    """Count :func:`axvline` artists by re-running the plot live and
-    inspecting the most recent matplotlib axes object.
-
-    matplotlib's PDF backend rasterises everything, so we cannot
-    introspect the saved PDF.  Instead we install a probe on
-    ``matplotlib.axes.Axes.axvline`` that counts calls, then re-execute
-    the plot function.
-    """
-    raise NotImplementedError
-
-
 def test_cumulative_cashflow_has_no_payback_lines(tmp_path: Path):
     plt.close("all")
     df = _yearly_cf()

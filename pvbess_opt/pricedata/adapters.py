@@ -36,6 +36,7 @@ from .store import (
     ScenarioDeck,
     _basis_factor,
     _read_meta,
+    infer_native_cadence_minutes,
     validate_engine_basis,
 )
 
@@ -278,18 +279,7 @@ def build_tyndp_deck(
         values = df["dam_price_eur_per_mwh"].to_numpy(dtype=float)
         if np.isnan(values).any():
             raise PriceDataError(f"{path}: NaN prices.")
-        if len(values) % 365 != 0:
-            raise PriceDataError(
-                f"{path}: {len(values)} steps is not a whole non-leap "
-                "year at any cadence."
-            )
-        native_steps_per_day = len(values) // 365
-        if (24 * 60) % native_steps_per_day != 0:
-            raise PriceDataError(
-                f"{path}: {native_steps_per_day} steps/day does not "
-                "divide the day into whole minutes."
-            )
-        native_minutes = (24 * 60) // native_steps_per_day
+        native_minutes = infer_native_cadence_minutes(len(values), str(path))
         notes: set[str] = set()
         curve = resample_intensive(
             values, native_minutes, dt_minutes,

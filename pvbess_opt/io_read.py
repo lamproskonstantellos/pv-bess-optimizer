@@ -213,9 +213,7 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
                 # slipping through as raw strings until the xlsx
                 # round-trip (three-surface parity).
                 if key in ("p_grid_export_max_kw", "p_grid_import_max_kw"):
-                    known[key] = _parse_grid_export_max(
-                        value, defaults[key], key,
-                    )
+                    known[key] = _parse_grid_export_max(value, key)
                 else:
                     known[key] = _parse_value(key, value, defaults[key])
                 continue
@@ -843,9 +841,34 @@ def config_json_schema() -> dict[str, Any]:
             "additionalProperties": True,
         }
     properties["timeseries_path"] = {"type": "string"}
+    properties["timeseries"] = {
+        "type": "array",
+        "description": (
+            "Inline per-step timeseries (list of row objects), an "
+            "alternative to timeseries_path: the pv_kwh / dam / load / "
+            "optional balancing / intraday price columns per step."
+        ),
+    }
     properties["max_injection_profile"] = {"type": "array"}
     properties["max_injection_profile_pv"] = {"type": "array"}
     properties["max_injection_profile_bess"] = {"type": "array"}
+    properties["sizing"] = {
+        "type": "object",
+        "description": (
+            "Sizing-sweep grid (read by pvbess_opt.sizing.read_sizing_block): "
+            "the PV / BESS capacity axes swept into a comparison batch. "
+            "Mutually exclusive with an enabled scenarios block."
+        ),
+    }
+    properties["bm_merit_order"] = {
+        "type": "array",
+        "description": (
+            "aFRR/mFRR merit-order activation curve (Eq. B10): list of "
+            "{product, price_eur_per_mwh, activation_probability_pct} rows, "
+            "monotone non-increasing in price; armed by "
+            "balancing.bm_merit_order_enabled."
+        ),
+    }
     properties["price_decks"] = {
         "type": "object",
         "description": (

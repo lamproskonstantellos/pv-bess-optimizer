@@ -319,7 +319,7 @@ legs; they stay on `g_dam_pv` in every configuration.
 |---|---|---|
 | `price_scenarios_enabled` | FALSE | Master switch; FALSE keeps years 2..N on the flat indices, bit-identical. |
 | `scenario_projection_mode` | `reprice` | `reprice` (G4) / `resolve` (G5) / `trajectory_only` (declared trajectories only, no auto-generation). |
-| `scenario_resolve_years` | `1,5,10,15,20,25` | Tier-2 support years (CSV; year 1 forced in; out-of-lifecycle years rejected). |
+| `scenario_resolve_years` | `1,5,10,15,20` | Tier-2 support years (CSV; year 1 forced in; out-of-lifecycle years rejected; the default matches the default 20-year lifecycle). |
 | `scenario_resolve_resolution` | 60 | Re-solve grid in minutes; must be a whole multiple of the workbook cadence, never finer. |
 | `scenario_interp` | `loglinear` | Eq. G6 (`loglinear` default / `linear`; a stream with a non-positive support factor falls back to linear automatically). |
 | `price_basis` | `nominal` | Engine basis for every deck (the repo's cashflow convention). |
