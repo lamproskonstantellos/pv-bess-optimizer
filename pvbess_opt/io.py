@@ -1260,7 +1260,11 @@ _ECONOMICS_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("debt_interest_rate_pct", 5.0, "%",
      "Annual debt interest rate (used only when gearing_pct > 0)."),
     ("debt_tenor_years", 15, "years",
-     "Debt repayment tenor in years (used only when gearing_pct > 0)."),
+     "Debt repayment tenor in years (used only when the debt layer is "
+     "active - gearing_pct > 0 or debt_sizing_mode = target_dscr). Must "
+     "not exceed project_lifecycle_years: the loan has to amortize within "
+     "the project, otherwise its unrepaid tail would inflate the equity "
+     "IRR / DSCR (the loader rejects tenor > lifecycle)."),
     ("debt_repayment", "annuity", "annuity | linear | sculpted",
      "Repayment profile: annuity (level debt service), linear (level "
      "principal) or sculpted (debt service proportional to the yearly "
@@ -4162,6 +4166,27 @@ def validate_workbook_params(
     sizing_mode = str(
         economics.get("debt_sizing_mode", "manual") or "manual"
     ).strip().lower()
+    # A debt tenor that outlives the project draws the full debt at Year 0
+    # but never repays the post-horizon amortization: the equity cashflow
+    # only spans years 1..project_lifecycle_years, so schedule years beyond
+    # the horizon are silently dropped, leaving the outstanding principal
+    # unrepaid and inflating equity_irr_pct / min_dscr / avg_dscr.  The E20
+    # equity formula assumes T_d <= Y; enforce it loudly whenever a debt
+    # layer actually runs (gearing > 0 or target-DSCR sizing).  All-equity
+    # runs (gearing 0, manual) draw no debt, so the tenor is inert and this
+    # is not checked -- the shipped default (gearing 0) is unaffected.
+    if gearing > 0.0 or sizing_mode == "target_dscr":
+        _raw_tenor = economics.get("debt_tenor_years")
+        _debt_tenor = 15 if _raw_tenor is None else int(_raw_tenor)
+        _life_years = int(project.get("project_lifecycle_years", 20) or 20)
+        if _debt_tenor > _life_years:
+            raise ValueError(
+                f"'debt_tenor_years' ({_debt_tenor}) exceeds "
+                f"'project_lifecycle_years' ({_life_years}): the loan would "
+                "outlive the project and its unamortized tail would never be "
+                "repaid in the equity cashflow. Set the tenor to at most the "
+                "project lifecycle."
+            )
     if sizing_mode == "target_dscr":
         raw_target = economics.get("target_dscr")
         target_dscr = 1.30 if raw_target is None else float(raw_target)

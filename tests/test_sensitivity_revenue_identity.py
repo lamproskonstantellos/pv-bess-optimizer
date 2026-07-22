@@ -104,6 +104,26 @@ def test_revenue_perturbation_preserves_gross_net_identity(factor: float):
         assert (retail_p + dam_p) == pytest.approx(rev_p, abs=max(0.01, 1e-6 * rev_p))
 
 
+@pytest.mark.parametrize("factor", [1.0, 1.2])
+def test_revenue_perturbation_at_full_fee_keeps_streams_finite(factor: float):
+    """At a 100 % energy-aggregator fee the per-stream gross recovery
+    ``net / (1 - frac)`` divides 0/0 (frac == 1, net == 0).  The guard must
+    keep ``revenue_retail_eur`` / ``revenue_dam_eur`` finite and summing to
+    ``revenue_eur`` (== 0) instead of NaN, preserving the factor=1.0 no-op."""
+    econ = _econ(fee_pct=100.0)
+    base = build_yearly_cashflow(_year1_kpis(), econ, _caps())
+    perturbed = _scale_revenue(base, factor, econ)
+    after_y0 = perturbed["project_year"] >= 1
+    pert = perturbed.loc[after_y0]
+    assert not pert["revenue_retail_eur"].isna().any()
+    assert not pert["revenue_dam_eur"].isna().any()
+    for y in pert.index:
+        rev_p = float(pert.at[y, "revenue_eur"])
+        retail_p = float(pert.at[y, "revenue_retail_eur"])
+        dam_p = float(pert.at[y, "revenue_dam_eur"])
+        assert (retail_p + dam_p) == pytest.approx(rev_p, abs=0.01)
+
+
 def test_revenue_perturbation_factor_one_is_noop():
     """``factor=1.0`` returns a frame identical to the base on revenue columns."""
     econ = _econ(fee_pct=10.0)

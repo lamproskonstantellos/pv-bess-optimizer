@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from pvbess_opt.kpis import _compute_canonical_revenue_aggregates
 from pvbess_opt.plotting.bess_revenue import (
@@ -164,6 +165,53 @@ def test_plot_bess_capacity_vs_activation_split_smoke(tmp_path: Path):
         econ={"currency_format": "auto"},
     )
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_monthly_energy_fee_uses_net_dam_base_like_waterfall(
+    tmp_path: Path, monkeypatch,
+):
+    """The monthly plot's energy-aggregator-fee bars must reconcile to the
+    waterfall's step, which is charged on the BESS DAM margin NET of grid
+    charging (profit_export_from_bess - expense_charge_bess_grid), not on
+    gross export.  A gross base disagrees with both the waterfall and the
+    cashflow whenever grid charging is non-zero."""
+    import matplotlib.pyplot as plt
+
+    import pvbess_opt.plotting.bess_revenue as br
+
+    captured: dict[str, float] = {}
+
+    def _spy(out_path):
+        ax = plt.gca()
+        for container in ax.containers:
+            if container.get_label() == "Energy aggregator fee":
+                captured["energy_fee"] = float(
+                    sum(b.get_height() for b in container)
+                )
+        return out_path
+
+    monkeypatch.setattr(br, "save_figure", _spy)
+
+    n = 96 * 30  # one month at 15 min
+    ts = pd.date_range("2026-01-01", periods=n, freq="15min").append(
+        pd.date_range("2026-02-01", periods=n, freq="15min")
+    )
+    total = len(ts)
+    # Annual gross BESS export 100k, grid charging 60k => net DAM 40k.
+    res = pd.DataFrame({
+        "timestamp": ts,
+        "profit_export_from_bess_eur": np.full(total, 100_000.0 / total),
+        "expense_charge_bess_grid_eur": np.full(total, 60_000.0 / total),
+        "bess_dis_grid_kwh": np.full(total, 0.0),
+    })
+    br.plot_bess_revenue_by_month(
+        res, {}, tmp_path / "m.pdf",
+        econ={"currency_format": "auto",
+              "aggregator_fee_pct_revenue": 5.0},
+    )
+    # Waterfall/cashflow value: -5% x 40k NET = -2000 (not -5% x 100k gross).
+    assert captured["energy_fee"] == pytest.approx(-2_000.0, abs=1e-6)
+    assert abs(captured["energy_fee"] - (-5_000.0)) > 1.0
 
 
 def test_plot_bess_revenue_by_month_smoke(tmp_path: Path):

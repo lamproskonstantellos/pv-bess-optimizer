@@ -205,6 +205,37 @@ Pre-delivery release audit (round 4):
   same set — a latent drift risk if a new activation-carrying product is
   added), completing the round-3 single-sourcing of the product tuples.
 
+Pre-delivery release audit (round 5):
+
+- **Debt tenor vs project life.** A debt tenor longer than the project
+  lifecycle (`debt_tenor_years > project_lifecycle_years`) with a debt
+  layer active (`gearing_pct > 0` or `debt_sizing_mode = target_dscr`)
+  drew the full debt at Year 0 but only serviced the amortization years
+  inside the horizon — the equity cashflow spans years 1..lifecycle, so
+  the post-horizon service was silently dropped, the outstanding principal
+  never repaid, and `equity_irr_pct` / `min_dscr` / `avg_dscr` inflated
+  (a 5-year project on a 15-year loan overstated the equity IRR by ~17 pp,
+  with ~74 % of the debt never repaid). The E20 equity formula assumes the
+  tenor amortizes within the horizon; the loader now enforces that loudly,
+  naming both keys. All-equity runs (`gearing_pct = 0`, manual) draw no
+  debt, so the tenor stays inert — the shipped default is unchanged.
+- **Plotting.** The by-month BESS-revenue figure charged the
+  energy-aggregator fee (Eq. E13) on GROSS export while the revenue
+  waterfall and the cashflow charge it on the DAM margin NET of grid
+  charging; with grid charging non-zero the monthly bars disagreed with
+  the waterfall (e.g. a 5 % fee on 100k gross / 60k charged summed to
+  −5000 monthly vs −2000 in the waterfall). The fee now rides the same net
+  margin (with the annual clamp allocated over positive-margin months, as
+  the optimizer-share bar already does). Gated behind
+  `aggregator_fee_pct_revenue > 0` (default off), so the default figure and
+  `03_results.xlsx` are unchanged.
+- **Sensitivity.** `_scale_revenue` produced NaN `revenue_retail_eur` /
+  `revenue_dam_eur` in the perturbed frame at `aggregator_fee_pct_revenue
+  = 100` (the per-stream gross recovery `net / (1 − frac)` divides 0/0 when
+  `frac = 1`), silently breaking the `factor = 1.0` no-op invariant for
+  those two informational columns; the degenerate divisor is now guarded so
+  the split resolves to zero (headline NPV/IRR were already correct).
+
 ## 1.0.0 (2026-07-06)
 
 Production release.
