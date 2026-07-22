@@ -192,7 +192,7 @@ def test_structured_config_temp_workbook_is_cleaned_up(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "read_inputs", lambda _p: ({}, None))
     monkeypatch.setattr(pipeline, "apply_ieee_style", lambda: None)
     monkeypatch.setattr(pipeline, "set_show_titles", lambda _v: None)
-    monkeypatch.setattr(pipeline, "_run_one", lambda *a, **k: object())
+    monkeypatch.setattr(pipeline, "_run_one", lambda *_a, **_k: object())
 
     pipeline.run(RunConfig(excel=cfg, outdir=tmp_path / "out"))
 
