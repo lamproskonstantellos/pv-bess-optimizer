@@ -550,6 +550,53 @@ def test_reachable_year_close_target_reports_zero_shortfall(
     )
 
 
+def test_reachable_year_close_target_held_at_extreme_price():
+    """A REACHABLE closed-cycle target must be held even at a price above
+    10000 EUR/MWh.  A fixed 10 EUR/kWh penalty (== a 10000 EUR/MWh price)
+    let the solver profitably drain the battery once a price exceeded
+    10000/eta_d (within EU technical caps), abandoning the target and
+    biasing the rolling-horizon foresight benchmark.  The penalty now
+    scales to dominate the largest price magnitude in the problem."""
+    try:
+        import highspy  # noqa: F401
+    except ImportError:
+        pytest.skip("requires HiGHS")
+    import pyomo.environ as pyo
+
+    from pvbess_opt.optimization import (
+        build_model,
+        choose_solver,
+        configure_solver_options,
+    )
+
+    params = {
+        "mode": "merchant", "dt_minutes": 60, "pv_nameplate_kwp": 0.0,
+        "bess_power_kw": 1_000.0, "bess_capacity_kwh": 100.0,
+        "efficiency_charge": 1.0, "efficiency_discharge": 1.0,
+        "soc_min_frac": 0.0, "soc_max_frac": 1.0, "initial_soc_frac": 0.5,
+        "max_cycles_per_day": 100.0, "p_grid_export_max_kw": 1_000.0,
+        "retail_tariff_eur_per_mwh": 0.0, "allow_bess_grid_charging": False,
+        "terminal_soc_equal": True,
+    }
+    for price in (9_999.0, 15_000.0, 50_000.0):
+        ts = pd.DataFrame({
+            "timestamp": pd.date_range("2026-01-01", periods=2, freq="h"),
+            "pv_kwh": [0.0, 0.0],
+            "dam_price_eur_per_mwh": [price, 0.0],
+        })
+        m = build_model(
+            params, ts, initial_soc_kwh=50.0, terminal_soc_target_kwh=50.0,
+        )
+        solver, name = choose_solver(None)
+        configure_solver_options(
+            solver, name, mip_gap=1e-9, time_limit_seconds=30,
+        )
+        solver.solve(m)
+        assert float(pyo.value(m.year_close_shortfall)) == pytest.approx(
+            0.0, abs=1e-3,
+        ), price
+
+
 # ---------------------------------------------------------------------------
 # Daily cycle cap across window seams (commit_hours not dividing 24)
 # ---------------------------------------------------------------------------
