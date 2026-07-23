@@ -166,6 +166,81 @@ def test_plot_yearly_combined_merchant_renders(tmp_path):
     assert (tmp_path / "yearly_combined.pdf").exists()
 
 
+def test_yearly_revenue_rescales_to_derated_kpis(tmp_path, monkeypatch):
+    """The merchant yearly-revenue plot draws raw dispatch EUR streams; passing
+    the availability/curtailment-derated ``year1_kpis`` must rescale the bars so
+    their annual totals reconcile to the derated headline (the workbook / SUMMARY
+    / financial plots), not the raw dispatch sum.  Mirrors the round-7 fix for
+    ``plot_bess_revenue_by_month`` in the merchant revenue trio."""
+    import matplotlib.pyplot as plt
+    import pytest
+
+    import pvbess_opt.plotting.yearly as yr
+
+    df = _make_year()
+    raw_pv = float(df["profit_export_from_pv_eur"].sum())
+    raw_bess = float(df["profit_export_from_bess_eur"].sum())
+    raw_grid = float(df["expense_charge_bess_grid_eur"].sum())
+    # Export legs carry availability x curtailment (0.99 x 0.9 ~ 0.8); the
+    # grid-charging withdrawal is curtailment-exempt (availability only, 0.9).
+    year1_kpis = {
+        "profit_export_from_pv_eur": raw_pv * 0.8,
+        "profit_export_from_bess_eur": raw_bess * 0.8,
+        "expense_charge_bess_grid_eur": raw_grid * 0.9,
+    }
+    captured: dict[str, float] = {}
+
+    def _spy(path):
+        ax = plt.gca()
+        for c in ax.containers:
+            lbl = c.get_label()
+            captured[lbl] = captured.get(lbl, 0.0) + float(
+                sum(b.get_height() for b in c)
+            )
+        return path
+
+    monkeypatch.setattr(yr, "save_figure", _spy)
+    yr.plot_yearly_revenue(df, 2026, tmp_path, year1_kpis=year1_kpis)
+
+    # Export bars reconcile to the derated KPIs, not the raw dispatch totals ...
+    assert captured.get("Export from PV") == pytest.approx(raw_pv * 0.8, rel=1e-6)
+    assert captured.get("Export from BESS") == pytest.approx(
+        raw_bess * 0.8, rel=1e-6,
+    )
+    # ... the grid-charging cost (drawn negative) uses the availability-only KPI ...
+    assert captured.get("Grid-charging cost") == pytest.approx(
+        -raw_grid * 0.9, rel=1e-6,
+    )
+    # ... and the export bars are NOT the raw (pre-fix) scale.
+    assert abs(captured.get("Export from PV", 0.0) - raw_pv) > 1.0
+
+
+def test_yearly_revenue_without_kpis_keeps_raw_scale(tmp_path, monkeypatch):
+    """A raw dispatch-only caller (no year1_kpis) keeps the raw scale -- the
+    rescale is opt-in via the derated KPI dict, so existing callers are
+    unaffected (bit-identity)."""
+    import matplotlib.pyplot as plt
+    import pytest
+
+    import pvbess_opt.plotting.yearly as yr
+
+    df = _make_year()
+    raw_pv = float(df["profit_export_from_pv_eur"].sum())
+    captured: dict[str, float] = {}
+
+    def _spy(path):
+        ax = plt.gca()
+        for c in ax.containers:
+            captured[c.get_label()] = captured.get(c.get_label(), 0.0) + float(
+                sum(b.get_height() for b in c)
+            )
+        return path
+
+    monkeypatch.setattr(yr, "save_figure", _spy)
+    yr.plot_yearly_revenue(df, 2026, tmp_path)  # no year1_kpis
+    assert captured.get("Export from PV") == pytest.approx(raw_pv, rel=1e-6)
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher branches on params['mode']
 # ---------------------------------------------------------------------------

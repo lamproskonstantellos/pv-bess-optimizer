@@ -252,6 +252,7 @@ def _generate_energy_plots_for_year(
     monthly: bool,
     yearly: bool,
     mode: str = "self_consumption",
+    year1_kpis: dict[str, Any] | None = None,
 ) -> None:
     """Render daily / monthly / yearly plots for a single calendar year.
 
@@ -274,7 +275,10 @@ def _generate_energy_plots_for_year(
                 if is_merchant:
                     plot_daily_dispatch(res_for_year, date_str, daily_root)
                     plot_daily_soc(res_for_year, date_str, daily_root)
-                    plot_daily_revenue(res_for_year, date_str, daily_root)
+                    plot_daily_revenue(
+                        res_for_year, date_str, daily_root,
+                        year1_kpis=year1_kpis,
+                    )
                     plot_daily_combined_merchant(
                         res_for_year, date_str, daily_root,
                     )
@@ -301,7 +305,10 @@ def _generate_energy_plots_for_year(
                 if is_merchant:
                     plot_monthly_dispatch(res_for_year, month, monthly_root)
                     plot_monthly_soc(res_for_year, month, monthly_root)
-                    plot_monthly_revenue(res_for_year, month, monthly_root)
+                    plot_monthly_revenue(
+                        res_for_year, month, monthly_root,
+                        year1_kpis=year1_kpis,
+                    )
                     plot_monthly_combined_merchant(
                         res_for_year, month, monthly_root,
                     )
@@ -320,7 +327,10 @@ def _generate_energy_plots_for_year(
             if is_merchant:
                 plot_yearly_dispatch(res_for_year, int(calendar_year), yearly_root)
                 plot_yearly_soc(res_for_year, int(calendar_year), yearly_root)
-                plot_yearly_revenue(res_for_year, int(calendar_year), yearly_root)
+                plot_yearly_revenue(
+                    res_for_year, int(calendar_year), yearly_root,
+                    year1_kpis=year1_kpis,
+                )
                 plot_yearly_combined_merchant(
                     res_for_year, int(calendar_year), yearly_root,
                 )
@@ -355,6 +365,7 @@ def _generate_all_energy_plots(
     energy_plots_dir: Path,
     *,
     mode: str = "self_consumption",
+    year1_kpis: dict[str, Any] | None = None,
 ) -> None:
     """Drive the energy-plot fan-out across the project lifetime."""
     daily_scope = str(econ.get("plot_daily_scope", "year1_only"))
@@ -377,6 +388,7 @@ def _generate_all_energy_plots(
             monthly=_scope_active_for_year(monthly_scope, 1),
             yearly=_scope_active_for_year(yearly_scope, 1),
             mode=mode,
+            year1_kpis=year1_kpis,
         )
         return
 
@@ -391,6 +403,11 @@ def _generate_all_energy_plots(
             monthly=_scope_active_for_year(monthly_scope, proj_year),
             yearly=_scope_active_for_year(yearly_scope, proj_year),
             mode=mode,
+            # The derated year1_kpis reconcile the Year-1 revenue plot only;
+            # later years carry their own degradation, so leave them raw
+            # (the factor would otherwise rescale year-N dispatch to Year-1's
+            # derated total).
+            year1_kpis=year1_kpis if proj_year == 1 else None,
         )
 
     if (
@@ -2239,13 +2256,17 @@ def _run_one(
         # so it renders for every run in both modes; the CFE view stays
         # tied to the emissions configuration.
         try:
-            # Apply the same availability rule as the derated KPIs so the
-            # Sankey balances against the real (never-derated) load: plant-side
-            # flows scale by the factor, grid import rises to cover the load
-            # during downtime.  Factor 1.0 (no unavailability) leaves it raw.
+            # Apply the same availability AND curtailment rules as the derated
+            # KPIs so the Sankey balances against the real (never-derated) load
+            # and its export node matches the derated *_export_mwh KPIs:
+            # plant-side flows scale by availability (grid import rises to cover
+            # downtime load), the export flows additionally scale by the
+            # curtailment quota (curtailed injection routed to a Curtailed-export
+            # sink).  Both factors 1.0 (the default) leave it raw.
             plot_energy_sankey(
                 res, layout["energy_plots"] / "energy_sankey.pdf",
                 availability_factor=float(kpis.get("availability_factor", 1.0)),
+                curtailment_factor=float(kpis.get("curtailment_factor", 1.0)),
             )
         except Exception:
             logger.exception("Energy-flow diagram generation failed")
@@ -2311,6 +2332,7 @@ def _run_one(
             econ,
             layout["energy_plots"],
             mode=resolve_mode(params),
+            year1_kpis=kpis,
         )
 
         _dt_min = int(params.get("dt_minutes", 60) or 60)

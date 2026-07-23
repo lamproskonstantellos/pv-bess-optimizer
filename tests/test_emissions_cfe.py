@@ -273,7 +273,9 @@ def _srcs_sinks(flows):
     srcs = _out_of(flows, "PV generation") + _out_of(flows, "Grid import")
     sinks = sum(
         _into(flows, n)
-        for n in ("Load", "Grid export", "Curtailed PV", "Losses")
+        for n in (
+            "Load", "Grid export", "Curtailed PV", "Curtailed export", "Losses"
+        )
     )
     return srcs, sinks
 
@@ -312,6 +314,44 @@ def test_energy_sankey_availability_raises_import_and_conserves():
     # A plant-side sink still scales DOWN by the factor.
     assert _into(adj, "Grid export") == pytest.approx(a * _into(raw, "Grid export"))
     # Conserves energy against the true demand.
+    s_adj, k_adj = _srcs_sinks(adj)
+    assert s_adj == pytest.approx(k_adj)
+
+
+def test_energy_sankey_curtailment_shrinks_export_and_conserves():
+    """Exogenous-quota curtailment (Eq. E48) inside the Sankey.
+
+    The two grid-export flows shrink by the curtailment factor so the
+    ``Grid export`` node matches the derated ``*_export_mwh`` KPIs; the
+    curtailed injection routes to a ``Curtailed export`` sink (absent by
+    default); round-trip ``losses`` are unchanged (taken before the export
+    haircut); and the flows still conserve energy.
+    """
+    from pvbess_opt.plotting.emissions import energy_sankey_flows
+
+    res = _sankey_frame(
+        pv_to_load_kwh=12.9, pv_to_bess_kwh=9.2, pv_to_grid_kwh=4.0,
+        pv_curtail_kwh=1.6, grid_to_load_kwh=13.0, bess_charge_grid_kwh=10.6,
+        bess_dis_load_kwh=6.3, bess_dis_grid_kwh=12.1,
+    )
+    raw = energy_sankey_flows(res, 1.0, 1.0)
+    export_raw = _into(raw, "Grid export")
+    losses_raw = _into(raw, "Losses")
+    s_raw, k_raw = _srcs_sinks(raw)
+    assert s_raw == pytest.approx(k_raw)
+    assert "Curtailed export" not in {t for _s, t, _v, _c in raw}  # off by default
+
+    c = 0.9
+    adj = energy_sankey_flows(res, 1.0, c)
+    # Export node shrinks by exactly the curtailment factor ...
+    assert _into(adj, "Grid export") == pytest.approx(c * export_raw)
+    # ... the removed injection lands in the Curtailed-export sink ...
+    assert _into(adj, "Curtailed export") == pytest.approx(
+        (1.0 - c) * export_raw,
+    )
+    # ... round-trip losses are unchanged (computed before the haircut) ...
+    assert _into(adj, "Losses") == pytest.approx(losses_raw)
+    # ... and the diagram still conserves energy.
     s_adj, k_adj = _srcs_sinks(adj)
     assert s_adj == pytest.approx(k_adj)
 

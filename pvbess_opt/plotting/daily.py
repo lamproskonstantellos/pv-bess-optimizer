@@ -29,6 +29,7 @@ downstream archival code can rely on a stable naming convention.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -44,6 +45,7 @@ from .helpers import (
     pad_right_to_end,
     plot_stack_filtered,
     pretty_date,
+    revenue_derate_factor,
     title_prefix,
 )
 from .style import (
@@ -593,8 +595,14 @@ def plot_daily_combined_merchant_with_soc(
 
 def plot_daily_revenue(
     res: pd.DataFrame, date_str: str, out_dir: Path,
+    year1_kpis: dict[str, Any] | None = None,
 ) -> None:
-    """DAM revenue per step (positive) minus grid-charging cost (negative)."""
+    """DAM revenue per step (positive) minus grid-charging cost (negative).
+
+    ``year1_kpis`` (the availability/curtailment-derated KPI dict) rescales the
+    raw per-step dispatch EUR streams so the annual total reconciles to the
+    derated headline; absent, the raw dispatch scale is kept.
+    """
     day = pd.to_datetime(date_str).date()
     df = res[res["timestamp"].dt.date == day]
     if df.empty:
@@ -603,13 +611,21 @@ def plot_daily_revenue(
     end = start + pd.Timedelta(days=1)
     t = df["timestamp"]
 
-    rev_pv = df.get("profit_export_from_pv_eur", pd.Series(0.0, index=df.index))
-    rev_bess = df.get("profit_export_from_bess_eur", pd.Series(0.0, index=df.index))
-    cost_grid = df.get("expense_charge_bess_grid_eur", pd.Series(0.0, index=df.index))
+    _f_pv = revenue_derate_factor(res, "profit_export_from_pv_eur", year1_kpis)
+    _f_bess = revenue_derate_factor(res, "profit_export_from_bess_eur", year1_kpis)
+    _f_grid = revenue_derate_factor(res, "expense_charge_bess_grid_eur", year1_kpis)
+    _f_ppa = revenue_derate_factor(res, "revenue_pv_ppa_eur", year1_kpis)
+    rev_pv = df.get(
+        "profit_export_from_pv_eur", pd.Series(0.0, index=df.index)) * _f_pv
+    rev_bess = df.get(
+        "profit_export_from_bess_eur", pd.Series(0.0, index=df.index)) * _f_bess
+    cost_grid = df.get(
+        "expense_charge_bess_grid_eur", pd.Series(0.0, index=df.index)) * _f_grid
     # PPA contract leg per step (absent when no contract is active).  A
     # CfD leg can mix signs within a day: the positive part stacks with
     # the exports, the negative part with the cost.
-    ppa = df.get("revenue_pv_ppa_eur", pd.Series(0.0, index=df.index))
+    ppa = df.get(
+        "revenue_pv_ppa_eur", pd.Series(0.0, index=df.index)) * _f_ppa
     ppa_arr = ppa.to_numpy(dtype=float)
     ppa_pos = np.clip(ppa_arr, 0.0, None)
     ppa_neg = np.clip(ppa_arr, None, 0.0)

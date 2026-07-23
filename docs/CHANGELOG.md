@@ -333,6 +333,32 @@ Pre-delivery release audit (round 8):
   dispatch surfaces resolve relative stores against the config, not the temp
   dir (an Excel input is unaffected).
 
+Pre-delivery release audit (round 9):
+
+- **Merchant revenue plots derated.** The merchant-mode daily / monthly / yearly
+  revenue plots (`plot_daily_revenue` / `plot_monthly_revenue` /
+  `plot_yearly_revenue`) drew their EUR streams straight from the un-derated
+  dispatch frame, while the workbook, SUMMARY and financial plots report the
+  availability- and curtailment-derated `year1_kpis` — so under a derate the
+  bars over-stated the reported revenue (the round-7 raw-vs-derated class, in the
+  sibling plots round 7 did not touch). Each per-period stream is now rescaled to
+  its derated KPI (a shared `revenue_derate_factor`), so the Year-1 plots
+  reconcile to the headline; the default self-consumption figure set does not
+  emit these plots, so it is unchanged.
+- **Energy Sankey honours curtailment.** `plot_energy_sankey` scaled its flows by
+  the availability factor only, so under `curtailment_pct > 0` the grid-export
+  ribbon and its MWh node label over-stated the curtailment-derated
+  `*_export_mwh` KPIs it documents itself as matching. The two export flows now
+  also scale by the curtailment factor, with the curtailed injection routed to a
+  `Curtailed export` sink so the diagram still conserves energy; both factors
+  `1.0` (the default) leave it bit-identical.
+- **Spurious curtailment-compensation warning.** `apply_curtailment_derate` folds
+  the E49 curtailment compensation into `profit_total_eur`, but the Year-1
+  revenue-split reconciliation guard's `split_total` omitted it, so a benign
+  "revenue split drift" warning fired on every valid curtailment+compensation
+  config. The guard now adds the compensation back (and the latent no-breakdown
+  branch carves it out symmetrically). Log-only — no cashflow number changes.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

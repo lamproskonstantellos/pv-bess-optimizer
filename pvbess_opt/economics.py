@@ -1060,6 +1060,13 @@ def build_yearly_cashflow(
                 year1_kpis.get("expense_grid_charging_fee_eur", 0.0) or 0.0
             ) + float(
                 year1_kpis.get("id_net_revenue_eur", 0.0) or 0.0
+            ) + float(
+                # apply_curtailment_derate folds the E49 curtailment
+                # compensation into profit_total_eur (it is not one of the
+                # revenue streams), so the split must add it back to
+                # reconcile; absent (curtailment off / no compensation) it is
+                # 0 and the guard is unchanged.
+                year1_kpis.get("curtailment_compensation_eur", 0.0) or 0.0
             )
             if abs(profit_total - split_total) > max(
                 1.0, abs(profit_total) * 1e-6,
@@ -1087,6 +1094,12 @@ def build_yearly_cashflow(
             year1_kpis.get("profit_total_eur", 0.0) or 0.0
         ) - float(year1_kpis.get("revenue_pv_ppa_eur", 0.0) or 0.0) + float(
             year1_kpis.get("expense_grid_charging_fee_eur", 0.0) or 0.0
+        ) - float(
+            # Curtailment compensation (Eq. E49) is folded into
+            # profit_total_eur but flows through its own column, so carve it
+            # out here exactly as the PPA leg is — else it would be
+            # double-counted (this no-breakdown branch is currently latent).
+            year1_kpis.get("curtailment_compensation_eur", 0.0) or 0.0
         )
         revenue_1_retail = revenue_1_gross
         revenue_1_dam = 0.0

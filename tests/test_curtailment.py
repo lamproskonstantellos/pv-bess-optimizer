@@ -163,6 +163,46 @@ def test_cashflow_column_and_lifetime_total():
     assert (cf_off["curtailment_compensation_eur"] == 0.0).all()
 
 
+def test_no_split_drift_warning_when_curtailment_compensation_folded_in(caplog):
+    """``apply_curtailment_derate`` folds the E49 curtailment compensation into
+    ``profit_total_eur`` (it is not a revenue stream), so the Year-1 revenue-split
+    reconciliation guard must add it back to ``split_total`` — else a spurious
+    "revenue split drift" warning fires on every valid curtailment+compensation
+    config (the maximal-stack run logged it 12x).  Log-only: the cashflow numbers
+    are unaffected, and the shipped default (``curtailment_pct=0``, no
+    compensation) never reaches this branch."""
+    import logging
+
+    econ = {
+        "project_lifecycle_years": 6, "project_start_year": 2026,
+        "discount_rate_pct": 7.0, "opex_inflation_pct": 0.0,
+        "retail_inflation_pct": 0.0, "dam_inflation_pct": 0.0,
+        "capex_pv_eur_per_kw": 400.0, "capex_bess_eur_per_kwh": 100.0,
+        "devex_pv_eur_per_kw": 0.0, "devex_bess_eur_per_kw": 0.0,
+        "opex_pv_eur_per_kwp": 5.0, "opex_bess_eur_per_kw": 5.0,
+        "pv_degradation_year1_pct": 0.0, "pv_degradation_annual_pct": 0.0,
+        "bess_degradation_annual_pct": 0.0, "bess_replacement_year": 0,
+        "bess_replacement_cost_pct": 0.0, "aggregator_fee_pct_revenue": 0.0,
+    }
+    caps = {"pv_kwp": 1000.0, "bess_kw": 500.0, "bess_kwh": 1000.0}
+    comp = 3_000.0
+    # A split-consistent dict (its reconstruction is 145_000) with the E49
+    # compensation folded into profit_total exactly as apply_curtailment_derate
+    # builds it — profit_total = split_reconstruction + compensation.
+    kpis = dict(
+        _kpis(),
+        profit_total_eur=145_000.0 + comp,
+        curtailment_compensation_eur=comp,
+    )
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.economics"):
+        build_yearly_cashflow(kpis, econ, caps)
+    drift = [
+        r.getMessage() for r in caplog.records
+        if "revenue split drift" in r.getMessage()
+    ]
+    assert not drift, f"spurious split-drift warning(s): {drift}"
+
+
 def test_sensitivity_lists_carry_the_column():
     from pvbess_opt.economics import TAX_LAYER_COLUMNS
     from pvbess_opt.sensitivity import _recompute_net, _scale_revenue
