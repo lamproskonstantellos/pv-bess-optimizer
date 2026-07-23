@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from calendar import month_name
 from pathlib import Path
+from typing import Any
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -36,6 +37,7 @@ from .helpers import (
     line_masked_zeros,
     month_aggregate,
     pad_line_to_bins_end,
+    revenue_derate_factor,
     title_prefix,
 )
 from .style import (
@@ -411,8 +413,14 @@ def plot_monthly_soc(
 
 def plot_monthly_revenue(
     res: pd.DataFrame, month: int, out_dir: Path,
+    year1_kpis: dict[str, Any] | None = None,
 ) -> None:
-    """Daily DAM revenue minus grid-charging cost."""
+    """Daily DAM revenue minus grid-charging cost.
+
+    ``year1_kpis`` (the availability/curtailment-derated KPI dict) rescales the
+    raw per-day dispatch EUR streams so the annual total reconciles to the
+    derated headline; absent, the raw dispatch scale is kept.
+    """
     df = res[res["timestamp"].dt.month == month]
     if df.empty:
         return
@@ -428,6 +436,9 @@ def plot_monthly_revenue(
     daily["date"] = pd.to_datetime(daily["date"])
     if daily.empty:
         return
+    for _c in cols.values():
+        if _c in daily.columns:
+            daily[_c] = daily[_c] * revenue_derate_factor(res, _c, year1_kpis)
     left, width_days = edges_and_widths_monthly(daily["date"])
 
     # A CfD PPA leg can mix signs across days: positive part stacks

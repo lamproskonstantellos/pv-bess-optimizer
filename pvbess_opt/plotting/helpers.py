@@ -2,11 +2,40 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
 from ..theme import ALPHA_STACK_AREAS, ALPHA_STACK_BARS, label_color
 from .style import get_project_mode_label
+
+
+def revenue_derate_factor(
+    res: pd.DataFrame, col: str, year1_kpis: dict[str, Any] | None,
+) -> float:
+    """Factor mapping a raw dispatch revenue column's ANNUAL sum to its derated
+    ``year1_kpis`` value.
+
+    The daily / monthly / yearly merchant-revenue plots draw EUR streams
+    (``profit_export_from_*``, ``expense_charge_bess_grid_eur``,
+    ``revenue_pv_ppa_eur``) straight from the un-derated dispatch frame, while
+    the workbook / SUMMARY / financial plots report the availability- and
+    curtailment-derated ``year1_kpis``.  Scaling each per-period column by this
+    factor reconciles the plot's annual total to the derated headline (mirrors
+    ``plot_bess_revenue_by_month``); using the derated KPI as the target rather
+    than raw factors handles each leg's own derate rule (the export legs carry
+    availability x curtailment, the grid-charging withdrawal only availability,
+    the baseload-PPA leg is curtailment-exempt).  Returns ``1.0`` when
+    ``year1_kpis`` is absent or lacks the key, or the raw annual sum is ~0, so a
+    raw dispatch-only caller keeps the raw scale.
+    """
+    if not year1_kpis or col not in year1_kpis or col not in res.columns:
+        return 1.0
+    raw = float(pd.to_numeric(res[col], errors="coerce").fillna(0.0).sum())
+    if abs(raw) <= 1e-9:
+        return 1.0
+    return float(year1_kpis[col] or 0.0) / raw
 
 __all__ = [
     "ZERO_THRESHOLD",
@@ -21,6 +50,7 @@ __all__ = [
     "pad_right_to_end",
     "plot_stack_filtered",
     "pretty_date",
+    "revenue_derate_factor",
     "title_prefix",
     "year_aggregate",
 ]

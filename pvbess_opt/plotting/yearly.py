@@ -20,6 +20,7 @@ already encoded in the ``out_dir`` parent (``05_energy_plots/<YYYY>/``).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -36,6 +37,7 @@ from .helpers import (
     line_if_nonzero,
     line_masked_zeros,
     pad_line_to_bins_end,
+    revenue_derate_factor,
     title_prefix,
     year_aggregate,
 )
@@ -395,8 +397,17 @@ def plot_yearly_soc(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     save_figure(out_dir / "yearly_soc.pdf")
 
 
-def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
-    """Monthly DAM revenue minus grid-charging cost."""
+def plot_yearly_revenue(
+    res: pd.DataFrame, year: int, out_dir: Path,
+    year1_kpis: dict[str, Any] | None = None,
+) -> None:
+    """Monthly DAM revenue minus grid-charging cost.
+
+    ``year1_kpis`` (the availability/curtailment-derated KPI dict) rescales the
+    raw per-month dispatch EUR streams so the annual total reconciles to the
+    derated headline the workbook and financial plots report; absent, the raw
+    dispatch scale is kept.
+    """
     df = res[pd.to_datetime(res["timestamp"]).dt.year == year].copy()
     if df.empty:
         return
@@ -414,6 +425,9 @@ def plot_yearly_revenue(res: pd.DataFrame, year: int, out_dir: Path) -> None:
     monthly = monthly.sort_values("month_start").reset_index(drop=True)
     if monthly.empty:
         return
+    for _c in cols.values():
+        if _c in monthly.columns:
+            monthly[_c] = monthly[_c] * revenue_derate_factor(df, _c, year1_kpis)
     left, width_days = edges_and_widths_yearly(monthly["month_start"])
 
     # Mixed-sign CfD leg: positive part stacks with the exports,

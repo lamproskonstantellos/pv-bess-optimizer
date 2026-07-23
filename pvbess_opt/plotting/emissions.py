@@ -64,24 +64,40 @@ _SANKEY_NODE_COLOURS: dict[str, str] = {
     "Load": COLORS["Load demand"],
     "Grid export": COLORS["BESS to grid"],
     "Curtailed PV": COLORS["Curtailed PV"],
+    # Post-solve exogenous-curtailment sink (Eq. E48); only drawn when the
+    # quota is active, so the default node set is unchanged.
+    "Curtailed export": COLORS["Curtailed PV"],
     "Losses": COLORS["BESS losses"],
 }
 _SANKEY_LOSSES_COLOUR = COLORS["BESS losses"]
 
 
 def energy_sankey_flows(
-    res: pd.DataFrame, availability_factor: float = 1.0,
+    res: pd.DataFrame,
+    availability_factor: float = 1.0,
+    curtailment_factor: float = 1.0,
 ) -> list[tuple[str, str, float, str]]:
     """Return the ``(source, target, MWh, colour)`` flows of the Sankey.
 
-    Pulled out of :func:`plot_energy_sankey` so the availability physics is
+    Pulled out of :func:`plot_energy_sankey` so the derate physics is
     unit-testable.  With ``availability_factor < 1`` every plant-side flow
     (PV, BESS, export) scales by the factor while ``grid_to_load`` rises by
     ``(1 - factor) * load`` — the grid covers the load the offline plant
     cannot serve — so the flows conserve energy against the true (never
-    derated) demand.  ``availability_factor == 1`` returns the raw dispatch.
+    derated) demand.
+
+    With ``curtailment_factor < 1`` (the exogenous-quota derate, Eq. E48) the
+    two grid-INJECTION flows (``pv_to_grid``, ``bess_to_grid``) shrink by the
+    factor so the ``Grid export`` node matches the curtailment-derated
+    ``pv_export_mwh`` / ``bess_export_mwh`` KPIs; the curtailed injection is
+    routed to a ``Curtailed export`` sink (distinct from the MILP's within-
+    dispatch ``Curtailed PV``) so the diagram still conserves energy, and the
+    round-trip ``losses`` are computed BEFORE the export haircut so they stay
+    physical.  Both factors ``== 1`` returns the raw dispatch (bit-identical);
+    the ``Curtailed export`` node appears only under active curtailment.
     """
     a = float(availability_factor)
+    c = float(curtailment_factor)
     # Raw annual energy per flow (MWh) from the dispatch frame.
     pv_to_load = _sum_mwh(res, "pv_to_load_kwh")
     pv_to_bess = _sum_mwh(res, "pv_to_bess_kwh")
@@ -104,8 +120,18 @@ def energy_sankey_flows(
         grid_to_load = grid_to_load * a + u * load_raw
     charge = pv_to_bess + grid_to_bess
     discharge = bess_to_load + bess_to_grid
+    # Round-trip losses reflect the physical dispatch and must be taken BEFORE
+    # the post-solve export haircut, else curtailed export would be miscounted
+    # as losses.
     losses = max(charge - discharge, 0.0)
-    return [
+    curtailed_pv_export = 0.0
+    curtailed_bess_export = 0.0
+    if c < 1.0:
+        curtailed_pv_export = pv_to_grid * (1.0 - c)
+        curtailed_bess_export = bess_to_grid * (1.0 - c)
+        pv_to_grid *= c
+        bess_to_grid *= c
+    flows = [
         ("PV generation", "Load", pv_to_load, COLORS["PV to load"]),
         ("PV generation", "BESS", pv_to_bess, COLORS["PV to BESS"]),
         ("PV generation", "Grid export", pv_to_grid, COLORS["PV to grid"]),
@@ -116,6 +142,16 @@ def energy_sankey_flows(
         ("BESS", "Grid export", bess_to_grid, COLORS["BESS to grid"]),
         ("BESS", "Losses", losses, _SANKEY_LOSSES_COLOUR),
     ]
+    if c < 1.0:
+        flows.append((
+            "PV generation", "Curtailed export", curtailed_pv_export,
+            COLORS["Curtailed PV"],
+        ))
+        flows.append((
+            "BESS", "Curtailed export", curtailed_bess_export,
+            COLORS["Curtailed PV"],
+        ))
+    return flows
 
 
 def plot_energy_sankey(
@@ -123,6 +159,7 @@ def plot_energy_sankey(
     out_path: Path,
     *,
     availability_factor: float = 1.0,
+    curtailment_factor: float = 1.0,
 ) -> Path:
     """Annual energy-flow diagram (MWh) for the solved dispatch.
 
@@ -133,20 +170,23 @@ def plot_energy_sankey(
     BESS`` reads in the same gold here as in the daily dispatch view.
     Node labels carry the annual MWh totals.
 
-    ``availability_factor`` (default ``1.0`` = no derate) makes the
-    diagram consistent with the availability-adjusted annual KPIs /
-    tables: every plant-side flow (PV, BESS, export) scales by the
-    factor, while the load is fixed exogenous demand, so ``grid_to_load``
-    RISES by ``(1 - factor) * load`` to cover the load the offline plant
-    cannot serve.  The load node therefore stays at the true demand and
-    the diagram balances against it — matching the ``system_total_*``
-    KPIs derated by :func:`pvbess_opt.availability.apply_unavailability_derate`.
-    Pass ``kpis['availability_factor']``.
+    ``availability_factor`` and ``curtailment_factor`` (default ``1.0`` = no
+    derate) make the diagram consistent with the derated annual KPIs / tables:
+    every plant-side flow scales by availability, while the load is fixed
+    exogenous demand, so ``grid_to_load`` RISES by ``(1 - factor) * load`` to
+    cover the load the offline plant cannot serve; and the two grid-export
+    flows additionally scale by the exogenous-curtailment factor, with the
+    curtailed injection routed to a ``Curtailed export`` sink.  The load node
+    therefore stays at the true demand and the diagram balances against it —
+    matching the ``system_total_*`` / ``*_export_mwh`` KPIs derated by
+    :func:`pvbess_opt.availability.apply_unavailability_derate` and
+    :func:`pvbess_opt.availability.apply_curtailment_derate`.  Pass
+    ``kpis['availability_factor']`` and ``kpis.get('curtailment_factor', 1.0)``.
 
     margins: delegated — the diagram turns its axes off and manages its
     own layout, so the universal axis margins do not apply.
     """
-    flows = energy_sankey_flows(res, availability_factor)
+    flows = energy_sankey_flows(res, availability_factor, curtailment_factor)
     total = sum(v for _s, _t, v, _c in flows)
     eps = max(total, 1.0) * 1.0e-6
     flows = [f for f in flows if f[2] > eps]
