@@ -234,6 +234,53 @@ def test_write_sizing_workbook_is_styled(tmp_path):
 
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_evaluate_sizing_point_threads_base_dir_to_financials(
+    tmp_path, monkeypatch,
+):
+    """A structured-config sizing sweep materializes a throwaway workbook into
+    a temp dir; relative price-scenario ``store_path`` entries must resolve
+    against the ORIGINAL config directory (threaded as ``base_dir``), not that
+    temp dir -- mirroring ``pipeline.run`` and ``scenarios.run_scenarios`` so
+    all three dispatch surfaces agree."""
+    import pvbess_opt.availability as availability
+    import pvbess_opt.kpis as kpis_mod
+    import pvbess_opt.optimization as optimization
+    import pvbess_opt.pipeline as pipeline
+    import pvbess_opt.sizing as sizing
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        optimization, "run_scenario",
+        lambda *_a, **_k: (pd.DataFrame(), None, pd.DataFrame()),
+    )
+    monkeypatch.setattr(kpis_mod, "compute_kpis", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        availability, "apply_operating_derates", lambda kp, _p: kp,
+    )
+
+    def _fake_build_financials(excel_path, *_a, base_dir=None, **_k):
+        captured["base_dir"] = base_dir
+        captured["excel_parent"] = Path(excel_path).parent
+        return {"fin_kpis": {}}
+
+    monkeypatch.setattr(pipeline, "_build_financials", _fake_build_financials)
+
+    cfg_dir = tmp_path / "project"
+    cfg_dir.mkdir()
+    temp_dir = tmp_path / "pvbess_sizing_tmp"
+    temp_dir.mkdir()
+    base_xlsx = temp_dir / "materialized.xlsx"  # the throwaway workbook
+
+    sizing.evaluate_sizing_point(
+        {}, pd.DataFrame(), {}, base_xlsx, (1.0, 1.0, 1.0),
+        solver_opts={}, base_dir=cfg_dir,
+    )
+    # base_dir reaches _build_financials as the ORIGINAL config dir ...
+    assert captured["base_dir"] == cfg_dir
+    # ... not the materialization temp dir (base_xlsx's parent).
+    assert captured["base_dir"] != captured["excel_parent"]
+
+
 def test_sizing_sweep_runs_2x2x2(tmp_path):
     from pvbess_opt.io import _typed_to_flat, read_workbook, write_workbook
 

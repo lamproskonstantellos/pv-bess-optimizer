@@ -306,6 +306,33 @@ Pre-delivery release audit (round 7):
   removed them, leaking one dir per scenario / grid point / sizing call. Each
   path now drops its temp dir once the workbook has been consumed.
 
+Pre-delivery release audit (round 8):
+
+- **Curtailment DAM-revenue KPI.** Under the exogenous-curtailment quota
+  (`curtailment_pct > 0`), `apply_curtailment_derate` scaled the net BESS-DAM
+  aggregate `revenue_bess_dam_eur` monolithically by `(1 - q)`, but that
+  aggregate is `profit_export_from_bess_eur - expense_charge_bess_grid_eur` and
+  the quota deliberately scales the export profit while EXEMPTING the
+  grid-charging withdrawal. The shipped `kpis_year1` value therefore
+  over-stated the DAM revenue by exactly `q * expense_charge_bess_grid_eur` and
+  broke its own documented identity against the two component keys in the same
+  sheet. The cashflow, aggregator-fee base, LCOE/LCOS and `profit_total_eur`
+  already recompose from the components, so NPV/IRR were correct — only the
+  standalone aggregate (and the round-7-reconciled monthly plot that mirrors
+  it) was wrong. `revenue_bess_dam_eur` is now recomposed from its scaled
+  components; the availability derate was already immune (it scales both legs).
+  `curtailment_pct = 0` still early-returns, so the shipped default
+  `03_results.xlsx` is bit-identical.
+- **Structured-config sizing sweep stores.** The sizing sweep was the one
+  dispatch surface not mirrored to the round-7 `run()` / `run_scenarios`
+  `base_dir` fix: `evaluate_sizing_point` called `_build_financials` without
+  `base_dir`, so a structured (YAML/JSON) config — materialized to a throwaway
+  workbook in the sweep's temp dir — resolved a relative price-scenario
+  `store_path` against that temp dir and crashed the sweep. `run_sizing` now
+  threads the original config directory through the sweep, so all three
+  dispatch surfaces resolve relative stores against the config, not the temp
+  dir (an Excel input is unaffected).
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

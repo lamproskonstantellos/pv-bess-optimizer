@@ -329,7 +329,15 @@ _CURTAILMENT_DERATED_KEYS: tuple[str, ...] = (
     "profit_export_from_pv_eur",
     "profit_export_from_bess_eur",
     "revenue_pv_dam_eur",
-    "revenue_bess_dam_eur",
+    # NOTE: revenue_bess_dam_eur is intentionally absent here.  It is the NET
+    # BESS-DAM aggregate (profit_export_from_bess_eur - expense_charge_bess_grid_eur);
+    # curtailment scales the export profit but EXEMPTS the grid-charging
+    # withdrawal (see the exemption list above), so scaling the aggregate
+    # monolithically by (1-q) would hand back q*expense_charge and break the
+    # aggregate's identity against its two component keys.  It is recomposed
+    # from the already-scaled components after the scaling loop instead.
+    # (revenue_pv_dam_eur has no exempt component, so scaling it directly is
+    # correct and keeps its identity with profit_export_from_pv_eur.)
     # Pay-as-produced PPA settles on metered export, so the generator
     # bears curtailment (documented assumption); the baseload fixed
     # leg is exempted below via the P10 marker.
@@ -414,6 +422,28 @@ def apply_curtailment_derate(
             out[key] = old * factor
             if key in _CURTAILMENT_PROFIT_COMPONENTS:
                 profit_delta += out[key] - old
+    # Recompose the net BESS-DAM aggregate from its now-scaled components so
+    # its documented identity survives the ASYMMETRIC curtailment scaling
+    # (export profit scaled by (1-q); the grid-charging withdrawal exempt).
+    # Scaling the aggregate monolithically would over-state it by
+    # q*expense_charge_bess_grid_eur and contradict the two component keys in
+    # the same sheet.  The cashflow, aggregator-fee base and profit_total
+    # already recompose from the components, so only this aggregate needed it.
+    if (
+        "revenue_bess_dam_eur" in out
+        and "profit_export_from_bess_eur" in out
+        and "expense_charge_bess_grid_eur" in out
+    ):
+        out["revenue_bess_dam_eur"] = (
+            float(out["profit_export_from_bess_eur"])
+            - float(out["expense_charge_bess_grid_eur"])
+        )
+    elif "revenue_bess_dam_eur" in out and isinstance(
+        out["revenue_bess_dam_eur"], (int, float)
+    ):
+        # Reduced KPI dict without the components: fall back to the monolithic
+        # scale (the exempt withdrawal is unavailable to recompose from).
+        out["revenue_bess_dam_eur"] = float(out["revenue_bess_dam_eur"]) * factor
     # Per-month list keys scale with the same factor (see the
     # unavailability derate for the reasoning).
     for key in _DERATED_LIST_KEYS:

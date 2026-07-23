@@ -62,14 +62,28 @@ def test_quota_derate_symmetry():
     out = apply_curtailment_derate(kpis, 10.0)
     for key in ("system_total_export_mwh", "pv_export_mwh",
                 "bess_export_mwh", "profit_export_from_pv_eur",
-                "profit_export_from_bess_eur", "revenue_pv_dam_eur",
-                "revenue_bess_dam_eur"):
+                "profit_export_from_bess_eur", "revenue_pv_dam_eur"):
         assert out[key] == pytest.approx(0.9 * kpis[key]), key
     for key in ("profit_load_from_pv_eur", "profit_load_from_bess_eur",
                 "expense_charge_bess_grid_eur",
                 "revenue_self_consumption_eur", "load_energy_mwh",
                 "system_total_import_mwh"):
         assert out[key] == kpis[key], key
+    # revenue_bess_dam_eur is the NET BESS-DAM aggregate (export profit minus
+    # the curtailment-EXEMPT grid-charging withdrawal), so it must NOT scale
+    # monolithically by (1 - q): curtailment scales the export leg but leaves
+    # the withdrawal untouched, so the aggregate is recomposed from its
+    # components and must keep its documented identity.  Regression: it used
+    # to be scaled as a whole, handing back q * expense_charge_bess_grid_eur
+    # (here 0.1 * 5_000 = 500 EUR of over-statement, 31_500 instead of 31_000).
+    assert out["revenue_bess_dam_eur"] == pytest.approx(
+        out["profit_export_from_bess_eur"]
+        - out["expense_charge_bess_grid_eur"]
+    )
+    assert out["revenue_bess_dam_eur"] == pytest.approx(
+        0.9 * kpis["profit_export_from_bess_eur"]
+        - kpis["expense_charge_bess_grid_eur"]
+    )  # = 31_000, not the pre-fix 0.9 * 35_000 = 31_500
     # profit_total drops by exactly the export-profit deltas (no
     # compensation configured).
     assert out["profit_total_eur"] == pytest.approx(
