@@ -174,13 +174,14 @@ Sheet ``pv``
 * ``losses_pct``: PVGIS system losses (percent).  A blank cell means
   the PVGIS default (14); an explicit ``0`` is honoured (loss-free
   array).
-* ``weather_year``: PVGIS weather year; use a non-leap year for a clean
-  8760-hour profile, or ``tmy``.
+* ``weather_year``: PVGIS weather year; use a non-leap calendar year for
+  a clean 8760-hour profile.
 * ``raddatabase``: optional PVGIS radiation-database override
   (e.g. ``PVGIS-SARAH3`` or ``PVGIS-ERA5``); blank lets PVGIS pick the
   regional default for the location.
 * ``timeseries_path``: file sub-mode: an optional external CSV / Parquet
-  whose ``pv_kwh`` column replaces the inline column.
+  used when the inline ``pv_kwh`` column is empty; a filled ``pv_kwh``
+  column wins and the file is ignored (a warning names the ignored file).
 * ``pv_nameplate_kwp``: PV nameplate.  ``0`` ⇒ no PV in this project.
   The ``pv_kwh`` timeseries is consumed verbatim (absolute kWh per step);
   nameplate is metadata for per-kW CAPEX / OPEX and the sizing-sweep axis.

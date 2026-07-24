@@ -464,11 +464,83 @@ Pre-delivery release audit (round 11):
   plots for project years 2+ now scale each revenue leg by the Year-1
   derated-to-raw factor, so displayed EUR agree with the derated cashflow
   under unavailability/curtailment (year 1 was reconciled in round 9;
-  later years still plotted raw undererated legs).
-- **Run log completeness.** The `run.log` tee now also attaches a
+  later years still plotted raw un-derated legs).
+- **Run log completeness.** The `run_log.txt` tee now also attaches a
   file handler to the logging tree, so loader warnings (empty-column,
   ffill/bfill, ignored-file notices) land in the delivered log instead of
   existing only on the console that scrolled away.
+
+Pre-delivery release audit (round 12):
+
+- **Empty columns are truly absent.** An entirely empty optional
+  timeseries column is now DROPPED after an accurate warning instead of
+  surviving as all-NaN — closing the worst finding of the round: a
+  present-but-blank `imbalance_price_eur_per_mwh` column passed the
+  `imbalance_pricing = 'single'` presence gate and reached settlement as
+  NaN (NaN cashflows with no error), while an absent column raised
+  cleanly at load. Empty and absent now behave identically everywhere:
+  single-price imbalance raises, dual falls back to the documented DAM
+  proxy, and an all-NaN price-deck variant column no longer silently
+  prices its scenario 0 under a factually wrong "filled via ffill/bfill"
+  warning (the deck simply does not exist and a scenario requesting it
+  fails fast). Columns a market fetch is about to replace are exempt in
+  both the empty and the partial-NaN checks (previously the gap warning
+  fired for fetched columns too).
+- **Timestamp diagnostics.** An unparseable timestamp STRING now gets the
+  branded blank/unparseable-row message instead of pandas' raw parse
+  error; the blank-row locator is positional (index-label independent);
+  and a DUPLICATED timestamp is named directly at load instead of dying
+  later in timestep detection with a resample hint that cannot fix
+  duplication. A negative `pv_kwh`/`load_kwh` is blamed on the file's own
+  cell, checked before gap-filling (a leading blank bfilled from a
+  negative value was previously named instead) — same fix on the external
+  `timeseries_path` surface.
+- **Scenario overrides.** An explicit null `balancing:` entry (a YAML
+  stub) no longer replaces an inherited balancing dict wholesale — it
+  merges inert with a warning (the child previously ran the BASE
+  workbook's balancing silently under its own label). A bare `balancing`
+  sheet row with a blank value cell is inert-with-warning instead of
+  silently resetting an inherited enable to the sheet default. A
+  per-scenario `pv.timeseries_path` override is rejected up front: the
+  engine resolves the base PV once and clears the path from the
+  materialised workbook, so the override was applied and then discarded —
+  the scenario silently solved the base profile. Boolean or blank
+  `pv.nameplate_kwp` overrides are rejected (bool would `float()` to a
+  silent 1-kWp or zeroed plant). With `--scenarios` supplied, a drafting
+  mistake in the workbook's (unused) scenarios sheet warns and is ignored
+  instead of blocking the batch, mirroring the sizing-sheet handling.
+- **Config-file surfaces, second pass.** The round-11 "never stricter
+  than the loader" fix missed five loader-accepted input classes —
+  numeric strings on number/integer keys, any non-NaN numeric on boolean
+  keys, blank-string/NaN "use the default" sentinels, numbers on
+  free-form string keys, and a bare section header (`simulation:`) — all
+  now pass `validate_config`. In the opposite (tolerated but flagged)
+  direction: non-finite numerics are now rejected on number keys and
+  unions containing "null" no longer accept everything. A blank top-level
+  `timeseries_path: ''` is treated as unset, so the pv-section file wins
+  the frame instead of a spurious "no time-series" failure.
+- **Run log, complete this time.** Round 11's tee handler only captured
+  logging emitted INSIDE the tee'd window — but every loader warning
+  fires in `run()` before the log file exists. A WARNING+ buffer now
+  attaches before `read_inputs` and the tee replays it into
+  `run_log.txt` the moment the file opens.
+- **Snapshot materialisation precision.** The external-PV snapshot
+  materialiser now fires only when the file actually WON the PV
+  resolution (mirroring the resolver's precedence): with a filled
+  `pv_kwh` column or `pv_source = 'pvgis'` and a stale path, it
+  previously blanked a path cell that never fed the run — and for PVGIS
+  logged a false "re-runs without the external file" claim while the
+  re-run still fetched. Rows beyond the model grid are cleared so a
+  longer stale column cannot survive as a mixed profile.
+- **Docs matched to behaviour.** The workbook's `timeseries_path` note
+  (and its schema template + the Sphinx inputs page) no longer claims the
+  file is used "instead of" the `pv_kwh` column — the column wins and the
+  file is ignored with a warning (round 10 changed the behaviour, the
+  note was missed; one note cell re-polished, zero value changes). The
+  Sphinx inputs page also dropped the `weather_year = 'tmy'` token the
+  loader rejects; the outputs page describes the snapshot as
+  self-contained rather than "a verbatim copy"; the CLI flag table gained
+  the missing `--config` / `--scenarios` rows; two changelog nits fixed.
 
 ## 1.0.0 (2026-07-06)
 

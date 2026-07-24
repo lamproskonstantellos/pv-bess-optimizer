@@ -50,6 +50,14 @@ Flag                                 Purpose
                                      and emit a comparison plot
                                      (overrides workbook
                                      ``uncertainty_compare_sources``).
+``--config``                         Structured config file
+                                     (``.yaml`` / ``.yml`` / ``.json``) to
+                                     run instead of the Excel workbook.
+``--scenarios``                      Scenarios file (``.yaml`` / ``.yml`` /
+                                     ``.json``) to run as a batch
+                                     comparison against the base input;
+                                     takes precedence over the workbook's
+                                     scenarios sheet.
 ===================================  ==========================================
 
 Output layout

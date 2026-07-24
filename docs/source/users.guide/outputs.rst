@@ -6,9 +6,11 @@ A run produces a single result directory under ``results/``.
 * ``00_summary/``: ``SUMMARY.md`` (the run digest: capacities,
   headline KPIs, artifact map) and ``run_log.txt`` (full stdout +
   stderr capture).
-* ``01_inputs/``: ``input_snapshot.xlsx`` (a verbatim copy of the
-  workbook used) and ``assumptions_summary.txt`` (a flat dump of the
-  parsed parameters and economic assumptions).
+* ``01_inputs/``: ``input_snapshot.xlsx`` (the workbook used, made
+  self-contained: fetched market prices and external-file PV are written
+  in, their source/path cells reset to file mode, and the API token cell
+  blanked) and ``assumptions_summary.txt`` (a flat dump of the parsed
+  parameters and economic assumptions).
 * ``02_dispatch/dispatch_timeseries.xlsx``: one sheet per calendar year
   with the per-step dispatch (lowercase snake_case columns).
 * ``03_results.xlsx``: KPIs, monthly KPIs, cashflows (yearly /
