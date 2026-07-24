@@ -1173,7 +1173,12 @@ workbook key: any ``<sheet>.<key>`` from the ten parameter sheets
 (``project``, ``pv``, ``bess``, ``economics``, ``simulation``,
 ``balancing``, ``ppa``, ``intraday``, ``market_data``,
 ``scenario_engine``), the
-short aliases above, or the bare specials.  An unknown target raises a
+short aliases above, or the bare specials.  Single exception:
+``pv.timeseries_path`` cannot be overridden per scenario — the engine
+resolves the base PV profile once and carries it into every scenario
+workbook verbatim, so the override would be applied and then discarded;
+vary PV via ``pv.nameplate_kwp`` (profile rescale) or run separate base
+workbooks.  An unknown target raises a
 ``ValueError`` naming the scenario and the offending key *before* any
 solver time is spent: a typo'd override would otherwise silently produce
 a comparison row identical to the base case.  The batch writes a styled
