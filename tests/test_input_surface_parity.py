@@ -182,12 +182,26 @@ def test_yaml_absent_cycle_fade_mirrors_workbook_absent_row(tmp_path, caplog):
 
 def test_every_dotted_target_resolves_as_scenario_override():
     """``<sheet>.<key>`` is a valid scenario target for every schema key
-    on every sheet, plus the documented aliases and bare specials."""
+    on every sheet, plus the documented aliases and bare specials.
+
+    Single documented exception: ``pv.timeseries_path`` — the engine
+    resolves the base PV once and clears the path from the materialised
+    workbook, so the override would be applied and then discarded; it is
+    rejected up front with guidance instead.
+    """
     for sheet, defaults in _SHEET_DEFAULTS.items():
         for key, value in defaults.items():
+            if sheet == "pv" and key == "timeseries_path":
+                with pytest.raises(ValueError, match="cannot be overridden"):
+                    validate_scenario_overrides(
+                        {"name": "probe", sheet: {key: "x.csv"}}
+                    )
+                continue
             scenario = {"name": "probe", sheet: {key: value}}
             validate_scenario_overrides(scenario)  # must not raise
     for alias in _PV_ALIASES:
+        if _PV_ALIASES[alias] == "timeseries_path":
+            continue
         validate_scenario_overrides({"name": "probe", "pv": {alias: 1.0}})
     for alias in _BESS_ALIASES:
         validate_scenario_overrides({"name": "probe", "bess": {alias: 1.0}})
