@@ -262,6 +262,77 @@ def test_excel_timeseries_path_sources_pv(tmp_path):
     )
 
 
+def test_pv_column_wins_over_timeseries_path_with_loud_warning(
+    tmp_path, caplog,
+):
+    """Both surfaces populated: the column wins by documented priority, but
+    the ignored file must be named in a WARNING — silently running the wrong
+    plant's profile is the failure mode (the workbook note reads 'instead of
+    the pv_kwh column', so a client filling the path expects it to win)."""
+    import logging
+
+    n = 96
+    external = pd.DataFrame({
+        "timestamp": pd.date_range("2019-06-01", periods=n, freq="15min"),
+        "pv_kwh": np.full(n, 7.0),
+    })
+    external.to_csv(tmp_path / "ext.csv", index=False)
+    typed = _typed(
+        n=n, freq="15min",  # pv_kwh column populated by the fixture
+        pv_overrides={"timeseries_path": "ext.csv"},
+    )
+    with caplog.at_level(logging.WARNING):
+        loaded = read_workbook(_write(tmp_path, typed))
+    # The column value (not 7.0) is used ...
+    assert float(loaded["ts"]["pv_kwh"].iloc[0]) != 7.0
+    # ... and the ignored file is called out loudly.
+    assert any(
+        "IGNORED" in r.getMessage() and "ext.csv" in r.getMessage()
+        for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_external_pv_nan_gaps_are_filled_like_the_column(tmp_path, caplog):
+    """NaN gaps in a timeseries_path CSV must get the same ffill/bfill + gap
+    warning the Excel column path receives — the normalisation runs before
+    the resolver injects the external series, so without the fill the NaNs
+    reach the MILP and crash at model build with no pointer to the file."""
+    import logging
+
+    n = 96
+    vals = np.full(n, 7.0)
+    vals[10:20] = np.nan
+    external = pd.DataFrame({
+        "timestamp": pd.date_range("2019-06-01", periods=n, freq="15min"),
+        "pv_kwh": vals,
+    })
+    external.to_csv(tmp_path / "gaps.csv", index=False)
+    typed = _typed(
+        n=n, freq="15min", pv_kwh="empty",
+        pv_overrides={"timeseries_path": "gaps.csv"},
+    )
+    with caplog.at_level(logging.WARNING):
+        loaded = read_workbook(_write(tmp_path, typed))
+    assert not loaded["ts"]["pv_kwh"].isna().any()
+    assert float(loaded["ts"]["pv_kwh"].iloc[12]) == pytest.approx(7.0)
+    assert any(
+        "NaN" in r.getMessage() and "gaps.csv" in r.getMessage()
+        for r in caplog.records
+    )
+    # An ENTIRELY empty external column is an input mistake, not a gap.
+    empty = pd.DataFrame({
+        "timestamp": pd.date_range("2019-06-01", periods=n, freq="15min"),
+        "pv_kwh": np.full(n, np.nan),
+    })
+    empty.to_csv(tmp_path / "empty.csv", index=False)
+    typed2 = _typed(
+        n=n, freq="15min", pv_kwh="empty",
+        pv_overrides={"timeseries_path": "empty.csv"},
+    )
+    with pytest.raises(ValueError, match="entirely empty"):
+        read_workbook(_write(tmp_path, typed2, name="empty_case.xlsx"))
+
+
 # ---------------------------------------------------------------------------
 # Excel / YAML parity for PVGIS
 # ---------------------------------------------------------------------------
@@ -311,7 +382,10 @@ def test_validate_pv_location_fields_accepts_defaults():
         "latitude": 37.98, "longitude": 23.73, "tilt": "optimal",
         "azimuth": 180.0, "losses_pct": 14.0, "weather_year": 2019,
     })
-    validate_pv_location_fields({"tilt": 30.0, "weather_year": "tmy"})
+    # 'tmy' is rejected end-to-end (the PVGIS provider does not support
+    # it), so the validator must not advertise it either.
+    with pytest.raises(ValueError, match="weather_year"):
+        validate_pv_location_fields({"tilt": 30.0, "weather_year": "tmy"})
 
 
 @pytest.mark.parametrize(

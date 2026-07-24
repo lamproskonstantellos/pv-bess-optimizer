@@ -595,6 +595,18 @@ def _resolve_pv_file_column(
         )
 
     if pv_kwh_has_data:
+        if ts_path is not None:
+            # Both surfaces populated: the column wins by the documented
+            # priority, but silently ignoring the path the user filled in
+            # (the workbook note reads "instead of the pv_kwh column")
+            # would run the WRONG plant's profile without a trace — every
+            # sibling conflict in this resolver warns loudly.
+            logger.warning(
+                "Both the pv_kwh column and timeseries_path (%s) carry PV "
+                "data; the pv_kwh column wins and the file is IGNORED. "
+                "Clear the pv_kwh column to use the external file.",
+                ts_path,
+            )
         return ts.drop(columns=["pv_kwh_override"]) if has_override_col else ts
 
     if ts_path is not None:
@@ -609,7 +621,26 @@ def _resolve_pv_file_column(
                 f"grid has {len(ts)}; resample it to match."
             )
         out = ts.drop(columns=["pv_kwh_override"]) if has_override_col else ts.copy()
-        out["pv_kwh"] = external["pv_kwh"].astype(float).to_numpy()
+        _series = external["pv_kwh"].astype(float)
+        _nan_count = int(_series.isna().sum())
+        if _nan_count == len(_series) and len(_series) > 0:
+            raise ValueError(
+                f"timeseries_path file's 'pv_kwh' column is entirely empty: "
+                f"{ts_path}."
+            )
+        if _nan_count > 0:
+            # The Excel column's documented NaN treatment (ffill/bfill +
+            # warning in _normalise_timeseries) runs BEFORE this resolver
+            # injects the external series, so gaps here would otherwise
+            # reach the MILP as NaN and crash at model build with no
+            # pointer to the file; apply the identical gap treatment.
+            logger.warning(
+                "timeseries_path pv_kwh had %d NaN value(s) filled via "
+                "ffill/bfill (%s). Check the file for gaps.",
+                _nan_count, ts_path,
+            )
+            _series = _series.ffill().bfill()
+        out["pv_kwh"] = _series.to_numpy()
         return out
 
     if override_has_data:
@@ -793,7 +824,7 @@ def _pv_schema_overrides() -> dict[str, Any]:
         "tilt": {"description": "degrees in [0, 90], or 'optimal'"},
         "azimuth": {"type": "number", "minimum": -180, "maximum": 360},
         "losses_pct": {"type": "number", "minimum": 0, "maximum": 100},
-        "weather_year": {"description": "non-leap calendar year, or 'tmy'"},
+        "weather_year": {"description": "non-leap calendar year"},
         "raddatabase": {"type": "string"},
         "timeseries_path": {"type": "string"},
     }
