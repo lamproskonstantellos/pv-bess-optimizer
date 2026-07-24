@@ -192,6 +192,18 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
         logger.warning(
             "Config top-level key %r is unknown; ignored.", key,
         )
+    # When the pv-sheet ``timeseries_path`` is the FRAME source (no
+    # top-level ``timeseries_path``), the resolved frame already carries
+    # the file's data — propagating the path into the workbook pv sheet
+    # would make the materialised workbook look like a user-authored
+    # column-vs-file conflict and misfire the loud "file is IGNORED"
+    # warning on every load.  With a top-level frame source present, the
+    # pv-sheet path is a genuine PV-only external file and must propagate.
+    _frame_from_pv_path = (
+        raw.get("timeseries_path") is None
+        and isinstance(raw.get("pv"), dict)
+        and bool((raw.get("pv") or {}).get("timeseries_path"))
+    )
     for section, defaults in _SHEET_DEFAULTS.items():
         user = raw.get(section)
         if user is None:
@@ -204,6 +216,12 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
             )
         known: dict[str, Any] = {}
         for key, value in user.items():
+            if (
+                section == "pv"
+                and key == "timeseries_path"
+                and _frame_from_pv_path
+            ):
+                continue
             if key in defaults:
                 # Route every known key through the SAME typed parser the
                 # workbook loader uses (io._parse_value / the grid-export
@@ -280,14 +298,25 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
         typed["bm_merit_order"] = pd.DataFrame(merit)
     typed["ts"] = _resolve_timeseries(raw, path.parent)
     _resolve_price_decks(raw, path.parent, typed)
+    def _profile_array(values: Any, key: str) -> np.ndarray:
+        # A non-numeric entry would raise numpy's bare "could not convert
+        # string to float" with no key named; wrap it so the config key is
+        # in the message (the workbook surface prefixes its sheet name).
+        try:
+            return np.asarray(values, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key}: {exc}") from exc
+
     mip = raw.get("max_injection_profile")
     if mip is not None:
-        typed["max_injection_profile"] = np.asarray(mip, dtype=float)
+        typed["max_injection_profile"] = _profile_array(
+            mip, "max_injection_profile",
+        )
     for _src in ("pv", "bess"):
         _mip_src = raw.get(f"max_injection_profile_{_src}")
         if _mip_src is not None:
-            typed[f"max_injection_profile_{_src}"] = np.asarray(
-                _mip_src, dtype=float,
+            typed[f"max_injection_profile_{_src}"] = _profile_array(
+                _mip_src, f"max_injection_profile_{_src}",
             )
     resolve_pv_source(typed, base_dir=path.parent)
     return typed
@@ -640,6 +669,18 @@ def _resolve_pv_file_column(
                 _nan_count, ts_path,
             )
             _series = _series.ffill().bfill()
+        # The loader's negative-energy guard (_normalise_timeseries) also
+        # runs BEFORE this injection, so the external series must carry its
+        # own check — else negative PV reaches the model and dies as an
+        # opaque solver infeasibility pointing nowhere near the file.
+        _neg = _series < 0.0
+        if bool(_neg.any()):
+            raise ValueError(
+                f"timeseries_path file's 'pv_kwh' column contains negative "
+                f"values (first at row {int(_neg.idxmax())}: "
+                f"{float(_series[_neg.idxmax()]):g}) in {ts_path}; energy "
+                "quantities must be >= 0."
+            )
         out["pv_kwh"] = _series.to_numpy()
         return out
 
@@ -669,8 +710,18 @@ def _apply_override_fallback(
             f"pv_kwh_override has {n_null} NaN values out of {n_total}. "
             "Fill every row, or leave the column empty and use 'pv_kwh'."
         )
+    _ov = override.astype(float)
+    _neg = _ov < 0.0
+    if bool(_neg.any()):
+        # Mirrors the loader's negative-energy guard, which runs before
+        # this fallback injects the deprecated column.
+        raise ValueError(
+            f"pv_kwh_override contains negative values (first at row "
+            f"{int(_neg.idxmax())}: {float(_ov[_neg.idxmax()]):g}); energy "
+            "quantities must be >= 0."
+        )
     out = ts.copy()
-    out["pv_kwh"] = override.astype(float)
+    out["pv_kwh"] = _ov
     out = out.drop(columns=["pv_kwh_override"])
     annual_sum = float(override.sum())
     if nameplate_kwp > 0.0:
@@ -955,14 +1006,40 @@ def config_json_schema() -> dict[str, Any]:
 
 
 def _type_matches(value: Any, json_type: str | list[str] | None) -> bool:
+    """Type check for :func:`validate_config` — never STRICTER than the loader.
+
+    The loader accepts integral floats on integer keys (YAML/openpyxl often
+    deliver ``20.0``), 0/1 and the TRUTHY/FALSY string tokens on booleans,
+    and case-insensitive enum tokens; the external-validation surface must
+    accept the same forms or it rejects configs that load fine.  (JSON
+    Schema itself defines ``"integer"`` as any number with a zero
+    fractional part.)
+    """
+    from .io import FALSY, TRUTHY
+
     if isinstance(json_type, (list, tuple)):
         return any(_type_matches(value, jt) for jt in json_type)
     if json_type == "number":
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     if json_type == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, int):
+            return True
+        return (
+            isinstance(value, float)
+            and np.isfinite(value)
+            and value == int(value)
+        )
     if json_type == "boolean":
-        return isinstance(value, bool)
+        if isinstance(value, bool):
+            return True
+        if isinstance(value, int) and value in (0, 1):
+            return True
+        return (
+            isinstance(value, str)
+            and value.strip().lower() in (TRUTHY | FALSY)
+        )
     if json_type == "string":
         return isinstance(value, str)
     if json_type == "array":
@@ -998,7 +1075,12 @@ def validate_config(
                 # Unknown keys are permitted; a None value means "absent"
                 # (an optional field left blank) and is not type-checked.
                 continue
-            if "enum" in spec and item not in spec["enum"]:
+            if "enum" in spec and item not in spec["enum"] and (
+                # The loader lowercases/strips enum tokens before matching;
+                # the validation surface must accept the same forms.
+                not isinstance(item, str)
+                or item.strip().lower() not in spec["enum"]
+            ):
                 errors.append(f"{section}.{key}: {item!r} not in {spec['enum']}")
             elif not _type_matches(item, spec.get("type")):
                 errors.append(

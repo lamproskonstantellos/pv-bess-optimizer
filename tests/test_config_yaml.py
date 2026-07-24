@@ -178,3 +178,85 @@ def test_yaml_config_runs_identically_to_excel(tmp_path):
         if isinstance(val, bool) or not isinstance(val, (int, float)):
             continue
         assert res_yaml.kpis[key] == pytest.approx(val, rel=1e-9, abs=1e-6), key
+
+
+def test_validate_config_is_never_stricter_than_the_loader():
+    """The external-validation surface must accept every form the loader
+    accepts: integral floats on integer keys (YAML/openpyxl deliver 20.0),
+    0/1 and TRUTHY/FALSY tokens on booleans, case-insensitive enum tokens.
+    Relaxation-only — the invalid forms must still be flagged."""
+    from pvbess_opt.io_read import validate_config
+
+    assert validate_config(
+        {"project": {"project_lifecycle_years": 20.0}}
+    ) == []
+    assert validate_config({"ppa": {"ppa_enabled": 1}}) == []
+    assert validate_config(
+        {"simulation": {"uncertainty_enabled": "true"}}
+    ) == []
+    assert validate_config({"project": {"mode": "Merchant"}}) == []
+    assert validate_config(
+        {"simulation": {"uncertainty_n_seeds": 40.0}}
+    ) == []
+    # Still-invalid forms stay flagged.
+    assert validate_config({"project": {"project_lifecycle_years": 20.7}})
+    assert validate_config({"ppa": {"ppa_enabled": "banana"}})
+    assert validate_config({"project": {"mode": "sideways"}})
+
+
+def test_yaml_profile_list_error_names_the_key(tmp_path):
+    """A non-numeric entry in the YAML max_injection_profile list must name
+    the config key, not surface numpy's bare conversion error."""
+    import numpy as np
+
+    from pvbess_opt.io_read import load_structured_config
+
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=48, freq="h"),
+        "pv_kwh": np.full(48, 5.0),
+        "load_kwh": np.full(48, 3.0),
+        "dam_price_eur_per_mwh": np.full(48, 60.0),
+    })
+    ts.to_csv(tmp_path / "ts.csv", index=False)
+    cfg = tmp_path / "bad_profile.yaml"
+    cfg.write_text(
+        "timeseries_path: ts.csv\n"
+        "max_injection_profile: ["
+        + ", ".join(["100.0"] * 23)
+        + ", high]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="max_injection_profile"):
+        load_structured_config(cfg)
+
+
+def test_pv_timeseries_path_as_frame_source_stays_quiet(tmp_path, caplog):
+    """A YAML config whose pv.timeseries_path IS the frame source (no
+    top-level timeseries_path) must not fire the column-vs-file conflict
+    warning — the frame's pv_kwh came from that very file.  The path must
+    also not propagate into the materialised pv sheet."""
+    import numpy as np
+
+    from pvbess_opt.io_read import load_structured_config
+
+    ts = pd.DataFrame({
+        "timestamp": pd.date_range("2026-01-01", periods=48, freq="h"),
+        "pv_kwh": np.full(48, 5.0),
+        "load_kwh": np.full(48, 3.0),
+        "dam_price_eur_per_mwh": np.full(48, 60.0),
+    })
+    ts.to_csv(tmp_path / "ts.csv", index=False)
+    cfg = tmp_path / "pvpath.yaml"
+    cfg.write_text(
+        "pv:\n"
+        "  pv_nameplate_kwp: 1000\n"
+        "  timeseries_path: ts.csv\n",
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING):
+        typed = load_structured_config(cfg)
+    assert not any(
+        "IGNORED" in r.getMessage() for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+    assert not typed["pv"].get("timeseries_path")
+    assert float(typed["ts"]["pv_kwh"].iloc[0]) == pytest.approx(5.0)
