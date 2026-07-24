@@ -165,13 +165,53 @@ def test_mc_knobs_are_range_checked(base_typed):
 # --- timeseries columns ----------------------------------------------------
 
 
-def test_all_nan_dam_column_in_merchant_is_rejected(tmp_path, base_typed):
+def test_all_nan_dam_column_in_merchant_warns_like_absent(
+    tmp_path, base_typed, caplog,
+):
+    """A present-but-empty DAM column and an ABSENT one are semantically
+    identical inputs; both get the same loud zero-revenue warning (a raise
+    would kill deliberately price-free balancing-only merchant decks and
+    documented price_source bypass workflows), and a non-'file'
+    price_source keeps the empty column QUIET (the fetch fills it)."""
     import copy
+    import logging
 
     typed = copy.deepcopy(base_typed)
     typed["project"]["mode"] = "merchant"
     typed["ts"]["dam_price_eur_per_mwh"] = np.nan
-    with pytest.raises(ValueError, match="dam_price_eur_per_mwh"):
+    with caplog.at_level(logging.WARNING):
+        read_inputs(_write(tmp_path, typed))
+    assert any(
+        "priced 0" in r.getMessage() for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+    # With the market bypass armed the resolver fills the column, so the
+    # empty column is the documented intent — no zero-revenue warning.
+    caplog.clear()
+    typed2 = copy.deepcopy(typed)
+    typed2.setdefault("market_data", {})["price_source"] = "entsoe"
+    from pvbess_opt.io import _normalise_timeseries
+
+    with caplog.at_level(logging.WARNING):
+        _normalise_timeseries(
+            typed2["ts"].copy(), mode="merchant",
+            market_sources=typed2["market_data"],
+        )
+    assert not any(
+        "priced 0" in r.getMessage() for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_all_nan_load_column_in_self_consumption_is_rejected(
+    tmp_path, base_typed,
+):
+    """load_kwh in self-consumption has no later filler (no market source,
+    no resolver), so an entirely empty column stays a hard error."""
+    import copy
+
+    typed = copy.deepcopy(base_typed)
+    typed["ts"]["load_kwh"] = np.nan
+    with pytest.raises(ValueError, match="load_kwh"):
         read_inputs(_write(tmp_path, typed))
 
 
@@ -216,3 +256,35 @@ def test_shipped_workbook_passes_all_new_guards():
     _params, ts = read_inputs(ROOT / "inputs" / "input.xlsx")
     assert len(ts) == 35040
     assert pd.to_datetime(ts["timestamp"]).is_monotonic_increasing
+
+
+# --- round-11 guard refinements --------------------------------------------
+
+
+def test_blank_timestamp_cell_named_precisely(tmp_path, base_typed):
+    """A blank/unparseable timestamp cell must be named as such (with its
+    row), not mis-reported as an out-of-order sheet the sort remedy cannot
+    fix."""
+    import copy
+
+    typed = copy.deepcopy(base_typed)
+    typed["ts"].loc[50, "timestamp"] = pd.NaT
+    with pytest.raises(ValueError, match=r"blank/unparseable timestamp.*50"):
+        read_inputs(_write(tmp_path, typed))
+
+
+def test_native_infinity_on_int_key_raises_cleanly():
+    """A native inf (YAML .inf / JSON Infinity) on an integer key must get
+    the finite-number ValueError, not an uncaught OverflowError; NaN stays
+    the blank-cell sentinel resolving to the default."""
+    with pytest.raises(ValueError, match="project_lifecycle_years"):
+        _parse_value("project_lifecycle_years", float("inf"), 20)
+    assert _parse_value("project_lifecycle_years", float("nan"), 20) == 20
+
+
+def test_weather_year_fractional_is_rejected():
+    from pvbess_opt.io import _parse_pv_weather_year
+
+    with pytest.raises(ValueError, match="whole calendar year"):
+        _parse_pv_weather_year(2019.5, 2019)
+    assert _parse_pv_weather_year(2019.0, 2019) == 2019
