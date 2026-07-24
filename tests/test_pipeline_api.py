@@ -247,3 +247,98 @@ def test_cli_main_smoke(tmp_path):
         "--time-limit", "180",
     ])
     assert rc == 0
+
+
+def test_revenue_leg_factors_and_synthetic_year_kpis():
+    """Later project years' revenue plots reconcile via per-leg FLAT factors
+    from Year 1 (derated KPI / raw sum) applied to each year's OWN raw sums
+    — not by rescaling year-N dispatch to Year-1 totals."""
+    import pandas as pd
+
+    from pvbess_opt.pipeline import (
+        _revenue_leg_factors,
+        _synthetic_year_kpis,
+    )
+
+    res1 = pd.DataFrame({
+        "profit_export_from_pv_eur": [60.0, 40.0],       # raw 100
+        "profit_export_from_bess_eur": [30.0, 20.0],     # raw 50
+        "expense_charge_bess_grid_eur": [6.0, 4.0],      # raw 10
+    })
+    year1_kpis = {
+        # export legs derated 0.9x, withdrawal 0.95x
+        "profit_export_from_pv_eur": 90.0,
+        "profit_export_from_bess_eur": 45.0,
+        "expense_charge_bess_grid_eur": 9.5,
+    }
+    f = _revenue_leg_factors(res1, year1_kpis)
+    assert f["profit_export_from_pv_eur"] == pytest.approx(0.9)
+    assert f["expense_charge_bess_grid_eur"] == pytest.approx(0.95)
+
+    # Year N with its own (degraded) raw sums gets year-N targets.
+    resN = pd.DataFrame({
+        "profit_export_from_pv_eur": [50.0, 30.0],       # raw 80
+        "profit_export_from_bess_eur": [20.0, 20.0],     # raw 40
+        "expense_charge_bess_grid_eur": [5.0, 3.0],      # raw 8
+    })
+    synth = _synthetic_year_kpis(resN, f)
+    assert synth is not None
+    assert synth["profit_export_from_pv_eur"] == pytest.approx(72.0)  # 80*0.9
+    assert synth["expense_charge_bess_grid_eur"] == pytest.approx(7.6)
+    # No factors (no KPI dict) -> None, callers keep the raw scale.
+    assert _synthetic_year_kpis(resN, {}) is None
+    assert _revenue_leg_factors(res1, None) == {}
+
+
+def test_materialize_external_pv_snapshot(tmp_path):
+    """A snapshot from an external timeseries_path PV run must become
+    self-contained: the resolved pv_kwh column written in, the path cell
+    blanked — so the snapshot re-runs without the external file."""
+    import numpy as np
+    import pandas as pd
+
+    from pvbess_opt.io import read_workbook, write_workbook
+    from pvbess_opt.pipeline import _materialize_external_pv_snapshot
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)
+    # Source workbook: empty pv column + a filled timeseries_path cell.
+    src_typed = {k: (v.copy() if hasattr(v, "copy") else v)
+                 for k, v in typed.items()}
+    src_typed["pv"] = dict(typed["pv"], timeseries_path="pv_profile.csv")
+    src_typed["ts"] = typed["ts"].copy()
+    src_typed["ts"]["pv_kwh"] = np.nan
+    src = tmp_path / "src.xlsx"
+    write_workbook(src_typed, src)
+    # Snapshot: a verbatim copy of the source (the pre-fix state).
+    snap = tmp_path / "input_snapshot.xlsx"
+    snap.write_bytes(src.read_bytes())
+    # The run's RESOLVED frame carries the external profile.
+    resolved_ts = typed["ts"].copy()
+    resolved_ts["pv_kwh"] = 7.25
+
+    _materialize_external_pv_snapshot(snap, src, resolved_ts)
+
+    snap_pv = pd.read_excel(snap, sheet_name="pv")
+    row = snap_pv[snap_pv["key"] == "timeseries_path"]
+    assert row["value"].isna().all(), "path cell must be blanked"
+    snap_ts = pd.read_excel(snap, sheet_name="timeseries")
+    assert float(snap_ts["pv_kwh"].iloc[0]) == pytest.approx(7.25)
+    assert int(snap_ts["pv_kwh"].notna().sum()) == 96
+
+
+def test_tee_log_captures_logging_output(tmp_path):
+    """run_log.txt must capture logging-module WARNINGs even when a CLI-style
+    handler bound the pre-tee stderr (the docs promise full capture)."""
+    import logging
+
+    from pvbess_opt.pipeline import _tee_stdout_to_log
+
+    log_path = tmp_path / "run_log.txt"
+    logger = logging.getLogger("pvbess_opt.test_tee")
+    with _tee_stdout_to_log(log_path):
+        print("plain stdout line")
+        logger.warning("captured-warning-marker")
+    text = log_path.read_text(encoding="utf-8")
+    assert "plain stdout line" in text
+    assert "captured-warning-marker" in text
