@@ -65,8 +65,11 @@ def test_pipeline_dispatcher_drops_obsolete_token():
     assert "plot_daily_year1" not in src
 
 
-def test_warning_when_plot_daily_scope_is_all(caplog):
-    """Selecting plot_daily_scope=all logs a WARNING with the PDF count."""
+def test_resolve_uncertainty_config_accepts_plot_scope_all():
+    """The uncertainty-config resolver must accept a plot_daily_scope='all'
+    econ dict without crashing.  (The ~9,000-PDF WARNING itself is emitted
+    inside ``pipeline._run_one`` and is not asserted here — the old name
+    advertised coverage this test never had.)"""
     import argparse
 
     from pvbess_opt.pipeline import _resolve_uncertainty_config
