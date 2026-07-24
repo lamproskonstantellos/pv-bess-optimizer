@@ -307,10 +307,28 @@ def _resolve_one(
     return merged
 
 
+def _canonicalise_scenario(scn: dict[str, Any]) -> dict[str, Any]:
+    """Normalise the bare ``balancing`` scalar shorthand to its dict form.
+
+    ``balancing: true`` becomes ``{"balancing": {"balancing_enabled": true}}``
+    so ``_deep_merge`` always merges dict-with-dict across ``inherits`` — a
+    scalar/dict cross would replace wholesale, silently dropping either the
+    parent's enable or its dotted keys (the same silent-drop class the sheet
+    parser rejects within one scenario).
+    """
+    bal = scn.get("balancing")
+    if bal is not None and not isinstance(bal, dict):
+        out = dict(scn)
+        out["balancing"] = {"balancing_enabled": bal}
+        return out
+    return scn
+
+
 def resolve_inheritance(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return scenarios with every ``inherits`` clause merged in."""
-    by_name = {s["name"]: s for s in scenarios if "name" in s}
-    return [_resolve_one(scn, by_name, frozenset()) for scn in scenarios]
+    canonical = [_canonicalise_scenario(s) for s in scenarios]
+    by_name = {s["name"]: s for s in canonical if "name" in s}
+    return [_resolve_one(scn, by_name, frozenset()) for scn in canonical]
 
 
 def _apply_scenario_overrides(
@@ -330,9 +348,19 @@ def _apply_scenario_overrides(
     # per pv_nameplate_kwp") and the sizing sweep's identical treatment
     # (evaluate_sizing_point).  Skipped when the base has no nameplate
     # (no shape to scale) or no resolved pv_kwh column.
-    _new_nameplate = float(
-        typed.get("pv", {}).get("pv_nameplate_kwp", 0.0) or 0.0
-    )
+    try:
+        _new_nameplate = float(
+            typed.get("pv", {}).get("pv_nameplate_kwp", 0.0) or 0.0
+        )
+    except (TypeError, ValueError) as exc:
+        # Name the scenario and key — a locale-formatted override
+        # ('30,000') would otherwise surface as a bare float() error.
+        raise ValueError(
+            f"scenario {scenario.get('name', 'scenario')!r}: "
+            f"pv nameplate override "
+            f"{typed.get('pv', {}).get('pv_nameplate_kwp')!r} is not a "
+            "number."
+        ) from exc
     if (
         _base_nameplate > 0.0
         and _new_nameplate != _base_nameplate
@@ -343,6 +371,15 @@ def _apply_scenario_overrides(
         typed["ts"]["pv_kwh"] = (
             typed["ts"]["pv_kwh"].astype(float)
             * (_new_nameplate / _base_nameplate)
+        )
+    elif _base_nameplate <= 0.0 and _new_nameplate > 0.0:
+        logger.warning(
+            "scenario %r sets pv_nameplate_kwp=%.6g on a base with no PV "
+            "nameplate: there is no PV shape to scale, so the CAPEX/OPEX "
+            "basis grows while generation stays at the base profile "
+            "(likely zero). Provide a base PV profile if PV output is "
+            "intended.",
+            scenario.get("name", "scenario"), _new_nameplate,
         )
     for key, value in (scenario.get("bess") or {}).items():
         typed["bess"][_BESS_ALIASES.get(key, key)] = value
@@ -414,9 +451,16 @@ def _apply_scenario_overrides(
             typed["ts"], keep_deck=_keep_deck,
         )
 
-    # The base PV profile is already resolved; scenarios rescale it by
-    # nameplate through the standard read path, so force file mode.
+    # The base PV profile is already resolved into typed['ts'] (a nameplate
+    # override rescales it in _apply_scenario_overrides, NOT on re-read —
+    # the loader treats pv_kwh as absolute), so force file mode and drop
+    # any external-path reference: the materialised temp workbook already
+    # CARRIES the resolved column, and a surviving timeseries_path would
+    # point at a path relative to the temp dir and misfire the loud
+    # column-vs-file conflict warning on every scenario load.
     typed["pv"]["pv_source"] = "file"
+    if typed.get("pv", {}).get("timeseries_path"):
+        typed["pv"]["timeseries_path"] = None
     # Same rule for the market-data bypass: the base read already
     # resolved any fetched price columns into typed['ts'], so the
     # materialised temp workbook must NOT re-trigger the fetch on
@@ -626,6 +670,7 @@ def _parse_scenarios_sheet(
     by_name: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     current: str | None = None
+    _collisions: list[str] = []
     for _, row in df.iterrows():
         name_val = col(row, "name")
         if name_val is not None and str(name_val).strip():
@@ -644,34 +689,55 @@ def _parse_scenarios_sheet(
             continue
         target = str(target).strip()
         value = col(row, "value")
-        if "." in target:
+        if target == "balancing":
+            # Canonicalise the documented bare shorthand to its dict form
+            # ({'balancing_enabled': value}) at parse time, so it composes
+            # with dotted ``balancing.<key>`` rows in either order AND
+            # deep-merges correctly across ``inherits`` (a scalar/dict
+            # cross would otherwise replace wholesale, silently dropping
+            # the other side's overrides).
+            bucket = scn.setdefault("balancing", {})
+            bucket["balancing_enabled"] = value
+        elif "." in target:
             section, key = target.split(".", 1)
             existing = scn.get(section)
             if existing is not None and not isinstance(existing, dict):
-                # The bare scalar shorthand (e.g. ``balancing = TRUE``) and a
-                # dotted target on the same section cannot coexist: silently
-                # skipping either row would solve a DIFFERENT scenario than
-                # the sheet describes while labelling the comparison row as
+                # A bare scalar and a dotted target on the same section
+                # cannot coexist (only ``balancing`` has a documented
+                # scalar shorthand, canonicalised above): silently skipping
+                # either row would solve a DIFFERENT scenario than the
+                # sheet describes while labelling the comparison row as
                 # the requested one.
-                raise ValueError(
+                _collisions.append(
                     f"scenario {current!r}: target {target!r} conflicts "
                     f"with the earlier bare {section!r} scalar override; "
-                    f"use dotted targets only (e.g. "
-                    f"'{section}.{section}_enabled' for the toggle)."
+                    f"use dotted '{section}.<key>' targets only."
                 )
+                continue
             bucket = scn.setdefault(section, {})
             bucket[key] = value
         else:
             existing = scn.get(target)
             if isinstance(existing, dict):
-                raise ValueError(
+                _collisions.append(
                     f"scenario {current!r}: bare target {target!r} would "
                     f"overwrite the earlier dotted "
                     f"'{target}.<key>' override(s) for the same section; "
-                    f"use dotted targets only (e.g. "
-                    f"'{target}.{target}_enabled' for the toggle)."
+                    f"use dotted '{target}.<key>' targets only."
                 )
+                continue
             scn[target] = value
+    if _collisions:
+        # A DISABLED sheet is documented as inert ("a normal run
+        # proceeds"), so its drafting mistakes must not kill the base
+        # run — warn instead; an enabled batch fails fast.
+        if enabled:
+            raise ValueError("; ".join(_collisions))
+        for _msg in _collisions:
+            logger.warning(
+                "scenarios sheet (disabled): %s (ignored because the "
+                "sheet's enabled toggle is FALSE).", _msg,
+            )
     return enabled, [by_name[name] for name in order]
 
 
