@@ -148,7 +148,7 @@ def test_structured_config_anchors_stores_to_config_dir_not_temp(
     sentinel = object()
 
     def _fake_run_one(
-        params, ts, config, base_name, timestamp, base_dir=None,
+        params, ts, config, base_name, timestamp, base_dir=None, **_kwargs,
     ):
         captured["base_dir"] = base_dir
         captured["excel_parent"] = Path(config.excel).parent
@@ -342,3 +342,133 @@ def test_tee_log_captures_logging_output(tmp_path):
     text = log_path.read_text(encoding="utf-8")
     assert "plain stdout line" in text
     assert "captured-warning-marker" in text
+
+
+# --- round-12 guard refinements --------------------------------------------
+
+
+def test_run_log_captures_pre_tee_loader_warnings(tmp_path):
+    """Loader warnings fire in run() BEFORE the run log exists; the early
+    buffer must replay them into the archived log when the tee opens (the
+    round-11 handler alone only captured in-tee logging)."""
+    import logging
+
+    from pvbess_opt.pipeline import _EarlyLogBuffer, _tee_stdout_to_log
+
+    logger = logging.getLogger("pvbess_opt.test_early")
+    root = logging.getLogger()
+    baseline_handlers = list(root.handlers)
+    buf = _EarlyLogBuffer()
+    root.addHandler(buf)
+    try:
+        # Fired BEFORE the log file exists (the read_inputs position).
+        logger.warning("pre-tee loader warning: column X is empty")
+        log_path = tmp_path / "run_log.txt"
+        with _tee_stdout_to_log(log_path, early_buffer=buf):
+            logger.warning("in-tee warning")
+        text = log_path.read_text(encoding="utf-8")
+        assert "pre-tee loader warning: column X is empty" in text
+        assert "in-tee warning" in text
+        # The tee detached the buffer (no double capture on a later tee).
+        assert buf not in root.handlers
+    finally:
+        root.removeHandler(buf)
+        assert list(root.handlers) == baseline_handlers
+
+
+def test_materialize_external_pv_snapshot_fires_only_when_path_won(tmp_path):
+    """The materialiser must mirror the resolver's precedence: a FILLED
+    pv_kwh column wins over the path, and pv_source='pvgis' fetches instead
+    of reading the file — in both cases the snapshot must stay untouched
+    (previously the path cell was destroyed and, for pvgis, a false
+    'self-contained' claim logged while the re-run still fetched)."""
+    import numpy as np
+    import pandas as pd
+
+    from pvbess_opt.io import read_workbook, write_workbook
+    from pvbess_opt.pipeline import _materialize_external_pv_snapshot
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)
+    resolved_ts = typed["ts"].copy()
+    resolved_ts["pv_kwh"] = 7.25
+
+    # Case 1: filled pv_kwh column + stale path -> the column won; no-op.
+    src_typed = {k: (v.copy() if hasattr(v, "copy") else v)
+                 for k, v in typed.items()}
+    src_typed["pv"] = dict(typed["pv"], timeseries_path="stale.csv")
+    src = tmp_path / "col_wins.xlsx"
+    write_workbook(src_typed, src)
+    snap = tmp_path / "snap1.xlsx"
+    snap.write_bytes(src.read_bytes())
+    _materialize_external_pv_snapshot(snap, src, resolved_ts)
+    snap_pv = pd.read_excel(snap, sheet_name="pv")
+    row = snap_pv[snap_pv["key"] == "timeseries_path"]
+    assert row["value"].iloc[0] == "stale.csv", "path cell must survive"
+
+    # Case 2: pv_source='pvgis' + stale path -> the fetch won; no-op.
+    src_typed2 = {k: (v.copy() if hasattr(v, "copy") else v)
+                  for k, v in typed.items()}
+    src_typed2["pv"] = dict(
+        typed["pv"], timeseries_path="stale.csv", pv_source="pvgis",
+    )
+    src_typed2["ts"] = typed["ts"].copy()
+    src_typed2["ts"]["pv_kwh"] = np.nan
+    src2 = tmp_path / "pvgis_wins.xlsx"
+    write_workbook(src_typed2, src2)
+    snap2 = tmp_path / "snap2.xlsx"
+    snap2.write_bytes(src2.read_bytes())
+    _materialize_external_pv_snapshot(snap2, src2, resolved_ts)
+    snap_pv2 = pd.read_excel(snap2, sheet_name="pv")
+    row2 = snap_pv2[snap_pv2["key"] == "timeseries_path"]
+    assert row2["value"].iloc[0] == "stale.csv", "path cell must survive"
+
+
+def test_generate_all_energy_plots_threads_synthetic_kpis_to_year2(
+    tmp_path, monkeypatch,
+):
+    """The critic's top surviving mutant: reverting the lifetime loop's
+    year-2+ ``year1_kpis`` argument back to None left every unit test
+    green.  This wiring test drives _generate_all_energy_plots itself and
+    asserts the year-2 plot call receives the SYNTHETIC dict (raw sums x
+    Year-1 derate factor), not None."""
+    import pandas as pd
+
+    from pvbess_opt import pipeline as pl
+
+    idx1 = pd.date_range("2026-01-01", periods=48, freq="h")
+    res_year1 = pd.DataFrame({
+        "timestamp": idx1,
+        "profit_export_from_pv_eur": 10.0,
+        "profit_export_from_bess_eur": 5.0,
+        "expense_charge_bess_grid_eur": 2.0,
+        "revenue_pv_ppa_eur": 0.0,
+    })
+    # Derated Year-1 KPIs at 90% of raw.
+    year1_kpis = {
+        "profit_export_from_pv_eur": 10.0 * 48 * 0.9,
+        "profit_export_from_bess_eur": 5.0 * 48 * 0.9,
+        "expense_charge_bess_grid_eur": 2.0 * 48 * 0.9,
+        "revenue_pv_ppa_eur": 0.0,
+    }
+    idx2 = pd.date_range("2027-01-01", periods=48, freq="h")
+    lifetime_df = pd.concat([
+        res_year1.assign(project_year=1, calendar_year=2026),
+        res_year1.assign(timestamp=idx2, project_year=2, calendar_year=2027),
+    ], ignore_index=True)
+
+    seen: dict[int, object] = {}
+
+    def _spy(res, cal_year, out_dir, *args, **kwargs):
+        seen[int(cal_year)] = kwargs.get("year1_kpis")
+
+    monkeypatch.setattr(pl, "_generate_energy_plots_for_year", _spy)
+    pl._generate_all_energy_plots(
+        res_year1, lifetime_df, None, {"plot_daily_scope": "none"},
+        tmp_path, mode="merchant", year1_kpis=year1_kpis,
+    )
+    assert seen[2026] is year1_kpis or seen[2026] == year1_kpis
+    y2 = seen[2027]
+    assert isinstance(y2, dict), "year-2 plot call must get synthetic KPIs"
+    assert y2["profit_export_from_pv_eur"] == pytest.approx(10.0 * 48 * 0.9)
+    assert y2["expense_charge_bess_grid_eur"] == pytest.approx(2.0 * 48 * 0.9)

@@ -216,8 +216,28 @@ class _Tee:
             pass
 
 
+class _EarlyLogBuffer(logging.Handler):
+    """Collects WARNING+ records emitted BEFORE the run log opens.
+
+    The loader (``read_inputs``) and the pre-solve estimators run before
+    ``_tee_stdout_to_log`` creates the log file, so their warnings — the
+    empty-column, ffill/bfill and conflict diagnostics — would exist only
+    on the console.  ``run()`` attaches this buffer first; the tee flushes
+    it into the archived log the moment the file exists.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
 @contextmanager
-def _tee_stdout_to_log(log_path: Path) -> Iterator[None]:
+def _tee_stdout_to_log(
+    log_path: Path, early_buffer: _EarlyLogBuffer | None = None,
+) -> Iterator[None]:
     """Context manager that mirrors stdout / stderr to ``log_path``.
 
     Logging-module output is mirrored explicitly: a CLI entry point calls
@@ -225,7 +245,9 @@ def _tee_stdout_to_log(log_path: Path) -> Iterator[None]:
     StreamHandler holds the pre-tee stream and every WARNING/INFO line
     would bypass the archived run log (the docs promise "full stdout +
     stderr capture").  A temporary root handler writing to the tee closes
-    that gap; it is removed on exit.
+    that gap; it is removed on exit.  ``early_buffer`` carries records
+    logged before this tee opened (loader warnings) — they are replayed
+    into the log file first, then the buffer is detached.
     """
     original_out = sys.stdout
     original_err = sys.stderr
@@ -241,6 +263,12 @@ def _tee_stdout_to_log(log_path: Path) -> Iterator[None]:
     )
     _root = logging.getLogger()
     _root.addHandler(_log_handler)
+    if early_buffer is not None:
+        # Stop collecting (records from here on reach the file handler
+        # directly), then replay what fired before the log existed.
+        _root.removeHandler(early_buffer)
+        for _rec in early_buffer.records:
+            _log_handler.handle(_rec)
     try:
         yield
     finally:
@@ -282,13 +310,41 @@ def _materialize_external_pv_snapshot(
             if "pv" not in src_wb.sheetnames:
                 return
             _has_path = False
+            _pv_source = "auto"
             for row in src_wb["pv"].iter_rows(min_row=2, max_col=2):
-                if str(row[0].value).strip() == "timeseries_path":
+                _key = str(row[0].value).strip()
+                if _key == "timeseries_path":
                     _has_path = bool(str(row[1].value or "").strip())
-                    break
+                elif _key == "pv_source":
+                    _val = str(row[1].value or "").strip().lower()
+                    if _val:
+                        _pv_source = _val
+            _col_has_data = False
+            if "timeseries" in src_wb.sheetnames:
+                _src_ts = src_wb["timeseries"]
+                _hdr = [c.value for c in next(_src_ts.iter_rows(
+                    min_row=1, max_row=1))]
+                if "pv_kwh" in _hdr:
+                    _ci = _hdr.index("pv_kwh")
+                    for _r in _src_ts.iter_rows(min_row=2):
+                        if _r[_ci].value is not None:
+                            _col_has_data = True
+                            break
         finally:
             src_wb.close()
-        if not _has_path or "pv_kwh" not in ts.columns:
+        # Fire only when the external file actually WON the resolution
+        # (mirrors _resolve_pv_file_column precedence): a filled pv_kwh
+        # column wins over the path, and pv_source='pvgis' fetches instead
+        # of reading the file — materialising in those cases would blank a
+        # path that never fed the run (and, for pvgis, log a false
+        # "re-runs without the external file" claim while the re-run still
+        # fetches).
+        if (
+            not _has_path
+            or _col_has_data
+            or _pv_source not in ("file", "auto")
+            or "pv_kwh" not in ts.columns
+        ):
             return
         snap_wb = openpyxl.load_workbook(snapshot_path)
         try:
@@ -304,6 +360,10 @@ def _materialize_external_pv_snapshot(
             values = ts["pv_kwh"].astype(float).to_numpy()
             for i, v in enumerate(values, start=2):
                 ws.cell(row=i, column=col_idx, value=float(v))
+            # Clear any rows beyond the model grid so a longer stale
+            # column cannot survive as a mixed old/new profile.
+            for r in range(len(values) + 2, ws.max_row + 1):
+                ws.cell(row=r, column=col_idx, value=None)
             snap_wb.save(snapshot_path)
             logger.info(
                 "[snapshot] external timeseries_path PV materialised into "
@@ -1749,6 +1809,7 @@ def _run_one(
     base_name: str,
     timestamp: str,
     base_dir: Path | None = None,
+    early_log_buffer: _EarlyLogBuffer | None = None,
 ) -> Results:
     """Solve, post-process, archive and plot a single scenario.
 
@@ -1758,6 +1819,8 @@ def _run_one(
     stores; the caller threads the original config directory here so those
     relative stores resolve against it, mirroring ``scenarios.run_scenarios``.
     Defaults to ``config.excel``'s parent for a genuine workbook input.
+    ``early_log_buffer`` carries loader warnings logged before the run log
+    opened; the tee replays them into the archived log.
     """
     _base_dir = base_dir or Path(config.excel).parent
     slug = _scenario_slug(params)
@@ -1830,7 +1893,7 @@ def _run_one(
             len(ts), est_s, est_min,
         )
 
-    with _tee_stdout_to_log(log_path):
+    with _tee_stdout_to_log(log_path, early_buffer=early_log_buffer):
         print(f"[run] mode={params.get('mode')}  "
               f"allow_bess_grid_charging={params.get('allow_bess_grid_charging')}  "
               f"slug={slug!r}")
@@ -2531,6 +2594,11 @@ def run(config: RunConfig) -> Results:
         run_config = replace(config, excel=materialize_to_xlsx(src, tmp_dir))
     else:
         run_config = config
+    # Buffer WARNING+ records from here on: read_inputs fires the loader
+    # diagnostics (empty columns, ffill/bfill, source conflicts) before the
+    # run log exists, and the tee replays the buffer once it does.
+    _early_log = _EarlyLogBuffer()
+    logging.getLogger().addHandler(_early_log)
     try:
         params, ts = read_inputs(run_config.excel)
         apply_ieee_style()
@@ -2544,8 +2612,11 @@ def run(config: RunConfig) -> Results:
         return _run_one(
             params, ts, run_config, base_name, timestamp,
             base_dir=src.parent,
+            early_log_buffer=_early_log,
         )
     finally:
+        # Idempotent when the tee already detached the buffer.
+        logging.getLogger().removeHandler(_early_log)
         # The materialized workbook has no consumer once the run has read it
         # and copied its shareable snapshot into 01_inputs; drop the temp dir
         # so batch/sweep invocations do not leak one dir per run.

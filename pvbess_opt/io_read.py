@@ -106,11 +106,15 @@ def _read_timeseries_file(path: Path) -> pd.DataFrame:
 
 def _resolve_timeseries(raw: dict[str, Any], base_dir: Path) -> pd.DataFrame:
     ref = raw.get("timeseries_path")
-    if ref is None:
+    if not (ref and str(ref).strip()):
+        # A blank top-level path ('' / whitespace) is the same "unset"
+        # intent as an absent key — fall through to the pv-section path
+        # instead of failing "no time-series provided" while a perfectly
+        # valid pv.timeseries_path sits ignored.
         pv_section = raw.get("pv")
         if isinstance(pv_section, dict):
             ref = pv_section.get("timeseries_path")
-    if ref:
+    if ref and str(ref).strip():
         ts_path = Path(str(ref))
         if not ts_path.is_absolute():
             ts_path = base_dir / ts_path
@@ -199,8 +203,9 @@ def load_structured_config(path: str | Path) -> dict[str, Any]:
     # column-vs-file conflict and misfire the loud "file is IGNORED"
     # warning on every load.  With a top-level frame source present, the
     # pv-sheet path is a genuine PV-only external file and must propagate.
+    _top_ref = raw.get("timeseries_path")
     _frame_from_pv_path = (
-        raw.get("timeseries_path") is None
+        not (_top_ref and str(_top_ref).strip())
         and isinstance(raw.get("pv"), dict)
         and bool((raw.get("pv") or {}).get("timeseries_path"))
     )
@@ -657,6 +662,21 @@ def _resolve_pv_file_column(
                 f"timeseries_path file's 'pv_kwh' column is entirely empty: "
                 f"{ts_path}."
             )
+        # The loader's negative-energy guard (_normalise_timeseries) runs
+        # BEFORE this resolver injects the external series, so the series
+        # must carry its own check — else negative PV reaches the model
+        # and dies as an opaque solver infeasibility pointing nowhere near
+        # the file.  Checked PRE-fill so the blame stays on the file's own
+        # cell (a leading blank bfilled from a negative would otherwise be
+        # named).
+        _neg = _series < 0.0
+        if bool(_neg.any()):
+            raise ValueError(
+                f"timeseries_path file's 'pv_kwh' column contains negative "
+                f"values (first at row {int(_neg.idxmax())}: "
+                f"{float(_series[_neg.idxmax()]):g}) in {ts_path}; energy "
+                "quantities must be >= 0."
+            )
         if _nan_count > 0:
             # The Excel column's documented NaN treatment (ffill/bfill +
             # warning in _normalise_timeseries) runs BEFORE this resolver
@@ -669,18 +689,6 @@ def _resolve_pv_file_column(
                 _nan_count, ts_path,
             )
             _series = _series.ffill().bfill()
-        # The loader's negative-energy guard (_normalise_timeseries) also
-        # runs BEFORE this injection, so the external series must carry its
-        # own check — else negative PV reaches the model and dies as an
-        # opaque solver infeasibility pointing nowhere near the file.
-        _neg = _series < 0.0
-        if bool(_neg.any()):
-            raise ValueError(
-                f"timeseries_path file's 'pv_kwh' column contains negative "
-                f"values (first at row {int(_neg.idxmax())}: "
-                f"{float(_series[_neg.idxmax()]):g}) in {ts_path}; energy "
-                "quantities must be >= 0."
-            )
         out["pv_kwh"] = _series.to_numpy()
         return out
 
@@ -1019,29 +1027,54 @@ def _type_matches(value: Any, json_type: str | list[str] | None) -> bool:
 
     if isinstance(json_type, (list, tuple)):
         return any(_type_matches(value, jt) for jt in json_type)
+    if json_type == "null":
+        # Without this branch a union containing "null" fell through to
+        # the accept-everything default, so e.g. a grid-cap key accepted
+        # a list the loader rejects.
+        return value is None
     if json_type == "number":
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, (int, float)):
+            # The loader rejects non-finite numerics on every ranged key.
+            return bool(np.isfinite(value))
+        if isinstance(value, str):
+            # The loader coerces numeric strings ('7.5') via float().
+            try:
+                return bool(np.isfinite(float(value.strip())))
+            except (TypeError, ValueError):
+                return False
+        return False
     if json_type == "integer":
         if isinstance(value, bool):
             return False
         if isinstance(value, int):
             return True
-        return (
-            isinstance(value, float)
-            and np.isfinite(value)
-            and value == int(value)
-        )
+        if isinstance(value, float):
+            return bool(np.isfinite(value)) and value == int(value)
+        if isinstance(value, str):
+            # The loader accepts '20' but rejects '20.0' on integer keys.
+            try:
+                int(value.strip())
+                return True
+            except (TypeError, ValueError):
+                return False
+        return False
     if json_type == "boolean":
         if isinstance(value, bool):
             return True
-        if isinstance(value, int) and value in (0, 1):
-            return True
+        if isinstance(value, (int, float)):
+            # The loader's bool parser accepts any non-NaN numeric
+            # (value != 0), not just 0/1.
+            return not (isinstance(value, float) and np.isnan(value))
         return (
             isinstance(value, str)
             and value.strip().lower() in (TRUTHY | FALSY)
         )
     if json_type == "string":
-        return isinstance(value, str)
+        # The loader str()s numerics on free-form string keys (a
+        # year-named scenario like ``debt_sizing_scenario: 2030``).
+        return isinstance(value, (str, int, float))
     if json_type == "array":
         return isinstance(value, (list, tuple))
     return True
@@ -1063,6 +1096,10 @@ def validate_config(
         if section not in raw or section_schema.get("type") != "object":
             continue
         value = raw[section]
+        if value is None:
+            # A bare section header (YAML ``simulation:``) loads as an
+            # empty section; the validation surface must agree.
+            continue
         if not isinstance(value, dict):
             errors.append(
                 f"{section}: expected object, got {type(value).__name__}"
@@ -1071,9 +1108,15 @@ def validate_config(
         props = section_schema.get("properties", {})
         for key, item in value.items():
             spec = props.get(key)
-            if spec is None or item is None:
-                # Unknown keys are permitted; a None value means "absent"
-                # (an optional field left blank) and is not type-checked.
+            if (
+                spec is None
+                or item is None
+                or (isinstance(item, str) and not item.strip())
+                or (isinstance(item, float) and np.isnan(item))
+            ):
+                # Unknown keys are permitted; None, blank strings and NaN
+                # are the loader's "absent — use the default" sentinels
+                # and are not type-checked.
                 continue
             if "enum" in spec and item not in spec["enum"] and (
                 # The loader lowercases/strips enum tokens before matching;

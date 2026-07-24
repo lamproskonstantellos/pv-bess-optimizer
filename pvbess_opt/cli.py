@@ -135,7 +135,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         sizing_block = read_sizing_block(input_path)
-        sheet_scenarios = read_scenarios_block(input_path)
+        if args.scenarios:
+            # The --scenarios file takes precedence, so a drafting mistake
+            # in the workbook's (unused for this run) scenarios sheet must
+            # not block the batch — mirror the sizing-sheet warn-and-ignore.
+            try:
+                sheet_scenarios = read_scenarios_block(input_path)
+            except ValueError as exc:
+                logger.warning(
+                    "--scenarios was supplied; ignoring the workbook's "
+                    "scenarios sheet, which failed to parse: %s", exc,
+                )
+                sheet_scenarios = None
+        else:
+            sheet_scenarios = read_scenarios_block(input_path)
         if sheet_scenarios and sizing_block and not args.scenarios:
             raise ValueError(
                 "Both the 'sizing' and 'scenarios' sheets are enabled; "

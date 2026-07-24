@@ -877,8 +877,9 @@ _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
      "'PVGIS-SARAH3' or 'PVGIS-ERA5'). Blank = let PVGIS pick the "
      "regional default for the location."),
     ("timeseries_path", None, "path",
-     "file only: optional external CSV/Parquet instead of the pv_kwh "
-     "column."),
+     "file only: optional external CSV/Parquet used when the pv_kwh "
+     "column is empty; a filled pv_kwh column wins and the file is "
+     "ignored (warning logged)."),
     ("pv_nameplate_kwp", 0, "kWp",
      "PV nameplate capacity. 0 = no PV in this project. The pv_kwh "
      "timeseries is consumed verbatim (absolute kWh per step); nameplate "
@@ -3348,12 +3349,15 @@ def _normalise_timeseries(
     # below sorts a COPY, so it cannot catch this; reject loudly instead
     # of silently re-sorting, because a partial Excel sort can also break
     # the row association between columns in ways no re-sort can repair.
-    _ts_index = pd.to_datetime(ts["timestamp"])
+    # errors="coerce" folds unparseable strings into the NaT branch below,
+    # which names the offending row — pandas' raw parse error would not.
+    _ts_index = pd.to_datetime(ts["timestamp"], errors="coerce")
     if bool(_ts_index.isna().any()):
         # A blank timestamp cell also breaks monotonicity, but the sort
         # remedy below cannot fix it and the diff-based locator would point
-        # at the wrong row — name the actual blank cell instead.
-        _blank_row = int(_ts_index.isna().idxmax())
+        # at the wrong row — name the actual blank cell instead.  argmax on
+        # the ndarray gives the POSITIONAL row regardless of index labels.
+        _blank_row = int(np.argmax(_ts_index.isna().to_numpy()))
         raise ValueError(
             f"timeseries has a blank/unparseable timestamp at row "
             f"{_blank_row} (0-based, excluding the header); fill the cell "
@@ -3366,6 +3370,18 @@ def _normalise_timeseries(
             f"out-of-order timestamp: {_ts_index.iloc[_bad]}). Sort the "
             "sheet by the timestamp column (with the selection extended to "
             "ALL columns so rows stay associated) and retry."
+        )
+    _dup_mask = _ts_index.diff().dt.total_seconds().to_numpy() == 0.0
+    if bool(_dup_mask.any()):
+        # A duplicated row passes the non-strict monotonic check above and
+        # would only die later in timestep detection with a resample hint
+        # that cannot fix duplication — name it directly instead.
+        _dup_row = int(np.argmax(_dup_mask))
+        raise ValueError(
+            f"timeseries has a duplicate timestamp at row {_dup_row} "
+            f"(0-based, excluding the header): {_ts_index.iloc[_dup_row]} "
+            "repeats the previous row. Remove the duplicated row(s) and "
+            "retry."
         )
 
     if mode == "self_consumption" and "load_kwh" not in ts.columns:
@@ -3390,6 +3406,24 @@ def _normalise_timeseries(
             "zero. Add the column if this is not intentional."
         )
 
+    # Negative energy quantities are physically impossible on these two
+    # columns (PV generation and exogenous demand) and only surface later
+    # as an opaque solver infeasibility; reject naming the first offender.
+    # Checked BEFORE the ffill/bfill pass: negatives can only originate in
+    # real cells, and checking pre-fill keeps the blame on the user's cell
+    # (a leading blank bfilled from a negative would otherwise be named).
+    for col in ("pv_kwh", "load_kwh"):
+        if col in ts.columns:
+            _vals = ts[col].astype(float)
+            _neg = _vals < 0.0
+            if bool(_neg.any()):
+                _first = ts.loc[_neg.idxmax(), "timestamp"]
+                raise ValueError(
+                    f"timeseries column {col!r} contains negative values "
+                    f"(first at {_first}: {float(_vals[_neg.idxmax()]):g}); "
+                    "energy quantities must be >= 0 (net-metering exports "
+                    "do not belong in this column)."
+                )
     for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh",
                 "retail_price_eur_per_mwh",
                 "ida_price_eur_per_mwh",
@@ -3402,17 +3436,19 @@ def _normalise_timeseries(
             nan_count = int(nan_mask.sum())
             if nan_count == len(ts) and len(ts) > 0:
                 # ffill/bfill on an all-NaN column is a no-op, so the
-                # generic "filled" warning would be factually wrong and the
-                # empty column would silently price/weigh every step 0
-                # downstream.  An empty pv_kwh column is the documented
-                # PVGIS / timeseries_path intent (the resolver fills it
-                # after this normalisation) and an empty market-bypassed
-                # price column is likewise filled by its fetch — both pass
-                # quietly.  load_kwh in self-consumption has no later
-                # filler, so it fails loudly; any other empty column gets
-                # an accurate warning (an empty column and an ABSENT column
-                # are semantically identical inputs, so both warn rather
-                # than one warning and one error).
+                # generic "filled" warning would be factually wrong.  An
+                # empty pv_kwh column is the documented PVGIS /
+                # timeseries_path intent (the resolver fills it after this
+                # normalisation) and an empty market-bypassed price column
+                # is likewise filled by its fetch — both pass quietly.
+                # load_kwh in self-consumption has no later filler, so it
+                # fails loudly.  Every other empty column is DROPPED after
+                # an accurate warning: an empty column and an ABSENT column
+                # are semantically identical inputs, and keeping the NaN
+                # column alive would defeat downstream presence checks
+                # (e.g. a present-but-blank imbalance column previously
+                # passed the imbalance_pricing='single' gate and settled
+                # every step at NaN).
                 if col == "pv_kwh" or _fetched(col):
                     continue
                 if col == "load_kwh" and mode == "self_consumption":
@@ -3430,15 +3466,16 @@ def _normalise_timeseries(
                         "zero. Populate or remove the column if this is "
                         "not intentional."
                     )
-                    continue
-                logger.warning(
-                    "Column '%s' is entirely empty (all %d rows NaN); it "
-                    "will be treated as missing (0 where consumed). Remove "
-                    "the column or populate it.",
-                    col, nan_count,
-                )
+                else:
+                    logger.warning(
+                        "Column '%s' is entirely empty (all %d rows NaN); "
+                        "treating it exactly like an absent column. "
+                        "Populate it to use it.",
+                        col, nan_count,
+                    )
+                ts = ts.drop(columns=[col])
                 continue
-            if nan_count > 0:
+            if nan_count > 0 and not _fetched(col):
                 first_nan = ts.loc[nan_mask.idxmax(), "timestamp"]
                 logger.warning(
                     "Column '%s' had %d NaN value(s) filled via ffill/bfill; "
@@ -3446,21 +3483,6 @@ def _normalise_timeseries(
                     col, nan_count, first_nan,
                 )
             ts[col] = numeric.ffill().bfill()
-    # Negative energy quantities are physically impossible on these two
-    # columns (PV generation and exogenous demand) and only surface later
-    # as an opaque solver infeasibility; reject naming the first offender.
-    for col in ("pv_kwh", "load_kwh"):
-        if col in ts.columns:
-            _vals = ts[col].astype(float)
-            _neg = _vals < 0.0
-            if bool(_neg.any()):
-                _first = ts.loc[_neg.idxmax(), "timestamp"]
-                raise ValueError(
-                    f"timeseries column {col!r} contains negative values "
-                    f"(first at {_first}: {float(_vals[_neg.idxmax()]):g}); "
-                    "energy quantities must be >= 0 (net-metering exports "
-                    "do not belong in this column)."
-                )
     # Deck variant columns (``<base>__<deck>``): validate the base name
     # against the recognised price columns and apply the same NaN
     # ffill/bfill treatment their canonical column receives.
@@ -3484,6 +3506,21 @@ def _normalise_timeseries(
         numeric = ts[name].astype(float)
         nan_mask = numeric.isna()
         nan_count = int(nan_mask.sum())
+        if nan_count == len(ts) and len(ts) > 0:
+            # An entirely empty deck variant would survive ffill/bfill as
+            # all-NaN and, applied via _apply_price_deck, silently price a
+            # scenario's every step 0 under a factually wrong "filled"
+            # warning.  Drop it like any other empty column — a scenario
+            # requesting the deck then fails fast with the existing
+            # "matches no variant column" error.
+            logger.warning(
+                "Deck variant column '%s' is entirely empty (all %d rows "
+                "NaN); treating it exactly like an absent column — the "
+                "%r deck will not exist. Populate it to use it.",
+                name, nan_count, deck,
+            )
+            ts = ts.drop(columns=[name])
+            continue
         if nan_count > 0:
             first_nan = ts.loc[nan_mask.idxmax(), "timestamp"]
             logger.warning(

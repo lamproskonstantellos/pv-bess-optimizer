@@ -619,3 +619,168 @@ def test_materialised_scenario_disarms_market_fetch():
     })
     assert explicit["market_data"]["price_source"] == "entsoe"
     assert explicit["market_data"]["price_reference_year"] == 2024
+
+
+# --- round-12 guard refinements --------------------------------------------
+
+
+def test_null_balancing_in_scenario_keeps_inherited_dict(caplog):
+    """A YAML scenario with ``balancing:`` (explicit null) previously
+    reached _deep_merge as a scalar and REPLACED the parent's canonicalised
+    balancing dict wholesale; the applier then skipped None and the child
+    silently ran the base workbook's balancing.  Null now merges inert
+    (parent preserved) with a warning."""
+    import logging
+
+    from pvbess_opt.scenarios import resolve_inheritance
+
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.scenarios"):
+        resolved = resolve_inheritance([
+            {"name": "P", "balancing": {
+                "balancing_enabled": True, "bm_block_hours": 4,
+            }},
+            {"name": "C", "inherits": "P", "balancing": None},
+        ])
+    child = next(s for s in resolved if s["name"] == "C")
+    assert child["balancing"] == {
+        "balancing_enabled": True, "bm_block_hours": 4,
+    }
+    assert any(
+        "empty 'balancing' entry" in r.getMessage() for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_scenario_pv_timeseries_path_override_is_rejected():
+    """evaluate_scenario clears the path from the materialised workbook, so
+    a per-scenario pv.timeseries_path override would be applied and then
+    discarded — the scenario would silently solve the BASE profile under
+    the override's label.  It must be rejected up front."""
+    from pvbess_opt.scenarios import validate_scenario_overrides
+
+    with pytest.raises(ValueError, match=r"other pv.*timeseries_path"):
+        validate_scenario_overrides({
+            "name": "other pv",
+            "pv": {"timeseries_path": "other_plant.csv"},
+        })
+
+
+def test_bare_balancing_blank_value_row_is_inert_and_warns(caplog):
+    """A bare 'balancing' sheet row with a BLANK value cell previously
+    canonicalised to balancing_enabled=None, which materialises as a blank
+    cell and re-parses to the sheet DEFAULT — silently resetting a base
+    TRUE.  The row is now inert, loudly."""
+    import logging
+
+    from pvbess_opt.scenarios import _parse_scenarios_sheet
+
+    df = pd.DataFrame({
+        "enabled": ["TRUE", None],
+        "name": ["s1", "s1"],
+        "inherits": [None, None],
+        "target": ["balancing", "balancing.bm_block_hours"],
+        "value": [None, 4],
+    })
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.scenarios"):
+        _enabled, scns = _parse_scenarios_sheet(df)
+    assert scns[0]["balancing"] == {"bm_block_hours": 4}
+    assert any(
+        "blank value cell" in r.getMessage() for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_nameplate_override_bool_and_blank_are_rejected():
+    """bool would float() to 1.0/0.0 (a silent 1-kWp or zeroed plant); a
+    blank override would fall into the base-default path and zero the
+    profile — both are drafting mistakes, not sizes."""
+    from pvbess_opt.scenarios import _apply_scenario_overrides
+
+    def _base():
+        return {
+            "pv": {"pv_nameplate_kwp": 15000.0}, "bess": {}, "project": {},
+            "economics": {}, "simulation": {}, "balancing": {},
+            "ts": pd.DataFrame({
+                "timestamp": pd.date_range("2026-01-01", periods=2, freq="h"),
+                "pv_kwh": [0.0, 100.0],
+            }),
+        }
+
+    for bad in (True, False, None, "  "):
+        with pytest.raises(ValueError, match="is not a number"):
+            _apply_scenario_overrides(
+                _base(), {"name": "bad", "pv": {"nameplate_kwp": bad}},
+            )
+    # An explicit numeric zero stays a legitimate "no PV" scenario.
+    zero = _apply_scenario_overrides(
+        _base(), {"name": "no pv", "pv": {"nameplate_kwp": 0.0}},
+    )
+    assert list(zero["ts"]["pv_kwh"]) == [0.0, 0.0]
+
+
+def test_disabled_sheet_collision_warns_naming_the_conflict(caplog):
+    """The disabled-sheet path must WARN per collision (not stay silent):
+    the sheet is inert, but the drafting mistake should be visible."""
+    import logging
+
+    from pvbess_opt.scenarios import _parse_scenarios_sheet
+
+    df = pd.DataFrame({
+        "enabled": ["FALSE", None],
+        "name": ["s1", "s1"],
+        "inherits": [None, None],
+        "target": ["project", "project.mode"],
+        "value": ["x", "merchant"],
+    })
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.scenarios"):
+        enabled, _scns = _parse_scenarios_sheet(df)
+    assert enabled is False
+    assert any(
+        "scenarios sheet (disabled)" in r.getMessage()
+        and "project" in r.getMessage()
+        for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+
+
+def test_cli_scenarios_file_survives_broken_workbook_sheet(
+    tmp_path, monkeypatch, caplog,
+):
+    """--scenarios takes precedence over the workbook's scenarios sheet, so
+    a drafting mistake in that (unused for this run) sheet must warn and be
+    ignored, not block the batch — mirroring the sizing-sheet handling."""
+    import logging
+
+    from pvbess_opt import cli
+    from pvbess_opt.io import write_workbook
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        cli, "run", lambda *_a, **_k: captured.setdefault("run", True),
+    )
+    monkeypatch.setattr(
+        cli, "run_sizing", lambda *_a, **_k: captured.setdefault("sizing", True),
+    )
+    monkeypatch.setattr(
+        cli, "run_scenarios",
+        lambda _config, scenarios: captured.update(scenarios=scenarios),
+    )
+    # ENABLED sheet with a bare+dotted collision on a non-balancing section
+    # (parse raises when this sheet is the batch source).
+    wb = tmp_path / "broken_sheet.xlsx"
+    write_workbook(_typed_for_write([
+        {"enabled": "TRUE", "name": "s1", "target": "project",
+         "value": "x"},
+        {"name": "s1", "target": "project.mode", "value": "merchant"},
+    ]), wb)
+    scn_file = tmp_path / "batch.yaml"
+    scn_file.write_text(
+        "scenarios:\n  - name: A\n  - name: B\n    inherits: A\n",
+        encoding="utf-8",
+    )
+    with caplog.at_level(logging.WARNING):
+        assert cli.main([str(wb), "--scenarios", str(scn_file)]) == 0
+    assert [s["name"] for s in captured["scenarios"]] == ["A", "B"]
+    assert any(
+        "failed to parse" in r.getMessage() for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+    # Without --scenarios the same workbook still fails fast (the sheet IS
+    # the batch source there).
+    assert cli.main([str(wb)]) == 1
