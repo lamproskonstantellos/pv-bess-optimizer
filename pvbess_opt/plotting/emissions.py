@@ -50,12 +50,17 @@ _SANKEY_NODE_COLUMNS: dict[str, int] = {
     "Load": 2,
     "Grid export": 2,
     "Curtailed PV": 2,
+    # Post-solve exogenous-curtailment sink (Eq. E48): registered in the
+    # layout so the renderer can place it whenever the quota emits its
+    # flows; nodes render only when they carry flow, so the default
+    # (quota off) layout is unchanged.
+    "Curtailed export": 2,
     "Losses": 2,
 }
 _SANKEY_COLUMN_ORDER: tuple[tuple[str, ...], ...] = (
     ("PV generation", "Grid import"),
     ("BESS",),
-    ("Load", "Grid export", "Curtailed PV", "Losses"),
+    ("Load", "Grid export", "Curtailed PV", "Curtailed export", "Losses"),
 )
 _SANKEY_NODE_COLOURS: dict[str, str] = {
     "PV generation": COLORS["PV generation"],
