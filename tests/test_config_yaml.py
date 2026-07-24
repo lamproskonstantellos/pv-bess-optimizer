@@ -260,3 +260,84 @@ def test_pv_timeseries_path_as_frame_source_stays_quiet(tmp_path, caplog):
     ), [r.getMessage() for r in caplog.records]
     assert not typed["pv"].get("timeseries_path")
     assert float(typed["ts"]["pv_kwh"].iloc[0]) == pytest.approx(5.0)
+
+
+# --- round-12: the never-stricter contract, closed over the full matrix ----
+
+
+def test_validate_config_accepts_all_loader_accepted_value_classes():
+    """Round 11 closed integral floats / bool tokens / enum case; the
+    round-12 sweep found five more loader-accepted classes the validator
+    still flagged.  Each pair below LOADS successfully, so validate_config
+    must not flag it."""
+    from pvbess_opt.io_read import validate_config
+
+    cases = {
+        # numeric strings on number / integer keys
+        "economics": {"discount_rate_pct": "7.5"},
+        "project": {"project_lifecycle_years": "20"},
+        # non-0/1 numeric on a boolean key; blank-string sentinel on enum
+        "ppa": {"ppa_enabled": 1.0},
+        # numbers on free-form string keys (a year-named scenario)
+    }
+    for section, kv in cases.items():
+        errs = [e for e in validate_config({section: kv})
+                if any(k in e for k in kv)]
+        assert errs == [], (section, kv, errs)
+    # blank-string / NaN "use the default" sentinels
+    assert [e for e in validate_config({"project": {"mode": ""}})
+            if "mode" in e] == []
+    assert [e for e in validate_config(
+        {"ppa": {"ppa_enabled": float("nan")}}) if "ppa_enabled" in e] == []
+    # a bare section header (YAML ``simulation:`` -> None)
+    assert [e for e in validate_config({"simulation": None})
+            if "simulation" in e] == []
+    # numbers on string keys
+    errs = validate_config({"economics": {"debt_sizing_scenario": 2030}})
+    assert [e for e in errs if "debt_sizing_scenario" in e] == [], errs
+
+
+def test_validate_config_still_flags_loader_rejected_values():
+    """The relaxation must not overshoot: values the LOADER rejects stay
+    flagged (non-finite numerics; a list on a scalar-or-null key; genuine
+    garbage)."""
+    from pvbess_opt.io_read import validate_config
+
+    errs = validate_config({"economics": {"discount_rate_pct": float("inf")}})
+    assert any("discount_rate_pct" in e for e in errs), errs
+    errs = validate_config({"project": {"p_grid_export_max_kw": [1, 2]}})
+    assert any("p_grid_export_max_kw" in e for e in errs), errs
+    errs = validate_config({"project": {"mode": "sideways"}})
+    assert any("mode" in e for e in errs), errs
+    errs = validate_config({"ppa": {"ppa_enabled": "banana"}})
+    assert any("ppa_enabled" in e for e in errs), errs
+
+
+def test_blank_top_level_timeseries_path_falls_back_to_pv_section(tmp_path):
+    """``timeseries_path: ''`` (a blank cell exported to YAML) is the same
+    "unset" intent as an absent key: the pv-section file must still win the
+    frame instead of a 'Config provides no time-series' failure."""
+    import numpy as np
+
+    from pvbess_opt.io_read import load_structured_config
+
+    pv_csv = tmp_path / "pv.csv"
+    idx = pd.date_range("2026-01-01", periods=24, freq="h")
+    pd.DataFrame({
+        "timestamp": idx,
+        "pv_kwh": np.linspace(0.0, 23.0, 24),
+        "load_kwh": [5.0] * 24,
+        "dam_price_eur_per_mwh": [60.0] * 24,
+    }).to_csv(pv_csv, index=False)
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(
+        "timeseries_path: ''\n"
+        "project:\n  mode: merchant\n"
+        f"pv:\n  timeseries_path: {pv_csv.name}\n"
+        "  pv_nameplate_kwp: 10\n"
+        "bess:\n  bess_power_kw: 10\n  bess_capacity_kwh: 20\n",
+        encoding="utf-8",
+    )
+    typed = load_structured_config(cfg)
+    assert len(typed["ts"]) == 24
+    assert float(typed["ts"]["pv_kwh"].iloc[-1]) == 23.0
