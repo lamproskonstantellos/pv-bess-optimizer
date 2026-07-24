@@ -359,6 +359,65 @@ Pre-delivery release audit (round 9):
   config. The guard now adds the compensation back (and the latent no-breakdown
   branch carves it out symmetrically). Log-only — no cashflow number changes.
 
+Pre-delivery release audit (round 10):
+
+- **Timeseries row order validated.** The MILP chains SOC and dispatch over
+  ROW order, but the loader only validated the timestamp GRID on a sorted
+  copy — a sheet whose rows were permuted (e.g. re-sorted by a price column
+  in Excel and saved) was accepted and silently optimised against a
+  scrambled price/PV sequence, making every downstream number wrong with no
+  trace. The loader now rejects non-chronological rows naming the first
+  out-of-order timestamp (a deliberate raise, not a silent re-sort: a
+  partial Excel column-sort also breaks row association in ways no re-sort
+  can repair).
+- **Boolean cells fail fast.** `_parse_bool` silently returned the key
+  default for any unrecognised token, which could INVERT the user's intent
+  (`terminal_soc_equal = 'off'` kept the constraint ON;
+  `allow_bess_grid_charging = 'on'` left grid charging OFF). Unknown tokens
+  on known boolean keys now raise naming the key, and the friendly
+  `on/off/enabled/disabled` tokens are accepted.
+- **Loader range/finiteness guards.** Added the missing validations the
+  adversarial-values sweep surfaced, each raising with the key named:
+  negative `bess_wear_cost_eur_per_mwh` (the objective would PAY the
+  optimizer to cycle); `unavailability_pct` outside [0, 100] (150 silently
+  zeroed ALL production, −5 silently removed the derate);
+  `project_lifecycle_years < 1` and fractional int-key cells (silent
+  truncation); `discount_rate_pct <= −100`; non-finite numeric strings
+  (`'nan'`/`'inf'` defeated every range check); negative
+  `uncertainty_sigma_*`, `uncertainty_n_seeds < 1`, negative
+  `bm_random_seed`; blank or out-of-range `max_injection_profile` cells;
+  negative `pv_kwh` / `load_kwh` rows (previously an opaque solver
+  infeasibility). An entirely empty required timeseries column (DAM in
+  merchant, load in self-consumption) now raises instead of silently
+  pricing/weighing every step 0, optional empty columns warn accurately,
+  and merchant decks without a DAM column get a loud warning.
+- **Scenario overrides.** Mixing the bare scalar shorthand
+  (`balancing = TRUE`) with a dotted target (`balancing.bm_block_hours`)
+  in the Excel scenarios sheet silently dropped one of the two rows — the
+  batch then solved a different scenario than the sheet describes under the
+  requested label; both orders now fail fast. A `pv.nameplate_kwp` override
+  now rescales the resolved `pv_kwh` profile (shape preserved), matching
+  the module contract and the sizing sweep — previously the scenario solved
+  the BASE plant's generation against the OVERRIDDEN plant's CAPEX/OPEX.
+- **PV source resolution.** When both the `pv_kwh` column and a
+  `timeseries_path` carry data the column wins by documented priority, but
+  the ignored file is now named in a loud warning (it was silent — a client
+  filling the documented path cell ran the wrong plant's profile with no
+  trace). NaN gaps in an external `timeseries_path` CSV now receive the
+  same ffill/bfill + warning treatment as the Excel column (they previously
+  crashed at model build with no pointer to the file), and an entirely
+  empty external column raises. The advertised-but-unsupported
+  `weather_year = 'tmy'` token is now rejected consistently at parse,
+  validation and note level (the PVGIS provider never supported it);
+  the shipped workbook's note cell was re-polished accordingly (one note
+  cell changed, zero value changes).
+- **Sankey render under curtailment.** The round-9 flows change emitted a
+  `Curtailed export` node that was never registered in the renderer's
+  layout tables, so `plot_energy_sankey` raised `KeyError` under an active
+  quota and the delivered figure silently went missing (the pipeline guard
+  swallows plot exceptions). The node is now in the layout (default node
+  set unchanged), locked by a render-level regression test.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.
