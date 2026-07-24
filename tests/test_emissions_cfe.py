@@ -356,6 +356,40 @@ def test_energy_sankey_curtailment_shrinks_export_and_conserves():
     assert s_adj == pytest.approx(k_adj)
 
 
+def test_energy_sankey_renders_under_curtailment(tmp_path):
+    """The full RENDER path must survive an active curtailment quota: the
+    ``Curtailed export`` node the flows emit under ``curtailment_factor < 1``
+    must be registered in the layout (node columns + column order), else the
+    ribbon-anchor loop KeyErrors and the delivered figure silently goes
+    missing (the pipeline guard swallows the raise).  Regression for the
+    layout gap in the round-9 flows change."""
+    from pvbess_opt.plotting.emissions import plot_energy_sankey
+
+    res = _sankey_frame(
+        pv_to_load_kwh=12.9, pv_to_bess_kwh=9.2, pv_to_grid_kwh=4.0,
+        pv_curtail_kwh=1.6, grid_to_load_kwh=13.0, bess_charge_grid_kwh=10.6,
+        bess_dis_load_kwh=6.3, bess_dis_grid_kwh=12.1,
+    )
+    out = tmp_path / "sankey_curtail.pdf"
+    result = plot_energy_sankey(
+        res, out, availability_factor=0.99, curtailment_factor=0.95,
+    )
+    assert result == out and out.exists() and out.stat().st_size > 0
+    # PV-only and BESS-only frames must render under the quota too.
+    out2 = tmp_path / "sankey_pv_only.pdf"
+    plot_energy_sankey(
+        _sankey_frame(pv_to_grid_kwh=21.4, pv_curtail_kwh=1.1),
+        out2, curtailment_factor=0.9,
+    )
+    assert out2.exists() and out2.stat().st_size > 0
+    out3 = tmp_path / "sankey_bess_only.pdf"
+    plot_energy_sankey(
+        _sankey_frame(bess_charge_grid_kwh=19.8, bess_dis_grid_kwh=18.0),
+        out3, curtailment_factor=0.9,
+    )
+    assert out3.exists() and out3.stat().st_size > 0
+
+
 def test_energy_sankey_full_availability_is_raw_dispatch():
     """``availability_factor == 1`` returns the untouched raw dispatch."""
     from pvbess_opt.plotting.emissions import energy_sankey_flows

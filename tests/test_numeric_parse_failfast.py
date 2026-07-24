@@ -94,9 +94,11 @@ def test_blank_location_field_passes(field):
     validate_pv_location_fields({field: None})
 
 
-# --- hybrid numeric-or-sentinel PV keys (tilt / weather_year) --------------
-# These route through bespoke parsers (a number OR the sentinel 'optimal' /
-# 'tmy'). The parser runs BEFORE validate_pv_location_fields, so a
+# --- bespoke-parser PV keys (tilt / weather_year) --------------------------
+# These route through bespoke parsers (tilt: a number OR the sentinel
+# 'optimal'; weather_year: a calendar year only — 'tmy' is rejected because
+# the PVGIS provider does not support it). The parser runs BEFORE
+# validate_pv_location_fields, so a
 # warn-and-default parser silently pre-empts the validator's reject branch on
 # a PVGIS-fetch run, changing the fetched PV profile and every downstream
 # number. They must fail fast at parse time like their sibling numeric keys.
@@ -122,9 +124,13 @@ def test_tilt_sentinel_and_number_still_parse():
     assert _parse_value("tilt", "30", "optimal") == 30.0
 
 
-def test_weather_year_sentinel_and_number_still_parse():
-    assert _parse_value("weather_year", "tmy", 2019) == "tmy"
+def test_weather_year_number_parses_and_tmy_is_rejected():
     assert _parse_value("weather_year", "2020", 2019) == 2020
+    # 'tmy' is rejected at parse time: the PVGIS provider does not
+    # support it (no uniform-8760 guarantee), so accepting it here would
+    # only defer the failure to fetch time with a confusing error.
+    with pytest.raises(ValueError, match="weather_year"):
+        _parse_value("weather_year", "tmy", 2019)
 
 
 @pytest.mark.parametrize("blank", [None, float("nan"), "", "   "])

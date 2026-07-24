@@ -164,6 +164,72 @@ def test_parse_scenarios_sheet_groups_and_nests():
     assert by["C"]["capex_multiplier"] == 0.8
 
 
+def test_parse_scenarios_sheet_rejects_bare_and_dotted_collision():
+    """Mixing the bare scalar shorthand (``balancing = TRUE``) with a dotted
+    target on the same section used to silently drop one of the two rows —
+    the scenario then solved something other than what the sheet describes
+    while the comparison row kept the requested label.  Both row orders must
+    fail fast naming the scenario and the conflicting target."""
+    from pvbess_opt.scenarios import _parse_scenarios_sheet
+
+    bare_first = pd.DataFrame({
+        "enabled": ["TRUE", None],
+        "name": ["s1", "s1"],
+        "inherits": [None, None],
+        "target": ["balancing", "balancing.bm_block_hours"],
+        "value": ["TRUE", 4],
+    })
+    with pytest.raises(ValueError, match=r"s1.*balancing"):
+        _parse_scenarios_sheet(bare_first)
+
+    dotted_first = pd.DataFrame({
+        "enabled": ["TRUE", None],
+        "name": ["s1", "s1"],
+        "inherits": [None, None],
+        "target": ["balancing.bm_block_hours", "balancing"],
+        "value": [4, "TRUE"],
+    })
+    with pytest.raises(ValueError, match=r"s1.*balancing"):
+        _parse_scenarios_sheet(dotted_first)
+
+
+def test_scenario_nameplate_override_rescales_pv_profile():
+    """A ``pv.nameplate_kwp`` override must rescale the resolved ``pv_kwh``
+    profile (shape preserved) — the module contract and the sizing sweep's
+    identical treatment; otherwise the scenario solves the BASE plant's
+    generation against the OVERRIDDEN plant's CAPEX/OPEX."""
+    from pvbess_opt.scenarios import _apply_scenario_overrides
+
+    base = {
+        "pv": {"pv_nameplate_kwp": 15000.0},
+        "bess": {},
+        "project": {},
+        "economics": {},
+        "simulation": {},
+        "balancing": {},
+        "ts": pd.DataFrame({
+            "timestamp": pd.date_range("2026-01-01", periods=4, freq="h"),
+            "pv_kwh": [0.0, 100.0, 200.0, 50.0],
+        }),
+    }
+    out = _apply_scenario_overrides(
+        base, {"name": "double", "pv": {"nameplate_kwp": 30000.0}},
+    )
+    assert out["pv"]["pv_nameplate_kwp"] == 30000.0
+    assert list(out["ts"]["pv_kwh"]) == [0.0, 200.0, 400.0, 100.0]
+    # The base frame is untouched (deepcopy semantics).
+    assert list(base["ts"]["pv_kwh"]) == [0.0, 100.0, 200.0, 50.0]
+    # No override -> no rescale.
+    same = _apply_scenario_overrides(base, {"name": "plain"})
+    assert list(same["ts"]["pv_kwh"]) == [0.0, 100.0, 200.0, 50.0]
+    # Zero-nameplate scenario zeroes the profile (consistent with the MILP
+    # pinning PV at zero nameplate).
+    zero = _apply_scenario_overrides(
+        base, {"name": "no pv", "pv": {"nameplate_kwp": 0.0}},
+    )
+    assert list(zero["ts"]["pv_kwh"]) == [0.0, 0.0, 0.0, 0.0]
+
+
 def test_parse_scenarios_sheet_disabled_toggle():
     from pvbess_opt.scenarios import _parse_scenarios_sheet
     df = pd.DataFrame({

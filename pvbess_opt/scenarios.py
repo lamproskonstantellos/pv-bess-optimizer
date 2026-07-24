@@ -318,8 +318,32 @@ def _apply_scenario_overrides(
 ) -> dict[str, Any]:
     validate_scenario_overrides(scenario)
     typed = copy.deepcopy(base_typed)
+    _base_nameplate = float(
+        (base_typed.get("pv") or {}).get("pv_nameplate_kwp", 0.0) or 0.0
+    )
     for key, value in (scenario.get("pv") or {}).items():
         typed["pv"][_PV_ALIASES.get(key, key)] = value
+    # A nameplate override changes the CAPEX/OPEX basis, so the resolved
+    # PV profile must scale with it (shape preserved) or the scenario
+    # would solve the BASE plant's generation against the OVERRIDDEN
+    # plant's cost — the module contract ("shared base PV shape, rescaled
+    # per pv_nameplate_kwp") and the sizing sweep's identical treatment
+    # (evaluate_sizing_point).  Skipped when the base has no nameplate
+    # (no shape to scale) or no resolved pv_kwh column.
+    _new_nameplate = float(
+        typed.get("pv", {}).get("pv_nameplate_kwp", 0.0) or 0.0
+    )
+    if (
+        _base_nameplate > 0.0
+        and _new_nameplate != _base_nameplate
+        and isinstance(typed.get("ts"), pd.DataFrame)
+        and "pv_kwh" in typed["ts"].columns
+    ):
+        typed["ts"] = typed["ts"].copy()
+        typed["ts"]["pv_kwh"] = (
+            typed["ts"]["pv_kwh"].astype(float)
+            * (_new_nameplate / _base_nameplate)
+        )
     for key, value in (scenario.get("bess") or {}).items():
         typed["bess"][_BESS_ALIASES.get(key, key)] = value
     for section in (
@@ -622,10 +646,31 @@ def _parse_scenarios_sheet(
         value = col(row, "value")
         if "." in target:
             section, key = target.split(".", 1)
+            existing = scn.get(section)
+            if existing is not None and not isinstance(existing, dict):
+                # The bare scalar shorthand (e.g. ``balancing = TRUE``) and a
+                # dotted target on the same section cannot coexist: silently
+                # skipping either row would solve a DIFFERENT scenario than
+                # the sheet describes while labelling the comparison row as
+                # the requested one.
+                raise ValueError(
+                    f"scenario {current!r}: target {target!r} conflicts "
+                    f"with the earlier bare {section!r} scalar override; "
+                    f"use dotted targets only (e.g. "
+                    f"'{section}.{section}_enabled' for the toggle)."
+                )
             bucket = scn.setdefault(section, {})
-            if isinstance(bucket, dict):
-                bucket[key] = value
+            bucket[key] = value
         else:
+            existing = scn.get(target)
+            if isinstance(existing, dict):
+                raise ValueError(
+                    f"scenario {current!r}: bare target {target!r} would "
+                    f"overwrite the earlier dotted "
+                    f"'{target}.<key>' override(s) for the same section; "
+                    f"use dotted targets only (e.g. "
+                    f"'{target}.{target}_enabled' for the toggle)."
+                )
             scn[target] = value
     return enabled, [by_name[name] for name in order]
 

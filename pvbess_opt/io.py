@@ -125,8 +125,8 @@ __all__ = [
     "write_workbook",
 ]
 
-TRUTHY = {"true", "1", "yes", "y", "t"}
-FALSY = {"false", "0", "no", "n", "f"}
+TRUTHY = {"true", "1", "yes", "y", "t", "on", "enabled"}
+FALSY = {"false", "0", "no", "n", "f", "off", "disabled"}
 
 # Tokens that disable the grid-export cap (treat as unlimited export).
 # An empty cell is also treated as unlimited — see _parse_grid_export_max.
@@ -871,7 +871,7 @@ _PV_ROWS: tuple[tuple[str, object, str, str], ...] = (
     ("losses_pct", 14, "%",
      "PVGIS only: system losses."),
     ("weather_year", 2019, "year",
-     'PVGIS only: non-leap year for a clean 8760, or "tmy".'),
+     "PVGIS only: non-leap calendar year for a clean 8760."),
     ("raddatabase", None, "text",
      "PVGIS only: optional radiation-database override (e.g. "
      "'PVGIS-SARAH3' or 'PVGIS-ERA5'). Blank = let PVGIS pick the "
@@ -2607,7 +2607,7 @@ def _coerce(value: Any, cast: type, default: Any) -> Any:
         return _COERCE_FAILED
 
 
-def _parse_bool(value: Any, default: bool) -> bool:
+def _parse_bool(value: Any, default: bool, key: str | None = None) -> bool:
     if value is None:
         return default
     if isinstance(value, bool):
@@ -2623,6 +2623,20 @@ def _parse_bool(value: Any, default: bool) -> bool:
         return True
     if token in FALSY:
         return False
+    # An unrecognised token for a KNOWN boolean key is an input mistake, and
+    # silently substituting the key default can INVERT the user's intent
+    # (e.g. ``terminal_soc_equal = 'x'`` keeping the constraint ON, or
+    # ``allow_bess_grid_charging = 'oui'`` leaving grid charging OFF) with a
+    # different dispatch and no trace.  Reject loudly, naming the key —
+    # the same fail-fast contract as ``_parse_string_enum`` and the numeric
+    # branches of ``_parse_value``.  Callers without a key (free-form flag
+    # cells outside the workbook schema) keep the lenient default.
+    if key is not None:
+        raise ValueError(
+            f"{key!r} expects a boolean, got {value!r}; use one of "
+            f"{sorted(TRUTHY)} / {sorted(FALSY)} (or leave the cell blank "
+            f"for the default {default!r})."
+        )
     return default
 
 
@@ -2685,26 +2699,28 @@ def _parse_pv_tilt(raw: Any, default: Any) -> Any:
 
 
 def _parse_pv_weather_year(raw: Any, default: Any) -> Any:
-    """Parse ``weather_year``: a calendar year or the literal ``tmy``."""
+    """Parse ``weather_year``: a calendar year.
+
+    The literal ``tmy`` is deliberately NOT accepted: the PVGIS provider
+    rejects it (a TMY response cannot guarantee the uniform 8760-hour
+    grid), so advertising it here would only defer the failure to fetch
+    time with a confusing error.
+    """
     if raw is None:
         return default
     if isinstance(raw, float) and np.isnan(raw):
         return default
-    if isinstance(raw, str):
-        token = raw.strip().lower()
-        if token == "":
-            return default
-        if token == "tmy":
-            return "tmy"
+    if isinstance(raw, str) and raw.strip() == "":
+        return default
     coerced = _coerce(raw, int, default)
     if coerced is _COERCE_FAILED:
-        # Fail fast on a non-blank value that is neither 'tmy' nor a year
-        # (mirrors _parse_pv_tilt and the numeric-key contract); a blank
-        # cell still resolves to the default.
+        # Fail fast on a non-blank value that is not a year (mirrors
+        # _parse_pv_tilt and the numeric-key contract); a blank cell
+        # still resolves to the default.
         raise ValueError(
-            f"'weather_year' expects a calendar year or 'tmy', got {raw!r} "
-            "which could not be parsed; correct the cell (leave it blank "
-            f"to use the default {default!r})."
+            f"'weather_year' expects a calendar year (e.g. 2019), got "
+            f"{raw!r} which could not be parsed; correct the cell (leave "
+            f"it blank to use the default {default!r})."
         )
     return coerced
 
@@ -2731,7 +2747,7 @@ def _parse_pv_path(raw: Any, default: Any) -> Any:
 
 def _parse_value(key: str, raw: Any, default: Any) -> Any:
     if key in _BOOL_KEYS:
-        return _parse_bool(raw, bool(default))
+        return _parse_bool(raw, bool(default), key=key)
     if key in _STR_KEYS:
         return _parse_string_enum(
             raw, str(default), _ALLOWED_VALUES.get(key, frozenset()), key,
@@ -2801,6 +2817,16 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
     # default for those), so the "blank uses the default" behaviour is
     # unchanged.
     if key in _INT_KEYS:
+        # A fractional value in an integer field would silently truncate
+        # (int(20.7) == 20) and change the horizon/count the user asked
+        # for; reject non-integral numerics loudly.  Integral floats
+        # (20.0, as YAML/openpyxl often deliver) pass through unchanged.
+        if isinstance(raw, float) and np.isfinite(raw) and raw != int(raw):
+            raise ValueError(
+                f"{key!r} expects a whole number, got {raw!r}; round it "
+                f"explicitly (leave the cell blank for the default "
+                f"{default!r})."
+            )
         coerced = _coerce(raw, int, default)
         if coerced is _COERCE_FAILED:
             raise ValueError(
@@ -2815,6 +2841,17 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
             f"{key!r} expects a number, got {raw!r} which could not be "
             f"parsed; correct the cell (leave it blank to use the default "
             f"{default!r})."
+        )
+    # The literal strings 'nan'/'inf' coerce via float() and would then
+    # defeat every downstream range check (NaN compares False against any
+    # bound) and poison the arithmetic silently.  A non-finite value is
+    # never a valid workbook number here — the two grid-cap keys, whose
+    # 'unlimited' tokens legitimately map to inf, are routed through
+    # _parse_grid_export_max before this parser is reached.
+    if isinstance(coerced, float) and not np.isfinite(coerced):
+        raise ValueError(
+            f"{key!r} expects a finite number, got {raw!r}; correct the "
+            f"cell (leave it blank to use the default {default!r})."
         )
     return coerced
 
@@ -3170,6 +3207,21 @@ def _extract_profile(
     df_norm: pd.DataFrame, *, scalar_col: str, monthly_prefix: str,
 ) -> np.ndarray:
     """Pull the (24,) or (24, 12) array from a normalised profile frame."""
+    def _checked(arr: np.ndarray, col: str) -> np.ndarray:
+        # A blank cell (NaN) would surface only at model build as an
+        # opaque "non-finite bound" Pyomo error, and out-of-range values
+        # are silently clipped by the consumer; reject both here naming
+        # the column and the first offending hour.
+        bad = ~np.isfinite(arr) | (arr < 0.0) | (arr > 100.0)
+        if bool(bad.any()):
+            hour = int(np.argmax(bad.any(axis=1) if arr.ndim == 2 else bad))
+            raise ValueError(
+                f"column {col!r} carries a blank or out-of-range value "
+                f"(first at hour {hour}); every cell must be a percent "
+                "in [0, 100]."
+            )
+        return arr
+
     monthly_cols = [f"{monthly_prefix}_{m}" for m in _MONTH_TOKENS]
     if all(col in df_norm.columns for col in monthly_cols):
         arr = np.zeros((24, 12), dtype=float)
@@ -3178,9 +3230,11 @@ def _extract_profile(
                 df_norm[f"{monthly_prefix}_{m_name}"]
                 .astype(float).to_numpy()
             )
-        return arr
+        return _checked(arr, monthly_prefix + "_<month>")
     if scalar_col in df_norm.columns:
-        return df_norm[scalar_col].astype(float).to_numpy()
+        return _checked(
+            df_norm[scalar_col].astype(float).to_numpy(), scalar_col,
+        )
     raise ValueError(
         f"profile sheet must contain either a '{scalar_col}' column "
         f"(24x1) or all 12 '{monthly_prefix}_<month>' columns (24x12)."
@@ -3235,12 +3289,38 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
     if "pv_kwh" not in ts.columns:
         raise ValueError("timeseries sheet must contain a 'pv_kwh' column.")
 
+    # The MILP chains SOC and dispatch over ROW order, so out-of-order rows
+    # (e.g. the sheet re-sorted by a price column in Excel and saved) would
+    # silently optimise against a scrambled price/PV sequence — every
+    # downstream number wrong with no trace.  The step-regularity check
+    # below sorts a COPY, so it cannot catch this; reject loudly instead
+    # of silently re-sorting, because a partial Excel sort can also break
+    # the row association between columns in ways no re-sort can repair.
+    _ts_index = pd.to_datetime(ts["timestamp"])
+    if not _ts_index.is_monotonic_increasing:
+        _bad = int(np.argmax(_ts_index.diff().dt.total_seconds().to_numpy() < 0))
+        raise ValueError(
+            "timeseries rows are not in chronological order (first "
+            f"out-of-order timestamp: {_ts_index.iloc[_bad]}). Sort the "
+            "sheet by the timestamp column (with the selection extended to "
+            "ALL columns so rows stay associated) and retry."
+        )
+
     if mode == "self_consumption" and "load_kwh" not in ts.columns:
         raise ValueError(
             "timeseries sheet must contain a 'load_kwh' column when mode='self_consumption'."
         )
     if mode == "merchant" and "load_kwh" in ts.columns:
         logger.info("merchant mode: load_kwh column ignored")
+    if mode == "merchant" and "dam_price_eur_per_mwh" not in ts.columns:
+        # Without DAM prices every merchant export is priced 0 and the run
+        # completes with zero revenue — flag it loudly (kept a warning, not
+        # an error, for deliberately price-free decks e.g. balancing-only).
+        logger.warning(
+            "merchant mode without a 'dam_price_eur_per_mwh' column: every "
+            "export step will be priced 0 EUR/MWh and DAM revenue will be "
+            "zero. Add the column if this is not intentional."
+        )
 
     for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh",
                 "retail_price_eur_per_mwh",
@@ -3252,6 +3332,33 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
             numeric = ts[col].astype(float)
             nan_mask = numeric.isna()
             nan_count = int(nan_mask.sum())
+            if nan_count == len(ts) and len(ts) > 0:
+                # ffill/bfill on an all-NaN column is a no-op, so the
+                # generic "filled" warning would be factually wrong and the
+                # empty column would silently price/weigh every step 0
+                # downstream.  An empty pv_kwh column is the documented
+                # PVGIS / timeseries_path intent (the resolver fills it
+                # after this normalisation), so it passes quietly; a column
+                # the ACTIVE mode requires fails loudly; any other empty
+                # column gets an accurate warning.
+                if col == "pv_kwh":
+                    continue
+                if (col == "dam_price_eur_per_mwh" and mode == "merchant") or (
+                    col == "load_kwh" and mode == "self_consumption"
+                ):
+                    raise ValueError(
+                        f"timeseries column {col!r} is entirely empty, but "
+                        f"mode={mode!r} requires it; populate the column "
+                        "(an empty required column would silently zero the "
+                        "corresponding revenue/demand)."
+                    )
+                logger.warning(
+                    "Column '%s' is entirely empty (all %d rows NaN); it "
+                    "will be treated as missing (0 where consumed). Remove "
+                    "the column or populate it.",
+                    col, nan_count,
+                )
+                continue
             if nan_count > 0:
                 first_nan = ts.loc[nan_mask.idxmax(), "timestamp"]
                 logger.warning(
@@ -3260,6 +3367,21 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
                     col, nan_count, first_nan,
                 )
             ts[col] = numeric.ffill().bfill()
+    # Negative energy quantities are physically impossible on these two
+    # columns (PV generation and exogenous demand) and only surface later
+    # as an opaque solver infeasibility; reject naming the first offender.
+    for col in ("pv_kwh", "load_kwh"):
+        if col in ts.columns:
+            _vals = ts[col].astype(float)
+            _neg = _vals < 0.0
+            if bool(_neg.any()):
+                _first = ts.loc[_neg.idxmax(), "timestamp"]
+                raise ValueError(
+                    f"timeseries column {col!r} contains negative values "
+                    f"(first at {_first}: {float(_vals[_neg.idxmax()]):g}); "
+                    "energy quantities must be >= 0 (net-metering exports "
+                    "do not belong in this column)."
+                )
     # Deck variant columns (``<base>__<deck>``): validate the base name
     # against the recognised price columns and apply the same NaN
     # ffill/bfill treatment their canonical column receives.
@@ -3534,6 +3656,14 @@ def _validate_balancing_config(
             "balancing sheet key 'bm_mc_scenarios' must be a positive "
             f"integer; got {mc_scenarios!r}."
         )
+    # numpy's default_rng rejects negative seeds deep inside the balancing
+    # MC with an error that names no workbook key; catch it here instead.
+    _seed_raw = balancing.get("bm_random_seed")
+    if _seed_raw is not None and int(_seed_raw) < 0:
+        raise ValueError(
+            "balancing sheet key 'bm_random_seed' must be a non-negative "
+            f"integer; got {_seed_raw!r}."
+        )
 
 
 def _validate_ppa_config(ppa: dict[str, Any]) -> None:
@@ -3742,19 +3872,20 @@ def validate_pv_location_fields(pv: dict[str, Any]) -> None:
     _range_check("losses_pct", 0.0, 100.0)
 
     weather_year = pv.get("weather_year")
-    if isinstance(weather_year, str) and weather_year.strip().lower() == "tmy":
-        pass
-    elif weather_year is not None and str(weather_year).strip() != "":
+    if weather_year is not None and str(weather_year).strip() != "":
+        # 'tmy' is rejected like any non-year token: the PVGIS provider
+        # does not support it (no uniform 8760 guarantee), so accepting
+        # it here would only defer the failure to fetch time.
         year_f = _coerce_optional_float(weather_year)
         if year_f is None:
             raise ValueError(
-                f"'weather_year' must be a calendar year or 'tmy'; got "
+                f"'weather_year' must be a calendar year; got "
                 f"{weather_year!r}."
             )
         if not (1980.0 <= year_f <= 2100.0):
             raise ValueError(
-                f"'weather_year' must be a plausible year (1980-2100) or "
-                f"'tmy'; got {weather_year!r}."
+                f"'weather_year' must be a plausible year (1980-2100); "
+                f"got {weather_year!r}."
             )
 
 
@@ -3993,6 +4124,7 @@ def validate_workbook_params(
     balancing = typed.get("balancing") or {}
     ppa = typed.get("ppa") or {}
     intraday = typed.get("intraday") or {}
+    simulation = typed.get("simulation") or {}
 
     validate_pv_location_fields(pv)
     _validate_ppa_config(ppa)
@@ -4044,6 +4176,10 @@ def validate_workbook_params(
         "capex_bess_eur_per_kwh",
         "devex_bess_eur_per_kw",
         "opex_bess_eur_per_kw",
+        # A negative cycle-wear cost would PAY the optimizer to cycle
+        # (the objective term is -wear x throughput), silently driving
+        # dispatch to the cycle cap regardless of spread.
+        "bess_wear_cost_eur_per_mwh",
         "bess_replacement_cost_pct",
         "bess_degradation_annual_pct",
         "bess_degradation_pct_per_cycle",
@@ -4149,8 +4285,15 @@ def validate_workbook_params(
     # Exogenous curtailment quota (Eqs. E48/E49): percent shares live
     # in [0, 100], the administered price is non-negative.  The
     # quota-vs-signal exclusivity is checked in read_workbook, where
-    # the timeseries is in scope.
-    for key in ("curtailment_pct", "curtailment_compensated_pct"):
+    # the timeseries is in scope.  unavailability_pct joins the same
+    # range contract: its consumer clamps the availability factor to
+    # [0, 1], so 150 would silently zero ALL production and -5 would
+    # silently remove the derate — out-of-range values are always an
+    # input mistake (e.g. typing availability instead of UNavailability).
+    for key in (
+        "curtailment_pct", "curtailment_compensated_pct",
+        "unavailability_pct",
+    ):
         value = float(project.get(key, 0.0) or 0.0)
         if not (0.0 <= value <= 100.0):
             raise ValueError(
@@ -4159,6 +4302,53 @@ def validate_workbook_params(
     _require_non_negative(
         project, "curtailment_compensation_price_eur_per_mwh",
     )
+
+    # Basic sanity on the two keys every downstream layer assumes
+    # without re-checking: a lifecycle below one operating year has no
+    # cashflow to build (the crash today surfaces only AFTER the Year-1
+    # MILP solve, minutes in, pointing nowhere near the workbook), and a
+    # discount rate at or below -100 % makes the discount factor's base
+    # non-positive (ZeroDivisionError / sign-alternating garbage NPV).
+    _life_raw = project.get("project_lifecycle_years")
+    if _life_raw is not None and int(_life_raw or 0) < 1:
+        raise ValueError(
+            "'project_lifecycle_years' must be >= 1; got "
+            f"{_life_raw!r}."
+        )
+    _rate_raw = economics.get("discount_rate_pct")
+    if _rate_raw is not None and float(_rate_raw) <= -100.0:
+        raise ValueError(
+            "'discount_rate_pct' must be greater than -100; got "
+            f"{_rate_raw!r} (the discount base 1 + r/100 must stay "
+            "positive)."
+        )
+
+    # Monte-Carlo knobs: impossible values crash deep inside numpy (a
+    # negative log-normal scale, an empty seed set) far from the
+    # workbook, only when the opt-in uncertainty layer runs; catch them
+    # here with the key named, alongside their already-validated
+    # siblings.
+    for _sig_key in (
+        "uncertainty_sigma_dam", "uncertainty_sigma_pv",
+        "uncertainty_sigma_load", "uncertainty_sigma_ida",
+    ):
+        _sig_raw = simulation.get(_sig_key)
+        if _sig_raw is not None and float(_sig_raw) < 0.0:
+            raise ValueError(
+                f"{_sig_key!r} must be non-negative; got {_sig_raw!r}."
+            )
+    _seeds_raw = simulation.get("uncertainty_n_seeds")
+    if _seeds_raw is not None and int(_seeds_raw) < 1:
+        raise ValueError(
+            "'uncertainty_n_seeds' must be >= 1; got "
+            f"{_seeds_raw!r}."
+        )
+    _bm_seed_raw = balancing.get("bm_random_seed")
+    if _bm_seed_raw is not None and int(_bm_seed_raw) < 0:
+        raise ValueError(
+            "'bm_random_seed' must be a non-negative integer; got "
+            f"{_bm_seed_raw!r}."
+        )
 
     # Target-DSCR debt sizing (Eqs. E41-E43): the keys are inert in
     # manual mode; in target_dscr mode the target must be a real
