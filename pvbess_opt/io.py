@@ -2712,6 +2712,16 @@ def _parse_pv_weather_year(raw: Any, default: Any) -> Any:
         return default
     if isinstance(raw, str) and raw.strip() == "":
         return default
+    # A fractional year (2019.5) would silently truncate to 2019 — the
+    # same whole-number contract as the _INT_KEYS branch of _parse_value.
+    if isinstance(raw, float) and (
+        not np.isfinite(raw) or raw != int(raw)
+    ):
+        raise ValueError(
+            f"'weather_year' expects a whole calendar year (e.g. 2019), "
+            f"got {raw!r}; correct the cell (leave it blank to use the "
+            f"default {default!r})."
+        )
     coerced = _coerce(raw, int, default)
     if coerced is _COERCE_FAILED:
         # Fail fast on a non-blank value that is not a year (mirrors
@@ -2825,6 +2835,17 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
             raise ValueError(
                 f"{key!r} expects a whole number, got {raw!r}; round it "
                 f"explicitly (leave the cell blank for the default "
+                f"{default!r})."
+            )
+        # A native infinity (YAML .inf, JSON Infinity) would escape as an
+        # uncaught OverflowError from int(); reject with the same
+        # finite-number contract as the float branch.  NaN is NOT caught
+        # here: a NaN float is the blank-cell sentinel and must keep
+        # resolving to the default via _coerce.
+        if isinstance(raw, float) and np.isinf(raw):
+            raise ValueError(
+                f"{key!r} expects a finite whole number, got {raw!r}; "
+                f"correct the value (leave it blank to use the default "
                 f"{default!r})."
             )
         coerced = _coerce(raw, int, default)
@@ -3282,12 +3303,43 @@ def _read_optional_injection_profile(
 # ---------------------------------------------------------------------------
 
 
-def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
-    """Validate timeseries columns and forward-fill numeric NaNs."""
+#: Timeseries column -> the market_data source key whose non-'file' setting
+#: fills/overwrites that column AFTER normalisation (so empty-column checks
+#: must stay quiet for it, exactly like the pv_kwh resolver contract).
+_COLUMN_MARKET_SOURCE: dict[str, str] = {
+    "dam_price_eur_per_mwh": "price_source",
+    "ida_price_eur_per_mwh": "intraday_source",
+    "imbalance_price_eur_per_mwh": "imbalance_source",
+    "imbalance_price_short_eur_per_mwh": "imbalance_source",
+    "imbalance_price_long_eur_per_mwh": "imbalance_source",
+}
+
+
+def _normalise_timeseries(
+    ts: pd.DataFrame,
+    *,
+    mode: str,
+    market_sources: dict[str, Any] | None = None,
+) -> pd.DataFrame:
+    """Validate timeseries columns and forward-fill numeric NaNs.
+
+    ``market_sources`` (the market_data sheet dict) tells the empty-column
+    checks which price columns a non-'file' source will fill after this
+    normalisation — an empty/absent column is then the documented bypass
+    intent, not a mistake.
+    """
     if "timestamp" not in ts.columns:
         raise ValueError("timeseries sheet must contain a 'timestamp' column.")
     if "pv_kwh" not in ts.columns:
         raise ValueError("timeseries sheet must contain a 'pv_kwh' column.")
+
+    def _fetched(col: str) -> bool:
+        src_key = _COLUMN_MARKET_SOURCE.get(col)
+        if src_key is None or not market_sources:
+            return False
+        return str(
+            market_sources.get(src_key, "file") or "file"
+        ).strip().lower() != "file"
 
     # The MILP chains SOC and dispatch over ROW order, so out-of-order rows
     # (e.g. the sheet re-sorted by a price column in Excel and saved) would
@@ -3297,6 +3349,16 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
     # of silently re-sorting, because a partial Excel sort can also break
     # the row association between columns in ways no re-sort can repair.
     _ts_index = pd.to_datetime(ts["timestamp"])
+    if bool(_ts_index.isna().any()):
+        # A blank timestamp cell also breaks monotonicity, but the sort
+        # remedy below cannot fix it and the diff-based locator would point
+        # at the wrong row — name the actual blank cell instead.
+        _blank_row = int(_ts_index.isna().idxmax())
+        raise ValueError(
+            f"timeseries has a blank/unparseable timestamp at row "
+            f"{_blank_row} (0-based, excluding the header); fill the cell "
+            "and retry."
+        )
     if not _ts_index.is_monotonic_increasing:
         _bad = int(np.argmax(_ts_index.diff().dt.total_seconds().to_numpy() < 0))
         raise ValueError(
@@ -3312,10 +3374,16 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
         )
     if mode == "merchant" and "load_kwh" in ts.columns:
         logger.info("merchant mode: load_kwh column ignored")
-    if mode == "merchant" and "dam_price_eur_per_mwh" not in ts.columns:
+    if (
+        mode == "merchant"
+        and "dam_price_eur_per_mwh" not in ts.columns
+        and not _fetched("dam_price_eur_per_mwh")
+    ):
         # Without DAM prices every merchant export is priced 0 and the run
         # completes with zero revenue — flag it loudly (kept a warning, not
         # an error, for deliberately price-free decks e.g. balancing-only).
+        # A non-'file' price_source fills the column after this check, so
+        # the bypass intent stays quiet.
         logger.warning(
             "merchant mode without a 'dam_price_eur_per_mwh' column: every "
             "export step will be priced 0 EUR/MWh and DAM revenue will be "
@@ -3338,20 +3406,31 @@ def _normalise_timeseries(ts: pd.DataFrame, *, mode: str) -> pd.DataFrame:
                 # empty column would silently price/weigh every step 0
                 # downstream.  An empty pv_kwh column is the documented
                 # PVGIS / timeseries_path intent (the resolver fills it
-                # after this normalisation), so it passes quietly; a column
-                # the ACTIVE mode requires fails loudly; any other empty
-                # column gets an accurate warning.
-                if col == "pv_kwh":
+                # after this normalisation) and an empty market-bypassed
+                # price column is likewise filled by its fetch — both pass
+                # quietly.  load_kwh in self-consumption has no later
+                # filler, so it fails loudly; any other empty column gets
+                # an accurate warning (an empty column and an ABSENT column
+                # are semantically identical inputs, so both warn rather
+                # than one warning and one error).
+                if col == "pv_kwh" or _fetched(col):
                     continue
-                if (col == "dam_price_eur_per_mwh" and mode == "merchant") or (
-                    col == "load_kwh" and mode == "self_consumption"
-                ):
+                if col == "load_kwh" and mode == "self_consumption":
                     raise ValueError(
                         f"timeseries column {col!r} is entirely empty, but "
                         f"mode={mode!r} requires it; populate the column "
                         "(an empty required column would silently zero the "
-                        "corresponding revenue/demand)."
+                        "corresponding demand)."
                     )
+                if col == "dam_price_eur_per_mwh" and mode == "merchant":
+                    logger.warning(
+                        "merchant mode with an entirely empty "
+                        "'dam_price_eur_per_mwh' column: every export step "
+                        "will be priced 0 EUR/MWh and DAM revenue will be "
+                        "zero. Populate or remove the column if this is "
+                        "not intentional."
+                    )
+                    continue
                 logger.warning(
                     "Column '%s' is entirely empty (all %d rows NaN); it "
                     "will be treated as missing (0 where consumed). Remove "
@@ -5115,6 +5194,7 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
     ts = _normalise_timeseries(
         pd.read_excel(xlsx_path, sheet_name="timeseries", parse_dates=["timestamp"]),
         mode=mode,
+        market_sources=typed.get("market_data"),
     )
     # Single PV-source resolution rule (auto | file | pvgis), shared with
     # the structured-config loader.  Resolves ts['pv_kwh'] from the column,

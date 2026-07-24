@@ -418,6 +418,58 @@ Pre-delivery release audit (round 10):
   swallows plot exceptions). The node is now in the layout (default node
   set unchanged), locked by a render-level regression test.
 
+Pre-delivery release audit (round 11):
+
+- **Scenario shorthand composes.** The bare `balancing = TRUE` shorthand is
+  now canonicalised to `{"balancing_enabled": ...}` at parse and at
+  inheritance resolution, so mixing it with dotted `balancing.*` targets
+  MERGES in either row order instead of failing (the round-10 fail-fast
+  also fired when the scenario engine was disabled, blocking workbooks
+  whose dormant sheet used both forms — disabled sheets now warn and are
+  ignored; genuine scalar/dict collisions on other sections still raise
+  when the engine is enabled). A non-numeric `pv.nameplate_kwp` override
+  raises naming the scenario, and overriding from a zero base nameplate
+  warns that no profile shape exists to rescale.
+- **Empty-DAM parity.** An all-NaN DAM column in merchant mode is treated
+  exactly like an absent column (loud "priced 0 EUR/MWh" warning), not a
+  hard error — the round-10 raise rejected valid workbooks that leave the
+  column blank because `price_source = 'entsoe'` fills it, or because a
+  price deck reprices it; columns about to be replaced by a fetch are now
+  recognised and skipped quietly. Blank timestamp cells are reported
+  first and by row number instead of surfacing as a confusing
+  out-of-order error.
+- **Loader edge guards.** A literal infinity in an integer-typed cell now
+  raises cleanly naming the key (blank cells keep resolving to the
+  default); a fractional `weather_year` (2023.5) is rejected instead of
+  being truncated into a different PVGIS year.
+- **External PV parity.** Negative `pv_kwh` values in a `timeseries_path`
+  file or a `pv_kwh_override` column are rejected naming the first
+  offending row — the in-workbook column already had this guard, so a
+  negative-energy profile could still enter through the file path.
+- **Config-file surfaces (YAML/JSON).** `validate_config` is now provably
+  never stricter than the loader: integral floats pass integer keys,
+  loader-accepted boolean tokens (`on`, `0/1`, ...) pass boolean keys and
+  enum matching is case/whitespace-insensitive, so a config that runs no
+  longer fails pre-validation (and vice-versa remains impossible);
+  profile-list errors name the offending config key; a top-level PV
+  timeseries file used as the frame source no longer triggers a spurious
+  "column wins over file" conflict warning against itself.
+- **Snapshot self-containment.** The shareable `01_inputs` snapshot now
+  materialises PV energy loaded from an external `timeseries_path` file
+  into its own timeseries sheet and blanks the path cell — previously the
+  snapshot silently depended on a file on the ORIGINAL machine and
+  re-running it elsewhere crashed or, worse, picked up a different file.
+  Scenario materialisation drops the stale path the same way.
+- **Year-2+ plot reconciliation.** Lifetime per-year revenue breakdown
+  plots for project years 2+ now scale each revenue leg by the Year-1
+  derated-to-raw factor, so displayed EUR agree with the derated cashflow
+  under unavailability/curtailment (year 1 was reconciled in round 9;
+  later years still plotted raw undererated legs).
+- **Run log completeness.** The `run.log` tee now also attaches a
+  file handler to the logging tree, so loader warnings (empty-column,
+  ffill/bfill, ignored-file notices) land in the delivered log instead of
+  existing only on the console that scrolled away.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

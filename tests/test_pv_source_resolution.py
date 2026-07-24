@@ -575,3 +575,35 @@ def test_file_mode_never_calls_pvgis(tmp_path, monkeypatch):
     out = read_workbook(_write(tmp_path, typed, "filemode.xlsx"))
     assert "lat" not in captured  # fetch never invoked
     assert (out["ts"]["pv_kwh"].to_numpy() == 100.0).all()
+
+
+def test_external_pv_negative_values_are_rejected(tmp_path):
+    """The loader's negative-energy guard runs BEFORE the resolver injects
+    an external timeseries_path series, so the resolver must carry its own
+    check — else negative PV reaches the model as an opaque solver
+    infeasibility (round-10 guard bypass)."""
+    n = 96
+    vals = np.full(n, 7.0)
+    vals[7] = -12.5
+    external = pd.DataFrame({
+        "timestamp": pd.date_range("2019-06-01", periods=n, freq="15min"),
+        "pv_kwh": vals,
+    })
+    external.to_csv(tmp_path / "neg.csv", index=False)
+    typed = _typed(
+        n=n, freq="15min", pv_kwh="empty",
+        pv_overrides={"timeseries_path": "neg.csv"},
+    )
+    with pytest.raises(ValueError, match=r"negative.*neg\.csv"):
+        read_workbook(_write(tmp_path, typed))
+
+
+def test_override_pv_negative_values_are_rejected(tmp_path):
+    """Same guard for the deprecated pv_kwh_override fallback column."""
+    n = 96
+    vals = np.full(n, 5.0)
+    vals[3] = -9.0
+    typed = _typed(n=n, freq="15min", pv_kwh="empty")
+    typed["ts"]["pv_kwh_override"] = vals
+    with pytest.raises(ValueError, match=r"pv_kwh_override.*negative"):
+        read_workbook(_write(tmp_path, typed))

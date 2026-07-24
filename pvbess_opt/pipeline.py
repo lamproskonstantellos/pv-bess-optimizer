@@ -218,15 +218,33 @@ class _Tee:
 
 @contextmanager
 def _tee_stdout_to_log(log_path: Path) -> Iterator[None]:
-    """Context manager that mirrors stdout / stderr to ``log_path``."""
+    """Context manager that mirrors stdout / stderr to ``log_path``.
+
+    Logging-module output is mirrored explicitly: a CLI entry point calls
+    ``logging.basicConfig`` BEFORE this tee swaps ``sys.stderr``, so its
+    StreamHandler holds the pre-tee stream and every WARNING/INFO line
+    would bypass the archived run log (the docs promise "full stdout +
+    stderr capture").  A temporary root handler writing to the tee closes
+    that gap; it is removed on exit.
+    """
     original_out = sys.stdout
     original_err = sys.stderr
     tee_out = _Tee(original_out, log_path)
     sys.stdout = tee_out
     sys.stderr = tee_out
+    # Attach to the tee's FILE handle only: the console already receives
+    # logger lines via the caller's own handler (or logging's lastResort),
+    # so mirroring to the tee itself would print each line twice.
+    _log_handler = logging.StreamHandler(tee_out._fh)
+    _log_handler.setFormatter(
+        logging.Formatter("%(levelname)s %(name)s: %(message)s")
+    )
+    _root = logging.getLogger()
+    _root.addHandler(_log_handler)
     try:
         yield
     finally:
+        _root.removeHandler(_log_handler)
         sys.stdout = original_out
         sys.stderr = original_err
         tee_out.close()
@@ -241,6 +259,118 @@ def _energy_plot_root_for_year(
     energy_plots_dir: Path, calendar_year: int,
 ) -> Path:
     return energy_plots_dir / str(int(calendar_year))
+
+
+def _materialize_external_pv_snapshot(
+    snapshot_path: Path, source_workbook: Path, ts: pd.DataFrame,
+) -> None:
+    """Make the input snapshot self-contained for external-file PV runs.
+
+    A run whose PV came from the pv-sheet ``timeseries_path`` writes a
+    verbatim snapshot whose relative path resolves against ``01_inputs/``
+    on re-run — the system's own artifact then fails to load.  Mirror the
+    market-data bypass contract ("fetched values written in, source keys
+    reset"): write the RESOLVED ``pv_kwh`` column into the snapshot's
+    timeseries sheet and blank its ``timeseries_path`` cell.  A no-op when
+    the source workbook carries no external path (the shipped default).
+    """
+    import openpyxl
+
+    try:
+        src_wb = openpyxl.load_workbook(source_workbook, read_only=True)
+        try:
+            if "pv" not in src_wb.sheetnames:
+                return
+            _has_path = False
+            for row in src_wb["pv"].iter_rows(min_row=2, max_col=2):
+                if str(row[0].value).strip() == "timeseries_path":
+                    _has_path = bool(str(row[1].value or "").strip())
+                    break
+        finally:
+            src_wb.close()
+        if not _has_path or "pv_kwh" not in ts.columns:
+            return
+        snap_wb = openpyxl.load_workbook(snapshot_path)
+        try:
+            for row in snap_wb["pv"].iter_rows(min_row=2, max_col=2):
+                if str(row[0].value).strip() == "timeseries_path":
+                    row[1].value = None
+                    break
+            ws = snap_wb["timeseries"]
+            header = [c.value for c in ws[1]]
+            if "pv_kwh" not in header:
+                return
+            col_idx = header.index("pv_kwh") + 1
+            values = ts["pv_kwh"].astype(float).to_numpy()
+            for i, v in enumerate(values, start=2):
+                ws.cell(row=i, column=col_idx, value=float(v))
+            snap_wb.save(snapshot_path)
+            logger.info(
+                "[snapshot] external timeseries_path PV materialised into "
+                "the input snapshot (%d rows); the snapshot re-runs "
+                "without the external file.", len(values),
+            )
+        finally:
+            snap_wb.close()
+    except Exception:
+        # The snapshot is a convenience artifact; never fail the run over
+        # its self-containment upgrade.
+        logger.exception(
+            "Failed to materialise external PV into the input snapshot"
+        )
+
+
+#: EUR streams the merchant revenue plots draw; per-leg derate factors are
+#: computed on these from Year 1 and applied flat to every later year.
+_REVENUE_PLOT_COLS: tuple[str, ...] = (
+    "profit_export_from_pv_eur",
+    "profit_export_from_bess_eur",
+    "expense_charge_bess_grid_eur",
+    "revenue_pv_ppa_eur",
+)
+
+
+def _revenue_leg_factors(
+    res_year1: pd.DataFrame, year1_kpis: dict[str, Any] | None,
+) -> dict[str, float]:
+    """Per-leg flat derate factors from the Year-1 derated KPIs.
+
+    The ratio ``derated Year-1 KPI / raw Year-1 dispatch sum`` captures each
+    leg's own derate rule (availability x curtailment for the export legs,
+    availability only for the grid-charging withdrawal, the baseload-PPA
+    exemption) as a constant — the same flat per-year treatment the
+    cashflow applies — so later years' revenue plots can reconcile to the
+    reported convention without a per-year KPI dict.
+    """
+    factors: dict[str, float] = {}
+    if not year1_kpis:
+        return factors
+    for col in _REVENUE_PLOT_COLS:
+        if col in year1_kpis and col in res_year1.columns:
+            raw = float(
+                pd.to_numeric(res_year1[col], errors="coerce")
+                .fillna(0.0).sum()
+            )
+            if abs(raw) > 1e-9:
+                factors[col] = float(year1_kpis[col] or 0.0) / raw
+    return factors
+
+
+def _synthetic_year_kpis(
+    res_year: pd.DataFrame, factors: dict[str, float],
+) -> dict[str, float] | None:
+    """Derated per-year KPI targets for a later project year's plots."""
+    if not factors:
+        return None
+    out: dict[str, float] = {}
+    for col, factor in factors.items():
+        if col in res_year.columns:
+            raw = float(
+                pd.to_numeric(res_year[col], errors="coerce")
+                .fillna(0.0).sum()
+            )
+            out[col] = raw * factor
+    return out or None
 
 
 def _generate_energy_plots_for_year(
@@ -376,6 +506,8 @@ def _generate_all_energy_plots(
         or PROJECT_SHEET_DEFAULTS["project_start_year"]
     )
 
+    _leg_factors = _revenue_leg_factors(res_year1, year1_kpis)
+
     if lifetime_df is None or lifetime_df.empty:
         if pd.api.types.is_datetime64_any_dtype(res_year1["timestamp"]):
             ts_first = pd.to_datetime(res_year1["timestamp"]).dt.year.iloc[0]
@@ -403,11 +535,15 @@ def _generate_all_energy_plots(
             monthly=_scope_active_for_year(monthly_scope, proj_year),
             yearly=_scope_active_for_year(yearly_scope, proj_year),
             mode=mode,
-            # The derated year1_kpis reconcile the Year-1 revenue plot only;
-            # later years carry their own degradation, so leave them raw
-            # (the factor would otherwise rescale year-N dispatch to Year-1's
-            # derated total).
-            year1_kpis=year1_kpis if proj_year == 1 else None,
+            # Year 1 reconciles to the derated year1_kpis directly; later
+            # years get synthetic per-year targets built from the Year-1
+            # per-leg factors (the year's OWN raw sums x the flat derate),
+            # so every year's revenue plot matches the reported convention
+            # without rescaling year-N dispatch to Year-1 totals.
+            year1_kpis=(
+                year1_kpis if proj_year == 1
+                else _synthetic_year_kpis(sub, _leg_factors)
+            ),
         )
 
     if (
@@ -2109,6 +2245,13 @@ def _run_one(
                 # cell.  The snapshot is shareable; scrub the secret
                 # unconditionally so it never rides into a results dir.
                 blank_entsoe_token(renamed)
+            # External-file PV (pv-sheet timeseries_path): write the
+            # resolved column in and blank the path cell so the snapshot
+            # re-runs without the external file (mirrors the market
+            # bypass contract above).  No-op for the shipped default.
+            _materialize_external_pv_snapshot(
+                renamed, Path(config.excel), ts,
+            )
         write_assumptions_summary(
             layout["inputs"] / "assumptions_summary.txt", params, econ,
         )

@@ -61,8 +61,36 @@ def test_resolve_inheritance_clones_and_overrides():
     ]
     resolved = {s["name"]: s for s in resolve_inheritance(scns)}
     assert resolved["B"]["bess"]["power_kw"] == 1000   # inherited
-    assert resolved["B"]["balancing"] is True          # own override
+    # The bare balancing scalar is canonicalised to its dict form so it
+    # deep-merges across inherits instead of replacing wholesale.
+    assert resolved["B"]["balancing"] == {"balancing_enabled": True}
     assert "inherits" not in resolved["B"]
+
+
+def test_resolve_inheritance_merges_bare_and_dotted_balancing():
+    """A parent's bare ``balancing`` enable and a child's dotted
+    ``balancing.<key>`` override must BOTH survive the inherits merge — a
+    scalar/dict cross used to replace wholesale, silently dropping the
+    parent's enable (the child then solved with balancing OFF under the
+    requested label) or, in the reverse direction, the parent's dotted
+    keys."""
+    resolved = {s["name"]: s for s in resolve_inheritance([
+        {"name": "bal_on", "balancing": True},
+        {"name": "bal_blocks", "inherits": "bal_on",
+         "balancing": {"bm_block_hours": 4}},
+    ])}
+    assert resolved["bal_blocks"]["balancing"] == {
+        "balancing_enabled": True, "bm_block_hours": 4,
+    }
+    # Reverse direction: parent dotted, child bare — the child's enable
+    # composes with (not clobbers) the parent's dotted keys.
+    resolved2 = {s["name"]: s for s in resolve_inheritance([
+        {"name": "blocks", "balancing": {"bm_block_hours": 4}},
+        {"name": "on", "inherits": "blocks", "balancing": True},
+    ])}
+    assert resolved2["on"]["balancing"] == {
+        "bm_block_hours": 4, "balancing_enabled": True,
+    }
 
 
 def test_apply_overrides_shorthand_and_capex_multiplier():
@@ -164,33 +192,52 @@ def test_parse_scenarios_sheet_groups_and_nests():
     assert by["C"]["capex_multiplier"] == 0.8
 
 
-def test_parse_scenarios_sheet_rejects_bare_and_dotted_collision():
-    """Mixing the bare scalar shorthand (``balancing = TRUE``) with a dotted
-    target on the same section used to silently drop one of the two rows —
-    the scenario then solved something other than what the sheet describes
-    while the comparison row kept the requested label.  Both row orders must
-    fail fast naming the scenario and the conflicting target."""
+def test_parse_scenarios_sheet_merges_bare_and_dotted_balancing():
+    """The documented bare ``balancing`` shorthand is canonicalised to its
+    dict form at parse time, so mixing it with dotted ``balancing.<key>``
+    rows COMPOSES correctly in either order (previously one of the two rows
+    was silently dropped; an intermediate fix raised instead)."""
     from pvbess_opt.scenarios import _parse_scenarios_sheet
 
-    bare_first = pd.DataFrame({
-        "enabled": ["TRUE", None],
-        "name": ["s1", "s1"],
-        "inherits": [None, None],
-        "target": ["balancing", "balancing.bm_block_hours"],
-        "value": ["TRUE", 4],
-    })
-    with pytest.raises(ValueError, match=r"s1.*balancing"):
-        _parse_scenarios_sheet(bare_first)
+    for targets, values in (
+        (["balancing", "balancing.bm_block_hours"], ["TRUE", 4]),
+        (["balancing.bm_block_hours", "balancing"], [4, "TRUE"]),
+    ):
+        df = pd.DataFrame({
+            "enabled": ["TRUE", None],
+            "name": ["s1", "s1"],
+            "inherits": [None, None],
+            "target": targets,
+            "value": values,
+        })
+        _enabled, scns = _parse_scenarios_sheet(df)
+        assert scns[0]["balancing"] == {
+            "balancing_enabled": "TRUE", "bm_block_hours": 4,
+        }, (targets, scns[0])
 
-    dotted_first = pd.DataFrame({
-        "enabled": ["TRUE", None],
-        "name": ["s1", "s1"],
-        "inherits": [None, None],
-        "target": ["balancing.bm_block_hours", "balancing"],
-        "value": [4, "TRUE"],
-    })
-    with pytest.raises(ValueError, match=r"s1.*balancing"):
-        _parse_scenarios_sheet(dotted_first)
+
+def test_parse_scenarios_sheet_rejects_nonbalancing_collision_when_enabled():
+    """For sections WITHOUT a documented scalar shorthand, a bare+dotted mix
+    is still a hard error on an ENABLED sheet (silently dropping a row would
+    solve a different scenario than described) — but a DISABLED sheet is
+    documented as inert, so its drafting mistakes only warn and the base run
+    proceeds."""
+    from pvbess_opt.scenarios import _parse_scenarios_sheet
+
+    def _sheet(enabled: str) -> pd.DataFrame:
+        return pd.DataFrame({
+            "enabled": [enabled, None],
+            "name": ["s1", "s1"],
+            "inherits": [None, None],
+            "target": ["project", "project.mode"],
+            "value": ["x", "merchant"],
+        })
+
+    with pytest.raises(ValueError, match=r"s1.*project"):
+        _parse_scenarios_sheet(_sheet("TRUE"))
+    # Disabled: parses without raising (warning only), stays disabled.
+    enabled, _scns = _parse_scenarios_sheet(_sheet("FALSE"))
+    assert enabled is False
 
 
 def test_scenario_nameplate_override_rescales_pv_profile():
@@ -228,6 +275,52 @@ def test_scenario_nameplate_override_rescales_pv_profile():
         base, {"name": "no pv", "pv": {"nameplate_kwp": 0.0}},
     )
     assert list(zero["ts"]["pv_kwh"]) == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_scenario_nameplate_override_nonnumeric_names_the_scenario():
+    """A locale-formatted or garbage nameplate override must raise naming
+    the scenario and value, not surface as a bare ``float()`` error deep in
+    the batch loop."""
+    from pvbess_opt.scenarios import _apply_scenario_overrides
+
+    base = {
+        "pv": {"pv_nameplate_kwp": 15000.0}, "bess": {}, "project": {},
+        "economics": {}, "simulation": {}, "balancing": {},
+        "ts": pd.DataFrame({
+            "timestamp": pd.date_range("2026-01-01", periods=2, freq="h"),
+            "pv_kwh": [0.0, 100.0],
+        }),
+    }
+    with pytest.raises(ValueError, match=r"big pv.*30,000.*not a number"):
+        _apply_scenario_overrides(
+            base, {"name": "big pv", "pv": {"nameplate_kwp": "30,000"}},
+        )
+
+
+def test_scenario_nameplate_override_on_zero_base_warns(caplog):
+    """Overriding the nameplate on a base WITHOUT one cannot rescale any
+    shape — CAPEX/OPEX grow while generation stays at the base profile.
+    That asymmetry must be loud, not silent."""
+    import logging
+
+    from pvbess_opt.scenarios import _apply_scenario_overrides
+
+    base = {
+        "pv": {}, "bess": {}, "project": {}, "economics": {},
+        "simulation": {}, "balancing": {},
+        "ts": pd.DataFrame({
+            "timestamp": pd.date_range("2026-01-01", periods=2, freq="h"),
+            "pv_kwh": [0.0, 0.0],
+        }),
+    }
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.scenarios"):
+        out = _apply_scenario_overrides(
+            base, {"name": "adds pv", "pv": {"nameplate_kwp": 30000.0}},
+        )
+    assert out["pv"]["pv_nameplate_kwp"] == 30000.0
+    assert any(
+        "no PV shape to scale" in rec.getMessage() for rec in caplog.records
+    ), caplog.records
 
 
 def test_parse_scenarios_sheet_disabled_toggle():
