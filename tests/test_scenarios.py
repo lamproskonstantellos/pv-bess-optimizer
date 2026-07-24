@@ -784,3 +784,43 @@ def test_cli_scenarios_file_survives_broken_workbook_sheet(
     # Without --scenarios the same workbook still fails fast (the sheet IS
     # the batch source there).
     assert cli.main([str(wb)]) == 1
+
+
+def test_nameplate_override_nonfinite_and_numpy_bool_are_rejected():
+    """NaN rides through float() (json.dump emits bare NaN by default;
+    YAML has .nan) and on a PV-less base silently produced a comparison
+    row identical to the base under the scenario's label; numpy bools are
+    not isinstance(bool) and would float() to a silent 1-kWp plant."""
+    from decimal import Decimal
+
+    import numpy as np
+
+    from pvbess_opt.scenarios import _apply_scenario_overrides
+
+    def _base(np_kwp):
+        return {
+            "pv": {"pv_nameplate_kwp": np_kwp}, "bess": {}, "project": {},
+            "economics": {}, "simulation": {}, "balancing": {},
+            "ts": pd.DataFrame({
+                "timestamp": pd.date_range("2026-01-01", periods=2, freq="h"),
+                "pv_kwh": [0.0, 100.0],
+            }),
+        }
+
+    for bad, base_np in (
+        (float("nan"), 0.0),        # the silent base-identical row case
+        (float("inf"), 1000.0),
+        (Decimal("NaN"), 0.0),
+        (np.float64("nan"), 0.0),
+        (np.True_, 1000.0),         # the silent 1-kWp case
+        (np.False_, 1000.0),
+    ):
+        with pytest.raises(ValueError, match=r"atk.*is not a"):
+            _apply_scenario_overrides(
+                _base(base_np), {"name": "atk", "pv": {"nameplate_kwp": bad}},
+            )
+    # Finite values (incl. numpy numerics) still rescale normally.
+    ok = _apply_scenario_overrides(
+        _base(1000.0), {"name": "ok", "pv": {"nameplate_kwp": np.float64(2000.0)}},
+    )
+    assert list(ok["ts"]["pv_kwh"]) == [0.0, 200.0]

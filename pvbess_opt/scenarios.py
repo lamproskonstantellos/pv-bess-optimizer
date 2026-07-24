@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -386,13 +387,14 @@ def _apply_scenario_overrides(
     )
     _raw_np = typed.get("pv", {}).get("pv_nameplate_kwp", 0.0)
     if _has_np_override and (
-        isinstance(_raw_np, bool)
+        isinstance(_raw_np, (bool, np.bool_))
         or _raw_np is None
         or (isinstance(_raw_np, str) and not _raw_np.strip())
     ):
-        # bool would float() to 1.0/0.0 (a silent 1-kWp or zeroed plant);
-        # a blank override would fall into the `or 0.0` base-default path
-        # and zero the profile — both are drafting mistakes, not sizes.
+        # bool (incl. numpy bool) would float() to 1.0/0.0 (a silent
+        # 1-kWp or zeroed plant); a blank override would fall into the
+        # `or 0.0` base-default path and zero the profile — both are
+        # drafting mistakes, not sizes.
         raise ValueError(
             f"scenario {scenario.get('name', 'scenario')!r}: "
             f"pv nameplate override {_raw_np!r} is not a number."
@@ -408,6 +410,17 @@ def _apply_scenario_overrides(
             f"{typed.get('pv', {}).get('pv_nameplate_kwp')!r} is not a "
             "number."
         ) from exc
+    if _has_np_override and not math.isfinite(_new_nameplate):
+        # NaN rides through float() (JSON's json.dump emits bare NaN by
+        # default; YAML has .nan) and would either silently zero the
+        # comparison row on a PV-less base (NaN > 0.0 is False on BOTH
+        # rescale branches, then the NaN materialises as a blank cell
+        # re-parsed to the default) or fail late and unnamed at the
+        # scenario's re-read.  Fail fast naming the scenario instead.
+        raise ValueError(
+            f"scenario {scenario.get('name', 'scenario')!r}: "
+            f"pv nameplate override {_raw_np!r} is not a finite number."
+        )
     if (
         _base_nameplate > 0.0
         and _new_nameplate != _base_nameplate
