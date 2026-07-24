@@ -767,6 +767,20 @@ def materialize_to_xlsx(input_path: str | Path, dst_dir: str | Path) -> Path:
     if not is_structured_config(input_path):
         return input_path
     typed = load_structured_config(input_path)
+    # The PV profile is already resolved into typed['ts'] and the workbook
+    # carries the column verbatim, so a surviving pv.timeseries_path would
+    # (a) point at a path relative to the ORIGINAL config dir that the
+    # temp workbook cannot resolve and (b) misfire the loud column-vs-file
+    # conflict warning on every read of the materialised workbook.  Same
+    # contract as evaluate_scenario and the input-snapshot materialiser.
+    if (
+        isinstance(typed.get("pv"), dict)
+        and typed["pv"].get("timeseries_path")
+        and isinstance(typed.get("ts"), pd.DataFrame)
+        and "pv_kwh" in typed["ts"].columns
+        and typed["ts"]["pv_kwh"].notna().any()
+    ):
+        typed["pv"]["timeseries_path"] = None
     dst = Path(dst_dir) / f"{input_path.stem}.xlsx"
     write_workbook(typed, dst)
     return dst
@@ -1026,6 +1040,21 @@ def _type_matches(value: Any, json_type: str | list[str] | None) -> bool:
     from .io import FALSY, TRUTHY
 
     if isinstance(json_type, (list, tuple)):
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        ):
+            # A numeric value must satisfy a union via its NUMERIC member
+            # — falling through to a "string" member would let 20.5 / inf
+            # pass an ["integer", "string"] key whose loader demands a
+            # whole year.  Exception: on nullable keys (the grid caps) the
+            # loader parses non-finite numerics AS the documented
+            # "uncapped" sentinel (inf), so they are loader-legal there.
+            if "null" in json_type and not np.isfinite(float(value)):
+                return True
+            _numeric = [jt for jt in json_type if jt in ("integer", "number")]
+            if _numeric:
+                return any(_type_matches(value, jt) for jt in _numeric)
         return any(_type_matches(value, jt) for jt in json_type)
     if json_type == "null":
         # Without this branch a union containing "null" fell through to
