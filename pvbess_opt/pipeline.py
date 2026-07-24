@@ -305,7 +305,15 @@ def _materialize_external_pv_snapshot(
     import openpyxl
 
     try:
-        src_wb = openpyxl.load_workbook(source_workbook, read_only=True)
+        # data_only=True: the RESOLVER's verdict comes from the pandas read
+        # (cached values), so the gate must judge the same thing — a column
+        # of formula cells with no cached value reads as EMPTY to the
+        # loader (the file wins) and must read as empty here too, or the
+        # snapshot keeps a dangling path.  Blank-string cells count as
+        # empty for the same reason (pandas reads them as NaN).
+        src_wb = openpyxl.load_workbook(
+            source_workbook, read_only=True, data_only=True,
+        )
         try:
             if "pv" not in src_wb.sheetnames:
                 return
@@ -327,7 +335,10 @@ def _materialize_external_pv_snapshot(
                 if "pv_kwh" in _hdr:
                     _ci = _hdr.index("pv_kwh")
                     for _r in _src_ts.iter_rows(min_row=2):
-                        if _r[_ci].value is not None:
+                        _v = _r[_ci].value
+                        if _v is not None and (
+                            not isinstance(_v, str) or _v.strip()
+                        ):
                             _col_has_data = True
                             break
         finally:
@@ -2589,17 +2600,21 @@ def run(config: RunConfig) -> Results:
     src = Path(config.excel)
     base_name = src.stem
     tmp_dir: Path | None = None
-    if is_structured_config(src):
-        tmp_dir = Path(tempfile.mkdtemp(prefix="pvbess_cfg_"))
-        run_config = replace(config, excel=materialize_to_xlsx(src, tmp_dir))
-    else:
-        run_config = config
-    # Buffer WARNING+ records from here on: read_inputs fires the loader
-    # diagnostics (empty columns, ffill/bfill, source conflicts) before the
-    # run log exists, and the tee replays the buffer once it does.
+    # Buffer WARNING+ records from here on: for a structured config the
+    # loader diagnostics fire inside materialize_to_xlsx (the YAML load
+    # resolves PV/timeseries there), and for a workbook inside read_inputs
+    # — both before the run log exists.  The tee replays the buffer once
+    # the log file opens.
     _early_log = _EarlyLogBuffer()
     logging.getLogger().addHandler(_early_log)
     try:
+        if is_structured_config(src):
+            tmp_dir = Path(tempfile.mkdtemp(prefix="pvbess_cfg_"))
+            run_config = replace(
+                config, excel=materialize_to_xlsx(src, tmp_dir),
+            )
+        else:
+            run_config = config
         params, ts = read_inputs(run_config.excel)
         apply_ieee_style()
         set_show_titles(params.get("show_titles", False))
