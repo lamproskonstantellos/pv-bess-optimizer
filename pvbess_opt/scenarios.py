@@ -174,6 +174,22 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
         defaults = _SHEET_DEFAULTS[section]
         for key in value:
             canonical = aliases.get(str(key), str(key))
+            if section == "pv" and canonical == "timeseries_path":
+                # evaluate_scenario resolves the base PV profile ONCE and
+                # clears the path from the materialised workbook, so this
+                # override would be applied and then discarded — the
+                # scenario would silently solve the BASE profile under the
+                # override's label.  (pv_source is different: forcing it
+                # to 'file' post-resolution is truthful, the materialised
+                # workbook carries the data.)
+                raise ValueError(
+                    f"scenario {name!r}: 'pv.timeseries_path' cannot be "
+                    "overridden per scenario — the base PV profile is "
+                    "resolved once and carried into every scenario "
+                    "workbook verbatim (per-scenario PV files are not "
+                    "re-read). Vary PV via 'pv.nameplate_kwp' (profile "
+                    "rescale) or run separate base workbooks."
+                )
             if canonical in defaults:
                 continue
             owner = _KEY_TO_SHEET.get(canonical)
@@ -316,12 +332,28 @@ def _canonicalise_scenario(scn: dict[str, Any]) -> dict[str, Any]:
     parent's enable or its dotted keys (the same silent-drop class the sheet
     parser rejects within one scenario).
     """
+    if "balancing" not in scn:
+        return scn
     bal = scn.get("balancing")
-    if bal is not None and not isinstance(bal, dict):
-        out = dict(scn)
-        out["balancing"] = {"balancing_enabled": bal}
+    if isinstance(bal, dict):
+        return scn
+    out = dict(scn)
+    if bal is None:
+        # An explicit null (YAML ``balancing:`` stub) must not reach
+        # _deep_merge as a scalar — it would replace an inherited balancing
+        # dict wholesale and the override applier would then skip it,
+        # silently running the BASE workbook's balancing under the
+        # scenario's label.  An empty dict is an inert merge instead.
+        logger.warning(
+            "scenario %r has an empty 'balancing' entry (null); ignoring "
+            "it (inherited/base balancing settings are kept). Remove the "
+            "key or give it a value.",
+            scn.get("name", "scenario"),
+        )
+        out["balancing"] = {}
         return out
-    return scn
+    out["balancing"] = {"balancing_enabled": bal}
+    return out
 
 
 def resolve_inheritance(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -348,10 +380,25 @@ def _apply_scenario_overrides(
     # per pv_nameplate_kwp") and the sizing sweep's identical treatment
     # (evaluate_sizing_point).  Skipped when the base has no nameplate
     # (no shape to scale) or no resolved pv_kwh column.
-    try:
-        _new_nameplate = float(
-            typed.get("pv", {}).get("pv_nameplate_kwp", 0.0) or 0.0
+    _has_np_override = any(
+        _PV_ALIASES.get(str(k), str(k)) == "pv_nameplate_kwp"
+        for k in (scenario.get("pv") or {})
+    )
+    _raw_np = typed.get("pv", {}).get("pv_nameplate_kwp", 0.0)
+    if _has_np_override and (
+        isinstance(_raw_np, bool)
+        or _raw_np is None
+        or (isinstance(_raw_np, str) and not _raw_np.strip())
+    ):
+        # bool would float() to 1.0/0.0 (a silent 1-kWp or zeroed plant);
+        # a blank override would fall into the `or 0.0` base-default path
+        # and zero the profile — both are drafting mistakes, not sizes.
+        raise ValueError(
+            f"scenario {scenario.get('name', 'scenario')!r}: "
+            f"pv nameplate override {_raw_np!r} is not a number."
         )
+    try:
+        _new_nameplate = float(_raw_np or 0.0)
     except (TypeError, ValueError) as exc:
         # Name the scenario and key — a locale-formatted override
         # ('30,000') would otherwise surface as a bare float() error.
@@ -696,6 +743,20 @@ def _parse_scenarios_sheet(
             # deep-merges correctly across ``inherits`` (a scalar/dict
             # cross would otherwise replace wholesale, silently dropping
             # the other side's overrides).
+            if value is None:
+                # A blank value cell would canonicalise to
+                # balancing_enabled=None, which materialises as a blank
+                # cell and re-parses to the sheet DEFAULT — silently
+                # resetting an inherited/base enable instead of leaving
+                # it alone.  Treat the row as inert, loudly.
+                logger.warning(
+                    "scenarios sheet: scenario %r has a bare 'balancing' "
+                    "row with a blank value cell; the row is ignored "
+                    "(base/inherited balancing settings are kept). Fill "
+                    "the value cell to use it.",
+                    current,
+                )
+                continue
             bucket = scn.setdefault("balancing", {})
             bucket["balancing_enabled"] = value
         elif "." in target:
