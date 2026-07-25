@@ -623,5 +623,5 @@ def test_scenario_resolve_years_accepts_native_list():
     assert _parse_value("scenario_resolve_years", "1,5,10", None) == "1,5,10"
     assert _parse_value("scenario_resolve_years", 5.0, None) == "5"
     assert _parse_value("scenario_resolve_years", None, "1,5") == "1,5"
-    with pytest.raises(ValueError, match="scenario_resolve_years.*boolean"):
+    with pytest.raises(ValueError, match=r"scenario_resolve_years.*boolean"):
         _parse_value("scenario_resolve_years", True, None)

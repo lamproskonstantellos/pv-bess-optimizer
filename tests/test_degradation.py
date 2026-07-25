@@ -253,7 +253,6 @@ def test_scheduled_replacement_beyond_lifecycle_is_rejected(base_typed=None):
     silently never fired (no CAPEX, no SOH reset, no warning) — the
     bess_augmentation_years 1..lifecycle bound is the precedent."""
     import copy
-
     from pathlib import Path
 
     import pytest as _pytest
