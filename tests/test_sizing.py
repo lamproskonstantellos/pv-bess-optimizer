@@ -109,6 +109,135 @@ def test_read_sizing_block(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Axis validation: a typo'd grid must never silently shape the deliverable.
+# A NaN axis point used to solve to an empty plant whose 0-CAPEX row topped
+# the NPV-ranked frontier; a negative one booked CAPEX as a year-0 credit
+# and did the same; a text cell in the Excel sheet was silently dropped so
+# the sweep quietly evaluated a smaller grid than the sheet listed.
+# ---------------------------------------------------------------------------
+
+
+def test_sizing_axis_rejects_nan():
+    with pytest.raises(ValueError, match="pv_nameplate_kwp.*finite"):
+        parse_sizing_grid({
+            "pv_nameplate_kwp": [float("nan"), 1000.0],
+            "bess_power_kw": [500.0],
+            "bess_capacity_kwh": [2000.0],
+        })
+
+
+def test_sizing_axis_rejects_infinity():
+    with pytest.raises(ValueError, match="bess_capacity_kwh.*finite"):
+        parse_sizing_grid({
+            "pv_nameplate_kwp": [1000.0],
+            "bess_power_kw": [500.0],
+            "bess_capacity_kwh": [float("inf")],
+        })
+
+
+def test_sizing_axis_rejects_negative():
+    with pytest.raises(ValueError, match="pv_nameplate_kwp.*>= 0"):
+        parse_sizing_grid({
+            "pv_nameplate_kwp": [-500.0, 1000.0],
+            "bess_power_kw": [250.0],
+            "bess_capacity_kwh": [500.0],
+        })
+
+
+def test_sizing_axis_rejects_boolean():
+    with pytest.raises(ValueError, match="bess_power_kw.*boolean"):
+        parse_sizing_grid({
+            "pv_nameplate_kwp": [1000.0],
+            "bess_power_kw": [True],
+            "bess_capacity_kwh": [2000.0],
+        })
+
+
+def test_sizing_axis_rejects_non_numeric_string():
+    with pytest.raises(ValueError, match="bess_duration_hours"):
+        parse_sizing_grid({
+            "pv_nameplate_kwp": [1000.0],
+            "bess_power_kw": [500.0],
+            "bess_duration_hours": ["2h"],
+        })
+
+
+def test_sizing_axis_zero_is_still_a_valid_point():
+    # 0 is the legitimate "no BESS" / "no PV" axis point and must survive
+    # the new validation untouched.
+    grid = parse_sizing_grid({
+        "pv_nameplate_kwp": [0.0, 1000.0],
+        "bess_power_kw": [0.0],
+        "bess_capacity_kwh": [0.0],
+    })
+    assert (0.0, 0.0, 0.0) in grid and (1000.0, 0.0, 0.0) in grid
+
+
+def test_sizing_sheet_names_non_numeric_cell():
+    from pvbess_opt.sizing import _parse_sizing_sheet
+    df = pd.DataFrame({
+        "enabled": ["TRUE", None, None],
+        "pv_nameplate_kwp": [4000, "8,000", 12000],
+        "bess_power_kw": [500, None, None],
+        "bess_capacity_kwh": [2000, None, None],
+    })
+    with pytest.raises(ValueError, match=r"pv_nameplate_kwp.*row 3.*'8,000'"):
+        _parse_sizing_sheet(df)
+
+
+def test_sizing_sheet_blank_cells_stay_ragged_padding():
+    from pvbess_opt.sizing import _parse_sizing_sheet
+    df = pd.DataFrame({
+        "enabled": ["TRUE", None, None],
+        "pv_nameplate_kwp": [4000, None, ""],
+        "bess_power_kw": [500, 1000, None],
+        "bess_capacity_kwh": [2000, None, None],
+    })
+    _enabled, block = _parse_sizing_sheet(df)
+    assert block["pv_nameplate_kwp"] == [4000.0]
+    assert block["bess_power_kw"] == [500.0, 1000.0]
+
+
+def test_sizing_grid_count_guard_raises_on_typo_scale():
+    with pytest.raises(ValueError, match="full MILP solve"):
+        parse_sizing_grid({
+            "pv_nameplate_kwp": {"min": 0, "max": 10_000, "step": 1},
+            "bess_power_kw": {"min": 0, "max": 100, "step": 10},
+            "bess_capacity_kwh": [1000.0, 2000.0],
+        })
+
+
+def test_sizing_grid_count_guard_warns_on_large_grid(caplog):
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING, logger="pvbess_opt.sizing"):
+        grid = parse_sizing_grid({
+            "pv_nameplate_kwp": {"min": 0, "max": 1_100, "step": 1},
+            "bess_power_kw": [500.0],
+            "bess_capacity_kwh": [2000.0],
+        })
+    assert len(grid) == 1_101
+    assert any("full MILP solve" in r.message for r in caplog.records)
+
+
+def test_read_sizing_block_yaml_honours_enabled_toggle(tmp_path):
+    # enabled: false -> no sweep (the Excel sheet's gate, same semantics).
+    off = tmp_path / "off.yaml"
+    off.write_text(
+        "sizing:\n  enabled: false\n  pv_nameplate_kwp: [1000, 2000]\n",
+        encoding="utf-8",
+    )
+    assert read_sizing_block(off) is None
+    # enabled: true -> block returned with the toggle stripped.
+    on = tmp_path / "on.yaml"
+    on.write_text(
+        "sizing:\n  enabled: true\n  pv_nameplate_kwp: [1000, 2000]\n",
+        encoding="utf-8",
+    )
+    assert read_sizing_block(on) == {"pv_nameplate_kwp": [1000, 2000]}
+
+
+# ---------------------------------------------------------------------------
 # Excel-driven sizing sheet (columnar, gated by an enabled TRUE/FALSE toggle)
 # ---------------------------------------------------------------------------
 
