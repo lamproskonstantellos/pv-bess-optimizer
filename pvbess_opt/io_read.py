@@ -131,6 +131,54 @@ def _resolve_timeseries(raw: dict[str, Any], base_dir: Path) -> pd.DataFrame:
     )
 
 
+def _convenience_num(
+    block: str, key: str, value: Any, kind: type,
+) -> float | int | None:
+    """Parse one financing/grid convenience-block value with the workbook
+    guards.
+
+    Blank-means-absent, like every workbook cell: a ``gearing:`` stub
+    (None), ``''`` or NaN keeps the economics default with a warning.
+    Booleans are rejected naming the key (float(True) is 1.0 — a
+    ``gearing: true`` would silently become 100 % debt), non-finite
+    numerics are rejected like every ranged workbook key, and an integer
+    key rejects a fractional value instead of silently truncating
+    (int(15.5) == 15).
+    """
+    if value is None or (isinstance(value, str) and not value.strip()) or (
+        isinstance(value, float) and np.isnan(value)
+    ):
+        logger.warning(
+            "%s block key %r is blank; keeping the economics default.",
+            block, key,
+        )
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(
+            f"{block} block key {key!r} expects a number, got boolean "
+            f"{bool(value)!r}."
+        )
+    try:
+        as_float = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"{block} block key {key!r} expects a number, got {value!r}."
+        ) from None
+    if not np.isfinite(as_float):
+        raise ValueError(
+            f"{block} block key {key!r} expects a finite number, got "
+            f"{value!r}."
+        )
+    if kind is int:
+        if as_float != int(as_float):
+            raise ValueError(
+                f"{block} block key {key!r} expects a whole number, got "
+                f"{value!r}."
+            )
+        return int(as_float)
+    return as_float
+
+
 def _apply_financing_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
     """Map an optional top-level ``financing:`` block onto economics keys.
 
@@ -142,25 +190,7 @@ def _apply_financing_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
         return
 
     def _num(key: str, kind: type) -> float | int | None:
-        # Blank-means-absent, like every workbook cell: a `gearing:`
-        # stub (None) or '' keeps the economics default instead of
-        # dying in float(None)/int('') unnamed.  A non-blank value that
-        # will not parse is named.
-        value = fin[key]
-        if value is None or (isinstance(value, str) and not value.strip()):
-            logger.warning(
-                "financing block key %r is blank; keeping the economics "
-                "default.", key,
-            )
-            return None
-        try:
-            converted: float | int = kind(value)
-        except (TypeError, ValueError):
-            raise ValueError(
-                f"financing block key {key!r} expects a number, got "
-                f"{value!r}."
-            ) from None
-        return converted
+        return _convenience_num("financing", key, fin[key], kind)
 
     econ = typed["economics"]
     if "gearing" in fin:
@@ -195,19 +225,8 @@ def _apply_grid_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
     econ = typed["economics"]
 
     def _num(key: str) -> float | None:
-        value = grid[key]
-        if value is None or (isinstance(value, str) and not value.strip()):
-            logger.warning(
-                "grid block key %r is blank; keeping the economics "
-                "default.", key,
-            )
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            raise ValueError(
-                f"grid block key {key!r} expects a number, got {value!r}."
-            ) from None
+        value = _convenience_num("grid", key, grid[key], float)
+        return None if value is None else float(value)
 
     if "co2_intensity" in grid:
         co2 = _num("co2_intensity")
