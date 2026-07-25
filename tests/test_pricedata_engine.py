@@ -654,3 +654,28 @@ def test_nonpositive_start_year_raises_named_error(tmp_path):
         apply_price_scenarios(
             econ, _armed_ts(), _res(pv_export=1.0), base_dir=tmp_path,
         )
+
+
+def test_zero_year1_base_with_live_later_years_warns(caplog):
+    """A store pricing a stream 0 in year 1 but non-zero later (e.g. a
+    product procured only from year 2) silently collapsed the whole
+    escalation path to flat 1.0; the guard now says so.  A genuinely
+    idle stream (all years ~0) stays quiet."""
+    import logging
+
+    from pvbess_opt.pricedata.engine import _factor_series
+
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.pricedata.engine"):
+        out = _factor_series(
+            [0.0, 10.0, 20.0], stream="bm_afrr_up_capacity", scenario="s1",
+        )
+    assert out == [1.0, 1.0, 1.0]
+    assert any("collapses to flat" in r.getMessage() for r in caplog.records)
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.pricedata.engine"):
+        out = _factor_series([0.0, 0.0, 0.0], stream="idle", scenario="s1")
+    assert out == [1.0, 1.0, 1.0]
+    assert not any(
+        "collapses to flat" in r.getMessage() for r in caplog.records
+    )

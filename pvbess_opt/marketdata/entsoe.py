@@ -47,6 +47,7 @@ from .base import (
     Zone,
     install_token_log_redaction,
     mask_token,
+    scrub_token_text,
     utcnow_isoformat,
 )
 
@@ -138,7 +139,7 @@ def parse_publication_document(body: bytes) -> list[PriceSegment]:
     except ElementTree.ParseError as exc:
         raise MarketDataError(
             f"unparseable ENTSO-E response ({exc}); first bytes: "
-            f"{body[:80]!r}."
+            f"{scrub_token_text(repr(body[:80]))}."
         ) from exc
     root_name = _local_name(root.tag)
     if root_name == "Acknowledgement_MarketDocument":
@@ -267,9 +268,12 @@ def _fetch_window(
             "or reuse the on-disk cache."
         )
     if status != 200:
+        # The excerpt is scrubbed: an error page can echo the request
+        # URL (or the bare token) into the body, and this message flows
+        # into logger.exception via the CLI.
         raise MarketDataError(
             f"ENTSO-E request failed with HTTP {status}; response starts "
-            f"{body[:120]!r}."
+            f"{scrub_token_text(repr(body[:120]), token)}."
         )
     items: list[Any] = []
     for document in _bodies_from_response(body):
@@ -538,7 +542,7 @@ def parse_balancing_document(
     except ElementTree.ParseError as exc:
         raise MarketDataError(
             f"unparseable ENTSO-E response ({exc}); first bytes: "
-            f"{body[:80]!r}."
+            f"{scrub_token_text(repr(body[:80]))}."
         ) from exc
     root_name = _local_name(root.tag)
     if root_name == "Acknowledgement_MarketDocument":

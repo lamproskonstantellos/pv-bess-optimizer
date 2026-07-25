@@ -135,3 +135,45 @@ def test_materialize_still_blanks_token(tmp_path):
     wb = openpyxl.load_workbook(snap, data_only=True)
     md = {r[0]: r[1] for r in wb["market_data"].iter_rows(min_row=2, values_only=True)}
     assert md["price_source"] == "file"
+
+
+# ---------------------------------------------------------------------------
+# S3 — HTTP-status error bodies are scrubbed (query-echoing responses)
+# ---------------------------------------------------------------------------
+
+
+def test_http_status_error_body_excerpt_scrubs_token(monkeypatch):
+    """A non-200 body that echoes the request (proxy/error pages do) must
+    not carry the token into the raised message — cli.main logs it via
+    logger.exception."""
+    echo_body = (
+        f"<html>bad request: /api?securityToken={_FAKE_TOKEN}"
+        f"&documentType=A44 | raw {_FAKE_TOKEN}</html>"
+    ).encode()
+
+    monkeypatch.setattr(
+        entsoe, "_http_get", lambda params, timeout: (500, echo_body),
+    )
+    from datetime import datetime, timezone
+
+    with pytest.raises(entsoe.MarketDataError) as excinfo:
+        entsoe._fetch_window(
+            {"documentType": "A44"},
+            datetime(2025, 1, 1, tzinfo=timezone.utc),
+            datetime(2025, 1, 2, tzinfo=timezone.utc),
+            token=_FAKE_TOKEN, timeout=1.0,
+        )
+    assert _FAKE_TOKEN not in str(excinfo.value)
+    assert "HTTP 500" in str(excinfo.value)
+
+
+def test_scrub_token_text_masks_pattern_and_literal():
+    from pvbess_opt.marketdata.base import mask_token, scrub_token_text
+
+    text = f"url ?securityToken={_FAKE_TOKEN}&x=1 and bare {_FAKE_TOKEN}."
+    out = scrub_token_text(text, _FAKE_TOKEN)
+    assert _FAKE_TOKEN not in out
+    assert mask_token(_FAKE_TOKEN) in out
+    # Pattern-only mode (no live token in scope) still masks the query.
+    out2 = scrub_token_text(f"?securityToken={_FAKE_TOKEN}&y=2")
+    assert _FAKE_TOKEN not in out2

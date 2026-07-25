@@ -279,6 +279,22 @@ def mask_token(token: str) -> str:
 _SECURITY_TOKEN_RE = re.compile(r"(securityToken=)([^&\s'\"]+)", re.IGNORECASE)
 
 
+def scrub_token_text(text: str, token: str | None = None) -> str:
+    """Mask any secret material inside free text destined for an error.
+
+    Applies the ``securityToken=<...>`` pattern mask and, when the live
+    token is supplied, replaces literal occurrences of it too (an error
+    page can echo the request URL — or just the token — into the body,
+    which error paths quote in excerpts).
+    """
+    text = _SECURITY_TOKEN_RE.sub(
+        lambda m: m.group(1) + mask_token(m.group(2)), text,
+    )
+    if token:
+        text = text.replace(token, mask_token(token))
+    return text
+
+
 class _TokenRedactingFilter(logging.Filter):
     """Mask a ``securityToken=<token>`` query parameter in a log record."""
 
@@ -1219,6 +1235,25 @@ def resolve_market_data(
             "imbalance_price_short_eur_per_mwh",
             "imbalance_price_long_eur_per_mwh",
         )
+        # The PROVIDER side of the same contract: a response carrying
+        # both the single (uncategorised) series and the dual (A04/A05)
+        # pair would land all three columns and downstream would settle
+        # on whichever regime its presence checks find first — a silent
+        # provider-mixed regime.
+        if "imbalance_price_eur_per_mwh" in imbalance_applied and any(
+            c in imbalance_applied
+            for c in (
+                "imbalance_price_short_eur_per_mwh",
+                "imbalance_price_long_eur_per_mwh",
+            )
+        ):
+            raise MarketDataError(
+                f"imbalance_source={imb_provider!r} returned BOTH the "
+                "single imbalance price and the dual short/long pair "
+                f"for one window ({', '.join(sorted(imbalance_applied))}); "
+                "a mixed regime cannot be settled. Check the zone's "
+                "imbalance publication or set imbalance_source='file'."
+            )
         stale = [
             column for column in family
             if column in pre_existing and column not in imbalance_applied
