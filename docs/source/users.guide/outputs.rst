@@ -13,7 +13,8 @@ A run produces a single result directory under ``results/``.
   parameters and economic assumptions).
 * ``02_dispatch/dispatch_timeseries.xlsx``: one sheet per calendar year
   with the per-step dispatch (lowercase snake_case columns).
-* ``03_results.xlsx``: KPIs, monthly KPIs, cashflows (yearly /
+* ``03_results.xlsx``: KPIs, monthly KPIs, the Year-1 per-step
+  dispatch echo (``dispatch_year1``), cashflows (yearly /
   quarterly / monthly), financial KPIs, sensitivity, lifetime yearly
   aggregates, rolling-horizon MC distribution (when active),
   economic assumptions echo, the ``degradation`` (SOH / cycle-fade)

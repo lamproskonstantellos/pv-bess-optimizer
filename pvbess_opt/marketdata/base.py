@@ -279,6 +279,22 @@ def mask_token(token: str) -> str:
 _SECURITY_TOKEN_RE = re.compile(r"(securityToken=)([^&\s'\"]+)", re.IGNORECASE)
 
 
+def scrub_token_text(text: str, token: str | None = None) -> str:
+    """Mask any secret material inside free text destined for an error.
+
+    Applies the ``securityToken=<...>`` pattern mask and, when the live
+    token is supplied, replaces literal occurrences of it too (an error
+    page can echo the request URL — or just the token — into the body,
+    which error paths quote in excerpts).
+    """
+    text = _SECURITY_TOKEN_RE.sub(
+        lambda m: m.group(1) + mask_token(m.group(2)), text,
+    )
+    if token:
+        text = text.replace(token, mask_token(token))
+    return text
+
+
 class _TokenRedactingFilter(logging.Filter):
     """Mask a ``securityToken=<token>`` query parameter in a log record."""
 
@@ -683,6 +699,32 @@ _AUTO_DEFAULT_SOURCE = "entsoe"
 # today (every shipped zone has a route); kept as the documented hook
 # so a future zone without any publication degrades per the contract.
 _PUBLISHES_NOTHING: frozenset[tuple[str, str]] = frozenset()
+
+
+def balancing_fetch_covers_column(
+    column: str, balancing_source: str, zone_code: str,
+) -> bool:
+    """Whether a non-'file' balancing source will actually fill ``column``.
+
+    Greece procures no standalone FCR (co-optimised ISP), so the ADMIE
+    provider — selected explicitly or via ``auto`` for the ``gr`` zone —
+    never fetches ``fcr_capacity_price_eur_per_mwh``.  The loader's
+    gap-fill diagnostics consult this so a fetch-EXEMPT column keeps its
+    warnings (a mostly-blank FCR column was previously ffilled to a
+    constant price in silence on the assumption "the fetch will replace
+    it").
+    """
+    if column != "fcr_capacity_price_eur_per_mwh":
+        return True
+    token = str(balancing_source or "file").strip().lower()
+    zone_key = str(zone_code or "").strip().lower()
+    if token == "admie":
+        return False
+    if token == "auto":
+        return _AUTO_SOURCE.get("balancing", {}).get(
+            zone_key, _AUTO_DEFAULT_SOURCE,
+        ) != "admie"
+    return True
 
 
 def resolve_dataset_source(
@@ -1193,6 +1235,25 @@ def resolve_market_data(
             "imbalance_price_short_eur_per_mwh",
             "imbalance_price_long_eur_per_mwh",
         )
+        # The PROVIDER side of the same contract: a response carrying
+        # both the single (uncategorised) series and the dual (A04/A05)
+        # pair would land all three columns and downstream would settle
+        # on whichever regime its presence checks find first — a silent
+        # provider-mixed regime.
+        if "imbalance_price_eur_per_mwh" in imbalance_applied and any(
+            c in imbalance_applied
+            for c in (
+                "imbalance_price_short_eur_per_mwh",
+                "imbalance_price_long_eur_per_mwh",
+            )
+        ):
+            raise MarketDataError(
+                f"imbalance_source={imb_provider!r} returned BOTH the "
+                "single imbalance price and the dual short/long pair "
+                f"for one window ({', '.join(sorted(imbalance_applied))}); "
+                "a mixed regime cannot be settled. Check the zone's "
+                "imbalance publication or set imbalance_source='file'."
+            )
         stale = [
             column for column in family
             if column in pre_existing and column not in imbalance_applied

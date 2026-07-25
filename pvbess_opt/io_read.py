@@ -140,16 +140,46 @@ def _apply_financing_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
     fin = raw.get("financing")
     if not isinstance(fin, dict):
         return
+
+    def _num(key: str, kind: type) -> float | int | None:
+        # Blank-means-absent, like every workbook cell: a `gearing:`
+        # stub (None) or '' keeps the economics default instead of
+        # dying in float(None)/int('') unnamed.  A non-blank value that
+        # will not parse is named.
+        value = fin[key]
+        if value is None or (isinstance(value, str) and not value.strip()):
+            logger.warning(
+                "financing block key %r is blank; keeping the economics "
+                "default.", key,
+            )
+            return None
+        try:
+            converted: float | int = kind(value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"financing block key {key!r} expects a number, got "
+                f"{value!r}."
+            ) from None
+        return converted
+
     econ = typed["economics"]
     if "gearing" in fin:
-        econ["gearing_pct"] = float(fin["gearing"]) * 100.0
+        gearing = _num("gearing", float)
+        if gearing is not None:
+            econ["gearing_pct"] = gearing * 100.0
     if "interest_rate" in fin:
-        econ["debt_interest_rate_pct"] = float(fin["interest_rate"]) * 100.0
+        rate = _num("interest_rate", float)
+        if rate is not None:
+            econ["debt_interest_rate_pct"] = rate * 100.0
     if "tenor_years" in fin:
-        econ["debt_tenor_years"] = int(fin["tenor_years"])
+        tenor = _num("tenor_years", int)
+        if tenor is not None:
+            econ["debt_tenor_years"] = tenor
     elif "tenor" in fin:
-        econ["debt_tenor_years"] = int(fin["tenor"])
-    if "repayment" in fin:
+        tenor = _num("tenor", int)
+        if tenor is not None:
+            econ["debt_tenor_years"] = tenor
+    if "repayment" in fin and fin["repayment"] is not None:
         econ["debt_repayment"] = str(fin["repayment"])
 
 
@@ -163,10 +193,30 @@ def _apply_grid_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
     if not isinstance(grid, dict):
         return
     econ = typed["economics"]
+
+    def _num(key: str) -> float | None:
+        value = grid[key]
+        if value is None or (isinstance(value, str) and not value.strip()):
+            logger.warning(
+                "grid block key %r is blank; keeping the economics "
+                "default.", key,
+            )
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"grid block key {key!r} expects a number, got {value!r}."
+            ) from None
+
     if "co2_intensity" in grid:
-        econ["grid_co2_intensity_kg_per_mwh"] = float(grid["co2_intensity"])
+        co2 = _num("co2_intensity")
+        if co2 is not None:
+            econ["grid_co2_intensity_kg_per_mwh"] = co2
     if "co2_annual_decline" in grid:
-        econ["grid_co2_annual_decline_pct"] = float(grid["co2_annual_decline"]) * 100.0
+        decline = _num("co2_annual_decline")
+        if decline is not None:
+            econ["grid_co2_annual_decline_pct"] = decline * 100.0
 
 
 def load_structured_config(path: str | Path) -> dict[str, Any]:
@@ -385,7 +435,18 @@ def _resolve_price_decks(
                     f"price deck {deck!r} ({deck_path}) has {len(df)} "
                     f"rows but the model grid has {len(ts)}."
                 )
-            ts[f"{col}__{deck}"] = df[col].to_numpy(dtype=float)
+            try:
+                values = df[col].to_numpy(dtype=float)
+            except (TypeError, ValueError) as exc:
+                # A text cell ('12 EUR') previously surfaced as a bare
+                # float-conversion error naming neither deck, column
+                # nor file.
+                raise ValueError(
+                    f"price deck {deck!r} ({deck_path}): column {col!r} "
+                    f"contains a non-numeric cell ({exc}); every value "
+                    "must be a number in EUR/MWh."
+                ) from exc
+            ts[f"{col}__{deck}"] = values
 
 
 def _resolve_pvgis(typed: dict[str, Any]) -> None:
@@ -923,10 +984,11 @@ def config_json_schema() -> dict[str, Any]:
             props["bess_replacement_year"] = {
                 "type": ["integer", "string"],
             }
-            # Events CSV (Eq. E51): a '8,15' string, a bare year, or
-            # null (no events, the default).
+            # Events CSV (Eq. E51): a '8,15' string, a bare year, a
+            # native YAML/JSON list of years, or null (no events, the
+            # default).
             props["bess_augmentation_years"] = {
-                "type": ["string", "number", "null"],
+                "type": ["string", "number", "array", "null"],
             }
         if section == "project":
             # Grid caps (Eqs. S15/S35): a positive number, an
@@ -1055,7 +1117,18 @@ def _type_matches(value: Any, json_type: str | list[str] | None) -> bool:
             _numeric = [jt for jt in json_type if jt in ("integer", "number")]
             if _numeric:
                 return any(_type_matches(value, jt) for jt in _numeric)
-        return any(_type_matches(value, jt) for jt in json_type)
+        # Inside a union the "string" member means token strings (the
+        # loader's cap/replacement-year parsers reject containers), so
+        # route it through the conservative scalar check rather than
+        # the permissive free-form branch below.
+        return any(
+            _type_matches(value, jt) if jt != "string"
+            else (
+                isinstance(value, (str, int, float))
+                and not isinstance(value, bool)
+            )
+            for jt in json_type
+        )
     if json_type == "null":
         # Without this branch a union containing "null" fell through to
         # the accept-everything default, so e.g. a grid-cap key accepted
@@ -1090,7 +1163,10 @@ def _type_matches(value: Any, json_type: str | list[str] | None) -> bool:
                 return False
         return False
     if json_type == "boolean":
-        if isinstance(value, bool):
+        if isinstance(value, (bool, np.bool_)):
+            # np.bool_ is NOT a bool subclass; a pandas-read TRUE cell
+            # arrives as np.bool_ and the loader accepts it everywhere a
+            # Python bool is legal.
             return True
         if isinstance(value, (int, float)):
             # The loader's bool parser accepts any non-NaN numeric
@@ -1101,9 +1177,12 @@ def _type_matches(value: Any, json_type: str | list[str] | None) -> bool:
             and value.strip().lower() in (TRUTHY | FALSY)
         )
     if json_type == "string":
-        # The loader str()s numerics on free-form string keys (a
-        # year-named scenario like ``debt_sizing_scenario: 2030``).
-        return isinstance(value, (str, int, float))
+        # The loader str()s any non-blank scalar on free-form string
+        # keys (a year-named scenario like ``debt_sizing_scenario:
+        # 2030``, a boolean, a datetime) — never stricter than the
+        # loader.  Enum-constrained keys are already fenced by the enum
+        # check before the type check runs.
+        return value is not None
     if json_type == "array":
         return isinstance(value, (list, tuple))
     return True

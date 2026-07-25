@@ -87,8 +87,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "uncertainty_n_seeds; 0 = single deterministic noiseless RH).",
     )
     parser.add_argument(
-        "--seed", type=int, default=42,
-        help="Base seed for the Monte Carlo rolling-horizon ensemble.",
+        "--seed", type=int, default=None,
+        help="Base seed for the Monte Carlo rolling-horizon ensemble "
+             "(default 42).",
     )
     parser.add_argument(
         "--compare-uncertainty-sources", action="store_true", default=False,
@@ -97,6 +98,41 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "(overrides workbook uncertainty_compare_sources).",
     )
     return parser.parse_args(argv)
+
+
+def _warn_single_run_flags_ignored(args: argparse.Namespace) -> None:
+    """Name every explicitly-set single-run flag a batch route discards.
+
+    The scenario batch and the sizing sweep consume the shared run
+    setup (--solver / --mode / --outdir / --mip-gap / --time-limit /
+    --tee) but not the rolling-horizon / Monte Carlo / strict flags —
+    those apply to single runs only.  They were previously accepted and
+    silently dropped (exit 0, no message), so e.g. a --scenarios batch
+    launched with --monte-carlo 50 looked like a stochastic comparison
+    while every row solved deterministically.
+    """
+    ignored = [
+        flag for flag, is_set in (
+            ("--strict", bool(args.strict)),
+            ("--rolling-horizon", bool(args.rolling_horizon)),
+            ("--window-hours", args.window_hours is not None),
+            ("--commit-hours", args.commit_hours is not None),
+            ("--monte-carlo", args.monte_carlo is not None),
+            ("--seed", args.seed is not None),
+            (
+                "--compare-uncertainty-sources",
+                bool(args.compare_uncertainty_sources),
+            ),
+        ) if is_set
+    ]
+    if ignored:
+        logger.warning(
+            "Batch run (--scenarios / scenarios sheet / sizing sheet): "
+            "the single-run flag(s) %s are ignored on this route. "
+            "Configure the workbook's simulation sheet (uncertainty_* "
+            "keys) to run scenarios with those features.",
+            ", ".join(ignored),
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -130,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
         window_hours=args.window_hours,
         commit_hours=args.commit_hours,
         monte_carlo=args.monte_carlo,
-        seed=args.seed,
+        seed=42 if args.seed is None else args.seed,
         compare_uncertainty_sources=args.compare_uncertainty_sources,
     )
     try:
@@ -160,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
                 "sheet is ignored for this run (the --scenarios batch takes "
                 "precedence)."
             )
+        if args.scenarios or sheet_scenarios or sizing_block:
+            _warn_single_run_flags_ignored(args)
         if args.scenarios:
             run_scenarios(config, read_scenarios_file(args.scenarios))
         elif sheet_scenarios:

@@ -652,3 +652,36 @@ def test_intraday_cache_key_separates_auctions(monkeypatch, tmp_path):
     counter["n"] = 0
     fetch_intraday_auction_year(md_base.ZONES["gr"], 2025, "ida1", **kwargs)
     assert counter["n"] == 0  # cache hit
+
+
+def test_provider_mixed_imbalance_regime_errors(monkeypatch, tmp_path):
+    """A provider response carrying BOTH the single (uncategorised)
+    imbalance series and the dual A04/A05 pair previously applied all
+    three columns — a silent provider-mixed regime, contradicting the
+    'never a silent single-vs-dual mix' contract that already covers
+    the stale-workbook direction."""
+    from tests._marketdata_helpers import balancing_xml
+
+    window = {"start": "2024-12-31T20:00Z", "end": "2026-01-01T02:00Z"}
+
+    def mixed_get(params, timeout):
+        if params["documentType"] == "A85":
+            return 200, balancing_xml([
+                {
+                    "category": category, **window, "prices": {1: 30.0},
+                    "field": "imbalance_Price.amount",
+                }
+                for category in (None, "A04", "A05")
+            ])
+        return balancing_year_responder(params)
+
+    monkeypatch.setattr(entsoe_mod, "_http_get", mixed_get)
+    src = _workbook_with_market_cells(
+        tmp_path,
+        bidding_zone="de_lu",
+        imbalance_source="entsoe",
+        entsoe_token=_TOKEN,
+        market_cache_dir=str(tmp_path / "cache"),
+    )
+    with pytest.raises(MarketDataError, match="BOTH the single"):
+        read_inputs(src)

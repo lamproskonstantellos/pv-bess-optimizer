@@ -424,3 +424,147 @@ def test_materialize_to_xlsx_drops_resolved_pv_path(tmp_path, caplog):
         "IGNORED" in r.getMessage() for r in caplog.records
     ), [r.getMessage() for r in caplog.records]
     assert float(ts["pv_kwh"].iloc[-1]) == 23.0
+
+
+# ---------------------------------------------------------------------------
+# Config-surface parity guards (silent bool coercions, .inf, lists, blanks).
+# The workbook sheet layer rejects booleans in numeric fields one layer
+# above _parse_value, so the YAML/JSON path — which calls the key parsers
+# directly — needs the same guards inside the special-routed parsers.
+# ---------------------------------------------------------------------------
+
+
+def _config_from_shipped(tmp_path, mutate):
+    """Dump the shipped workbook to YAML, mutate the raw mapping, save."""
+    import yaml
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:24].reset_index(drop=True)
+    cfg = tmp_path / "cfg.yaml"
+    dump_structured_config(typed, cfg)
+    raw = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    mutate(raw)
+    cfg.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return cfg
+
+
+def test_config_bool_grid_cap_rejected_named(tmp_path):
+    """`p_grid_export_max_kw: true` previously loaded as a silent 1.0-kW
+    cap that strangled the plant; both cap keys now reject booleans."""
+    cfg = _config_from_shipped(
+        tmp_path, lambda raw: raw["project"].update(
+            p_grid_export_max_kw=True,
+        ),
+    )
+    with pytest.raises(ValueError, match=r"p_grid_export_max_kw.*boolean"):
+        load_structured_config(cfg)
+
+
+def test_config_bool_replacement_year_rejected_named(tmp_path):
+    """`bess_replacement_year: true` previously loaded as a silent year-1
+    replacement (float(True) == 1)."""
+    cfg = _config_from_shipped(
+        tmp_path, lambda raw: raw["bess"].update(bess_replacement_year=True),
+    )
+    with pytest.raises(ValueError, match=r"bess_replacement_year.*boolean"):
+        load_structured_config(cfg)
+
+
+def test_config_bool_tilt_and_weather_year_rejected_named():
+    from pvbess_opt.io import _parse_value
+
+    with pytest.raises(ValueError, match=r"tilt.*boolean"):
+        _parse_value("tilt", True, "optimal")
+    with pytest.raises(ValueError, match=r"weather_year.*boolean"):
+        _parse_value("weather_year", True, 2019)
+
+
+def test_config_inf_augmentation_years_named(tmp_path):
+    """`bess_augmentation_years: .inf` previously died in int(inf) with a
+    bare OverflowError before the round-14 named guard could fire."""
+    import yaml
+
+    cfg = _config_from_shipped(
+        tmp_path,
+        lambda raw: raw["bess"].update(bess_augmentation_years=None),
+    )
+    raw = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    raw["bess"]["bess_augmentation_years"] = float("inf")
+    cfg.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    # The load keeps the token; the run path (materialise -> read ->
+    # validate) names the key instead of dying in int(inf) with a bare
+    # OverflowError.
+    from pvbess_opt.io_read import materialize_to_xlsx
+
+    loaded = load_structured_config(cfg)
+    assert loaded["bess"]["bess_augmentation_years"] == "inf"
+    wb = materialize_to_xlsx(cfg, tmp_path)
+    with pytest.raises(ValueError, match="bess_augmentation_years"):
+        read_workbook(wb)
+
+
+def test_config_augmentation_list_form_loads(tmp_path):
+    """A native YAML list — the natural config form — normalises to the
+    canonical CSV instead of stringifying to '[8, 15]' garbage."""
+    cfg = _config_from_shipped(
+        tmp_path,
+        lambda raw: raw["bess"].update(bess_augmentation_years=[8, 15]),
+    )
+    loaded = load_structured_config(cfg)
+    assert loaded["bess"]["bess_augmentation_years"] == "8,15"
+    assert validate_config(
+        {"bess": {"bess_augmentation_years": [8, 15]}},
+    ) == []
+
+
+def test_config_augmentation_bool_and_date_rejected_named():
+    import datetime
+
+    from pvbess_opt.io import _parse_value
+
+    with pytest.raises(ValueError, match=r"bess_augmentation_years.*boolean"):
+        _parse_value("bess_augmentation_years", True, None)
+    with pytest.raises(ValueError, match=r"bess_augmentation_years.*date"):
+        _parse_value(
+            "bess_augmentation_years", datetime.datetime(2026, 1, 1), None,
+        )
+
+
+def test_financing_and_grid_blocks_blank_means_absent(tmp_path, caplog):
+    """A `gearing:` stub (None) or '' keeps the economics default with a
+    warning instead of dying in float(None) unnamed; a non-blank value
+    that will not parse is named."""
+    cfg = _config_from_shipped(
+        tmp_path,
+        lambda raw: raw.update(
+            financing={"gearing": None, "interest_rate": ""},
+            grid={"co2_intensity": ""},
+        ),
+    )
+    with caplog.at_level(logging.WARNING):
+        loaded = load_structured_config(cfg)
+    blanks = [r.getMessage() for r in caplog.records if "is blank" in r.getMessage()]
+    assert len(blanks) == 3
+    # The economics defaults survive untouched.
+    base = read_workbook(ROOT / "inputs" / "input.xlsx")
+    assert loaded["economics"]["gearing_pct"] == base["economics"]["gearing_pct"]
+
+    cfg2 = _config_from_shipped(
+        tmp_path, lambda raw: raw.update(financing={"gearing": "half"}),
+    )
+    with pytest.raises(ValueError, match=r"gearing.*'half'"):
+        load_structured_config(cfg2)
+
+
+def test_validate_config_accepts_np_bool_and_scalar_string_keys():
+    """Parity: forms the loader accepts must pass validate_config —
+    np.bool_ on boolean keys and non-string scalars on free-form string
+    keys were rejected."""
+    import numpy as np
+
+    assert validate_config(
+        {"bess": {"terminal_soc_equal": np.bool_(True)}},
+    ) == []
+    assert validate_config(
+        {"scenario_engine": {"debt_sizing_scenario": 2030}},
+    ) == []

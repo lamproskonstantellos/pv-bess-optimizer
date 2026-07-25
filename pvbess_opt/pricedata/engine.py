@@ -168,6 +168,20 @@ def _factor_series(
     """g[y] = R_y / R_1 with the zero-volume guard and the year-1 anchor."""
     base = revenues[0]
     if abs(base) < 1e-9:
+        # No year-1 base to normalise on: the stream's escalation path
+        # collapses to flat.  Silent for a genuinely idle stream (all
+        # years ~0), but a store that prices later years while year 1
+        # is 0 (e.g. a product procured only from year 2) would lose
+        # its entire path — say so.
+        if any(abs(r) > 1e-9 for r in revenues[1:]):
+            logger.warning(
+                "scenario %r: %s has a ~0 year-1 base but non-zero "
+                "later-year store values; the per-year escalation path "
+                "collapses to flat 1.0 (the reprice normalises on the "
+                "year-1 dispatch revenue). Check the store's year-1 "
+                "curve if a real path was intended.",
+                scenario, stream,
+            )
         return [1.0] * len(revenues)
     series = [r / base for r in revenues]
     if not all(np.isfinite(v) for v in series):

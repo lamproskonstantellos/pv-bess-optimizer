@@ -54,7 +54,10 @@ def apply_production_case(
       EUR/MWh on exported VOLUME, which falls with production — the
       opposite of the price-perturbing Revenue tornado driver, where
       it stays fixed); ``imbalance_cost_eur`` (Eq. E28: PV-curve
-      volume times DAM prices).
+      volume times DAM prices); ``go_revenue_eur`` (Eq. E54:
+      certificate volume IS PV export energy); and
+      ``support_settlement_eur`` (Eqs. E55-E57: premium times eligible
+      PV volume — the volume leg carries the resource risk).
     * DOES NOT scale: the balancing family (capacity AND activation —
       BESS reservation revenue, not PV-resource-driven; activation is
       partly PV-coupled in some configurations but is classified
@@ -68,8 +71,15 @@ def apply_production_case(
       ``grid_charging_fee_eur`` (grid-import volume, not PV);
       ``revenue_levy_eur`` (mixed market-turnover base — kept at the
       base value, which overstates the levy under a haircut and is
-      therefore conservative for a lender case); OPEX / CAPEX / DEVEX;
-      the informational ``bess_market_revenue_eur`` netting base.
+      therefore conservative for a lender case);
+      ``curtailment_compensation_eur`` and ``intraday_revenue_eur``
+      (curtailment and re-dispatch volumes are NONLINEAR in the
+      resource year — scaling them linearly would claim a precision
+      the cashflow-level approximation does not have; both belong to
+      the recorded re-dispatch future work); OPEX / CAPEX / DEVEX
+      (augmentation CAPEX included — a committed programme, not a
+      resource-linked cost); the informational
+      ``bess_market_revenue_eur`` netting base.
 
     The tax-layer columns are dropped by the net recompute (the same
     stale-value guard as the sensitivity frames): lender DSCR reads
@@ -118,6 +128,17 @@ def apply_production_case(
         "ppa_revenue_eur",
         "route_to_market_fee_eur",
         "imbalance_cost_eur",
+        # GO revenue (Eq. E54): certificate volume IS PV export energy
+        # (go_price x PV MWh x pv_factor), so it scales with the
+        # production case exactly like the PPA leg.
+        "go_revenue_eur",
+        # FiP/CfD support settlement (Eqs. E55-E57): premium per
+        # ELIGIBLE PV MWh times volume — the volume leg carries the
+        # resource risk, so the settlement scales with production.
+        # (This is the opposite of the price-perturbing Revenue tornado
+        # driver, where the mixed strike/reference column must NOT be
+        # scaled — see sensitivity.py.)
+        "support_settlement_eur",
     ):
         if col in df.columns:
             df[col] = df[col].astype(float) * factor
@@ -162,9 +183,21 @@ def build_lender_cases(
     if low_price_cf is not None and not low_price_cf.empty:
         cases.append(("low_price", 100.0, low_price_cf))
     rows: list[dict[str, Any]] = []
+    base_net = yearly_cf["net_cashflow_eur"].to_numpy(dtype=float)
     for case, f_pct, frame in cases:
         net = frame["net_cashflow_eur"].to_numpy(dtype=float)
-        equity_irr_pct, min_dscr, avg_dscr = _leverage_kpis(net, econ)
+        # The case rows answer "same committed debt, worse year", so
+        # under debt_repayment='sculpted' the service must stay the
+        # schedule committed at financial close (shaped on the BASE
+        # cashflow) — re-sculpting on the case CFADS made min == avg by
+        # construction and hid the binding worst year (the post-tax
+        # equity-IRR convention, economics.apply_tax_layer, is the
+        # precedent).  Annuity/linear schedules are CFADS-independent,
+        # so this is inert for them, and for the base row the source is
+        # its own cashflow.
+        equity_irr_pct, min_dscr, avg_dscr = _leverage_kpis(
+            net, econ, schedule_source_cf=base_net,
+        )
         npv = float(frame["discounted_cf_eur"].sum())
         investment = -float(net[0]) if net.size >= 1 else 0.0
         capacity = size_debt(

@@ -55,16 +55,52 @@ class SizingResult:
 # ---------------------------------------------------------------------------
 
 
-def _axis_values(spec: Any) -> list[float]:
+def _axis_float(raw: Any, name: str) -> float:
+    """Coerce one axis entry to a validated float.
+
+    Sizes are physical plant quantities: booleans (``float(True)`` would
+    be a silent 1-kWp/kW/kWh plant — the scenario-override precedent),
+    non-finite values (a NaN point solves to an empty plant and its
+    0-CAPEX row outranks every real point on the NPV-sorted frontier)
+    and negatives (a negative nameplate books CAPEX as a year-0 cash
+    CREDIT and crowns the garbage point) are all rejected naming the
+    axis, so a typo'd grid can never silently shape the deliverable.
+    """
+    if isinstance(raw, (bool, np.bool_)):
+        raise ValueError(
+            f"sizing axis '{name}' expects numbers, got boolean {raw}; "
+            "write the size as a numeric value."
+        )
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"sizing axis '{name}' expects numbers, got {raw!r}; "
+            "correct the entry."
+        ) from None
+    if not np.isfinite(val):
+        raise ValueError(
+            f"sizing axis '{name}' entries must be finite, got {raw!r}; "
+            "correct the entry."
+        )
+    if val < 0.0:
+        raise ValueError(
+            f"sizing axis '{name}' entries must be >= 0, got {val}; "
+            "sizes are physical plant quantities."
+        )
+    return val
+
+
+def _axis_values(spec: Any, name: str = "sizing") -> list[float]:
     """Parse one grid axis: an explicit list, a ``{min,max,step}`` mapping,
-    or a scalar."""
+    or a scalar.  Every value is validated by :func:`_axis_float`."""
     if isinstance(spec, (list, tuple)):
-        return [float(x) for x in spec]
+        return [_axis_float(x, name) for x in spec]
     if isinstance(spec, dict):
-        lo = float(spec["min"])
-        hi = float(spec["max"])
+        lo = _axis_float(spec["min"], f"{name}.min")
+        hi = _axis_float(spec["max"], f"{name}.max")
         step = float(spec.get("step", (hi - lo) or 1.0))
-        if step <= 0.0:
+        if not np.isfinite(step) or step <= 0.0:
             raise ValueError("sizing axis 'step' must be positive")
         out: list[float] = []
         x = lo
@@ -72,7 +108,31 @@ def _axis_values(spec: Any) -> list[float]:
             out.append(round(x, 6))
             x += step
         return out
-    return [float(spec)]
+    return [_axis_float(spec, name)]
+
+
+# Each grid point is a full MILP solve (~seconds to minutes), so the point
+# count is guarded: a warning past _GRID_WARN_POINTS (an intentional large
+# sweep still runs, loudly) and a hard error past _GRID_MAX_POINTS (at one
+# minute per solve that is ~10 weeks of wall-clock — always a typo'd axis,
+# never an intended sweep; split the grid into separate runs instead).
+_GRID_WARN_POINTS = 1_000
+_GRID_MAX_POINTS = 100_000
+
+
+def _guard_grid_size(count: int) -> None:
+    if count > _GRID_MAX_POINTS:
+        raise ValueError(
+            f"sizing grid has {count:,} points (> {_GRID_MAX_POINTS:,}); "
+            "each point is a full MILP solve, so a grid this size is "
+            "almost certainly a typo'd axis. Check the axis lists / "
+            "min-max-step entries, or split the sweep into smaller grids."
+        )
+    if count > _GRID_WARN_POINTS:
+        logger.warning(
+            "[sizing] grid has %s points; each point is a full MILP "
+            "solve, so this sweep will take a while.", f"{count:,}",
+        )
 
 
 def parse_sizing_grid(block: dict[str, Any]) -> list[tuple[float, float, float]]:
@@ -81,14 +141,20 @@ def parse_sizing_grid(block: dict[str, Any]) -> list[tuple[float, float, float]]
     Capacity may be given directly as ``bess_capacity_kwh`` or as
     ``bess_duration_hours`` (capacity = power x duration).
     """
-    pv = _axis_values(block.get("pv_nameplate_kwp", block.get("pv_kwp", 0.0)))
-    power = _axis_values(block.get("bess_power_kw", 0.0))
+    pv = _axis_values(
+        block.get("pv_nameplate_kwp", block.get("pv_kwp", 0.0)),
+        "pv_nameplate_kwp",
+    )
+    power = _axis_values(block.get("bess_power_kw", 0.0), "bess_power_kw")
     if "bess_capacity_kwh" in block:
-        cap = _axis_values(block["bess_capacity_kwh"])
+        cap = _axis_values(block["bess_capacity_kwh"], "bess_capacity_kwh")
+        _guard_grid_size(len(pv) * len(power) * len(cap))
         return [(p, w, c) for p, w, c in itertools.product(pv, power, cap)]
     if "bess_duration_hours" in block:
-        dur = _axis_values(block["bess_duration_hours"])
+        dur = _axis_values(block["bess_duration_hours"], "bess_duration_hours")
+        _guard_grid_size(len(pv) * len(power) * len(dur))
         return [(p, w, w * d) for p, w, d in itertools.product(pv, power, dur)]
+    _guard_grid_size(len(pv) * len(power))
     return [(p, w, w) for p, w in itertools.product(pv, power)]
 
 
@@ -331,8 +397,25 @@ def _parse_sizing_sheet(df: pd.DataFrame) -> tuple[bool, dict[str, Any]]:
         key = cols.get(name)
         if key is None:
             return []
-        series = pd.to_numeric(df[key], errors="coerce").dropna()
-        return [float(x) for x in series.tolist()]
+        raw = df[key]
+        numeric = pd.to_numeric(raw, errors="coerce")
+        # Blank cells are the documented ragged-column padding; a
+        # non-blank cell that fails numeric conversion is an authored
+        # value the sweep would otherwise silently drop (a quietly
+        # smaller grid), so it is named and rejected instead.
+        for pos, (orig, num) in enumerate(zip(raw, numeric, strict=True)):
+            if not pd.isna(num):
+                continue
+            if orig is None or (isinstance(orig, float) and np.isnan(orig)):
+                continue
+            if isinstance(orig, str) and not orig.strip():
+                continue
+            raise ValueError(
+                f"sizing sheet column '{name}' row {pos + 2} contains "
+                f"{orig!r}, which is not a number; correct the cell "
+                "(blank cells are allowed and skipped)."
+            )
+        return [float(x) for x in numeric.dropna().tolist()]
 
     enabled = False
     enabled_key = cols.get("enabled")
@@ -377,6 +460,19 @@ def read_sizing_block(path: str | Path) -> dict[str, Any] | None:
         if isinstance(raw, dict):
             block = raw.get("sizing")
             if isinstance(block, dict):
+                # Honour an explicit ``enabled`` toggle exactly like the
+                # Excel sheet's gate: a config that carries the block but
+                # switches it off must not run the sweep.  Absent key =
+                # enabled (presence of the block opts in, as documented).
+                from .io import _parse_bool
+
+                if "enabled" in block:
+                    enabled = _parse_bool(block["enabled"], True)
+                    block = {
+                        k: v for k, v in block.items() if k != "enabled"
+                    }
+                    if not enabled:
+                        return None
                 return block
         return None
     if suffix in (".xlsx", ".xls"):
@@ -441,8 +537,12 @@ def run_sizing(config: Any, sizing_block: dict[str, Any]) -> SizingResult:
         oversizing_breakeven_mwh=breakeven,
     )
 
+    from .io import unique_output_dir
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(config.outdir) / f"{src.stem}_sizing_{stamp}"
+    out_dir = unique_output_dir(
+        Path(config.outdir) / f"{src.stem}_sizing_{stamp}",
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     write_sizing_workbook(out_dir / "sizing.xlsx", result)
     plot_efficient_frontier(frontier, out_dir / "efficient_frontier.pdf")

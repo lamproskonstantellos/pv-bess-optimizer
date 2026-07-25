@@ -71,6 +71,7 @@ Mode-specific timeseries semantics
 
 from __future__ import annotations
 
+import datetime as _dt
 import itertools
 import logging
 import re
@@ -2452,7 +2453,9 @@ def _parse_trajectories_sheet(
             bucket["mode"] = str(mode_val).strip().lower()
         try:
             year = int(float(year_val))
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
+            # OverflowError: int(inf) — a 1e999 year cell must be named
+            # like every other malformed trajectories entry.
             raise ValueError(
                 f"trajectories stream {current!r}: year {year_val!r} is "
                 f"not an integer."
@@ -2671,6 +2674,14 @@ def _parse_string_enum(
 
 def _parse_pv_tilt(raw: Any, default: Any) -> Any:
     """Parse ``tilt``: the literal ``optimal`` or a number in degrees."""
+    if isinstance(raw, (bool, np.bool_)):
+        # float(True) is 1.0 — a silent 1-degree array (the generic
+        # boolean-in-numeric guard runs after the key-specific branches,
+        # so this parser needs its own copy).
+        raise ValueError(
+            f"'tilt' expects a number in [0, 90] or 'optimal', got "
+            f"boolean {bool(raw)!r}; write a numeric value instead."
+        )
     if raw is None:
         return default
     if isinstance(raw, float) and np.isnan(raw):
@@ -2707,6 +2718,14 @@ def _parse_pv_weather_year(raw: Any, default: Any) -> Any:
     grid), so advertising it here would only defer the failure to fetch
     time with a confusing error.
     """
+    if isinstance(raw, (bool, np.bool_)):
+        # int(True) is 1 — a silent year-1 weather request (the generic
+        # boolean-in-numeric guard runs after the key-specific branches,
+        # so this parser needs its own copy).
+        raise ValueError(
+            f"'weather_year' expects a whole calendar year (e.g. 2019), "
+            f"got boolean {bool(raw)!r}; write a numeric value instead."
+        )
     if raw is None:
         return default
     if isinstance(raw, float) and np.isnan(raw):
@@ -2794,11 +2813,29 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
     if key == "bess_augmentation_years":
         # Free-form CSV of event years ('8,15'); a blank cell keeps the
         # default (None = no events).  Numeric single-year cells arrive
-        # as floats from openpyxl, so normalise through str.  Content
-        # validation (integers, 1..lifecycle) is the validator's job.
+        # as floats from openpyxl, so normalise through str.  A YAML/JSON
+        # list ([8, 15] — the natural config form) normalises to the same
+        # CSV.  Content validation (integers, 1..lifecycle) is the
+        # validator's job; non-finite floats must NOT hit int() here
+        # (int(inf) is a bare OverflowError that would pre-empt the named
+        # parse_augmentation_years error).
         if raw is None or (isinstance(raw, float) and np.isnan(raw)):
             return default
-        if isinstance(raw, float) and raw == int(raw):
+        if isinstance(raw, (bool, np.bool_)):
+            raise ValueError(
+                f"{key!r} expects project years (e.g. '8,15'), got "
+                f"boolean {bool(raw)!r}."
+            )
+        if isinstance(raw, _dt.date):
+            # datetime.datetime subclasses date, so one check covers both.
+            raise ValueError(
+                f"{key!r} expects project years (e.g. '8,15'), got a "
+                f"date {raw!r}."
+            )
+        if isinstance(raw, (list, tuple)):
+            token = ",".join(str(x) for x in raw).strip()
+            return token if token else default
+        if isinstance(raw, float) and np.isfinite(raw) and raw == int(raw):
             raw = int(raw)
         token = str(raw).strip()
         return token if token else default
@@ -2892,6 +2929,16 @@ def _parse_grid_export_max(
     unlimited tokens) raises ``ValueError`` naming the key rather than
     silently capping at the default.
     """
+    if isinstance(raw, (bool, np.bool_)):
+        # float(True) is 1.0: a YAML `p_grid_export_max_kw: true` would
+        # silently strangle the plant behind a 1-kW cap (the workbook
+        # path rejects booleans one layer up; the config path lands
+        # here).
+        raise ValueError(
+            f"{key!r} expects a number in kW, got boolean {bool(raw)!r}; "
+            "write a number, or leave the value blank / 'inf' / "
+            "'unlimited' / 'disabled' to remove the cap."
+        )
     if raw is None:
         return float("inf")
     if isinstance(raw, float) and np.isnan(raw):
@@ -3098,6 +3145,14 @@ def _parse_bess_replacement_year(raw: Any, default: Any) -> int | str:
     the default 0, silently disabling replacement).
     """
     _ = default  # three-way semantics leave no room for a fallback
+    if isinstance(raw, (bool, np.bool_)):
+        # float(True) is 1.0: a YAML `bess_replacement_year: true` would
+        # silently schedule a year-1 replacement (the workbook path
+        # rejects booleans one layer up; the config path lands here).
+        raise ValueError(
+            f"'bess_replacement_year' expects a number, blank, or "
+            f"'auto', got boolean {bool(raw)!r}."
+        )
     if raw is None:
         return BESS_REPLACEMENT_AUTO
     if isinstance(raw, float) and np.isnan(raw):
@@ -3256,7 +3311,25 @@ def _extract_profile(
         return arr
 
     monthly_cols = [f"{monthly_prefix}_{m}" for m in _MONTH_TOKENS]
-    if all(col in df_norm.columns for col in monthly_cols):
+    present_monthly = [c for c in monthly_cols if c in df_norm.columns]
+    if present_monthly and len(present_monthly) < len(monthly_cols):
+        # A PARTIAL monthly set is always a typo'd header, and silently
+        # degrading a 24x12 authored profile to the scalar column (or to
+        # the flat default) would reshape dispatch with no trace.
+        missing = [c for c in monthly_cols if c not in df_norm.columns]
+        raise ValueError(
+            f"profile sheet carries {len(present_monthly)} of the 12 "
+            f"'{monthly_prefix}_<month>' columns; missing/typo'd: "
+            f"{missing}. Provide all 12 monthly columns, or a single "
+            f"'{scalar_col}' column."
+        )
+    if len(present_monthly) == len(monthly_cols):
+        if scalar_col in df_norm.columns:
+            logger.warning(
+                "profile sheet carries BOTH the scalar '%s' column and "
+                "the 12 monthly columns; the monthly set wins and the "
+                "scalar column is ignored.", scalar_col,
+            )
         arr = np.zeros((24, 12), dtype=float)
         for m_idx, m_name in enumerate(_MONTH_TOKENS):
             arr[:, m_idx] = (
@@ -3355,14 +3428,54 @@ def _normalise_timeseries(
         raise ValueError("timeseries sheet must contain a 'timestamp' column.")
     if "pv_kwh" not in ts.columns:
         raise ValueError("timeseries sheet must contain a 'pv_kwh' column.")
+    # pandas mangles DUPLICATED sheet headers to '<name>.1' / '<name>.2'
+    # silently.  For a schema column the un-suffixed duplicate wins every
+    # presence check, so e.g. an EMPTY first 'pv_kwh' next to the user's
+    # full second copy read as "no PV data" (and with PVGIS coordinates
+    # set, the fetch silently replaced the user's data).  Name the
+    # duplicate instead of guessing which copy was meant.
+    _mangled = re.compile(r"^(?P<base>.+)\.(?P<n>\d+)$")
+    for col in ts.columns:
+        m = _mangled.match(str(col))
+        if m and m.group("base") in ts.columns:
+            raise ValueError(
+                f"timeseries sheet has a duplicated {m.group('base')!r} "
+                "column header (pandas read the second copy as "
+                f"{col!r}); keep exactly one column per name."
+            )
+    # The id_da_* columns are the pipeline's own committed-position
+    # carriers (written into every intraday dispatch output).  Pasted
+    # back into an INPUT timeseries they would pin the day-ahead solve
+    # to the stale position within the deviation budget — a silently
+    # position-constrained "optimal" dispatch.
+    _reserved = [c for c in ts.columns if str(c).startswith("id_da_")]
+    if _reserved:
+        raise ValueError(
+            f"timeseries sheet carries reserved internal column(s) "
+            f"{sorted(map(str, _reserved))}: the id_da_* family is "
+            "written by the intraday two-stage dispatch and must not "
+            "appear in an input workbook. Remove the column(s)."
+        )
 
     def _fetched(col: str) -> bool:
         src_key = _COLUMN_MARKET_SOURCE.get(col)
         if src_key is None or not market_sources:
             return False
-        return str(
+        source = str(
             market_sources.get(src_key, "file") or "file"
-        ).strip().lower() != "file"
+        ).strip().lower()
+        if source == "file":
+            return False
+        if src_key == "balancing_source":
+            # A fetch-EXEMPT column (FCR under the ADMIE provider —
+            # explicit or 'auto' for the gr zone) keeps its gap/empty
+            # diagnostics: nothing will replace it after normalisation.
+            from .marketdata.base import balancing_fetch_covers_column
+
+            return balancing_fetch_covers_column(
+                col, source, str(market_sources.get("bidding_zone", "gr")),
+            )
+        return True
 
     # The MILP chains SOC and dispatch over ROW order, so out-of-order rows
     # (e.g. the sheet re-sorted by a price column in Excel and saved) would
@@ -3883,6 +3996,19 @@ def _validate_ppa_config(ppa: dict[str, Any]) -> None:
             "ppa_structure must be 'pay_as_produced' or 'baseload'; "
             f"got {structure!r}."
         )
+    if structure == "pay_as_produced":
+        share_pap = float(ppa.get("ppa_volume_share_pct", 100.0) or 0.0)
+        if share_pap == 0.0:
+            # The baseload analog (a zero band) is rejected loudly; a
+            # zero SHARE is the same drafting mistake on this structure
+            # — the contract is enabled and settles nothing.  Warn (not
+            # raise) so a deliberately parked contract stays runnable.
+            logger.warning(
+                "ppa_enabled = TRUE with ppa_volume_share_pct = 0: the "
+                "pay-as-produced contract covers no volume and settles "
+                "0 EUR. Set the share, or ppa_enabled = FALSE if the "
+                "contract is not meant to bind."
+            )
     if structure == "baseload":
         baseload_mw = float(ppa.get("ppa_baseload_mw", 0.0) or 0.0)
         if baseload_mw <= 0.0:
@@ -5024,7 +5150,7 @@ def validate_workbook_params(
 
 def _apply_balancing_timeseries_fallback(
     ts: pd.DataFrame, balancing: dict[str, Any],
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[str]]:
     """Fill in any missing balancing-price column with its scalar default.
 
     No-op when ``balancing_enabled`` is False (the columns may be absent
@@ -5035,9 +5161,16 @@ def _apply_balancing_timeseries_fallback(
     warning per missing column, which produced a 9-line warning storm
     for a workbook that simply hadn't carried any balancing-price
     timeseries.
+
+    Returns the (possibly copied) frame and the list of column names the
+    fallback materialised.  The list is provenance for the scenario
+    engine: a materialised column must NOT survive into a scenario's
+    temp workbook, or the scenario's re-read would find it "present"
+    and a scenario override of the corresponding ``*_default_*`` scalar
+    would be accepted but never reach settlement.
     """
     if not bool(balancing.get("balancing_enabled", False)):
-        return ts
+        return ts, []
 
     out = ts
     n_rows = len(out)
@@ -5066,11 +5199,18 @@ def _apply_balancing_timeseries_fallback(
             for col, value, default_key in missing_columns
         )
         logger.warning(
-            "Balancing timeseries columns missing; applied per-product "
-            "defaults: %s.",
+            "Balancing timeseries columns missing or empty; applied "
+            "per-product defaults: %s.",
             formatted,
         )
-    return out
+    return out, [col for col, _value, _key in missing_columns]
+
+
+# Header-scan window for the key/value sheets: rows a user might
+# plausibly leave above the header (title lines, a blank spacer) and
+# columns a user might insert between/before the pair.
+_KV_HEADER_SCAN_ROWS = 10
+_KV_HEADER_SCAN_COLS = 8
 
 
 def _read_kv_flat(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
@@ -5082,33 +5222,97 @@ def _read_kv_flat(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
     would make the boolean-in-numeric-field guard in ``_parse_kv_sheet``
     fire on legitimate zeros.  Requires the ``key`` / ``value`` header
     pair, skips blank and ``#`` separator keys.
+
+    The header pair is located by SCANNING (first ``_KV_HEADER_SCAN_ROWS``
+    rows, case-insensitive, any column order with ``value`` to the right
+    of ``key``), so a capitalised ``Key``/``Value`` pair, a blank row
+    left above the header, or a column inserted between them still parse
+    the authored values.  A sheet that EXISTS but has no locatable
+    header raises naming the sheet: every one of its keys would
+    otherwise silently revert to the schema defaults — delivered numbers
+    computed from a workbook the user never wrote.
+
+    Formula cells are substituted from their Excel-cached values when
+    the file carries them (a workbook last saved by Excel), so a
+    ``=2000*2`` value cell reads as the 4000 Excel displays.  A formula
+    with no cached value (script-authored file) keeps its formula text
+    and fails downstream with the named correct-the-cell error.
     """
     from openpyxl import load_workbook
 
     wb = load_workbook(xlsx_path, read_only=True)
     try:
         ws = wb[sheet_name]
-        rows = ws.iter_rows(max_col=2, values_only=True)
-        header = next(rows, None)
-        if (
-            header is None
-            or len(header) < 2
-            or str(header[0]).strip() != "key"
-            or str(header[1]).strip() != "value"
+        key_col: int | None = None
+        value_col: int | None = None
+        header_row: int | None = None
+        for row_idx, row in enumerate(
+            ws.iter_rows(
+                max_row=_KV_HEADER_SCAN_ROWS,
+                max_col=_KV_HEADER_SCAN_COLS,
+                values_only=True,
+            ),
+            start=1,
         ):
-            return {}
+            cells = [
+                str(c).strip().lower() if isinstance(c, str) else None
+                for c in row
+            ]
+            if "key" in cells:
+                k = cells.index("key")
+                if "value" in cells[k + 1:]:
+                    key_col = k + 1
+                    value_col = cells.index("value", k + 1) + 1
+                    header_row = row_idx
+                    break
+        if header_row is None or key_col is None or value_col is None:
+            raise ValueError(
+                f"Sheet {sheet_name!r} has no 'key' / 'value' header pair "
+                f"in its first {_KV_HEADER_SCAN_ROWS} rows; every key on "
+                "the sheet would silently fall back to its default. "
+                "Restore the header row (column headers 'key' and "
+                "'value')."
+            )
         out: dict[str, Any] = {}
-        for row in rows:
-            raw_key = row[0] if row else None
+        for row in ws.iter_rows(
+            min_row=header_row + 1, max_col=value_col, values_only=True,
+        ):
+            raw_key = row[key_col - 1] if len(row) >= key_col else None
             if not isinstance(raw_key, str):
                 continue
             key = raw_key.strip()
             if not key or key.startswith("#"):
                 continue
-            out[key] = row[1] if len(row) > 1 else None
-        return out
+            out[key] = row[value_col - 1] if len(row) >= value_col else None
     finally:
         wb.close()
+
+    # Substitute Excel-cached results for formula-text values.  The
+    # data_only pass is opened lazily so workbooks without formulas (the
+    # shipped artifact has zero) never pay a second read.
+    formula_keys = [
+        k for k, v in out.items()
+        if isinstance(v, str) and v.lstrip().startswith("=")
+    ]
+    if formula_keys:
+        wb_values = load_workbook(xlsx_path, read_only=True, data_only=True)
+        try:
+            ws_values = wb_values[sheet_name]
+            cached: dict[str, Any] = {}
+            for row in ws_values.iter_rows(
+                min_row=header_row + 1, max_col=value_col, values_only=True,
+            ):
+                raw_key = row[key_col - 1] if len(row) >= key_col else None
+                if isinstance(raw_key, str) and raw_key.strip() in formula_keys:
+                    cached[raw_key.strip()] = (
+                        row[value_col - 1] if len(row) >= value_col else None
+                    )
+            for formula_key in formula_keys:
+                if cached.get(formula_key) is not None:
+                    out[formula_key] = cached[formula_key]
+        finally:
+            wb_values.close()
+    return out
 
 
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
@@ -5134,6 +5338,15 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
                 flat, source=f"Workbook {xlsx_path!s} (bess sheet)",
             )
         typed[sheet_name] = _parse_kv_sheet(sheet_name, flat)
+        if sheet_name == "project" and (
+            typed["project"].get("p_grid_import_max_kw") is None
+        ):
+            # An ABSENT row keeps the schema default None; downstream
+            # consumers (np.isinf checks, float() in _typed_to_flat)
+            # need the uncapped sentinel itself, and a present-but-empty
+            # cell already parses to inf — the absent-row-equals-default
+            # contract demands the same value on both paths.
+            typed["project"]["p_grid_import_max_kw"] = float("inf")
         if (
             sheet_name == "bess"
             and "bess_degradation_pct_per_cycle" not in flat
@@ -5390,7 +5603,9 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
                 "blanks (the per-step share of the export cap that "
                 "remains available)."
             )
-    ts = _apply_balancing_timeseries_fallback(ts, typed["balancing"])
+    ts, _balancing_fallback_cols = _apply_balancing_timeseries_fallback(
+        ts, typed["balancing"],
+    )
     # Single-price imbalance settlement has no canonical DAM
     # relationship to proxy, so the column is mandatory (the dual
     # regime falls back per side to the U8a DAM proxy instead).
@@ -5437,6 +5652,10 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         "dt_minutes": dt_minutes,
     }
     out.update(typed)
+    # Provenance for the scenario engine (see the fallback docstring):
+    # which balancing price columns hold materialised scalar defaults
+    # rather than workbook data.  write_workbook ignores the key.
+    out["balancing_fallback_columns"] = _balancing_fallback_cols
     return out
 
 
@@ -5656,6 +5875,28 @@ LAYOUT_SUBDIRS: tuple[str, ...] = (
     "05_energy_plots",
     "06_uncertainty_plots",
 )
+
+
+def unique_output_dir(candidate: Path) -> Path:
+    """Return ``candidate`` or, when it already exists, the first free
+    ``<candidate>_2`` / ``_3`` / ... sibling.
+
+    The run directories are stamped to whole seconds, so two runs
+    starting within the same second previously landed in ONE directory
+    and the second silently overwrote the first's artifacts.  The bump
+    is logged so the batch log records where each run actually went.
+    """
+    candidate = Path(candidate)
+    if not candidate.exists():
+        return candidate
+    n = 2
+    while (bumped := candidate.with_name(f"{candidate.name}_{n}")).exists():
+        n += 1
+    logger.info(
+        "[io] output directory %s already exists (same-second run "
+        "stamp); writing to %s instead.", candidate, bumped,
+    )
+    return bumped
 
 
 def make_run_layout(out_dir: Path) -> dict[str, Path]:
