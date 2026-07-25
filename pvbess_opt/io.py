@@ -3048,7 +3048,11 @@ def parse_augmentation_years(raw: Any) -> tuple[int, ...]:
     if isinstance(raw, (list, tuple)):
         tokens = [str(v) for v in raw]
     else:
-        if isinstance(raw, float) and raw == int(raw):
+        if (
+            isinstance(raw, float)
+            and np.isfinite(raw)
+            and raw == int(raw)
+        ):
             raw = int(raw)
         tokens = str(raw).strip().split(",")
     years: set[int] = set()
@@ -3063,6 +3067,13 @@ def parse_augmentation_years(raw: Any) -> tuple[int, ...]:
                 "bess_augmentation_years must be a comma-separated list "
                 f"of project years (e.g. '8,15'); got {token!r}."
             ) from None
+        if not np.isfinite(value):
+            # int(inf) below would raise a bare OverflowError with no
+            # key named — reject like every other malformed entry.
+            raise ValueError(
+                "bess_augmentation_years entries must be finite whole "
+                f"project years; got {token!r}."
+            )
         if value != int(value):
             raise ValueError(
                 "bess_augmentation_years entries must be whole project "
@@ -3417,23 +3428,43 @@ def _normalise_timeseries(
             "zero. Add the column if this is not intentional."
         )
 
-    # Negative energy quantities are physically impossible on these two
-    # columns (PV generation and exogenous demand) and only surface later
-    # as an opaque solver infeasibility; reject naming the first offender.
-    # Checked BEFORE the ffill/bfill pass: negatives can only originate in
-    # real cells, and checking pre-fill keeps the blame on the user's cell
-    # (a leading blank bfilled from a negative would otherwise be named).
-    for col in ("pv_kwh", "load_kwh"):
+    def _as_float(col: str) -> pd.Series:
+        # astype(float) naming the offending COLUMN on failure — a
+        # whitespace-only or textual cell would otherwise surface as a
+        # bare "could not convert string to float" with no pointer to
+        # the sheet or column.  Shared by every conversion site below.
+        try:
+            return ts[col].astype(float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"timeseries column {col!r} contains a non-numeric "
+                f"cell ({exc}); fix the cell (blank cells are allowed "
+                "and treated as gaps)."
+            ) from exc
+
+    # Negative values are physically impossible on these columns (PV
+    # generation, exogenous demand, grid carbon intensity) and either
+    # surface later as an opaque solver infeasibility or silently flip a
+    # KPI's sign; reject naming the first offender.  Checked BEFORE the
+    # ffill/bfill pass: negatives can only originate in real cells, and
+    # checking pre-fill keeps the blame on the user's cell (a leading
+    # blank bfilled from a negative would otherwise be named).
+    for col, _reason in (
+        ("pv_kwh", "energy quantities must be >= 0 (net-metering exports "
+                   "do not belong in this column)"),
+        ("load_kwh", "energy quantities must be >= 0 (net-metering exports "
+                     "do not belong in this column)"),
+        ("grid_co2_kg_per_mwh", "grid carbon intensity must be >= 0"),
+    ):
         if col in ts.columns:
-            _vals = ts[col].astype(float)
+            _vals = _as_float(col)
             _neg = _vals < 0.0
             if bool(_neg.any()):
                 _first = ts.loc[_neg.idxmax(), "timestamp"]
                 raise ValueError(
                     f"timeseries column {col!r} contains negative values "
                     f"(first at {_first}: {float(_vals[_neg.idxmax()]):g}); "
-                    "energy quantities must be >= 0 (net-metering exports "
-                    "do not belong in this column)."
+                    f"{_reason}."
                 )
     # The nine balancing price columns and the CO2-intensity series get the
     # identical treatment: a present-but-empty balancing column previously
@@ -3450,17 +3481,7 @@ def _normalise_timeseries(
                 "grid_co2_kg_per_mwh",
                 *_BALANCING_TS_COLUMN_DEFAULTS):
         if col in ts.columns:
-            try:
-                numeric = ts[col].astype(float)
-            except (TypeError, ValueError) as exc:
-                # A whitespace-only or textual cell would otherwise surface
-                # as a bare "could not convert string to float" with no
-                # pointer to the sheet or column.
-                raise ValueError(
-                    f"timeseries column {col!r} contains a non-numeric "
-                    f"cell ({exc}); fix the cell (blank cells are allowed "
-                    "and treated as gaps)."
-                ) from exc
+            numeric = _as_float(col)
             nan_mask = numeric.isna()
             nan_count = int(nan_mask.sum())
             if nan_count == len(ts) and len(ts) > 0:
@@ -3532,7 +3553,7 @@ def _normalise_timeseries(
                 f"timeseries column {name!r}: deck name {deck!r} must "
                 f"match [a-z0-9_]+."
             )
-        numeric = ts[name].astype(float)
+        numeric = _as_float(name)
         nan_mask = numeric.isna()
         nan_count = int(nan_mask.sum())
         if nan_count == len(ts) and len(ts) > 0:
@@ -5023,7 +5044,16 @@ def _apply_balancing_timeseries_fallback(
     missing_columns: list[tuple[str, float, str]] = []
     for col, default_key in _BALANCING_TS_COLUMN_DEFAULTS.items():
         if col in out.columns:
-            continue
+            # A present-but-entirely-NaN column is semantically ABSENT and
+            # must take the scalar default too.  The normaliser drops such
+            # columns on the 'file' path, but a fetch-exempted column the
+            # provider does not publish (e.g. FCR under the ADMIE source —
+            # Greece procures no standalone FCR) survives to here as
+            # all-NaN and previously settled every product at NaN with no
+            # warning: NaN balancing revenue and NaN NPV.  This is the
+            # LAST line of defence and covers every source path.
+            if not bool(out[col].isna().all()) or n_rows == 0:
+                continue
         default_value = float(balancing.get(default_key, 0.0) or 0.0)
         if out is ts:  # avoid the copy until we know we need one
             out = ts.copy()

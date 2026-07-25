@@ -567,3 +567,98 @@ def test_whitespace_cell_in_price_column_is_named():
     })
     with pytest.raises(ValueError, match="dam_price_eur_per_mwh"):
         _normalise_timeseries(ts, mode="merchant")
+
+
+# --- round-14 guard refinements --------------------------------------------
+
+
+def test_present_but_empty_balancing_column_takes_scalar_default_always():
+    """The LAST line of defence for empty==absent: a present-but-all-NaN
+    balancing column that survives to the scalar fallback (a fetch-exempted
+    column the provider does not publish — e.g. FCR under the ADMIE source,
+    Greece procures no standalone FCR) must take the scalar default like an
+    absent column, not settle every product at NaN."""
+    from pvbess_opt.io import (
+        _apply_balancing_timeseries_fallback,
+        _normalise_timeseries,
+    )
+
+    idx = pd.date_range("2026-01-01", periods=4, freq="h")
+    # Direct fallback: present-but-all-NaN -> filled from the scalar.
+    ts = pd.DataFrame({
+        "timestamp": idx,
+        "fcr_capacity_price_eur_per_mwh": [np.nan] * 4,
+    })
+    bal = {"balancing_enabled": True,
+           "fcr_default_capacity_price_eur_per_mwh": 9.99}
+    out = _apply_balancing_timeseries_fallback(ts, bal)
+    assert out["fcr_capacity_price_eur_per_mwh"].tolist() == [9.99] * 4
+    # End-to-end shape of the ADMIE gap: the normaliser keeps the column
+    # quietly (fetch-exempted), the fetch never fills FCR, the fallback
+    # must still rescue it.
+    ts2 = pd.DataFrame({
+        "timestamp": idx, "pv_kwh": [1.0] * 4, "load_kwh": [2.0] * 4,
+        "dam_price_eur_per_mwh": [50.0] * 4,
+        "fcr_capacity_price_eur_per_mwh": [np.nan] * 4,
+    })
+    kept = _normalise_timeseries(
+        ts2, mode="self_consumption",
+        market_sources={"balancing_source": "admie"},
+    )
+    assert kept["fcr_capacity_price_eur_per_mwh"].isna().all()
+    rescued = _apply_balancing_timeseries_fallback(kept, bal)
+    assert rescued["fcr_capacity_price_eur_per_mwh"].tolist() == [9.99] * 4
+    # A populated column stays verbatim (bit-identity depends on it).
+    ts3 = pd.DataFrame({
+        "timestamp": idx,
+        "fcr_capacity_price_eur_per_mwh": [1.0, 2.0, 3.0, 4.0],
+    })
+    same = _apply_balancing_timeseries_fallback(ts3, bal)
+    assert same["fcr_capacity_price_eur_per_mwh"].tolist() == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_whitespace_cells_named_in_energy_and_deck_columns():
+    """The round-13 astype guard covered the canonical loop only; the
+    negative-value pre-check (pv_kwh/load_kwh) and the deck-variant loop
+    still surfaced a bare 'could not convert string to float'."""
+    from pvbess_opt.io import _normalise_timeseries
+
+    idx = pd.date_range("2026-01-01", periods=4, freq="h")
+    base = {"timestamp": idx, "pv_kwh": [1.0] * 4, "load_kwh": [2.0] * 4,
+            "dam_price_eur_per_mwh": [50.0] * 4}
+    bad_pv = pd.DataFrame({**base, "pv_kwh": ["1", " ", "3", "4"]})
+    with pytest.raises(ValueError, match="pv_kwh"):
+        _normalise_timeseries(bad_pv, mode="merchant")
+    bad_deck = pd.DataFrame({
+        **base, "dam_price_eur_per_mwh__low": ["1", " ", "3", "4"],
+    })
+    with pytest.raises(ValueError, match="dam_price_eur_per_mwh__low"):
+        _normalise_timeseries(bad_deck, mode="merchant")
+
+
+def test_negative_grid_co2_is_rejected():
+    """A negative carbon intensity is physically wrong and would silently
+    flip emissions KPIs' sign; rejected naming the column and first row."""
+    from pvbess_opt.io import _normalise_timeseries
+
+    idx = pd.date_range("2026-01-01", periods=4, freq="h")
+    ts = pd.DataFrame({
+        "timestamp": idx, "pv_kwh": [1.0] * 4, "load_kwh": [2.0] * 4,
+        "dam_price_eur_per_mwh": [50.0] * 4,
+        "grid_co2_kg_per_mwh": [100.0, -250.0, 300.0, 200.0],
+    })
+    with pytest.raises(ValueError, match=r"grid_co2_kg_per_mwh.*01:00"):
+        _normalise_timeseries(ts, mode="merchant")
+
+
+def test_augmentation_years_infinite_entries_raise_cleanly():
+    """`bess_augmentation_years: .inf` previously died in int() with a bare
+    OverflowError naming nothing; it must raise ValueError naming the key
+    like every other malformed entry."""
+    from pvbess_opt.io import parse_augmentation_years
+
+    for bad in (float("inf"), float("-inf"), "inf", "8,inf"):
+        with pytest.raises(ValueError, match="bess_augmentation_years"):
+            parse_augmentation_years(bad)
+    assert parse_augmentation_years("8,15") == (8, 15)
+    assert parse_augmentation_years(8.0) == (8,)

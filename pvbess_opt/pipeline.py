@@ -309,8 +309,11 @@ def _materialize_external_pv_snapshot(
         # (cached values), so the gate must judge the same thing — a column
         # of formula cells with no cached value reads as EMPTY to the
         # loader (the file wins) and must read as empty here too, or the
-        # snapshot keeps a dangling path.  Blank-string cells count as
-        # empty for the same reason (pandas reads them as NaN).
+        # snapshot keeps a dangling path.  Whitespace-string cells also
+        # count as empty (defensive: the loader rejects such workbooks
+        # naming the column before any snapshot is written, so the gate
+        # normally never sees them — the term keeps the verdicts aligned
+        # if that ever changes).
         src_wb = openpyxl.load_workbook(
             source_workbook, read_only=True, data_only=True,
         )
@@ -372,9 +375,11 @@ def _materialize_external_pv_snapshot(
             for i, v in enumerate(values, start=2):
                 ws.cell(row=i, column=col_idx, value=float(v))
             # Clear any rows beyond the model grid so a longer stale
-            # column cannot survive as a mixed old/new profile.
+            # column cannot survive as a mixed old/new profile.  NOTE:
+            # openpyxl's Worksheet.cell(value=None) does NOT assign —
+            # only an explicit .value write clears the cell.
             for r in range(len(values) + 2, ws.max_row + 1):
-                ws.cell(row=r, column=col_idx, value=None)
+                ws.cell(row=r, column=col_idx).value = None
             snap_wb.save(snapshot_path)
             logger.info(
                 "[snapshot] external timeseries_path PV materialised into "

@@ -568,3 +568,68 @@ def test_run_attaches_early_buffer_before_materialize_and_threads_it(
         "materialize-time loader warning" in rec.getMessage()
         for rec in buf.records
     ), "the buffer must already be attached when materialisation runs"
+
+
+# --- round-14 guard refinements --------------------------------------------
+
+
+def test_snapshot_stale_rows_are_actually_cleared_and_blank_strings_count_empty(
+    tmp_path,
+):
+    """Two locks: (a) openpyxl's Worksheet.cell(value=None) does NOT assign,
+    so the round-12 stale-row 'clear' loop was a silent no-op — trailing
+    pv_kwh rows beyond the model grid must actually end up blank; (b) the
+    gate's blank-string term (a ' ' cell counts as empty — the mutation
+    sweep's surviving unlocked branch)."""
+    import numpy as np
+    import openpyxl
+    import pandas as pd
+
+    from pvbess_opt.io import read_workbook, write_workbook
+    from pvbess_opt.pipeline import _materialize_external_pv_snapshot
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)
+    src_typed = {k: (v.copy() if hasattr(v, "copy") else v)
+                 for k, v in typed.items()}
+    src_typed["pv"] = dict(typed["pv"], timeseries_path="pv_profile.csv")
+    src_typed["ts"] = typed["ts"].copy()
+    src_typed["ts"]["pv_kwh"] = np.nan
+    src = tmp_path / "src.xlsx"
+    write_workbook(src_typed, src)
+    # (b) blank-STRING pv_kwh cells: non-None to openpyxl, empty to the
+    # resolver — the gate must still fire.
+    wb = openpyxl.load_workbook(src)
+    ws = wb["timeseries"]
+    header = [c.value for c in ws[1]]
+    ci = header.index("pv_kwh") + 1
+    for r in range(2, ws.max_row + 1):
+        ws.cell(row=r, column=ci).value = " "
+    wb.save(src)
+    snap = tmp_path / "snap.xlsx"
+    snap.write_bytes(src.read_bytes())
+    # (a) give the SNAPSHOT four stale pv_kwh rows beyond the model grid.
+    wb2 = openpyxl.load_workbook(snap)
+    ws2 = wb2["timeseries"]
+    for r in range(ws2.max_row + 1, ws2.max_row + 5):
+        ws2.cell(row=r, column=ci).value = 999.0
+    stale_rows = list(range(98, 102))
+    wb2.save(snap)
+
+    resolved_ts = typed["ts"].copy()
+    resolved_ts["pv_kwh"] = 7.25
+    _materialize_external_pv_snapshot(snap, src, resolved_ts)
+
+    snap_pv = pd.read_excel(snap, sheet_name="pv")
+    row = snap_pv[snap_pv["key"] == "timeseries_path"]
+    assert row["value"].isna().all(), (
+        "gate must fire on a blank-string column (empty to the resolver)"
+    )
+    out = openpyxl.load_workbook(snap)
+    ots = out["timeseries"]
+    assert float(ots.cell(row=2, column=ci).value) == pytest.approx(7.25)
+    for r in stale_rows:
+        assert ots.cell(row=r, column=ci).value in (None, ""), (
+            f"stale row {r} must be cleared, got "
+            f"{ots.cell(row=r, column=ci).value!r}"
+        )
