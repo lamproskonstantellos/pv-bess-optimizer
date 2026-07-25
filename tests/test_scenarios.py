@@ -583,6 +583,67 @@ def test_cli_routes_enabled_scenarios_sheet_to_batch(tmp_path, monkeypatch):
     assert [s["name"] for s in captured["scenarios"]] == ["Merchant", "PV only"]
 
 
+def test_cli_batch_route_warns_on_ignored_single_run_flags(
+    tmp_path, monkeypatch, caplog,
+):
+    """--strict / the rolling-horizon and Monte Carlo flags apply to
+    single runs only; a batch route must say so instead of silently
+    accepting and discarding them (a --monte-carlo 50 batch previously
+    looked stochastic while every row solved deterministically)."""
+    import logging as _logging
+
+    from pvbess_opt import cli
+    from pvbess_opt.io import write_workbook
+
+    monkeypatch.setattr(cli, "run", lambda *_a, **_k: None)
+    monkeypatch.setattr(cli, "run_sizing", lambda *_a, **_k: None)
+    monkeypatch.setattr(cli, "run_scenarios", lambda *_a, **_k: None)
+    wb = tmp_path / "scn.xlsx"
+    write_workbook(_typed_for_write([
+        {"enabled": "TRUE", "name": "Merchant", "target": "project.mode",
+         "value": "merchant"},
+    ]), wb)
+    with caplog.at_level(_logging.WARNING, logger="pvbess_opt.cli"):
+        rc = cli.main([
+            str(wb), "--strict", "--monte-carlo", "5", "--seed", "7",
+            "--window-hours", "12",
+        ])
+    assert rc == 0
+    msgs = [r.getMessage() for r in caplog.records
+            if "ignored on this route" in r.getMessage()]
+    assert len(msgs) == 1
+    for flag in ("--strict", "--monte-carlo", "--seed", "--window-hours"):
+        assert flag in msgs[0]
+    assert "--rolling-horizon" not in msgs[0]  # not set -> not named
+
+
+def test_cli_single_run_flags_do_not_warn_on_single_runs(
+    tmp_path, monkeypatch, caplog,
+):
+    import logging as _logging
+
+    from pvbess_opt import cli
+    from pvbess_opt.io import write_workbook
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        cli, "run", lambda config: captured.setdefault("config", config),
+    )
+    wb = tmp_path / "single.xlsx"
+    write_workbook(_typed_for_write(None), wb)
+    with caplog.at_level(_logging.WARNING, logger="pvbess_opt.cli"):
+        rc = cli.main([str(wb), "--monte-carlo", "3", "--strict"])
+    assert rc == 0
+    assert not any(
+        "ignored on this route" in r.getMessage() for r in caplog.records
+    )
+    # And the flags actually reach the single-run config.
+    assert captured["config"].monte_carlo == 3
+    assert captured["config"].strict is True
+    # --seed keeps its documented default when not supplied.
+    assert captured["config"].seed == 42
+
+
 def test_comparison_workbook_is_styled(tmp_path):
     comp = pd.DataFrame(
         [

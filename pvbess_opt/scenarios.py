@@ -976,8 +976,12 @@ def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResul
     )
     result = ScenarioResult(comparison=comparison)
 
+    from .io import unique_output_dir
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(config.outdir) / f"{src.stem}_scenarios_{stamp}"
+    out_dir = unique_output_dir(
+        Path(config.outdir) / f"{src.stem}_scenarios_{stamp}",
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     # NPV tail risk over the scenario set (Eqs. U10/U11): appended to
     # the WORKBOOK table only (equal-weight scenarios - a deck is a

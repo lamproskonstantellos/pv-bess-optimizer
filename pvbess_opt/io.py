@@ -5671,6 +5671,28 @@ LAYOUT_SUBDIRS: tuple[str, ...] = (
 )
 
 
+def unique_output_dir(candidate: Path) -> Path:
+    """Return ``candidate`` or, when it already exists, the first free
+    ``<candidate>_2`` / ``_3`` / ... sibling.
+
+    The run directories are stamped to whole seconds, so two runs
+    starting within the same second previously landed in ONE directory
+    and the second silently overwrote the first's artifacts.  The bump
+    is logged so the batch log records where each run actually went.
+    """
+    candidate = Path(candidate)
+    if not candidate.exists():
+        return candidate
+    n = 2
+    while (bumped := candidate.with_name(f"{candidate.name}_{n}")).exists():
+        n += 1
+    logger.info(
+        "[io] output directory %s already exists (same-second run "
+        "stamp); writing to %s instead.", candidate, bumped,
+    )
+    return bumped
+
+
 def make_run_layout(out_dir: Path) -> dict[str, Path]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

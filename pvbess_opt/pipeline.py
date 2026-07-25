@@ -55,6 +55,7 @@ from pvbess_opt.io import (
     PROJECT_SHEET_DEFAULTS,
     copy_input_snapshot,
     make_run_layout,
+    unique_output_dir,
     read_inputs,
     write_assumptions_summary,
     write_dispatch_artifacts,
@@ -1844,7 +1845,7 @@ def _run_one(
     set_project_mode_label(_project_mode_label(params))
 
     folder = f"{base_name}_{slug}_{timestamp}"
-    out_dir = Path(config.outdir) / folder
+    out_dir = unique_output_dir(Path(config.outdir) / folder)
     layout = make_run_layout(out_dir)
     log_path = layout["summary"] / "run_log.txt"
 

@@ -537,8 +537,12 @@ def run_sizing(config: Any, sizing_block: dict[str, Any]) -> SizingResult:
         oversizing_breakeven_mwh=breakeven,
     )
 
+    from .io import unique_output_dir
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(config.outdir) / f"{src.stem}_sizing_{stamp}"
+    out_dir = unique_output_dir(
+        Path(config.outdir) / f"{src.stem}_sizing_{stamp}",
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     write_sizing_workbook(out_dir / "sizing.xlsx", result)
     plot_efficient_frontier(frontier, out_dir / "efficient_frontier.pdf")
