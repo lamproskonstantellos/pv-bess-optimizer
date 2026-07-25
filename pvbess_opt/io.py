@@ -5080,6 +5080,13 @@ def _apply_balancing_timeseries_fallback(
     return out, [col for col, _value, _key in missing_columns]
 
 
+# Header-scan window for the key/value sheets: rows a user might
+# plausibly leave above the header (title lines, a blank spacer) and
+# columns a user might insert between/before the pair.
+_KV_HEADER_SCAN_ROWS = 10
+_KV_HEADER_SCAN_COLS = 8
+
+
 def _read_kv_flat(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
     """Read a (key, value, ...) sheet to ``{key: value}`` with faithful types.
 
@@ -5089,33 +5096,97 @@ def _read_kv_flat(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
     would make the boolean-in-numeric-field guard in ``_parse_kv_sheet``
     fire on legitimate zeros.  Requires the ``key`` / ``value`` header
     pair, skips blank and ``#`` separator keys.
+
+    The header pair is located by SCANNING (first ``_KV_HEADER_SCAN_ROWS``
+    rows, case-insensitive, any column order with ``value`` to the right
+    of ``key``), so a capitalised ``Key``/``Value`` pair, a blank row
+    left above the header, or a column inserted between them still parse
+    the authored values.  A sheet that EXISTS but has no locatable
+    header raises naming the sheet: every one of its keys would
+    otherwise silently revert to the schema defaults — delivered numbers
+    computed from a workbook the user never wrote.
+
+    Formula cells are substituted from their Excel-cached values when
+    the file carries them (a workbook last saved by Excel), so a
+    ``=2000*2`` value cell reads as the 4000 Excel displays.  A formula
+    with no cached value (script-authored file) keeps its formula text
+    and fails downstream with the named correct-the-cell error.
     """
     from openpyxl import load_workbook
 
     wb = load_workbook(xlsx_path, read_only=True)
     try:
         ws = wb[sheet_name]
-        rows = ws.iter_rows(max_col=2, values_only=True)
-        header = next(rows, None)
-        if (
-            header is None
-            or len(header) < 2
-            or str(header[0]).strip() != "key"
-            or str(header[1]).strip() != "value"
+        key_col: int | None = None
+        value_col: int | None = None
+        header_row: int | None = None
+        for row_idx, row in enumerate(
+            ws.iter_rows(
+                max_row=_KV_HEADER_SCAN_ROWS,
+                max_col=_KV_HEADER_SCAN_COLS,
+                values_only=True,
+            ),
+            start=1,
         ):
-            return {}
+            cells = [
+                str(c).strip().lower() if isinstance(c, str) else None
+                for c in row
+            ]
+            if "key" in cells:
+                k = cells.index("key")
+                if "value" in cells[k + 1:]:
+                    key_col = k + 1
+                    value_col = cells.index("value", k + 1) + 1
+                    header_row = row_idx
+                    break
+        if header_row is None or key_col is None or value_col is None:
+            raise ValueError(
+                f"Sheet {sheet_name!r} has no 'key' / 'value' header pair "
+                f"in its first {_KV_HEADER_SCAN_ROWS} rows; every key on "
+                "the sheet would silently fall back to its default. "
+                "Restore the header row (column headers 'key' and "
+                "'value')."
+            )
         out: dict[str, Any] = {}
-        for row in rows:
-            raw_key = row[0] if row else None
+        for row in ws.iter_rows(
+            min_row=header_row + 1, max_col=value_col, values_only=True,
+        ):
+            raw_key = row[key_col - 1] if len(row) >= key_col else None
             if not isinstance(raw_key, str):
                 continue
             key = raw_key.strip()
             if not key or key.startswith("#"):
                 continue
-            out[key] = row[1] if len(row) > 1 else None
-        return out
+            out[key] = row[value_col - 1] if len(row) >= value_col else None
     finally:
         wb.close()
+
+    # Substitute Excel-cached results for formula-text values.  The
+    # data_only pass is opened lazily so workbooks without formulas (the
+    # shipped artifact has zero) never pay a second read.
+    formula_keys = [
+        k for k, v in out.items()
+        if isinstance(v, str) and v.lstrip().startswith("=")
+    ]
+    if formula_keys:
+        wb_values = load_workbook(xlsx_path, read_only=True, data_only=True)
+        try:
+            ws_values = wb_values[sheet_name]
+            cached: dict[str, Any] = {}
+            for row in ws_values.iter_rows(
+                min_row=header_row + 1, max_col=value_col, values_only=True,
+            ):
+                raw_key = row[key_col - 1] if len(row) >= key_col else None
+                if isinstance(raw_key, str) and raw_key.strip() in formula_keys:
+                    cached[raw_key.strip()] = (
+                        row[value_col - 1] if len(row) >= value_col else None
+                    )
+            for k in formula_keys:
+                if cached.get(k) is not None:
+                    out[k] = cached[k]
+        finally:
+            wb_values.close()
+    return out
 
 
 def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
@@ -5141,6 +5212,15 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
                 flat, source=f"Workbook {xlsx_path!s} (bess sheet)",
             )
         typed[sheet_name] = _parse_kv_sheet(sheet_name, flat)
+        if sheet_name == "project" and (
+            typed["project"].get("p_grid_import_max_kw") is None
+        ):
+            # An ABSENT row keeps the schema default None; downstream
+            # consumers (np.isinf checks, float() in _typed_to_flat)
+            # need the uncapped sentinel itself, and a present-but-empty
+            # cell already parses to inf — the absent-row-equals-default
+            # contract demands the same value on both paths.
+            typed["project"]["p_grid_import_max_kw"] = float("inf")
         if (
             sheet_name == "bess"
             and "bess_degradation_pct_per_cycle" not in flat

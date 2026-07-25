@@ -666,3 +666,155 @@ def test_augmentation_years_infinite_entries_raise_cleanly():
             parse_augmentation_years(bad)
     assert parse_augmentation_years("8,15") == (8, 15)
     assert parse_augmentation_years(8.0) == (8,)
+
+
+# --- kv-sheet header robustness (silent-defaults class) ---------------------
+#
+# _read_kv_flat required the exact lowercase 'key'/'value' pair at row 1,
+# columns A/B; anything else returned {} and EVERY key on the sheet
+# silently reverted to its schema default — delivered numbers computed
+# from a workbook the user never wrote (a capitalised header pair turned
+# an authored discount_rate_pct=11 / bess_power_kw=500 workbook into the
+# 7 % / 0-kW defaults with zero warnings).
+
+
+def _write_variant_workbook(base_typed, tmp_path, mutate):
+    """Write the trimmed shipped workbook, apply ``mutate(wb)``, save."""
+    import copy as _copy
+
+    import openpyxl
+
+    typed = _copy.deepcopy(base_typed)
+    typed["economics"] = dict(typed["economics"], discount_rate_pct=11.0)
+    dst = tmp_path / "variant.xlsx"
+    write_workbook(typed, dst)
+    wb = openpyxl.load_workbook(dst)
+    mutate(wb)
+    wb.save(dst)
+    return dst
+
+
+def test_kv_header_case_variant_reads_authored_values(tmp_path, base_typed):
+    def mutate(wb):
+        ws = wb["economics"]
+        ws.cell(1, 1, "Key")
+        ws.cell(1, 2, "Value")
+
+    dst = _write_variant_workbook(base_typed, tmp_path, mutate)
+    typed = read_workbook(dst)
+    assert typed["economics"]["discount_rate_pct"] == 11.0
+    read_inputs(dst)  # and the full parse stays healthy
+
+
+def test_kv_blank_row_above_header_reads_authored_values(
+    tmp_path, base_typed,
+):
+    def mutate(wb):
+        ws = wb["economics"]
+        ws.insert_rows(1)
+
+    dst = _write_variant_workbook(base_typed, tmp_path, mutate)
+    typed = read_workbook(dst)
+    assert typed["economics"]["discount_rate_pct"] == 11.0
+    read_inputs(dst)  # and the full parse stays healthy
+
+
+def test_kv_inserted_column_before_values_reads_authored_values(
+    tmp_path, base_typed,
+):
+    def mutate(wb):
+        ws = wb["economics"]
+        ws.insert_cols(2)  # 'key' stays col A, 'value' moves to col C
+
+    dst = _write_variant_workbook(base_typed, tmp_path, mutate)
+    typed = read_workbook(dst)
+    assert typed["economics"]["discount_rate_pct"] == 11.0
+    read_inputs(dst)  # and the full parse stays healthy
+
+
+def test_kv_sheet_without_header_raises_naming_the_sheet(
+    tmp_path, base_typed,
+):
+    def mutate(wb):
+        ws = wb["economics"]
+        ws.cell(1, 1, "parameter")
+        ws.cell(1, 2, "setting")
+
+    dst = _write_variant_workbook(base_typed, tmp_path, mutate)
+    with pytest.raises(ValueError, match="'economics'.*header"):
+        read_inputs(dst)
+
+
+def test_missing_import_cap_row_falls_back_to_uncapped(
+    tmp_path, base_typed,
+):
+    """Deleting the p_grid_import_max_kw ROW must equal the documented
+    absent-row-=-default (uncapped) — it previously crashed with an
+    unnamed \"ufunc 'isinf'\" TypeError from np.isinf(None)."""
+
+    def mutate(wb):
+        ws = wb["project"]
+        for row in list(ws.iter_rows(min_row=2, max_col=1)):
+            if row[0].value == "p_grid_import_max_kw":
+                ws.delete_rows(row[0].row, 1)
+                break
+
+    dst = _write_variant_workbook(base_typed, tmp_path, mutate)
+    params, _ts = read_inputs(dst)
+    assert params["p_grid_import_max_kw"] == float("inf")
+
+
+def test_kv_formula_with_cached_value_reads_the_cached_number(
+    tmp_path, base_typed,
+):
+    """A formula value cell saved by Excel carries a cached result; the
+    loader must consume the number Excel displays (previously it read
+    the formula TEXT and rejected the cell as unparseable)."""
+    import re
+    import zipfile
+
+    def mutate(wb):
+        ws = wb["bess"]
+        for row in ws.iter_rows(min_row=2, max_col=2):
+            if row[0].value == "bess_capacity_kwh":
+                row[1].value = "=2000*2"
+                break
+
+    dst = _write_variant_workbook(base_typed, tmp_path, mutate)
+    # openpyxl writes the formula with no cached value; inject the cache
+    # the way Excel stores it (<v> next to <f>) so the file matches a
+    # workbook last saved by Excel.
+    with zipfile.ZipFile(dst) as zf:
+        names = zf.namelist()
+        contents = {n: zf.read(n) for n in names}
+    # bess is the fourth sheet in write_workbook order (timeseries,
+    # project, pv, bess) but locate it by content to stay order-proof.
+    target = None
+    for name, blob in contents.items():
+        if name.startswith("xl/worksheets/") and b"2000*2" in blob:
+            target = name
+            break
+    assert target is not None
+    contents[target] = re.sub(
+        rb"<f>2000\*2</f>", rb"<f>2000*2</f><v>4000</v>", contents[target],
+    )
+    with zipfile.ZipFile(dst, "w") as zf:
+        for name in names:
+            zf.writestr(name, contents[name])
+    params, _ts = read_inputs(dst)
+    assert params["bess_capacity_kwh"] == 4000.0
+
+
+def test_kv_formula_without_cached_value_still_errors_named(
+    tmp_path, base_typed,
+):
+    def mutate(wb):
+        ws = wb["bess"]
+        for row in ws.iter_rows(min_row=2, max_col=2):
+            if row[0].value == "bess_capacity_kwh":
+                row[1].value = "=2000*2"
+                break
+
+    dst = _write_variant_workbook(base_typed, tmp_path, mutate)
+    with pytest.raises(ValueError, match="bess_capacity_kwh.*=2000\\*2"):
+        read_inputs(dst)
