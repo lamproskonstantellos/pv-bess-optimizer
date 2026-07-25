@@ -482,3 +482,88 @@ def test_read_workbook_threads_market_sources_to_the_normaliser(
     with caplog.at_level(logging.WARNING):
         read_inputs(_write(tmp_path, typed, "file.xlsx"))
     assert any("priced 0" in r.getMessage() for r in caplog.records)
+
+
+# --- round-13 guard refinements --------------------------------------------
+
+
+def test_empty_balancing_column_behaves_like_absent(caplog):
+    """The nine balancing price columns must follow the round-12 contract
+    too: a present-but-empty column previously bypassed the scalar
+    fallback (which fills only ABSENT columns) and settled every product
+    at NaN — NaN balancing revenue and NaN NPV with no warning anywhere."""
+    import logging
+
+    from pvbess_opt.io import _BALANCING_TS_COLUMN_DEFAULTS, _normalise_timeseries
+
+    idx = pd.date_range("2026-01-01", periods=4, freq="h")
+    base = {"timestamp": idx, "pv_kwh": [1.0] * 4, "load_kwh": [2.0] * 4,
+            "dam_price_eur_per_mwh": [50.0] * 4}
+    for col in _BALANCING_TS_COLUMN_DEFAULTS:
+        caplog.clear()
+        ts = pd.DataFrame({**base, col: [np.nan] * 4})
+        with caplog.at_level(logging.WARNING):
+            out = _normalise_timeseries(ts, mode="self_consumption")
+        assert col not in out.columns, col
+        assert any(
+            "exactly like an absent column" in r.getMessage()
+            for r in caplog.records
+        ), (col, [r.getMessage() for r in caplog.records])
+
+    # A fetch-bypassed balancing column stays (the fetch fills it), quiet.
+    caplog.clear()
+    col = "mfrr_up_capacity_price_eur_per_mwh"
+    ts = pd.DataFrame({**base, col: [np.nan] * 4})
+    with caplog.at_level(logging.WARNING):
+        out = _normalise_timeseries(
+            ts, mode="self_consumption",
+            market_sources={"balancing_source": "entsoe"},
+        )
+    assert col in out.columns
+    assert not any(col in r.getMessage() for r in caplog.records)
+
+    # Partial NaN gets the standard gap treatment (was: silent NaN gaps
+    # riding into settlement).
+    caplog.clear()
+    ts2 = pd.DataFrame({**base, col: [12.0, np.nan, 14.0, np.nan]})
+    with caplog.at_level(logging.WARNING):
+        out2 = _normalise_timeseries(ts2, mode="self_consumption")
+    assert list(out2[col]) == [12.0, 12.0, 14.0, 14.0]
+    assert any("filled via ffill/bfill" in r.getMessage() for r in caplog.records)
+
+
+def test_empty_grid_co2_column_is_dropped(caplog):
+    """An all-NaN grid_co2_kg_per_mwh column flipped the per-step
+    carbon-intensity presence gate and delivered NaN emissions KPIs; it now
+    behaves exactly like an absent column (scalar/off path)."""
+    import logging
+
+    from pvbess_opt.io import _normalise_timeseries
+
+    idx = pd.date_range("2026-01-01", periods=4, freq="h")
+    ts = pd.DataFrame({
+        "timestamp": idx, "pv_kwh": [1.0] * 4, "load_kwh": [2.0] * 4,
+        "dam_price_eur_per_mwh": [50.0] * 4,
+        "grid_co2_kg_per_mwh": [np.nan] * 4,
+    })
+    with caplog.at_level(logging.WARNING):
+        out = _normalise_timeseries(ts, mode="merchant")
+    assert "grid_co2_kg_per_mwh" not in out.columns
+    assert any(
+        "exactly like an absent column" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_whitespace_cell_in_price_column_is_named():
+    """A whitespace-only cell previously surfaced as a bare 'could not
+    convert string to float' with no pointer to the sheet or column."""
+    from pvbess_opt.io import _normalise_timeseries
+
+    idx = pd.date_range("2026-01-01", periods=4, freq="h")
+    ts = pd.DataFrame({
+        "timestamp": idx, "pv_kwh": [1.0] * 4, "load_kwh": [2.0] * 4,
+        "dam_price_eur_per_mwh": ["50", " ", "40", "30"],
+    })
+    with pytest.raises(ValueError, match="dam_price_eur_per_mwh"):
+        _normalise_timeseries(ts, mode="merchant")

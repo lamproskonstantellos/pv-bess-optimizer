@@ -542,6 +542,60 @@ Pre-delivery release audit (round 12):
   self-contained rather than "a verbatim copy"; the CLI flag table gained
   the missing `--config` / `--scenarios` rows; two changelog nits fixed.
 
+Pre-delivery release audit (round 13):
+
+- **Empty-equals-absent, completed for every settled column.** The
+  round-12 empty-column drop covered the eight canonical price/load
+  columns and deck variants but not the NINE balancing price columns —
+  a present-but-blank `mfrr_up_capacity_price_eur_per_mwh` (or any
+  sibling) bypassed the scalar fallback (which fills only ABSENT
+  columns) and settled every product at NaN: NaN balancing revenue and
+  NaN NPV with no warning anywhere, one diagnostics tier BELOW the
+  round-12 finding. The nine columns now get the identical treatment
+  (empty → dropped with a warning, the scalar fallback engages; gaps →
+  ffill/bfill with a warning; a non-'file' `balancing_source` keeps them
+  quiet for the fetch), and so does `grid_co2_kg_per_mwh`, whose empty
+  column flipped the per-step carbon-intensity gate into NaN emissions
+  KPIs. A whitespace-only cell in any of these columns now raises naming
+  the column instead of a bare float-conversion error.
+- **Scenario nameplate override, finished.** `NaN` rode through the
+  round-12 guard (`json.dump` emits bare NaN by default; YAML has
+  `.nan`): on a PV-less base both rescale branches are False for NaN, the
+  value materialises as a blank cell and re-parses to the default — a
+  comparison row silently identical to the base under the scenario's
+  label. Non-finite overrides now raise naming the scenario, and numpy
+  booleans (not `isinstance(..., bool)`) are caught like plain booleans
+  instead of `float()`-ing to a silent 1-kWp plant.
+- **Snapshot gate judges cached values.** The external-PV materialiser
+  read the source workbook without `data_only`, so a `pv_kwh` column of
+  formula cells with no cached value — empty to the loader, the file
+  wins — looked "filled" to the gate and the snapshot kept a dangling
+  path (the self-containment claim silently failed for script-authored
+  workbooks). The gate now reads cached values and counts blank-string
+  cells as empty, matching the resolver's verdict.
+- **Early log buffer covers structured configs.** For YAML/JSON inputs
+  the loader warnings fire inside `materialize_to_xlsx` — BEFORE the
+  round-12 buffer attached — so the archived `run_log.txt` still missed
+  them (and instead captured a spurious column-vs-file conflict warning
+  from the materialised workbook's retained pv path). The buffer now
+  attaches before materialisation, and `materialize_to_xlsx` blanks the
+  resolved `pv.timeseries_path` like every other materialisation site,
+  killing the false warning. A wiring test locks the buffer's threading
+  through `run()` (the mutation sweep's one surviving wiring mutant).
+- **validate_config union routing.** A numeric value now satisfies a
+  type union via its NUMERIC member — falling through to a "string"
+  member let `20.5`/`inf` pass the `["integer","string"]`
+  `bess_replacement_year` the loader rejects; non-finite numerics stay
+  accepted on the nullable grid caps, where the loader parses them AS
+  the documented uncapped sentinel. The numbers-on-string-keys test
+  probe now targets a schema-present key (the old probe was skipped as
+  an unknown key, making the lock vacuous), and the blank-path fallback
+  test pins the frame-source flag half.
+- **Docs.** The scenarios-targets paragraph gained the
+  `pv.timeseries_path` exception clause the round-12 rejection
+  introduced (the user guide still promised every sheet key is a valid
+  target).
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

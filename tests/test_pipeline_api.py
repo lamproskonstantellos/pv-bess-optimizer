@@ -472,3 +472,99 @@ def test_generate_all_energy_plots_threads_synthetic_kpis_to_year2(
     assert isinstance(y2, dict), "year-2 plot call must get synthetic KPIs"
     assert y2["profit_export_from_pv_eur"] == pytest.approx(10.0 * 48 * 0.9)
     assert y2["expense_charge_bess_grid_eur"] == pytest.approx(2.0 * 48 * 0.9)
+
+
+# --- round-13 guard refinements --------------------------------------------
+
+
+def test_snapshot_gate_judges_cached_values_like_the_resolver(tmp_path):
+    """The gate must judge the pv_kwh column the way the RESOLVER does
+    (cached values): a column of formula cells with no cached value reads
+    as EMPTY to the loader — the external file wins and feeds the run — so
+    the gate must fire, or the snapshot keeps a dangling path and the
+    self-containment claim silently fails.  Blank-string cells count as
+    empty for the same reason."""
+    import openpyxl
+    import pandas as pd
+
+    from pvbess_opt.io import read_workbook, write_workbook
+    from pvbess_opt.pipeline import _materialize_external_pv_snapshot
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)
+    src_typed = {k: (v.copy() if hasattr(v, "copy") else v)
+                 for k, v in typed.items()}
+    src_typed["pv"] = dict(typed["pv"], timeseries_path="pv_profile.csv")
+    src = tmp_path / "formula_src.xlsx"
+    write_workbook(src_typed, src)
+    # Simulate a script-authored workbook: pv_kwh cells hold FORMULAS with
+    # no cached value (openpyxl never computes) — pandas reads them as NaN,
+    # so the resolver would load the external file.
+    wb = openpyxl.load_workbook(src)
+    ws = wb["timeseries"]
+    header = [c.value for c in ws[1]]
+    ci = header.index("pv_kwh") + 1
+    for r in range(2, ws.max_row + 1):
+        ws.cell(row=r, column=ci, value="=NA()")
+    wb.save(src)
+    snap = tmp_path / "snap.xlsx"
+    snap.write_bytes(src.read_bytes())
+    resolved_ts = typed["ts"].copy()
+    resolved_ts["pv_kwh"] = 7.25
+
+    _materialize_external_pv_snapshot(snap, src, resolved_ts)
+
+    snap_pv = pd.read_excel(snap, sheet_name="pv")
+    row = snap_pv[snap_pv["key"] == "timeseries_path"]
+    assert row["value"].isna().all(), (
+        "gate must fire on a cached-empty formula column (the file won)"
+    )
+    snap_ts = pd.read_excel(snap, sheet_name="timeseries")
+    assert float(snap_ts["pv_kwh"].iloc[0]) == pytest.approx(7.25)
+
+
+def test_run_attaches_early_buffer_before_materialize_and_threads_it(
+    tmp_path, monkeypatch,
+):
+    """Two locks in one: (a) the early buffer must attach BEFORE
+    materialize_to_xlsx — for YAML/JSON configs the loader warnings fire
+    INSIDE materialisation, and round 12's placement lost them; (b) the
+    SAME buffer object must be threaded into _run_one (the critic's
+    surviving wiring mutant — deleting the production wiring left every
+    unit test green)."""
+    import logging
+
+    import pvbess_opt.pipeline as pipeline
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("# structured config\n", encoding="utf-8")
+    logger = logging.getLogger("pvbess_opt.io_read")
+    captured: dict[str, object] = {}
+
+    def _fake_materialize(_src, dst):
+        # The loader-warning position for structured configs.
+        logger.warning("materialize-time loader warning: gap filled")
+        return Path(dst) / "materialized.xlsx"
+
+    monkeypatch.setattr(pipeline, "is_structured_config", lambda _p: True)
+    monkeypatch.setattr(pipeline, "materialize_to_xlsx", _fake_materialize)
+    monkeypatch.setattr(pipeline, "read_inputs", lambda _p: ({}, None))
+    monkeypatch.setattr(pipeline, "apply_ieee_style", lambda: None)
+    monkeypatch.setattr(pipeline, "set_show_titles", lambda _v: None)
+
+    def _fake_run_one(params, ts, config, base_name, timestamp,
+                      base_dir=None, early_log_buffer=None, **_kwargs):
+        captured["buffer"] = early_log_buffer
+        return object()
+
+    monkeypatch.setattr(pipeline, "_run_one", _fake_run_one)
+    pipeline.run(RunConfig(excel=cfg, outdir=tmp_path / "out"))
+
+    buf = captured["buffer"]
+    assert isinstance(buf, pipeline._EarlyLogBuffer), (
+        "run() must thread its OWN buffer into _run_one"
+    )
+    assert any(
+        "materialize-time loader warning" in rec.getMessage()
+        for rec in buf.records
+    ), "the buffer must already be attached when materialisation runs"

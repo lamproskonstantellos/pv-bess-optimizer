@@ -293,7 +293,14 @@ def test_validate_config_accepts_all_loader_accepted_value_classes():
     assert [e for e in validate_config({"simulation": None})
             if "simulation" in e] == []
     # numbers on string keys
-    errs = validate_config({"economics": {"debt_sizing_scenario": 2030}})
+    # Schema-present free-form string keys (a year-named deck/scenario):
+    # probe keys in their OWN sections — an unknown key is skipped before
+    # any type check and would make this lock vacuous.
+    errs = validate_config({"economics": {"debt_sizing_deck": 2030}})
+    assert [e for e in errs if "debt_sizing_deck" in e] == [], errs
+    errs = validate_config(
+        {"scenario_engine": {"debt_sizing_scenario": 2030}}
+    )
     assert [e for e in errs if "debt_sizing_scenario" in e] == [], errs
 
 
@@ -341,3 +348,79 @@ def test_blank_top_level_timeseries_path_falls_back_to_pv_section(tmp_path):
     typed = load_structured_config(cfg)
     assert len(typed["ts"]) == 24
     assert float(typed["ts"]["pv_kwh"].iloc[-1]) == 23.0
+    # The frame-source flag must agree with the fallback: the pv path fed
+    # the FRAME, so it must not leak into the typed pv sheet (a surviving
+    # path misfires the loud column-vs-file conflict warning on every
+    # load of the materialised workbook).
+    assert not typed["pv"].get("timeseries_path")
+
+
+# --- round-13 guard refinements --------------------------------------------
+
+
+def test_validate_config_union_numerics_route_numerically():
+    """A numeric value must satisfy a type union via its NUMERIC member —
+    falling through to a "string" member let 20.5 / inf pass the
+    ["integer", "string"] key whose loader demands a whole year."""
+    from pvbess_opt.io_read import validate_config
+
+    for bad in (20.5, float("inf"), float("-inf")):
+        errs = validate_config({"bess": {"bess_replacement_year": bad}})
+        assert any("bess_replacement_year" in e for e in errs), (bad, errs)
+    for ok in (20, 20.0, "3", None):
+        errs = [e for e in validate_config(
+            {"bess": {"bess_replacement_year": ok}})
+            if "bess_replacement_year" in e]
+        assert errs == [], (ok, errs)
+    # Nullable grid caps: the loader parses non-finite numerics AS the
+    # documented uncapped sentinel (inf), so the validator must accept
+    # them there (the shipped workbook's typed dict carries inf).
+    for ok in (float("inf"), 5000.0, None, "none"):
+        errs = [e for e in validate_config(
+            {"project": {"p_grid_import_max_kw": ok}})
+            if "p_grid_import_max_kw" in e]
+        assert errs == [], (ok, errs)
+
+
+def test_materialize_to_xlsx_drops_resolved_pv_path(tmp_path, caplog):
+    """The materialised temp workbook carries the resolved pv_kwh column
+    verbatim, so a surviving pv.timeseries_path would point at a path
+    relative to the ORIGINAL config dir and misfire the loud column-vs-file
+    conflict warning on every read of the materialised workbook."""
+    import logging
+
+    import numpy as np
+
+    from pvbess_opt.io import read_inputs
+    from pvbess_opt.io_read import materialize_to_xlsx
+
+    idx = pd.date_range("2026-01-01", periods=24, freq="h")
+    (tmp_path / "pv_only.csv").write_text(
+        "timestamp,pv_kwh\n" + "\n".join(
+            f"{t},{v}"
+            for t, v in zip(idx, np.linspace(0, 23, 24), strict=True)
+        ), encoding="utf-8",
+    )
+    pd.DataFrame({
+        "timestamp": idx, "load_kwh": [5.0] * 24,
+        "dam_price_eur_per_mwh": [60.0] * 24,
+    }).to_csv(tmp_path / "frame.csv", index=False)
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(
+        "timeseries_path: frame.csv\n"
+        "project:\n  mode: merchant\n"
+        "pv:\n  timeseries_path: pv_only.csv\n"
+        "  pv_nameplate_kwp: 10\n"
+        "bess:\n  bess_power_kw: 10\n  bess_capacity_kwh: 20\n",
+        encoding="utf-8",
+    )
+    dst = materialize_to_xlsx(cfg, tmp_path / "out")
+    pv_sheet = pd.read_excel(dst, sheet_name="pv")
+    row = pv_sheet[pv_sheet["key"] == "timeseries_path"]
+    assert row["value"].isna().all(), "materialised path cell must be blank"
+    with caplog.at_level(logging.WARNING):
+        _params, ts = read_inputs(dst)
+    assert not any(
+        "IGNORED" in r.getMessage() for r in caplog.records
+    ), [r.getMessage() for r in caplog.records]
+    assert float(ts["pv_kwh"].iloc[-1]) == 23.0

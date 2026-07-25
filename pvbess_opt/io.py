@@ -3313,6 +3313,17 @@ _COLUMN_MARKET_SOURCE: dict[str, str] = {
     "imbalance_price_eur_per_mwh": "imbalance_source",
     "imbalance_price_short_eur_per_mwh": "imbalance_source",
     "imbalance_price_long_eur_per_mwh": "imbalance_source",
+    # The nine balancing price columns are filled by the balancing fetch
+    # (A81/A84 / ADMIE) when balancing_source is not 'file'.
+    "fcr_capacity_price_eur_per_mwh": "balancing_source",
+    "afrr_up_capacity_price_eur_per_mwh": "balancing_source",
+    "afrr_dn_capacity_price_eur_per_mwh": "balancing_source",
+    "mfrr_up_capacity_price_eur_per_mwh": "balancing_source",
+    "mfrr_dn_capacity_price_eur_per_mwh": "balancing_source",
+    "afrr_up_activation_price_eur_per_mwh": "balancing_source",
+    "afrr_dn_activation_price_eur_per_mwh": "balancing_source",
+    "mfrr_up_activation_price_eur_per_mwh": "balancing_source",
+    "mfrr_dn_activation_price_eur_per_mwh": "balancing_source",
 }
 
 
@@ -3424,14 +3435,32 @@ def _normalise_timeseries(
                     "energy quantities must be >= 0 (net-metering exports "
                     "do not belong in this column)."
                 )
+    # The nine balancing price columns and the CO2-intensity series get the
+    # identical treatment: a present-but-empty balancing column previously
+    # bypassed the scalar fallback (which only fills ABSENT columns) and
+    # settled every product at NaN — NaN balancing revenue and NaN NPV with
+    # no warning anywhere; an empty grid_co2 column likewise flipped the
+    # per-step carbon-intensity gate and delivered NaN emissions KPIs.
     for col in ("load_kwh", "pv_kwh", "dam_price_eur_per_mwh",
                 "retail_price_eur_per_mwh",
                 "ida_price_eur_per_mwh",
                 "imbalance_price_eur_per_mwh",
                 "imbalance_price_short_eur_per_mwh",
-                "imbalance_price_long_eur_per_mwh"):
+                "imbalance_price_long_eur_per_mwh",
+                "grid_co2_kg_per_mwh",
+                *_BALANCING_TS_COLUMN_DEFAULTS):
         if col in ts.columns:
-            numeric = ts[col].astype(float)
+            try:
+                numeric = ts[col].astype(float)
+            except (TypeError, ValueError) as exc:
+                # A whitespace-only or textual cell would otherwise surface
+                # as a bare "could not convert string to float" with no
+                # pointer to the sheet or column.
+                raise ValueError(
+                    f"timeseries column {col!r} contains a non-numeric "
+                    f"cell ({exc}); fix the cell (blank cells are allowed "
+                    "and treated as gaps)."
+                ) from exc
             nan_mask = numeric.isna()
             nan_count = int(nan_mask.sum())
             if nan_count == len(ts) and len(ts) > 0:
