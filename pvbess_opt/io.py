@@ -5307,9 +5307,9 @@ def _read_kv_flat(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
                     cached[raw_key.strip()] = (
                         row[value_col - 1] if len(row) >= value_col else None
                     )
-            for k in formula_keys:
-                if cached.get(k) is not None:
-                    out[k] = cached[k]
+            for formula_key in formula_keys:
+                if cached.get(formula_key) is not None:
+                    out[formula_key] = cached[formula_key]
         finally:
             wb_values.close()
     return out

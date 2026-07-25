@@ -154,12 +154,13 @@ def _apply_financing_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
             )
             return None
         try:
-            return kind(value)
+            converted: float | int = kind(value)
         except (TypeError, ValueError):
             raise ValueError(
                 f"financing block key {key!r} expects a number, got "
                 f"{value!r}."
             ) from None
+        return converted
 
     econ = typed["economics"]
     if "gearing" in fin:

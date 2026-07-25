@@ -630,6 +630,129 @@ Pre-delivery release audit (round 14):
   through the materialiser. The same test locks the gate's
   blank-string-cell term (the mutation sweep's one surviving branch).
 
+Pre-delivery release audit (final round 1):
+
+- **Key/value sheets never silently revert to defaults.** The kv reader
+  required the exact lowercase `key`/`value` pair at row 1, columns A/B;
+  a capitalised header pair, a blank row left above it or an inserted
+  column returned an empty sheet and EVERY key fell back to its schema
+  default — an authored `discount_rate_pct = 11` / `bess_power_kw = 500`
+  workbook delivered results computed at the 7 % / 0-kW defaults with
+  zero warnings. The header pair is now located by a case-insensitive
+  scan; a sheet with no locatable header raises naming the sheet. A
+  missing `p_grid_import_max_kw` row equals the documented uncapped
+  default instead of an unnamed `isinf` TypeError, and Excel-cached
+  formula results are consumed as the numbers Excel displays.
+- **Sizing sweeps validate their axes.** A NaN axis point solved to an
+  empty plant whose 0-CAPEX row RANKED FIRST on the delivered
+  `sizing_frontier`; a negative nameplate booked CAPEX as a year-0 cash
+  credit and likewise topped the ranking; a non-numeric Excel cell was
+  silently dropped (a quietly smaller grid); a typo'd min/max/step axis
+  could commit the run to a million MILP solves unguarded; and a
+  YAML `sizing: {enabled: false}` block ran the sweep anyway. Axis
+  entries now reject booleans, non-finite and negative values naming
+  the axis, non-blank non-numeric sheet cells are named, the grid count
+  warns past 1,000 points and raises past 100,000, and the config
+  surface honours the `enabled` toggle exactly like the sheet.
+- **Scenario overrides reach settlement.** With the base workbook's
+  balancing enabled, the scalar fallback materialised the base default
+  prices into real timeseries columns; those survived into every
+  scenario's temp workbook, so a `*_default_*_price` override was
+  accepted, landed in the scenario's config — and settled on the BASE
+  price (the identical spec behaved differently when the base shipped
+  disabled). The fallback now records what it materialised and the
+  scenario engine drops exactly those columns so the per-scenario
+  re-read re-materialises them from the scenario's own scalars.
+  `capex_multiplier` is validated up front (false silently zeroed every
+  CAPEX line; NaN re-parsed to the SHEET DEFAULTS; negatives booked
+  CAPEX as a credit); malformed scenarios-file entries and duplicate
+  scenario names raise instead of silently dropping/merging rows.
+- **Batch routes name what they ignore; runs never overwrite runs.**
+  `--strict` and the rolling-horizon / Monte Carlo flags were accepted
+  with `--scenarios`/sizing and silently discarded (a `--monte-carlo
+  50` batch looked stochastic while every row solved
+  deterministically); the CLI now warns naming exactly the flags
+  dropped. Two runs starting within one second shared a stamped output
+  directory and the second silently overwrote the first's artifacts;
+  all three run surfaces bump to a logged `_2`/`_3` sibling instead.
+- **Config-path parity with the workbook guards.** The YAML/JSON
+  surface routed the special keys around the sheet-level boolean
+  fail-fast: `p_grid_export/import_max_kw: true` became a silent
+  1.0-kW cap, `bess_replacement_year: true` a year-1 replacement,
+  `tilt`/`weather_year: true` a 1-degree array / year-1 weather
+  request — all four parsers now reject booleans naming the key. A
+  native `.inf` for `bess_augmentation_years` no longer dies in a bare
+  `int(inf)` OverflowError ahead of the round-14 named guard, a native
+  YAML list normalises to the canonical CSV instead of stringifying to
+  `'[8, 15]'` garbage, and booleans/dates are rejected named; the
+  trajectories sheet names an `inf` year cell the same way. The
+  financing/grid convenience blocks follow blank-means-absent instead
+  of dying in `float(None)`, and `validate_config` accepts numpy bools
+  and loader-stringified scalars (never stricter than the loader).
+- **Timeseries front door.** A DUPLICATED schema header (pandas mangles
+  the second copy to `pv_kwh.1`) let an empty first copy win the
+  presence checks — with PVGIS coordinates set, the fetch silently
+  replaced the user's authored generation; duplicates are now rejected
+  naming the header. The reserved `id_da_*` position columns are
+  rejected on input (pasted back from a dispatch output they silently
+  pinned the day-ahead solve to a stale committed position). A
+  fetch-EXEMPT balancing column (FCR under the ADMIE provider — Greece
+  procures no standalone FCR) keeps its gap/empty diagnostics instead
+  of being ffilled to a constant price in silence. A partial monthly
+  max-injection set (one typo'd month) raises naming the missing
+  columns instead of silently degrading the authored 24x12 profile to
+  the scalar column, and a text cell in a price-deck CSV names the
+  deck, column and file.
+- **Rolling-horizon Monte Carlo.** The compare-sources branch dropped
+  the armed imbalance settlement from every delivered financial (and
+  VaR/CVaR was skipped with a warning blaming settings that were
+  correct); the four ensembles now run with the settlement threaded
+  and the aggregates/tail statistics source from the all-noise
+  ensemble. CLI `--window-hours`/`--commit-hours` overrides bypassed
+  the loader's `window >= 2 x commit` imbalance lookahead gate,
+  delivering all-zero settlement KPIs plus a degenerate ensemble whose
+  every seed was identical; the gate is re-checked on the resolved
+  values.
+- **Lender case table.** The P90 haircut left `go_revenue_eur` and
+  `support_settlement_eur` — pure PV-volume streams — at their P50
+  values, overstating P90 CFADS, DSCR and the delivered debt capacity
+  (+5.5 % in the repro shape); both now scale, and the per-column
+  classification is documented completely. Under sculpted repayment
+  the case rows re-derived the schedule from the case CFADS (min ==
+  avg by construction, hiding the binding worst year); they now
+  service the schedule committed on the base cashflow.
+- **Markets.** `invariant_7` false-flagged the OPTIMAL intraday
+  Stage-2 dispatch (an IDA buy-back legitimately curtails with cap
+  headroom at a positive DAM price), killing valid `--strict`
+  merchant+intraday runs; Stage-2 frames are exempt while Stage-1
+  keeps the full check. An enabled pay-as-produced PPA with a zero
+  volume share now warns that the contract is inert (the baseload
+  analog already raised).
+- **Market data & price scenarios.** A non-200 ENTSO-E response whose
+  body echoes the request no longer carries the API token into the
+  logged error (body excerpts are scrubbed; the transport and DEBUG-log
+  scrubs already existed). A provider response carrying BOTH the
+  single imbalance series and the dual A04/A05 pair is rejected (the
+  'never a silent regime mix' contract previously covered only the
+  stale-workbook direction). A price store with a zero year-1 base and
+  live later years warns that the stream's escalation path collapses
+  to flat.
+- **Monthly cash-flow figure completeness.** The Year-1 monthly stack
+  never drew curtailment compensation, GO revenue, the signed FiP/CfD
+  settlement or augmentation CAPEX — all four are inside the net line
+  it overlays, so the line floated off the bars with no legend entry
+  whenever those features were active; all four now join the stack
+  mirroring the yearly bars, locked by a sum-of-bars == net test.
+- **Docs, scripts & test hygiene.** `scripts/resample_timeseries.py`
+  no longer emits a workbook the loader rejects (the pandas
+  passthrough mis-typed numeric kv cells as Excel booleans; the sheets
+  now copy with faithful types) — closing the deferred-ledger item.
+  The outputs page documents the always-shipped `dispatch_year1`
+  sheet. The year-2 synthetic-KPI wiring lock distinguishes the
+  synthetic dict from the year-1 dict (its fixture previously made
+  the two identical, so one mutant survived). The balancing fallback
+  warning says "missing or empty", matching what it rescues.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.
