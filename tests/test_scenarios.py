@@ -130,7 +130,7 @@ def test_balancing_off_shorthand():
 
 
 def test_capex_multiplier_rejects_boolean():
-    with pytest.raises(ValueError, match="'zeroed'.*boolean|boolean"):
+    with pytest.raises(ValueError, match=r"'zeroed'.*boolean|boolean"):
         validate_scenario_overrides(
             {"name": "zeroed", "capex_multiplier": False},
         )
@@ -138,7 +138,7 @@ def test_capex_multiplier_rejects_boolean():
 
 def test_capex_multiplier_rejects_nan_and_infinity():
     for bad in (float("nan"), float("inf")):
-        with pytest.raises(ValueError, match="'broken'.*finite|finite"):
+        with pytest.raises(ValueError, match=r"'broken'.*finite|finite"):
             validate_scenario_overrides(
                 {"name": "broken", "capex_multiplier": bad},
             )
@@ -152,7 +152,7 @@ def test_capex_multiplier_rejects_negative():
 
 
 def test_capex_multiplier_rejects_non_numeric_string():
-    with pytest.raises(ValueError, match="'off'.*not a number|not a number"):
+    with pytest.raises(ValueError, match=r"'off'.*not a number|not a number"):
         validate_scenario_overrides(
             {"name": "s", "capex_multiplier": "off"},
         )
@@ -221,7 +221,7 @@ def test_scenario_balancing_scalar_override_reaches_the_rereads_ts(tmp_path):
     # scalar — the price settlement will actually use.
     dst = tmp_path / "scenario.xlsx"
     write_workbook(typed, dst)
-    params, ts = read_inputs(dst)
+    _params, ts = read_inputs(dst)
     assert ts["fcr_capacity_price_eur_per_mwh"].unique().tolist() == [25.0]
 
 

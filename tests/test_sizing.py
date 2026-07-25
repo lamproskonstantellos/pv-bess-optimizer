@@ -118,7 +118,7 @@ def test_read_sizing_block(tmp_path):
 
 
 def test_sizing_axis_rejects_nan():
-    with pytest.raises(ValueError, match="pv_nameplate_kwp.*finite"):
+    with pytest.raises(ValueError, match=r"pv_nameplate_kwp.*finite"):
         parse_sizing_grid({
             "pv_nameplate_kwp": [float("nan"), 1000.0],
             "bess_power_kw": [500.0],
@@ -127,7 +127,7 @@ def test_sizing_axis_rejects_nan():
 
 
 def test_sizing_axis_rejects_infinity():
-    with pytest.raises(ValueError, match="bess_capacity_kwh.*finite"):
+    with pytest.raises(ValueError, match=r"bess_capacity_kwh.*finite"):
         parse_sizing_grid({
             "pv_nameplate_kwp": [1000.0],
             "bess_power_kw": [500.0],
@@ -136,7 +136,7 @@ def test_sizing_axis_rejects_infinity():
 
 
 def test_sizing_axis_rejects_negative():
-    with pytest.raises(ValueError, match="pv_nameplate_kwp.*>= 0"):
+    with pytest.raises(ValueError, match=r"pv_nameplate_kwp.*>= 0"):
         parse_sizing_grid({
             "pv_nameplate_kwp": [-500.0, 1000.0],
             "bess_power_kw": [250.0],
@@ -145,7 +145,7 @@ def test_sizing_axis_rejects_negative():
 
 
 def test_sizing_axis_rejects_boolean():
-    with pytest.raises(ValueError, match="bess_power_kw.*boolean"):
+    with pytest.raises(ValueError, match=r"bess_power_kw.*boolean"):
         parse_sizing_grid({
             "pv_nameplate_kwp": [1000.0],
             "bess_power_kw": [True],

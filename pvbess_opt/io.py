@@ -71,6 +71,7 @@ Mode-specific timeseries semantics
 
 from __future__ import annotations
 
+import datetime as _dt
 import itertools
 import logging
 import re
@@ -2452,7 +2453,9 @@ def _parse_trajectories_sheet(
             bucket["mode"] = str(mode_val).strip().lower()
         try:
             year = int(float(year_val))
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
+            # OverflowError: int(inf) — a 1e999 year cell must be named
+            # like every other malformed trajectories entry.
             raise ValueError(
                 f"trajectories stream {current!r}: year {year_val!r} is "
                 f"not an integer."
@@ -2671,6 +2674,14 @@ def _parse_string_enum(
 
 def _parse_pv_tilt(raw: Any, default: Any) -> Any:
     """Parse ``tilt``: the literal ``optimal`` or a number in degrees."""
+    if isinstance(raw, (bool, np.bool_)):
+        # float(True) is 1.0 — a silent 1-degree array (the generic
+        # boolean-in-numeric guard runs after the key-specific branches,
+        # so this parser needs its own copy).
+        raise ValueError(
+            f"'tilt' expects a number in [0, 90] or 'optimal', got "
+            f"boolean {bool(raw)!r}; write a numeric value instead."
+        )
     if raw is None:
         return default
     if isinstance(raw, float) and np.isnan(raw):
@@ -2707,6 +2718,14 @@ def _parse_pv_weather_year(raw: Any, default: Any) -> Any:
     grid), so advertising it here would only defer the failure to fetch
     time with a confusing error.
     """
+    if isinstance(raw, (bool, np.bool_)):
+        # int(True) is 1 — a silent year-1 weather request (the generic
+        # boolean-in-numeric guard runs after the key-specific branches,
+        # so this parser needs its own copy).
+        raise ValueError(
+            f"'weather_year' expects a whole calendar year (e.g. 2019), "
+            f"got boolean {bool(raw)!r}; write a numeric value instead."
+        )
     if raw is None:
         return default
     if isinstance(raw, float) and np.isnan(raw):
@@ -2794,11 +2813,29 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
     if key == "bess_augmentation_years":
         # Free-form CSV of event years ('8,15'); a blank cell keeps the
         # default (None = no events).  Numeric single-year cells arrive
-        # as floats from openpyxl, so normalise through str.  Content
-        # validation (integers, 1..lifecycle) is the validator's job.
+        # as floats from openpyxl, so normalise through str.  A YAML/JSON
+        # list ([8, 15] — the natural config form) normalises to the same
+        # CSV.  Content validation (integers, 1..lifecycle) is the
+        # validator's job; non-finite floats must NOT hit int() here
+        # (int(inf) is a bare OverflowError that would pre-empt the named
+        # parse_augmentation_years error).
         if raw is None or (isinstance(raw, float) and np.isnan(raw)):
             return default
-        if isinstance(raw, float) and raw == int(raw):
+        if isinstance(raw, (bool, np.bool_)):
+            raise ValueError(
+                f"{key!r} expects project years (e.g. '8,15'), got "
+                f"boolean {bool(raw)!r}."
+            )
+        if isinstance(raw, _dt.date):
+            # datetime.datetime subclasses date, so one check covers both.
+            raise ValueError(
+                f"{key!r} expects project years (e.g. '8,15'), got a "
+                f"date {raw!r}."
+            )
+        if isinstance(raw, (list, tuple)):
+            token = ",".join(str(x) for x in raw).strip()
+            return token if token else default
+        if isinstance(raw, float) and np.isfinite(raw) and raw == int(raw):
             raw = int(raw)
         token = str(raw).strip()
         return token if token else default
@@ -2892,6 +2929,16 @@ def _parse_grid_export_max(
     unlimited tokens) raises ``ValueError`` naming the key rather than
     silently capping at the default.
     """
+    if isinstance(raw, (bool, np.bool_)):
+        # float(True) is 1.0: a YAML `p_grid_export_max_kw: true` would
+        # silently strangle the plant behind a 1-kW cap (the workbook
+        # path rejects booleans one layer up; the config path lands
+        # here).
+        raise ValueError(
+            f"{key!r} expects a number in kW, got boolean {bool(raw)!r}; "
+            "write a number, or leave the value blank / 'inf' / "
+            "'unlimited' / 'disabled' to remove the cap."
+        )
     if raw is None:
         return float("inf")
     if isinstance(raw, float) and np.isnan(raw):
@@ -3098,6 +3145,14 @@ def _parse_bess_replacement_year(raw: Any, default: Any) -> int | str:
     the default 0, silently disabling replacement).
     """
     _ = default  # three-way semantics leave no room for a fallback
+    if isinstance(raw, (bool, np.bool_)):
+        # float(True) is 1.0: a YAML `bess_replacement_year: true` would
+        # silently schedule a year-1 replacement (the workbook path
+        # rejects booleans one layer up; the config path lands here).
+        raise ValueError(
+            f"'bess_replacement_year' expects a number, blank, or "
+            f"'auto', got boolean {bool(raw)!r}."
+        )
     if raw is None:
         return BESS_REPLACEMENT_AUTO
     if isinstance(raw, float) and np.isnan(raw):

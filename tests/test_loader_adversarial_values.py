@@ -741,7 +741,7 @@ def test_kv_sheet_without_header_raises_naming_the_sheet(
         ws.cell(1, 2, "setting")
 
     dst = _write_variant_workbook(base_typed, tmp_path, mutate)
-    with pytest.raises(ValueError, match="'economics'.*header"):
+    with pytest.raises(ValueError, match=r"'economics'.*header"):
         read_inputs(dst)
 
 
@@ -816,5 +816,5 @@ def test_kv_formula_without_cached_value_still_errors_named(
                 break
 
     dst = _write_variant_workbook(base_typed, tmp_path, mutate)
-    with pytest.raises(ValueError, match="bess_capacity_kwh.*=2000\\*2"):
+    with pytest.raises(ValueError, match=r"bess_capacity_kwh.*=2000\*2"):
         read_inputs(dst)
