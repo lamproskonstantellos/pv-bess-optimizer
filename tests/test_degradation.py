@@ -220,3 +220,54 @@ def test_wear_cost_suppresses_cycles_and_is_not_double_counted(tmp_path):
         res1, {**params, "bess_wear_cost_eur_per_mwh": 9999.0}, verify_balance=False,
     )
     assert a["profit_total_eur"] == b["profit_total_eur"]
+
+
+def test_eol_threshold_100_never_replaces_the_nameplate_pack():
+    """Round-2 regression: bess_eol_soh_pct = 100 (a loader-legal bound)
+    matched the nameplate year-1 factor (1.0 <= 100) and scheduled a
+    replacement of the brand-new battery in year 1, charging a full
+    replacement CAPEX on top of the initial investment.  'Falls to the
+    threshold' must mean the SOH has actually fallen."""
+    from pvbess_opt.lifetime import resolve_bess_replacement_year
+
+    def probe(eol):
+        econ = {
+            "project_lifecycle_years": 20,
+            "bess_degradation_annual_pct": 1.5,
+            "bess_eol_soh_pct": eol,
+            "bess_replacement_year": "auto",
+        }
+        return resolve_bess_replacement_year(
+            econ, year1_discharge_mwh=500.0, capacity_mwh=1.0,
+        )
+
+    year, reason, _second = probe(100.0)
+    assert (year, reason) == (2, "soh_threshold")  # first DEGRADED year
+    assert probe(99.9)[0] == 2                      # unchanged
+    assert probe(80.0)[0] == 16                     # unchanged
+
+
+def test_scheduled_replacement_beyond_lifecycle_is_rejected(base_typed=None):
+    """Round-2 regression: bess_replacement_year = 25 on a 20-year
+    project was accepted verbatim and the configured investment event
+    silently never fired (no CAPEX, no SOH reset, no warning) — the
+    bess_augmentation_years 1..lifecycle bound is the precedent."""
+    import copy
+
+    from pathlib import Path
+
+    import pytest as _pytest
+
+    from pvbess_opt.io import read_workbook, validate_workbook_params
+
+    root = Path(__file__).resolve().parent.parent
+    typed = read_workbook(root / "inputs" / "input.xlsx")
+    typed = {k: (copy.deepcopy(v) if isinstance(v, dict) else v)
+             for k, v in typed.items()}
+    typed["bess"]["bess_replacement_year"] = 25
+    typed["project"]["project_lifecycle_years"] = 20
+    with _pytest.raises(ValueError, match="beyond"):
+        validate_workbook_params(typed, dt_minutes=15)
+    # A replacement in the final year is still legal.
+    typed["bess"]["bess_replacement_year"] = 20
+    validate_workbook_params(typed, dt_minutes=15)

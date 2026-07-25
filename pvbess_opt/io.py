@@ -4505,6 +4505,23 @@ def validate_workbook_params(
     ):
         _require_non_negative(bess, key)
 
+    # A scheduled replacement beyond the project horizon can never fire:
+    # the factor engine's reset and the cashflow's replacement CAPEX
+    # both loop over 1..lifecycle, so the configured investment event
+    # would be silently discarded (no CAPEX, no SOH reset, no trace).
+    # Mirror the bess_augmentation_years 1..lifecycle bound.
+    _raw_repl_year = bess.get("bess_replacement_year", 0)
+    if not isinstance(_raw_repl_year, str):
+        _repl_year = int(_raw_repl_year or 0)
+        _lifecycle = int(project.get("project_lifecycle_years", 0) or 0)
+        if _repl_year > 0 and _lifecycle > 0 and _repl_year > _lifecycle:
+            raise ValueError(
+                f"'bess_replacement_year' ({_repl_year}) is beyond "
+                f"project_lifecycle_years ({_lifecycle}); the scheduled "
+                "replacement would never fire. Use a year within the "
+                "project horizon, or 0 to never replace."
+            )
+
     # Annual cycle cap (Eq. E46): flag a daily cap that already binds
     # tighter than the requested annual one — the annual key would then
     # never be the active constraint.
