@@ -310,11 +310,10 @@ def test_invariant_7_exempts_stage2_frames_and_strict_passes(short_ts_factory=No
     merchant+intraday run.  The Stage-1 frame keeps the full check."""
     import numpy as np
 
-    from tests.conftest import _make_short_ts, _short_params
-
     from pvbess_opt.intraday import redispatch_intraday
     from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
     from pvbess_opt.pipeline import _check_strict_invariants
+    from tests.conftest import _make_short_ts, _short_params
 
     ts = _make_short_ts(24, with_load=False)
     rng = np.random.default_rng(7)

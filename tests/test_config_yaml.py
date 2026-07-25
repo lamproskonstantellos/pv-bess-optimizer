@@ -456,7 +456,7 @@ def test_config_bool_grid_cap_rejected_named(tmp_path):
             p_grid_export_max_kw=True,
         ),
     )
-    with pytest.raises(ValueError, match="p_grid_export_max_kw.*boolean"):
+    with pytest.raises(ValueError, match=r"p_grid_export_max_kw.*boolean"):
         load_structured_config(cfg)
 
 
@@ -466,16 +466,16 @@ def test_config_bool_replacement_year_rejected_named(tmp_path):
     cfg = _config_from_shipped(
         tmp_path, lambda raw: raw["bess"].update(bess_replacement_year=True),
     )
-    with pytest.raises(ValueError, match="bess_replacement_year.*boolean"):
+    with pytest.raises(ValueError, match=r"bess_replacement_year.*boolean"):
         load_structured_config(cfg)
 
 
 def test_config_bool_tilt_and_weather_year_rejected_named():
     from pvbess_opt.io import _parse_value
 
-    with pytest.raises(ValueError, match="tilt.*boolean"):
+    with pytest.raises(ValueError, match=r"tilt.*boolean"):
         _parse_value("tilt", True, "optimal")
-    with pytest.raises(ValueError, match="weather_year.*boolean"):
+    with pytest.raises(ValueError, match=r"weather_year.*boolean"):
         _parse_value("weather_year", True, 2019)
 
 
@@ -522,9 +522,9 @@ def test_config_augmentation_bool_and_date_rejected_named():
 
     from pvbess_opt.io import _parse_value
 
-    with pytest.raises(ValueError, match="bess_augmentation_years.*boolean"):
+    with pytest.raises(ValueError, match=r"bess_augmentation_years.*boolean"):
         _parse_value("bess_augmentation_years", True, None)
-    with pytest.raises(ValueError, match="bess_augmentation_years.*date"):
+    with pytest.raises(ValueError, match=r"bess_augmentation_years.*date"):
         _parse_value(
             "bess_augmentation_years", datetime.datetime(2026, 1, 1), None,
         )
@@ -552,7 +552,7 @@ def test_financing_and_grid_blocks_blank_means_absent(tmp_path, caplog):
     cfg2 = _config_from_shipped(
         tmp_path, lambda raw: raw.update(financing={"gearing": "half"}),
     )
-    with pytest.raises(ValueError, match="gearing.*'half'"):
+    with pytest.raises(ValueError, match=r"gearing.*'half'"):
         load_structured_config(cfg2)
 
 

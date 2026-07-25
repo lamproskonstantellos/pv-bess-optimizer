@@ -13,6 +13,7 @@ Two paths are covered:
 from __future__ import annotations
 
 import traceback
+from datetime import UTC
 from pathlib import Path
 
 import openpyxl
@@ -152,15 +153,15 @@ def test_http_status_error_body_excerpt_scrubs_token(monkeypatch):
     ).encode()
 
     monkeypatch.setattr(
-        entsoe, "_http_get", lambda params, timeout: (500, echo_body),
+        entsoe, "_http_get", lambda _params, _timeout: (500, echo_body),
     )
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     with pytest.raises(entsoe.MarketDataError) as excinfo:
         entsoe._fetch_window(
             {"documentType": "A44"},
-            datetime(2025, 1, 1, tzinfo=timezone.utc),
-            datetime(2025, 1, 2, tzinfo=timezone.utc),
+            datetime(2025, 1, 1, tzinfo=UTC),
+            datetime(2025, 1, 2, tzinfo=UTC),
             token=_FAKE_TOKEN, timeout=1.0,
         )
     assert _FAKE_TOKEN not in str(excinfo.value)

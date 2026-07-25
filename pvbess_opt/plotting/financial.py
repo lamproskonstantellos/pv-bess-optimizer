@@ -893,6 +893,33 @@ def plot_monthly_cashflow_year1(
         capex = sub["capex_eur"].astype(float).to_numpy()
     else:
         capex = np.zeros_like(revenue)
+    # The remaining monthly net components (all part of
+    # net_cashflow_eur): without their bars the net line floats above
+    # (or, for a CfD repayment month, below) the stack with no legend
+    # entry explaining the gap — the docstring's reconcile-to-the-net
+    # promise mirrors the yearly stack, which draws all four.
+    if "curtailment_compensation_eur" in sub.columns:
+        curtailment_comp = (
+            sub["curtailment_compensation_eur"].astype(float).to_numpy()
+        )
+    else:
+        curtailment_comp = np.zeros_like(revenue)
+    if "go_revenue_eur" in sub.columns:
+        go_revenue = sub["go_revenue_eur"].astype(float).to_numpy()
+    else:
+        go_revenue = np.zeros_like(revenue)
+    if "support_settlement_eur" in sub.columns:
+        support_settlement = (
+            sub["support_settlement_eur"].astype(float).to_numpy()
+        )
+    else:
+        support_settlement = np.zeros_like(revenue)
+    if "augmentation_capex_eur" in sub.columns:
+        augmentation_capex = (
+            sub["augmentation_capex_eur"].astype(float).to_numpy()
+        )
+    else:
+        augmentation_capex = np.zeros_like(revenue)
 
     plt.figure(figsize=(7, 4))
     ax = plt.gca()
@@ -932,6 +959,17 @@ def plot_monthly_cashflow_year1(
                edgecolor="black", linewidth=0.4,
                label="Capacity-market revenue")
         pos_bottom = pos_bottom + np.clip(capacity_market, 0.0, None)
+    if np.any(np.abs(curtailment_comp) > 1e-9):
+        ax.bar(months, curtailment_comp, bottom=pos_bottom,
+               color=financial_color("Curtailment compensation"),
+               edgecolor="black", linewidth=0.4,
+               label="Curtailment compensation")
+        pos_bottom = pos_bottom + np.clip(curtailment_comp, 0.0, None)
+    if np.any(np.abs(go_revenue) > 1e-9):
+        ax.bar(months, go_revenue, bottom=pos_bottom,
+               color=financial_color("GO revenue"),
+               edgecolor="black", linewidth=0.4, label="GO revenue")
+        pos_bottom = pos_bottom + np.clip(go_revenue, 0.0, None)
     if np.any(np.abs(intraday_revenue) > 1e-9):
         # The margin is >= 0 by construction (Eq. E58): a plain
         # positive band like the tolling payment.
@@ -1002,6 +1040,25 @@ def plot_monthly_cashflow_year1(
                label="State-support netting")
         pos_bottom = pos_bottom + np.clip(support_net, 0.0, None)
         neg_bottom = neg_bottom + np.clip(support_net, None, 0.0)
+    if np.any(np.abs(support_settlement) > 1e-9):
+        # Signed per month (Eqs. E55-E57): sliding-FiP months stack with
+        # the revenue, two-way CfD repayment months below — one band,
+        # element-wise bottoms (the state-support netting pattern).
+        ax.bar(months, support_settlement,
+               bottom=np.where(
+                   support_settlement >= 0.0, pos_bottom, neg_bottom,
+               ),
+               color=financial_color("Support settlement (FiP/CfD)"),
+               edgecolor="black", linewidth=0.4,
+               label="Support settlement (FiP/CfD)")
+        pos_bottom = pos_bottom + np.clip(support_settlement, 0.0, None)
+        neg_bottom = neg_bottom + np.clip(support_settlement, None, 0.0)
+    if np.any(np.abs(augmentation_capex) > 1e-9):
+        ax.bar(months, augmentation_capex, bottom=neg_bottom,
+               color=financial_color("Augmentation CAPEX"),
+               edgecolor="black", linewidth=0.4,
+               label="Augmentation CAPEX")
+        neg_bottom = neg_bottom + augmentation_capex
     if np.any(np.abs(devex) > 1e-9):
         ax.bar(months, devex, bottom=neg_bottom,
                color=financial_color("DEVEX"),

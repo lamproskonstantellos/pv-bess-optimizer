@@ -20,7 +20,6 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import pvbess_opt.pipeline as pipeline_mod
 from pvbess_opt.pipeline import RunConfig, _resolve_uncertainty_config, run
 
 ROOT = Path(__file__).resolve().parent.parent

@@ -270,3 +270,50 @@ def test_apply_financial_legend_accepts_year_annotated_payback():
         "Discounted payback: 7.0 yr",
     ]
     plt.close(fig)
+
+
+def test_monthly_cashflow_bars_reconcile_with_all_streams(tmp_path):
+    """Every monthly net component must be DRAWN: curtailment
+    compensation, GO revenue, the signed FiP/CfD settlement and the
+    augmentation CAPEX are part of net_cashflow_eur, and omitting their
+    bars left the net line floating off the stack with no legend entry
+    explaining the gap (the docstring promises bars-reconcile-to-net,
+    like the yearly stack, which draws all four)."""
+    rows = []
+    for m in range(1, 13):
+        rows.append({
+            "project_year": 1, "calendar_year": 2026, "period": m,
+            "revenue_eur": 15_000.0,
+            "opex_eur": -1_500.0,
+            "curtailment_compensation_eur": 120.0,
+            "go_revenue_eur": 80.0,
+            # CfD: repayment month in December, receipts otherwise.
+            "support_settlement_eur": 400.0 if m < 12 else -600.0,
+            "augmentation_capex_eur": -2_000.0 if m == 12 else 0.0,
+        })
+    df = pd.DataFrame(rows)
+    df["net_cashflow_eur"] = (
+        df["revenue_eur"] + df["opex_eur"]
+        + df["curtailment_compensation_eur"] + df["go_revenue_eur"]
+        + df["support_settlement_eur"] + df["augmentation_capex_eur"]
+    )
+
+    fig = _render_with_open_figure(
+        plot_monthly_cashflow_year1, df, tmp_path / "monthly_all.pdf",
+    )
+    ax = fig.axes[0]
+    _handles, labels = ax.get_legend_handles_labels()
+    for expected in (
+        "Curtailment compensation", "GO revenue",
+        "Support settlement (FiP/CfD)", "Augmentation CAPEX",
+    ):
+        assert expected in labels, (expected, labels)
+
+    # Reconciliation: the bar stack sums to the net line per month.
+    sums = {m: 0.0 for m in range(1, 13)}
+    for patch in ax.patches:
+        month = round(patch.get_x() + patch.get_width() / 2.0)
+        sums[month] += float(patch.get_height())
+    net = df.set_index("period")["net_cashflow_eur"]
+    residual = max(abs(sums[m] - float(net.loc[m])) for m in range(1, 13))
+    assert residual < 1e-6, (sums, net.to_dict())
