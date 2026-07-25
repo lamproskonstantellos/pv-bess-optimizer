@@ -175,18 +175,27 @@ def main(argv: list[str] | None = None) -> int:
         resampled = _resample_column(col_series, idx, target, kind)
         out[col] = resampled.reindex(out_idx).values
 
-    # Carry the other sheets through unchanged.
-    other_sheets = {
-        name: pd.read_excel(src, sheet_name=name)
-        for name in sheets
-        if name != "timeseries"
-    }
-
+    # Carry the other sheets through with openpyxl, which preserves each
+    # cell's stored type exactly.  The previous pandas
+    # read_excel -> to_excel round-trip mis-typed numeric 0/1 cells in
+    # the mixed-type kv value columns as Excel BOOLEANS, so the script
+    # printed success and then the very next read_inputs rejected the
+    # workbook with a boolean-in-numeric-field error.
+    _ = sheets  # sheet inventory only informs the read above
     dst.parent.mkdir(parents=True, exist_ok=True)
-    with pd.ExcelWriter(dst, engine="openpyxl") as writer:
-        out.to_excel(writer, sheet_name="timeseries", index=False)
-        for name, df in other_sheets.items():
-            df.to_excel(writer, sheet_name=name, index=False)
+    import openpyxl
+    from openpyxl.utils.dataframe import dataframe_to_rows
+
+    wb = openpyxl.load_workbook(src)
+    ts_position = wb.sheetnames.index("timeseries")
+    wb.remove(wb["timeseries"])
+    ws = wb.create_sheet("timeseries", ts_position)
+    for row in dataframe_to_rows(out, index=False, header=True):
+        ws.append([
+            cell.to_pydatetime() if isinstance(cell, pd.Timestamp) else cell
+            for cell in row
+        ])
+    wb.save(dst)
 
     print(
         f"Resampled {src} -> {dst} (target {target} min; "

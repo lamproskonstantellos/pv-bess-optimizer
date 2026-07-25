@@ -452,9 +452,19 @@ def test_generate_all_energy_plots_threads_synthetic_kpis_to_year2(
         "revenue_pv_ppa_eur": 0.0,
     }
     idx2 = pd.date_range("2027-01-01", periods=48, freq="h")
+    # Year-2 raw sums must DIFFER from year 1 (2x here), or the
+    # assertion below cannot distinguish the synthetic year-2 dict from
+    # the year-1 dict being threaded through — the mutation sweep found
+    # that mutant surviving the identical-rows fixture.
+    res_year2 = res_year1.assign(
+        timestamp=idx2,
+        profit_export_from_pv_eur=20.0,
+        profit_export_from_bess_eur=10.0,
+        expense_charge_bess_grid_eur=4.0,
+    )
     lifetime_df = pd.concat([
         res_year1.assign(project_year=1, calendar_year=2026),
-        res_year1.assign(timestamp=idx2, project_year=2, calendar_year=2027),
+        res_year2.assign(project_year=2, calendar_year=2027),
     ], ignore_index=True)
 
     seen: dict[int, object] = {}
@@ -470,8 +480,14 @@ def test_generate_all_energy_plots_threads_synthetic_kpis_to_year2(
     assert seen[2026] is year1_kpis or seen[2026] == year1_kpis
     y2 = seen[2027]
     assert isinstance(y2, dict), "year-2 plot call must get synthetic KPIs"
-    assert y2["profit_export_from_pv_eur"] == pytest.approx(10.0 * 48 * 0.9)
-    assert y2["expense_charge_bess_grid_eur"] == pytest.approx(2.0 * 48 * 0.9)
+    # Synthetic year-2 values: the YEAR-2 raw sums times the Year-1
+    # derate factor — distinct from the year-1 dict on this fixture, so
+    # both the =None mutant and the year-1-dict mutant die.
+    assert y2["profit_export_from_pv_eur"] == pytest.approx(20.0 * 48 * 0.9)
+    assert y2["expense_charge_bess_grid_eur"] == pytest.approx(4.0 * 48 * 0.9)
+    assert y2["profit_export_from_pv_eur"] != pytest.approx(
+        year1_kpis["profit_export_from_pv_eur"],
+    )
 
 
 # --- round-13 guard refinements --------------------------------------------
