@@ -421,6 +421,15 @@ def _apply_scenario_overrides(
             f"scenario {scenario.get('name', 'scenario')!r}: "
             f"pv nameplate override {_raw_np!r} is not a finite number."
         )
+    if _has_np_override and _new_nameplate < 0.0:
+        # A negative override would rescale pv_kwh NEGATIVE and die at
+        # the scenario's re-read — late (after earlier scenarios solved),
+        # unnamed, and blaming the timeseries column instead of the
+        # override.  Fail fast naming the scenario, like non-finite.
+        raise ValueError(
+            f"scenario {scenario.get('name', 'scenario')!r}: "
+            f"pv nameplate override {_raw_np!r} must be >= 0."
+        )
     if (
         _base_nameplate > 0.0
         and _new_nameplate != _base_nameplate

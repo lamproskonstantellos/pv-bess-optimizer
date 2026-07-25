@@ -824,3 +824,28 @@ def test_nameplate_override_nonfinite_and_numpy_bool_are_rejected():
         _base(1000.0), {"name": "ok", "pv": {"nameplate_kwp": np.float64(2000.0)}},
     )
     assert list(ok["ts"]["pv_kwh"]) == [0.0, 200.0]
+
+
+def test_nameplate_override_negative_is_rejected():
+    """A negative override would rescale pv_kwh NEGATIVE and die at the
+    scenario's re-read — late, unnamed, and blaming the timeseries column
+    instead of the override.  Fail fast naming the scenario."""
+    from pvbess_opt.scenarios import _apply_scenario_overrides
+
+    base = {
+        "pv": {"pv_nameplate_kwp": 1000.0}, "bess": {}, "project": {},
+        "economics": {}, "simulation": {}, "balancing": {},
+        "ts": pd.DataFrame({
+            "timestamp": pd.date_range("2026-01-01", periods=2, freq="h"),
+            "pv_kwh": [0.0, 100.0],
+        }),
+    }
+    with pytest.raises(ValueError, match=r"neg.*must be >= 0"):
+        _apply_scenario_overrides(
+            base, {"name": "neg", "pv": {"nameplate_kwp": -5}},
+        )
+    # Zero stays the legit "no PV" scenario.
+    zero = _apply_scenario_overrides(
+        base, {"name": "no pv", "pv": {"nameplate_kwp": 0.0}},
+    )
+    assert list(zero["ts"]["pv_kwh"]) == [0.0, 0.0]
