@@ -1,0 +1,136 @@
+"""Compare-sources mode must not lose armed per-seed features.
+
+The compare branch of the pipeline runs four Monte Carlo ensembles
+(DAM / PV / Load / All) but previously called ``monte_carlo_rolling``
+WITHOUT the imbalance settlement arguments the plain branch passes —
+with ``imbalance_enabled = TRUE`` the Eq. E28 settlement silently
+vanished from every delivered financial (and ``risk_metrics_enabled``
+was skipped with a warning blaming ``uncertainty_enabled``/``n_seeds``,
+both of which were set).  The CLI ``--window-hours``/``--commit-hours``
+overrides also bypassed the loader's ``window >= 2 x commit`` imbalance
+lookahead gate, delivering all-zero settlement KPIs plus a degenerate
+"Monte Carlo" whose every seed was identical, silently.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+import pvbess_opt.pipeline as pipeline_mod
+from pvbess_opt.pipeline import RunConfig, _resolve_uncertainty_config, run
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _highs_available() -> bool:
+    try:
+        import highspy  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _one_day_workbook(tmp_path: Path, **simulation_overrides) -> Path:
+    from pvbess_opt.io import read_workbook, write_workbook
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)
+    typed["simulation"]["uncertainty_diagnostics_enabled"] = False
+    for scope in ("plot_daily_scope", "plot_monthly_scope", "plot_yearly_scope"):
+        typed["simulation"][scope] = "none"
+    typed["bess"]["terminal_soc_equal"] = False
+    typed["simulation"].update(simulation_overrides)
+    out = tmp_path / "one_day.xlsx"
+    write_workbook(typed, out)
+    return out
+
+
+def test_cli_window_commit_overrides_revalidate_the_lookahead_gate():
+    econ = {
+        "uncertainty_enabled": True,
+        "uncertainty_n_seeds": 2,
+        "uncertainty_window_hours": 12,
+        "uncertainty_commit_hours": 6,
+        "imbalance_enabled": True,
+    }
+    # The workbook 12/6 passed the loader gate; the CLI 6/6 starves the
+    # nomination lookahead and must be rejected with the loader's error.
+    bad = RunConfig(excel="x.xlsx", window_hours=6, commit_hours=6)
+    with pytest.raises(ValueError, match="2 x uncertainty_commit_hours"):
+        _resolve_uncertainty_config(bad, econ, "self_consumption")
+    # No overrides -> the stored values pass unchanged.
+    ok = RunConfig(excel="x.xlsx")
+    cfg = _resolve_uncertainty_config(ok, econ, "self_consumption")
+    assert (cfg["window_hours"], cfg["commit_hours"]) == (12, 6)
+    # Overrides that keep the gate satisfied stay legal.
+    wide = RunConfig(excel="x.xlsx", window_hours=16, commit_hours=8)
+    cfg = _resolve_uncertainty_config(wide, econ, "self_consumption")
+    assert (cfg["window_hours"], cfg["commit_hours"]) == (16, 8)
+
+
+@pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_compare_sources_keeps_settlement_and_risk_metrics(
+    tmp_path, monkeypatch, caplog,
+):
+    workbook = _one_day_workbook(
+        tmp_path,
+        uncertainty_enabled=True,
+        uncertainty_compare_sources=True,
+        uncertainty_n_seeds=2,
+        uncertainty_window_hours=12,
+        uncertainty_commit_hours=6,
+        imbalance_enabled=True,
+        risk_metrics_enabled=True,
+    )
+
+    calls: list[dict] = []
+
+    def fake_mc(params, ts, **kwargs):
+        calls.append(dict(kwargs))
+        pf = float(kwargs["pf_profit_eur"])
+        profits = [pf * 0.98, pf * 0.96]
+        return pd.DataFrame({
+            "seed": [42, 43],
+            "profit_total_eur": profits,
+            "grid_export_mwh": [1.0, 1.0],
+            "grid_import_mwh": [1.0, 1.0],
+            "pv_curtailed_mwh": [0.0, 0.0],
+            "bess_cycles_total": [1.0, 1.0],
+            "foresight_gap_pct": [2.0, 4.0],
+            "imbalance_cost_eur": [-120.0, -80.0],
+            "imbalance_short_mwh": [0.4, 0.2],
+            "imbalance_long_mwh": [0.1, 0.3],
+            "imbalance_cost_pv_only_eur": [-150.0, -100.0],
+            "bess_imbalance_hedge_value_eur": [30.0, 20.0],
+        })
+
+    monkeypatch.setattr("pvbess_opt.pipeline.monte_carlo_rolling", fake_mc)
+
+    with caplog.at_level(logging.WARNING):
+        results = run(RunConfig(
+            excel=workbook, solver="highs", outdir=tmp_path / "out",
+            mip_gap=1e-3, time_limit=120,
+        ))
+
+    # All four ensembles ran, each with the settlement armed.
+    assert len(calls) == 4
+    assert all(c.get("imbalance_enabled") is True for c in calls)
+
+    # The settlement aggregates reach the delivered KPIs (mean of the
+    # 'all' ensemble; every fake ensemble returns the same values).
+    assert results.kpis["imbalance_cost_year1_eur"] == pytest.approx(-100.0)
+    assert results.kpis["bess_imbalance_hedge_value_mean_eur"] == (
+        pytest.approx(25.0)
+    )
+
+    # VaR/CVaR runs on the compare frame's 'all' ensemble instead of
+    # being skipped with a false diagnosis.
+    assert "npv_var_eur" in results.kpis
+    assert not any(
+        "no rolling-horizon Monte Carlo seeds are available"
+        in r.getMessage() for r in caplog.records
+    )

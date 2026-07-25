@@ -55,8 +55,8 @@ from pvbess_opt.io import (
     PROJECT_SHEET_DEFAULTS,
     copy_input_snapshot,
     make_run_layout,
-    unique_output_dir,
     read_inputs,
+    unique_output_dir,
     write_assumptions_summary,
     write_dispatch_artifacts,
     write_results_workbook,
@@ -1789,6 +1789,26 @@ def _resolve_uncertainty_config(
     enable_ida = bool(econ.get("uncertainty_ida_enabled", True)) and bool(
         econ.get("id_enabled", False)
     )
+    # The loader enforces window >= 2 x commit whenever the imbalance
+    # settlement is armed (the nomination is the [commit, 2*commit)
+    # lookahead of each window) — but only on the WORKBOOK values.  CLI
+    # --window-hours/--commit-hours land here afterwards, and a
+    # combination that starves the lookahead delivered all-zero
+    # imbalance KPIs plus a degenerate 'Monte Carlo' (fully-committed
+    # windows never see noise, so every seed is identical) with no
+    # message.  Re-run the loader's gate on the RESOLVED values.
+    if enabled and bool(econ.get("imbalance_enabled", False)) and (
+        window < 2 * commit
+    ):
+        raise ValueError(
+            f"imbalance_enabled requires uncertainty_window_hours "
+            f"(= {window}) >= 2 x uncertainty_commit_hours "
+            f"(= {commit}): the nomination for the next commit "
+            f"block is the lookahead slice [commit, 2 x commit) of "
+            f"each window. Adjust --window-hours/--commit-hours (the "
+            f"workbook values passed this check before the CLI "
+            f"overrides were applied)."
+        )
     return {
         "enabled": enabled,
         "compare_sources": compare,
@@ -2076,6 +2096,14 @@ def _run_one(
                         enable_ida=unc_cfg["enable_ida"],
                         window_hours=window_h,
                         commit_hours=commit_h,
+                        imbalance_enabled=unc_cfg["imbalance_enabled"],
+                        imbalance_pricing=unc_cfg["imbalance_pricing"],
+                        imbalance_price_mult_short=(
+                            unc_cfg["imbalance_price_mult_short"]
+                        ),
+                        imbalance_price_mult_long=(
+                            unc_cfg["imbalance_price_mult_long"]
+                        ),
                         solver_name=config.solver,
                         strict=bool(config.strict),
                         mip_gap=rh_window_gap,
@@ -2247,15 +2275,28 @@ def _run_one(
                 kpis["foresight_gap_pct_p10"] = float(round(gap_p.loc[0.10], 4))
                 kpis["foresight_gap_pct_p50"] = float(round(gap_p.loc[0.50], 4))
                 kpis["foresight_gap_pct_p90"] = float(round(gap_p.loc[0.90], 4))
+            # In compare-sources mode the per-seed settlement lives in
+            # the rolling_compare_df; its 'all' ensemble (every noise
+            # source on) is the canonical full-noise realisation, so the
+            # settlement aggregates are sourced from it — previously the
+            # compare branch simply dropped the armed imbalance
+            # settlement from every delivered financial.
+            _settlement_mc_df = rolling_mc_df
+            if _settlement_mc_df is None and rolling_compare_df is not None:
+                _all_rows = rolling_compare_df[
+                    rolling_compare_df["source_set"] == "all"
+                ]
+                if "imbalance_cost_eur" in _all_rows.columns:
+                    _settlement_mc_df = _all_rows
             if (
-                rolling_mc_df is not None
-                and "imbalance_cost_eur" in rolling_mc_df.columns
+                _settlement_mc_df is not None
+                and "imbalance_cost_eur" in _settlement_mc_df.columns
             ):
                 # Imbalance settlement aggregates (Eqs. U6-U9): the MEAN
                 # feeds the yearly cashflow as the unbiased expected-value
                 # estimate (Eq. E28); the percentiles carry the
                 # distributional story (right-skewed, spike-driven).
-                _imb = rolling_mc_df["imbalance_cost_eur"].astype(float)
+                _imb = _settlement_mc_df["imbalance_cost_eur"].astype(float)
                 _imb_p = _imb.quantile([0.10, 0.50, 0.90])
                 kpis["imbalance_cost_year1_eur"] = float(round(_imb.mean(), 2))
                 kpis["imbalance_cost_p10_eur"] = float(
@@ -2267,7 +2308,7 @@ def _run_one(
                 kpis["imbalance_cost_p90_eur"] = float(
                     round(_imb_p.loc[0.90], 2),
                 )
-                _hedge = rolling_mc_df[
+                _hedge = _settlement_mc_df[
                     "bess_imbalance_hedge_value_eur"
                 ].astype(float)
                 kpis["bess_imbalance_hedge_value_mean_eur"] = float(
@@ -2381,8 +2422,17 @@ def _run_one(
 
         # NPV tail risk over the Monte Carlo seeds (Eqs. U10/U11):
         # adds KPI rows + a results sheet only when armed and seeded.
+        _risk_source_df = rolling_mc_df
+        if _risk_source_df is None and rolling_compare_df is not None:
+            # Compare-sources mode: the seeds live in the compare frame;
+            # its 'all' ensemble feeds the tail statistics (previously
+            # VaR/CVaR was skipped here with a warning blaming
+            # uncertainty_enabled/n_seeds, both of which were set).
+            _risk_source_df = rolling_compare_df[
+                rolling_compare_df["source_set"] == "all"
+            ]
         risk_df = _compute_risk_metrics(
-            rolling_mc_df, kpis, econ, bundle.get("capacities"),
+            _risk_source_df, kpis, econ, bundle.get("capacities"),
         )
 
         # Weighted price-scenario ensemble (pricedata layer): one
