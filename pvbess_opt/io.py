@@ -3311,7 +3311,25 @@ def _extract_profile(
         return arr
 
     monthly_cols = [f"{monthly_prefix}_{m}" for m in _MONTH_TOKENS]
-    if all(col in df_norm.columns for col in monthly_cols):
+    present_monthly = [c for c in monthly_cols if c in df_norm.columns]
+    if present_monthly and len(present_monthly) < len(monthly_cols):
+        # A PARTIAL monthly set is always a typo'd header, and silently
+        # degrading a 24x12 authored profile to the scalar column (or to
+        # the flat default) would reshape dispatch with no trace.
+        missing = [c for c in monthly_cols if c not in df_norm.columns]
+        raise ValueError(
+            f"profile sheet carries {len(present_monthly)} of the 12 "
+            f"'{monthly_prefix}_<month>' columns; missing/typo'd: "
+            f"{missing}. Provide all 12 monthly columns, or a single "
+            f"'{scalar_col}' column."
+        )
+    if len(present_monthly) == len(monthly_cols):
+        if scalar_col in df_norm.columns:
+            logger.warning(
+                "profile sheet carries BOTH the scalar '%s' column and "
+                "the 12 monthly columns; the monthly set wins and the "
+                "scalar column is ignored.", scalar_col,
+            )
         arr = np.zeros((24, 12), dtype=float)
         for m_idx, m_name in enumerate(_MONTH_TOKENS):
             arr[:, m_idx] = (
@@ -3410,14 +3428,54 @@ def _normalise_timeseries(
         raise ValueError("timeseries sheet must contain a 'timestamp' column.")
     if "pv_kwh" not in ts.columns:
         raise ValueError("timeseries sheet must contain a 'pv_kwh' column.")
+    # pandas mangles DUPLICATED sheet headers to '<name>.1' / '<name>.2'
+    # silently.  For a schema column the un-suffixed duplicate wins every
+    # presence check, so e.g. an EMPTY first 'pv_kwh' next to the user's
+    # full second copy read as "no PV data" (and with PVGIS coordinates
+    # set, the fetch silently replaced the user's data).  Name the
+    # duplicate instead of guessing which copy was meant.
+    _mangled = re.compile(r"^(?P<base>.+)\.(?P<n>\d+)$")
+    for col in ts.columns:
+        m = _mangled.match(str(col))
+        if m and m.group("base") in ts.columns:
+            raise ValueError(
+                f"timeseries sheet has a duplicated {m.group('base')!r} "
+                "column header (pandas read the second copy as "
+                f"{col!r}); keep exactly one column per name."
+            )
+    # The id_da_* columns are the pipeline's own committed-position
+    # carriers (written into every intraday dispatch output).  Pasted
+    # back into an INPUT timeseries they would pin the day-ahead solve
+    # to the stale position within the deviation budget — a silently
+    # position-constrained "optimal" dispatch.
+    _reserved = [c for c in ts.columns if str(c).startswith("id_da_")]
+    if _reserved:
+        raise ValueError(
+            f"timeseries sheet carries reserved internal column(s) "
+            f"{sorted(map(str, _reserved))}: the id_da_* family is "
+            "written by the intraday two-stage dispatch and must not "
+            "appear in an input workbook. Remove the column(s)."
+        )
 
     def _fetched(col: str) -> bool:
         src_key = _COLUMN_MARKET_SOURCE.get(col)
         if src_key is None or not market_sources:
             return False
-        return str(
+        source = str(
             market_sources.get(src_key, "file") or "file"
-        ).strip().lower() != "file"
+        ).strip().lower()
+        if source == "file":
+            return False
+        if src_key == "balancing_source":
+            # A fetch-EXEMPT column (FCR under the ADMIE provider —
+            # explicit or 'auto' for the gr zone) keeps its gap/empty
+            # diagnostics: nothing will replace it after normalisation.
+            from .marketdata.base import balancing_fetch_covers_column
+
+            return balancing_fetch_covers_column(
+                col, source, str(market_sources.get("bidding_zone", "gr")),
+            )
+        return True
 
     # The MILP chains SOC and dispatch over ROW order, so out-of-order rows
     # (e.g. the sheet re-sorted by a price column in Excel and saved) would

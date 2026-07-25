@@ -606,7 +606,13 @@ def test_present_but_empty_balancing_column_takes_scalar_default_always():
         ts2, mode="self_consumption",
         market_sources={"balancing_source": "admie"},
     )
-    assert kept["fcr_capacity_price_eur_per_mwh"].isna().all()
+    # Since the fetch-exempt diagnostics fix, the all-NaN FCR column is
+    # dropped by the normaliser with the accurate empty-equals-absent
+    # warning (it previously survived silently); the scalar fallback
+    # then fills it through the ABSENT path — same settled price, and
+    # the present-but-all-NaN rescue above stays the last line of
+    # defence for any path that still hands one through.
+    assert "fcr_capacity_price_eur_per_mwh" not in kept.columns
     rescued, _ = _apply_balancing_timeseries_fallback(kept, bal)
     assert rescued["fcr_capacity_price_eur_per_mwh"].tolist() == [9.99] * 4
     # A populated column stays verbatim (bit-identity depends on it).
@@ -818,3 +824,154 @@ def test_kv_formula_without_cached_value_still_errors_named(
     dst = _write_variant_workbook(base_typed, tmp_path, mutate)
     with pytest.raises(ValueError, match=r"bess_capacity_kwh.*=2000\*2"):
         read_inputs(dst)
+
+
+# --- timeseries header hygiene and fetch-exempt gap diagnostics -------------
+
+
+def test_duplicated_schema_header_is_named(tmp_path, base_typed):
+    """pandas mangles a duplicated sheet header to 'pv_kwh.1' silently;
+    with PVGIS coordinates set the empty first copy previously won the
+    presence check and the fetch replaced the user's data unnoticed."""
+    import copy
+
+    from pvbess_opt.io import _normalise_timeseries
+
+    ts = copy.deepcopy(base_typed)["ts"]
+    ts["pv_kwh.1"] = ts["pv_kwh"]
+    with pytest.raises(ValueError, match="duplicated 'pv_kwh'"):
+        _normalise_timeseries(ts, mode="self_consumption")
+
+    # End-to-end: the same duplication authored in the workbook itself.
+    typed = copy.deepcopy(base_typed)
+    dst = _write(tmp_path, typed, "dup.xlsx")
+    from openpyxl import load_workbook
+
+    wb = load_workbook(dst)
+    ws = wb["timeseries"]
+    headers = [c.value for c in ws[1]]
+    src_idx = headers.index("pv_kwh") + 1
+    new_col = ws.max_column + 1
+    ws.cell(1, new_col, "pv_kwh")
+    for r in range(2, ws.max_row + 1):
+        ws.cell(r, new_col, ws.cell(r, src_idx).value)
+    wb.save(dst)
+    with pytest.raises(ValueError, match="duplicated 'pv_kwh'"):
+        read_inputs(dst)
+
+
+def test_reserved_id_da_columns_are_rejected(base_typed):
+    """The id_da_* family is written by the intraday two-stage dispatch;
+    pasted back into an input it silently pinned the day-ahead solve to
+    the stale committed position within the deviation budget."""
+    import copy
+
+    from pvbess_opt.io import _normalise_timeseries
+
+    ts = copy.deepcopy(base_typed)["ts"]
+    ts["id_da_position_kwh"] = 0.0
+    with pytest.raises(ValueError, match="id_da_position_kwh"):
+        _normalise_timeseries(ts, mode="merchant")
+
+
+def test_fetch_exempt_fcr_column_keeps_gap_warning(caplog):
+    """FCR under the ADMIE provider (explicit or auto for gr) is never
+    fetched, so a mostly-blank FCR column must keep the ffill/bfill gap
+    warning instead of being silently expanded to a constant price."""
+    import logging
+
+    from pvbess_opt.io import _normalise_timeseries
+
+    idx = pd.date_range("2026-01-01", periods=6, freq="h")
+
+    def _frame():
+        return pd.DataFrame({
+            "timestamp": idx, "pv_kwh": [1.0] * 6, "load_kwh": [2.0] * 6,
+            "dam_price_eur_per_mwh": [50.0] * 6,
+            "fcr_capacity_price_eur_per_mwh":
+                [42.0] + [float("nan")] * 5,
+        })
+
+    for source in ("admie", "auto"):
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
+            out = _normalise_timeseries(
+                _frame(), mode="self_consumption",
+                market_sources={
+                    "balancing_source": source, "bidding_zone": "gr",
+                },
+            )
+        gap = [r for r in caplog.records
+               if "filled via ffill/bfill" in r.getMessage()
+               and "fcr_capacity" in r.getMessage()]
+        assert len(gap) == 1, (source, [r.getMessage() for r in caplog.records])
+        assert out["fcr_capacity_price_eur_per_mwh"].tolist() == [42.0] * 6
+
+    # Control: a column the fetch WILL replace stays quiet.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
+        _normalise_timeseries(
+            _frame(), mode="self_consumption",
+            market_sources={
+                "balancing_source": "entsoe", "bidding_zone": "de_lu",
+            },
+        )
+    assert not any(
+        "fcr_capacity" in r.getMessage() and "ffill" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_partial_monthly_injection_profile_raises_named():
+    """11 of 12 monthly columns (one typo'd) previously degraded the
+    authored 24x12 profile to the scalar column in silence."""
+    from pvbess_opt.io import _parse_max_injection_profile_sheet
+
+    df = pd.DataFrame({"hour_of_day": range(24)})
+    months = ["jan", "feb", "mar", "apr", "may", "jun",
+              "jul", "aug", "sep", "oct", "nov", "dec"]
+    for m in months[:-1]:
+        df[f"max_injection_pct_{m}"] = 90.0
+    df["max_injection_pct_dce"] = 90.0  # typo'd december
+    df["max_injection_pct"] = 100.0
+    with pytest.raises(ValueError, match="max_injection_pct_dec"):
+        _parse_max_injection_profile_sheet(df)
+
+
+def test_scalar_plus_full_monthly_injection_profile_warns(caplog):
+    import logging
+
+    from pvbess_opt.io import _parse_max_injection_profile_sheet
+
+    df = pd.DataFrame({"hour_of_day": range(24)})
+    for m in ("jan", "feb", "mar", "apr", "may", "jun",
+              "jul", "aug", "sep", "oct", "nov", "dec"):
+        df[f"max_injection_pct_{m}"] = 90.0
+    df["max_injection_pct"] = 100.0
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
+        arr = _parse_max_injection_profile_sheet(df)
+    assert arr.shape == (24, 12)
+    assert (arr == 90.0).all()
+    assert any("monthly set wins" in r.getMessage() for r in caplog.records)
+
+
+def test_price_deck_text_cell_named(tmp_path, base_typed):
+    """A '12 EUR' cell in a deck CSV previously raised a bare float
+    conversion error naming neither deck, column nor file."""
+    import copy
+
+    from pvbess_opt.io_read import _resolve_price_decks
+
+    typed = copy.deepcopy(base_typed)
+    deck = tmp_path / "low.csv"
+    rows = len(typed["ts"])
+    deck.write_text(
+        "dam_price_eur_per_mwh\n" + "\n".join(
+            ["12 EUR"] + ["50.0"] * (rows - 1),
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=r"deck 'low'.*dam_price_eur_per_mwh"):
+        _resolve_price_decks(
+            {"price_decks": {"low": str(deck)}}, tmp_path, typed,
+        )

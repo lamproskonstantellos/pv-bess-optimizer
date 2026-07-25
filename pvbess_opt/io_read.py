@@ -434,7 +434,18 @@ def _resolve_price_decks(
                     f"price deck {deck!r} ({deck_path}) has {len(df)} "
                     f"rows but the model grid has {len(ts)}."
                 )
-            ts[f"{col}__{deck}"] = df[col].to_numpy(dtype=float)
+            try:
+                values = df[col].to_numpy(dtype=float)
+            except (TypeError, ValueError) as exc:
+                # A text cell ('12 EUR') previously surfaced as a bare
+                # float-conversion error naming neither deck, column
+                # nor file.
+                raise ValueError(
+                    f"price deck {deck!r} ({deck_path}): column {col!r} "
+                    f"contains a non-numeric cell ({exc}); every value "
+                    "must be a number in EUR/MWh."
+                ) from exc
+            ts[f"{col}__{deck}"] = values
 
 
 def _resolve_pvgis(typed: dict[str, Any]) -> None:

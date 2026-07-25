@@ -685,6 +685,32 @@ _AUTO_DEFAULT_SOURCE = "entsoe"
 _PUBLISHES_NOTHING: frozenset[tuple[str, str]] = frozenset()
 
 
+def balancing_fetch_covers_column(
+    column: str, balancing_source: str, zone_code: str,
+) -> bool:
+    """Whether a non-'file' balancing source will actually fill ``column``.
+
+    Greece procures no standalone FCR (co-optimised ISP), so the ADMIE
+    provider — selected explicitly or via ``auto`` for the ``gr`` zone —
+    never fetches ``fcr_capacity_price_eur_per_mwh``.  The loader's
+    gap-fill diagnostics consult this so a fetch-EXEMPT column keeps its
+    warnings (a mostly-blank FCR column was previously ffilled to a
+    constant price in silence on the assumption "the fetch will replace
+    it").
+    """
+    if column != "fcr_capacity_price_eur_per_mwh":
+        return True
+    token = str(balancing_source or "file").strip().lower()
+    zone_key = str(zone_code or "").strip().lower()
+    if token == "admie":
+        return False
+    if token == "auto":
+        return _AUTO_SOURCE.get("balancing", {}).get(
+            zone_key, _AUTO_DEFAULT_SOURCE,
+        ) != "admie"
+    return True
+
+
 def resolve_dataset_source(
     dataset: str, requested: str, zone: Zone,
 ) -> str | None:
