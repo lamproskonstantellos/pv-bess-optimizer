@@ -2081,6 +2081,22 @@ def _run_one(
                 )
                 ensembles: list[pd.DataFrame] = []
                 for src, en_dam, en_pv, en_load in _COMPARE_SOURCE_FLAGS:
+                    if src == "all":
+                        # The 'all' ensemble feeds the DELIVERED
+                        # settlement aggregates and NPV tail risk (it is
+                        # the compare-mode stand-in for the plain MC
+                        # path), so it must honour the workbook's
+                        # per-source uncertainty_{dam,pv,load}_enabled
+                        # toggles exactly like the plain path — the
+                        # hard-coded all-True flags re-introduced noise
+                        # a user had explicitly disabled, and the
+                        # delivered financials differed from the plain
+                        # run of the identical workbook.  The three
+                        # single-source ensembles keep their fixed
+                        # diagnostic definitions.
+                        en_dam = unc_cfg["enable_dam"]
+                        en_pv = unc_cfg["enable_pv"]
+                        en_load = unc_cfg["enable_load"]
                     sub = monte_carlo_rolling(
                         params, ts,
                         n_seeds=n_seeds,

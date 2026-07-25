@@ -133,3 +133,55 @@ def test_compare_sources_keeps_settlement_and_risk_metrics(
         "no rolling-horizon Monte Carlo seeds are available"
         in r.getMessage() for r in caplog.records
     )
+
+
+@pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_all_ensemble_honours_per_source_toggles(tmp_path, monkeypatch):
+    """Round-2 regression: the 'all' ensemble — which feeds the DELIVERED
+    settlement aggregates and NPV tail risk — ran with hard-coded
+    all-True noise flags, re-introducing a source the workbook had
+    explicitly disabled (uncertainty_dam_enabled = FALSE); the plain-MC
+    path honoured the toggle, so the two modes delivered different
+    financials for the identical workbook."""
+    workbook = _one_day_workbook(
+        tmp_path,
+        uncertainty_enabled=True,
+        uncertainty_compare_sources=True,
+        uncertainty_n_seeds=2,
+        uncertainty_window_hours=12,
+        uncertainty_commit_hours=6,
+        uncertainty_dam_enabled=False,
+    )
+
+    calls: list[dict] = []
+
+    def fake_mc(params, ts, **kwargs):
+        calls.append(dict(kwargs))
+        pf = float(kwargs["pf_profit_eur"])
+        return pd.DataFrame({
+            "seed": [42, 43],
+            "profit_total_eur": [pf * 0.99, pf * 0.97],
+            "grid_export_mwh": [1.0, 1.0],
+            "grid_import_mwh": [1.0, 1.0],
+            "pv_curtailed_mwh": [0.0, 0.0],
+            "bess_cycles_total": [1.0, 1.0],
+            "foresight_gap_pct": [1.0, 3.0],
+        })
+
+    monkeypatch.setattr("pvbess_opt.pipeline.monte_carlo_rolling", fake_mc)
+    run(RunConfig(
+        excel=workbook, solver="highs", outdir=tmp_path / "out",
+        mip_gap=1e-3, time_limit=120,
+    ))
+
+    assert len(calls) == 4
+    # The three single-source ensembles keep their fixed diagnostic
+    # definitions...
+    dam_only, pv_only, load_only, all_combined = calls
+    assert (dam_only["enable_dam"], dam_only["enable_pv"]) == (True, False)
+    assert (pv_only["enable_dam"], pv_only["enable_pv"]) == (False, True)
+    assert load_only["enable_load"] is True
+    # ...while the 'all' ensemble honours the workbook toggles exactly
+    # like the plain-MC path (DAM noise disabled here).
+    assert all_combined["enable_dam"] is False
+    assert all_combined["enable_pv"] is True
