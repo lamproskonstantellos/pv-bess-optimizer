@@ -596,6 +596,40 @@ Pre-delivery release audit (round 13):
   introduced (the user guide still promised every sheet key is a valid
   target).
 
+Pre-delivery release audit (round 14):
+
+- **Empty-equals-absent at the last line of defence.** The scalar
+  balancing fallback now treats a present-but-entirely-NaN column as
+  ABSENT (filled from the per-product default with the standard
+  warning). This closes the one path the round-13 fix left open: a
+  fetch-exempted column the provider does not publish — FCR under the
+  ADMIE source (Greece procures no standalone FCR), or `auto` resolving
+  to ADMIE for the shipped `gr` zone — was kept quietly by the
+  normaliser, never filled by the fetch, skipped by the fallback
+  (present), and settled at NaN: NaN FCR revenue and NaN NPV with zero
+  warnings. As the LAST line of defence this also covers the documented
+  future `auto`-degradation hook.
+- **Named non-numeric-cell errors everywhere.** The round-13 astype
+  guard covered the canonical column loop only; a whitespace/text cell
+  in `pv_kwh`/`load_kwh` (the negative-value pre-check) or a deck
+  variant column still surfaced a bare "could not convert string to
+  float". One shared conversion helper now names the column at all
+  three sites.
+- **Physical-sign and finiteness guards.** Negative
+  `grid_co2_kg_per_mwh` values are rejected naming the column and first
+  row (they silently flipped emissions KPIs' sign); a negative
+  `pv.nameplate_kwp` scenario override raises naming the scenario (it
+  previously rescaled `pv_kwh` negative and died late, unnamed, blaming
+  the timeseries column); `bess_augmentation_years` entries of
+  `inf`/`.inf` raise a ValueError naming the key instead of a bare
+  `OverflowError` from `int(inf)`.
+- **Snapshot stale-row clearing actually clears.** The round-12 loop
+  used `Worksheet.cell(value=None)`, which openpyxl silently ignores —
+  the defensive clear was a no-op; it now assigns `.value` explicitly,
+  and a regression test drives a snapshot with trailing stale rows
+  through the materialiser. The same test locks the gate's
+  blank-string-cell term (the mutation sweep's one surviving branch).
+
 ## 1.0.0 (2026-07-06)
 
 Production release.
