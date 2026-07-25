@@ -1070,3 +1070,16 @@ def test_nameplate_override_negative_is_rejected():
         base, {"name": "no pv", "pv": {"nameplate_kwp": 0.0}},
     )
     assert list(zero["ts"]["pv_kwh"]) == [0.0, 0.0]
+
+
+def test_explicit_blank_scenario_names_are_rejected():
+    """Round-2 regression: the duplicate-name guard skipped name=None, so
+    repeated empty '- name:' YAML entries passed unflagged and produced
+    comparison rows all labelled None."""
+    with pytest.raises(ValueError, match="empty 'name'"):
+        resolve_inheritance([{"name": None, "capex_multiplier": 0.5}])
+    with pytest.raises(ValueError, match="blank 'name'"):
+        resolve_inheritance([{"name": "   ", "capex_multiplier": 0.5}])
+    # A scenario with NO name key keeps its historical default label.
+    out = resolve_inheritance([{"capex_multiplier": 0.5}])
+    assert len(out) == 1 and "name" not in out[0]
