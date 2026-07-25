@@ -3996,6 +3996,19 @@ def _validate_ppa_config(ppa: dict[str, Any]) -> None:
             "ppa_structure must be 'pay_as_produced' or 'baseload'; "
             f"got {structure!r}."
         )
+    if structure == "pay_as_produced":
+        share_pap = float(ppa.get("ppa_volume_share_pct", 100.0) or 0.0)
+        if share_pap == 0.0:
+            # The baseload analog (a zero band) is rejected loudly; a
+            # zero SHARE is the same drafting mistake on this structure
+            # — the contract is enabled and settles nothing.  Warn (not
+            # raise) so a deliberately parked contract stays runnable.
+            logger.warning(
+                "ppa_enabled = TRUE with ppa_volume_share_pct = 0: the "
+                "pay-as-produced contract covers no volume and settles "
+                "0 EUR. Set the share, or ppa_enabled = FALSE if the "
+                "contract is not meant to bind."
+            )
     if structure == "baseload":
         baseload_mw = float(ppa.get("ppa_baseload_mw", 0.0) or 0.0)
         if baseload_mw <= 0.0:

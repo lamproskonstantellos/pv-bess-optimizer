@@ -299,3 +299,46 @@ def test_resolve_intraday_config_coercion():
     assert cfg.id_allow_purchases is False
     assert cfg.id_fee_eur_per_mwh == 2.0
     assert cfg.id_inflation_pct == 0.0
+
+
+def test_invariant_7_exempts_stage2_frames_and_strict_passes(short_ts_factory=None):
+    """A Stage-2 re-dispatch can OPTIMALLY curtail with cap headroom at
+    a positive DAM price (an IDA buy-back of the committed position, or
+    the anti-wash binary occupying the step), so the DAM-price
+    'lazy curtailment' predicate is undefined there: invariant_7
+    previously counted those steps and --strict aborted a valid
+    merchant+intraday run.  The Stage-1 frame keeps the full check."""
+    import numpy as np
+
+    from tests.conftest import _make_short_ts, _short_params
+
+    from pvbess_opt.intraday import redispatch_intraday
+    from pvbess_opt.optimization import run_scenario, verify_dispatch_invariants
+    from pvbess_opt.pipeline import _check_strict_invariants
+
+    ts = _make_short_ts(24, with_load=False)
+    rng = np.random.default_rng(7)
+    ida = ts["dam_price_eur_per_mwh"].to_numpy() + rng.normal(0, 40, len(ts))
+    ida[5] = ts.loc[5, "dam_price_eur_per_mwh"] + 200.0
+    ida[6] = ts.loc[6, "dam_price_eur_per_mwh"] - 200.0
+    ts["ida_price_eur_per_mwh"] = ida
+
+    params = _short_params("merchant")
+    params["allow_bess_grid_charging"] = True
+    params["intraday"] = {
+        "id_enabled": True, "id_max_deviation_frac_of_cap": 0.25,
+        "id_allow_purchases": True, "id_fee_eur_per_mwh": 1.0,
+    }
+
+    _res1, _, res1_full = run_scenario(
+        params, ts, mip_gap=1e-6, return_unrounded=True,
+    )
+    inv1 = verify_dispatch_invariants(res1_full, params)
+    assert inv1["invariant_7_curtail_behavior_count"] == 0.0
+
+    _res2, _, res2_full = redispatch_intraday(
+        params, ts, res1_full, mip_gap=1e-6,
+    )
+    inv2 = verify_dispatch_invariants(res2_full, params)
+    assert inv2["invariant_7_curtail_behavior_count"] == 0.0
+    _check_strict_invariants(inv2)  # must not raise

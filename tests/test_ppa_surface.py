@@ -414,3 +414,26 @@ def test_summary_md_ppa_row_only_when_nonzero(tmp_path):
         params=params,
     )
     assert "| Lifetime PPA revenue [EUR] | 123,456 |" in out.read_text()
+
+
+def test_enabled_pay_as_produced_zero_share_warns(caplog):
+    """ppa_enabled = TRUE with ppa_volume_share_pct = 0 settles nothing;
+    the baseload analog (a zero band) is rejected loudly, so the
+    pay-as-produced structure must at least say the contract is inert
+    instead of being accepted in silence."""
+    import logging
+
+    typed = _typed({"ppa_enabled": True, "ppa_volume_share_pct": 0.0})
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
+        validate_workbook_params(typed, dt_minutes=60)
+    assert any(
+        "ppa_volume_share_pct = 0" in r.getMessage() for r in caplog.records
+    )
+    # A non-zero share stays quiet.
+    caplog.clear()
+    typed = _typed({"ppa_enabled": True, "ppa_volume_share_pct": 80.0})
+    with caplog.at_level(logging.WARNING, logger="pvbess_opt.io"):
+        validate_workbook_params(typed, dt_minutes=60)
+    assert not any(
+        "ppa_volume_share_pct = 0" in r.getMessage() for r in caplog.records
+    )

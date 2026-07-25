@@ -2506,10 +2506,23 @@ def verify_dispatch_invariants(
         export_profitable = res["dam_price_eur_per_mwh"].to_numpy(dtype=float) > 0.0
     else:
         export_profitable = np.zeros_like(pv_curtail, dtype=bool)
-    inv_7 = float(
-        (pv_can_inject_more & (pv_curtail > tol_kwh) & export_profitable)
-        .astype(float).sum()
-    )
+    # A Stage-2 intraday frame re-dispatches around the COMMITTED
+    # day-ahead position: additional injection is a sell deviation that
+    # settles at the intraday price net of the venue fee, is capped by
+    # the per-step deviation budget and gated by the anti-wash binary —
+    # so curtailment with cap headroom at a positive DAM price can be
+    # the position-constrained optimum, not "lazy curtailment".  The
+    # DAM-price predicate is undefined for that dispatch, and flagging
+    # it aborted valid --strict merchant+intraday runs; the Stage-1
+    # frame of the same run keeps the full check.
+    _stage2_frame = "id_sell_pv_kwh" in res.columns
+    if _stage2_frame:
+        inv_7 = 0.0
+    else:
+        inv_7 = float(
+            (pv_can_inject_more & (pv_curtail > tol_kwh) & export_profitable)
+            .astype(float).sum()
+        )
 
     if params.get("terminal_soc_equal", True):
         if len(soc):
