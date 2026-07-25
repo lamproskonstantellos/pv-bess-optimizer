@@ -301,7 +301,7 @@ def test_resolve_intraday_config_coercion():
     assert cfg.id_inflation_pct == 0.0
 
 
-def test_invariant_7_exempts_stage2_frames_and_strict_passes(short_ts_factory=None):
+def test_invariant_7_exempts_stage2_frames_and_strict_passes():
     """A Stage-2 re-dispatch can OPTIMALLY curtail with cap headroom at
     a positive DAM price (an IDA buy-back of the committed position, or
     the anti-wash binary occupying the step), so the DAM-price
