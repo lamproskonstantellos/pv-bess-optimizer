@@ -16,6 +16,7 @@ from pvbess_opt.scenarios import (
     read_scenarios_file,
     resolve_inheritance,
     run_scenarios,
+    validate_scenario_overrides,
     write_scenario_comparison_workbook,
 )
 from pvbess_opt.theme import COL_WIDTH_MAX, COL_WIDTH_MIN, HEADER_FILL_HEX
@@ -118,6 +119,165 @@ def test_balancing_off_shorthand():
         _base_typed(), {"name": "x", "balancing": False},
     )
     assert typed["balancing"]["balancing_enabled"] is False
+
+
+# ---------------------------------------------------------------------------
+# capex_multiplier value validation: float(False) is 0.0 (every CAPEX line
+# silently zeroed), NaN materialises blank cells that re-parse to the SHEET
+# DEFAULTS on the scenario re-read, and a negative multiplier books CAPEX
+# as a cash credit — all under the scenario's label with no warning.
+# ---------------------------------------------------------------------------
+
+
+def test_capex_multiplier_rejects_boolean():
+    with pytest.raises(ValueError, match="'zeroed'.*boolean|boolean"):
+        validate_scenario_overrides(
+            {"name": "zeroed", "capex_multiplier": False},
+        )
+
+
+def test_capex_multiplier_rejects_nan_and_infinity():
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="'broken'.*finite|finite"):
+            validate_scenario_overrides(
+                {"name": "broken", "capex_multiplier": bad},
+            )
+
+
+def test_capex_multiplier_rejects_negative():
+    with pytest.raises(ValueError, match="credit"):
+        validate_scenario_overrides(
+            {"name": "cheap", "capex_multiplier": -1.0},
+        )
+
+
+def test_capex_multiplier_rejects_non_numeric_string():
+    with pytest.raises(ValueError, match="'off'.*not a number|not a number"):
+        validate_scenario_overrides(
+            {"name": "s", "capex_multiplier": "off"},
+        )
+
+
+def test_capex_multiplier_null_is_inert_with_warning(caplog):
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING, logger="pvbess_opt.scenarios"):
+        validate_scenario_overrides({"name": "stub", "capex_multiplier": None})
+    assert any("capex_multiplier" in r.message for r in caplog.records)
+    typed = _apply_scenario_overrides(
+        _base_typed(), {"name": "stub", "capex_multiplier": None},
+    )
+    assert typed["pv"]["capex_pv_eur_per_kw"] == 500.0  # base kept
+
+
+def test_capex_multiplier_numeric_string_still_accepted():
+    # The scenarios sheet can deliver the value as text; '0.5' is a number.
+    typed = _apply_scenario_overrides(
+        _base_typed(), {"name": "half", "capex_multiplier": "0.5"},
+    )
+    assert typed["pv"]["capex_pv_eur_per_kw"] == pytest.approx(250.0)
+
+
+# ---------------------------------------------------------------------------
+# Scenario overrides of the balancing *_default_* price scalars must reach
+# settlement.  The base read's scalar fallback materialises the defaults
+# into real ts columns; if those survive into the scenario's temp workbook
+# the re-read finds them "present" and the scenario's own scalar never
+# fires — the override was accepted and silently discarded (and the same
+# spec behaved differently depending on the base workbook's enable toggle).
+# ---------------------------------------------------------------------------
+
+
+def _typed_with_balancing_fallback() -> dict:
+    from pvbess_opt.io import read_workbook, write_workbook
+
+    typed = _typed_for_write()
+    typed["balancing"] = dict(typed.get("balancing") or {},
+                              balancing_enabled=True,
+                              bm_settlement_minutes=60,
+                              fcr_default_capacity_price_eur_per_mwh=9.99)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "base.xlsx"
+        write_workbook(typed, p)
+        return read_workbook(p)
+
+
+def test_scenario_balancing_scalar_override_reaches_the_rereads_ts(tmp_path):
+    from pvbess_opt.io import read_inputs, write_workbook
+
+    base = _typed_with_balancing_fallback()
+    assert "fcr_capacity_price_eur_per_mwh" in base["ts"].columns
+    assert base["ts"]["fcr_capacity_price_eur_per_mwh"].iloc[0] == 9.99
+
+    typed = _apply_scenario_overrides(base, {
+        "name": "fcr-up",
+        "balancing": {"fcr_default_capacity_price_eur_per_mwh": 25.0},
+    })
+    # The fallback-materialised column must not survive into the
+    # scenario workbook...
+    assert "fcr_capacity_price_eur_per_mwh" not in typed["ts"].columns
+    # ...so the scenario re-read re-materialises it from the OVERRIDDEN
+    # scalar — the price settlement will actually use.
+    dst = tmp_path / "scenario.xlsx"
+    write_workbook(typed, dst)
+    params, ts = read_inputs(dst)
+    assert ts["fcr_capacity_price_eur_per_mwh"].unique().tolist() == [25.0]
+
+
+def test_scenario_keeps_real_balancing_columns_verbatim(tmp_path):
+    import numpy as np
+
+    from pvbess_opt.io import read_inputs, write_workbook
+
+    base = _typed_with_balancing_fallback()
+    # Simulate REAL workbook data: a populated column is not fallback
+    # provenance and must survive a scalar override untouched.
+    base["ts"]["fcr_capacity_price_eur_per_mwh"] = np.linspace(
+        1.0, 2.0, len(base["ts"]),
+    )
+    base["balancing_fallback_columns"] = [
+        c for c in base["balancing_fallback_columns"]
+        if c != "fcr_capacity_price_eur_per_mwh"
+    ]
+    typed = _apply_scenario_overrides(base, {
+        "name": "fcr-up",
+        "balancing": {"fcr_default_capacity_price_eur_per_mwh": 25.0},
+    })
+    assert "fcr_capacity_price_eur_per_mwh" in typed["ts"].columns
+    dst = tmp_path / "scenario.xlsx"
+    write_workbook(typed, dst)
+    _params, ts = read_inputs(dst)
+    assert ts["fcr_capacity_price_eur_per_mwh"].iloc[0] == pytest.approx(1.0)
+    assert ts["fcr_capacity_price_eur_per_mwh"].iloc[-1] == pytest.approx(2.0)
+
+
+# ---------------------------------------------------------------------------
+# Scenarios-file hygiene: malformed entries and duplicate names are
+# authoring bugs, not rows to silently drop or merge.
+# ---------------------------------------------------------------------------
+
+
+def test_scenarios_file_rejects_non_dict_entry(tmp_path):
+    f = tmp_path / "scn.yaml"
+    f.write_text(
+        "scenarios:\n"
+        "  - name: base\n"
+        "  - cheap-capex\n"          # a missed 'name:' key -> bare string
+        "  - name: expensive\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=r"scenarios\[1\].*cheap-capex"):
+        read_scenarios_file(f)
+
+
+def test_duplicate_scenario_names_rejected():
+    with pytest.raises(ValueError, match="duplicate scenario name 'A'"):
+        resolve_inheritance([
+            {"name": "A", "capex_multiplier": 0.5},
+            {"name": "A", "capex_multiplier": 2.0},
+            {"name": "B", "inherits": "A"},
+        ])
 
 
 def test_read_scenarios_file(tmp_path):

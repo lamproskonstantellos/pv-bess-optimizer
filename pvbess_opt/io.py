@@ -5024,7 +5024,7 @@ def validate_workbook_params(
 
 def _apply_balancing_timeseries_fallback(
     ts: pd.DataFrame, balancing: dict[str, Any],
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[str]]:
     """Fill in any missing balancing-price column with its scalar default.
 
     No-op when ``balancing_enabled`` is False (the columns may be absent
@@ -5035,9 +5035,16 @@ def _apply_balancing_timeseries_fallback(
     warning per missing column, which produced a 9-line warning storm
     for a workbook that simply hadn't carried any balancing-price
     timeseries.
+
+    Returns the (possibly copied) frame and the list of column names the
+    fallback materialised.  The list is provenance for the scenario
+    engine: a materialised column must NOT survive into a scenario's
+    temp workbook, or the scenario's re-read would find it "present"
+    and a scenario override of the corresponding ``*_default_*`` scalar
+    would be accepted but never reach settlement.
     """
     if not bool(balancing.get("balancing_enabled", False)):
-        return ts
+        return ts, []
 
     out = ts
     n_rows = len(out)
@@ -5066,11 +5073,11 @@ def _apply_balancing_timeseries_fallback(
             for col, value, default_key in missing_columns
         )
         logger.warning(
-            "Balancing timeseries columns missing; applied per-product "
-            "defaults: %s.",
+            "Balancing timeseries columns missing or empty; applied "
+            "per-product defaults: %s.",
             formatted,
         )
-    return out
+    return out, [col for col, _value, _key in missing_columns]
 
 
 def _read_kv_flat(xlsx_path: Path, sheet_name: str) -> dict[str, Any]:
@@ -5390,7 +5397,9 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
                 "blanks (the per-step share of the export cap that "
                 "remains available)."
             )
-    ts = _apply_balancing_timeseries_fallback(ts, typed["balancing"])
+    ts, _balancing_fallback_cols = _apply_balancing_timeseries_fallback(
+        ts, typed["balancing"],
+    )
     # Single-price imbalance settlement has no canonical DAM
     # relationship to proxy, so the column is mandatory (the dual
     # regime falls back per side to the U8a DAM proxy instead).
@@ -5437,6 +5446,10 @@ def read_workbook(xlsx_path: str | Path) -> dict[str, Any]:
         "dt_minutes": dt_minutes,
     }
     out.update(typed)
+    # Provenance for the scenario engine (see the fallback docstring):
+    # which balancing price columns hold materialised scalar defaults
+    # rather than workbook data.  write_workbook ignores the key.
+    out["balancing_fallback_columns"] = _balancing_fallback_cols
     return out
 
 

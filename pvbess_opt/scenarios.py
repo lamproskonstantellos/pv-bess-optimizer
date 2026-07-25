@@ -122,6 +122,49 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
                     f"timeseries)."
                 )
             continue
+        if section == "capex_multiplier":
+            if value is None:
+                # A YAML ``capex_multiplier:`` stub — inert, like the
+                # null-balancing shorthand: warn and keep the base CAPEX.
+                logger.warning(
+                    "scenario %r has an empty 'capex_multiplier' entry "
+                    "(null); ignoring it (base CAPEX kept). Remove the "
+                    "key or give it a value.",
+                    name,
+                )
+                continue
+            if isinstance(value, (bool, np.bool_)):
+                # float(False) is 0.0: every CAPEX line silently zeroed
+                # under the scenario's label.
+                raise ValueError(
+                    f"scenario {name!r}: capex_multiplier {value!r} is a "
+                    "boolean, not a number; write the multiplier as a "
+                    "numeric value (e.g. 0.8 for -20 % CAPEX)."
+                )
+            try:
+                m = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"scenario {name!r}: capex_multiplier {value!r} is "
+                    "not a number; write the multiplier as a numeric "
+                    "value (e.g. 0.8 for -20 % CAPEX)."
+                ) from None
+            if not np.isfinite(m):
+                # NaN would materialise blank CAPEX cells that re-parse
+                # to the SHEET DEFAULTS on the scenario re-read — a
+                # comparison row priced on defaults under the
+                # scenario's label.
+                raise ValueError(
+                    f"scenario {name!r}: capex_multiplier must be "
+                    f"finite, got {value!r}."
+                )
+            if m < 0.0:
+                raise ValueError(
+                    f"scenario {name!r}: capex_multiplier must be "
+                    f">= 0, got {m} (a negative multiplier books CAPEX "
+                    "as a cash credit)."
+                )
+            continue
         if section in _BARE_SPECIALS:
             continue
         if section == "balancing" and not isinstance(value, dict):
@@ -360,6 +403,21 @@ def _canonicalise_scenario(scn: dict[str, Any]) -> dict[str, Any]:
 def resolve_inheritance(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return scenarios with every ``inherits`` clause merged in."""
     canonical = [_canonicalise_scenario(s) for s in scenarios]
+    # Duplicate names are always a drafting mistake: both rows would run
+    # under one comparison label and an ``inherits`` clause would bind
+    # silently to whichever definition came last.
+    seen: set[str] = set()
+    for scn in canonical:
+        name = scn.get("name")
+        if name is None:
+            continue
+        if name in seen:
+            raise ValueError(
+                f"duplicate scenario name {name!r}: comparison rows and "
+                "'inherits' references need unique names; rename one of "
+                "the definitions."
+            )
+        seen.add(name)
     by_name = {s["name"]: s for s in canonical if "name" in s}
     return [_resolve_one(scn, by_name, frozenset()) for scn in canonical]
 
@@ -467,6 +525,24 @@ def _apply_scenario_overrides(
         typed["balancing"].update(bal)
     elif bal is not None:
         typed["balancing"]["balancing_enabled"] = _as_bool(bal)
+
+    # Columns the BASE read's scalar fallback materialised hold the
+    # base's default prices, not workbook data.  Left in place they
+    # would survive into the scenario's temp workbook, where the
+    # re-read finds them "present" and never re-applies the fallback —
+    # so a scenario override of e.g.
+    # balancing.fcr_default_capacity_price_eur_per_mwh would be
+    # accepted, land in the scenario's BalancingConfig, and still
+    # settle on the BASE price (and the identical spec behaved
+    # differently depending on the base workbook's enable toggle).
+    # Dropping them lets the scenario's own re-read re-materialise
+    # them from the scenario's (possibly overridden) scalars; columns
+    # that carried real workbook data are untouched.
+    _fallback_cols = typed.pop("balancing_fallback_columns", None) or []
+    if _fallback_cols and "ts" in typed:
+        typed["ts"] = typed["ts"].drop(
+            columns=[c for c in _fallback_cols if c in typed["ts"].columns],
+        )
 
     mult = scenario.get("capex_multiplier")
     if mult is not None:
@@ -693,7 +769,18 @@ def read_scenarios_file(path: str | Path) -> list[dict[str, Any]]:
         raise ValueError(
             f"{path}: expected a mapping with a 'scenarios' list."
         )
-    return [s for s in raw["scenarios"] if isinstance(s, dict)]
+    entries = raw["scenarios"]
+    for pos, entry in enumerate(entries):
+        # A malformed entry (a bare string from a missed '- name:' key,
+        # a stray list, ...) was previously dropped silently, so the
+        # batch ran with fewer scenarios than the file lists.
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"{path}: scenarios[{pos}] is not a mapping "
+                f"(got {type(entry).__name__}: {entry!r}); each entry "
+                "must be a '- name: ...' block of overrides."
+            )
+    return list(entries)
 
 
 def _cell(value: Any) -> Any:

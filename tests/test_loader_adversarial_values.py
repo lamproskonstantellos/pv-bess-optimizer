@@ -591,8 +591,9 @@ def test_present_but_empty_balancing_column_takes_scalar_default_always():
     })
     bal = {"balancing_enabled": True,
            "fcr_default_capacity_price_eur_per_mwh": 9.99}
-    out = _apply_balancing_timeseries_fallback(ts, bal)
+    out, filled = _apply_balancing_timeseries_fallback(ts, bal)
     assert out["fcr_capacity_price_eur_per_mwh"].tolist() == [9.99] * 4
+    assert "fcr_capacity_price_eur_per_mwh" in filled
     # End-to-end shape of the ADMIE gap: the normaliser keeps the column
     # quietly (fetch-exempted), the fetch never fills FCR, the fallback
     # must still rescue it.
@@ -606,15 +607,18 @@ def test_present_but_empty_balancing_column_takes_scalar_default_always():
         market_sources={"balancing_source": "admie"},
     )
     assert kept["fcr_capacity_price_eur_per_mwh"].isna().all()
-    rescued = _apply_balancing_timeseries_fallback(kept, bal)
+    rescued, _ = _apply_balancing_timeseries_fallback(kept, bal)
     assert rescued["fcr_capacity_price_eur_per_mwh"].tolist() == [9.99] * 4
     # A populated column stays verbatim (bit-identity depends on it).
     ts3 = pd.DataFrame({
         "timestamp": idx,
         "fcr_capacity_price_eur_per_mwh": [1.0, 2.0, 3.0, 4.0],
     })
-    same = _apply_balancing_timeseries_fallback(ts3, bal)
+    same, refilled = _apply_balancing_timeseries_fallback(ts3, bal)
     assert same["fcr_capacity_price_eur_per_mwh"].tolist() == [1.0, 2.0, 3.0, 4.0]
+    # Real data is never marked as materialised (the other eight
+    # absent columns are, and legitimately so).
+    assert "fcr_capacity_price_eur_per_mwh" not in refilled
 
 
 def test_whitespace_cells_named_in_energy_and_deck_columns():
