@@ -342,3 +342,106 @@ def test_summary_and_workbook_surfaces(tmp_path):
         kpis_year1={"profit_total_eur": 1.0}, kpis_monthly_year1=None,
     )
     assert "lender_cases" not in pd.ExcelFile(xlsx2).sheet_names
+
+
+# ---------------------------------------------------------------------------
+# PV-volume streams under the haircut; committed schedule for case rows
+# ---------------------------------------------------------------------------
+
+
+def _kpis_with_go_and_support() -> dict:
+    kpis = _kpis()
+    kpis.update({
+        "pv_export_mwh": 4_000.0,
+        "bess_export_mwh": 1_000.0,
+        "pv_generation_mwh": 7_000.0,
+        "support_monthly_eligible_mwh": [300.0] * 12,
+        "support_monthly_ref_price_eur_per_mwh": [60.0] * 12,
+    })
+    return kpis
+
+
+def _econ_with_go_and_support(**o) -> dict:
+    return _econ(
+        go_price_eur_per_mwh=5.0,
+        support_scheme="sliding_fip",
+        support_strike_eur_per_mwh=90.0,
+        support_term_years=N_YEARS,
+        support_ref_inflation_pct=0.0,
+        **o,
+    )
+
+
+def test_p90_scales_go_revenue_and_support_settlement():
+    """GO revenue (E54) and the FiP/CfD settlement (E55-E57) are pure
+    PV-volume streams; the haircut previously left both at their P50
+    values, overstating P90 CFADS, DSCR and sized debt capacity."""
+    cf = build_yearly_cashflow(
+        _kpis_with_go_and_support(), _econ_with_go_and_support(), _caps(),
+    )
+    assert float(cf["go_revenue_eur"].abs().sum()) > 0.0
+    assert float(cf["support_settlement_eur"].abs().sum()) > 0.0
+    out = apply_production_case(cf, 0.90)
+    op = cf["project_year"] >= 1
+    for col in ("go_revenue_eur", "support_settlement_eur"):
+        np.testing.assert_allclose(
+            out.loc[op, col].to_numpy(dtype=float),
+            0.90 * cf.loc[op, col].to_numpy(dtype=float),
+            rtol=1e-12,
+            err_msg=col,
+        )
+
+
+def test_p90_case_debt_capacity_reflects_scaled_pv_streams():
+    """The delivered lender_cases p90 debt capacity must be computed on
+    the fully-haircut CFADS (it previously carried the unscaled GO +
+    support streams: +5.5 % capacity in the repro shape)."""
+    from pvbess_opt.economics import size_debt
+    from pvbess_opt.sensitivity import _recompute_net
+
+    econ = _econ_with_go_and_support(
+        gearing_pct=60.0, target_dscr=1.30, production_p90_factor_pct=90.0,
+    )
+    cf = build_yearly_cashflow(_kpis_with_go_and_support(), econ, _caps())
+    table = build_lender_cases(cf, econ)
+    shipped = float(
+        table.loc[table.case == "p90", "debt_capacity_eur"].iloc[0],
+    )
+    expected_frame = _recompute_net(apply_production_case(cf, 0.90))
+    net = expected_frame["net_cashflow_eur"].to_numpy(dtype=float)
+    expected = size_debt(net[1:], econ, -float(net[0])).debt_capacity_eur
+    assert shipped == pytest.approx(expected, abs=0.01)  # table rounds to cents
+
+
+def test_sculpted_case_rows_service_the_committed_schedule():
+    """Under debt_repayment='sculpted' the case rows answer 'same
+    committed debt, worse year': the service stays the schedule shaped
+    on the BASE cashflow.  Re-sculpting on the case CFADS made
+    min_dscr == avg_dscr by construction and hid the binding worst
+    year (a replacement-year dip read as level 1.36x coverage while
+    the committed-schedule truth was a 1.27x bind)."""
+    econ = _econ(
+        debt_repayment="sculpted",
+        gearing_pct=65.0,
+        target_dscr=1.30,
+        production_p90_factor_pct=85.0,
+        bess_replacement_year=4,
+        bess_replacement_cost_pct=40.0,
+    )
+    cf = build_yearly_cashflow(_kpis(), econ, _caps())
+    table = build_lender_cases(cf, econ)
+    row = table.loc[table.case == "p90"].iloc[0]
+    # A re-sculpted schedule is level by construction; the committed
+    # schedule shows the replacement-year bind, so min < avg strictly.
+    assert row["min_dscr"] < row["avg_dscr"] - 1e-6
+
+    from pvbess_opt.economics import _leverage_kpis
+    from pvbess_opt.sensitivity import _recompute_net
+
+    case_cf = _recompute_net(apply_production_case(cf, 0.85))
+    _irr, min_dscr, avg_dscr = _leverage_kpis(
+        case_cf["net_cashflow_eur"].to_numpy(dtype=float), econ,
+        schedule_source_cf=cf["net_cashflow_eur"].to_numpy(dtype=float),
+    )
+    assert row["min_dscr"] == pytest.approx(min_dscr, abs=1e-4)
+    assert row["avg_dscr"] == pytest.approx(avg_dscr, abs=1e-4)  # 4dp table
