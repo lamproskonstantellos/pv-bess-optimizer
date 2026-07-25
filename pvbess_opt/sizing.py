@@ -99,8 +99,12 @@ def _axis_values(spec: Any, name: str = "sizing") -> list[float]:
     if isinstance(spec, dict):
         lo = _axis_float(spec["min"], f"{name}.min")
         hi = _axis_float(spec["max"], f"{name}.max")
-        step = float(spec.get("step", (hi - lo) or 1.0))
-        if not np.isfinite(step) or step <= 0.0:
+        # The step routes through the same guard as min/max: a boolean
+        # would silently drive the grid at step 1.0 (float(True)), and a
+        # non-numeric string raised a bare conversion error naming
+        # neither the axis nor 'step'.
+        step = _axis_float(spec.get("step", (hi - lo) or 1.0), f"{name}.step")
+        if step <= 0.0:
             raise ValueError("sizing axis 'step' must be positive")
         out: list[float] = []
         x = lo
