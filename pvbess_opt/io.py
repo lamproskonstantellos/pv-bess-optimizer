@@ -2793,10 +2793,11 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         # and a cache path may be case-sensitive on disk — none of them
         # may pass through the lowercasing enum parser.
         "entsoe_token", "entsoe_token_env", "market_cache_dir",
-        # Free-form scenario_engine strings: a CSV of support years and
-        # a scenario NAME (matched case-sensitively against the
-        # price_scenarios sheet).
-        "scenario_resolve_years", "debt_sizing_scenario",
+        # Free-form scenario_engine string: a scenario NAME (matched
+        # case-sensitively against the price_scenarios sheet).  The
+        # years CSV (scenario_resolve_years) has its own branch below
+        # so a native YAML/JSON list normalises instead of stringifying.
+        "debt_sizing_scenario",
     ):
         # Free-form strings: a blank cell resolves to the default; a
         # non-blank cell is taken verbatim (stripped).
@@ -2831,6 +2832,31 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
             raise ValueError(
                 f"{key!r} expects project years (e.g. '8,15'), got a "
                 f"date {raw!r}."
+            )
+        if isinstance(raw, (list, tuple)):
+            token = ",".join(str(x) for x in raw).strip()
+            return token if token else default
+        if isinstance(raw, float) and np.isfinite(raw) and raw == int(raw):
+            raw = int(raw)
+        token = str(raw).strip()
+        return token if token else default
+    if key == "scenario_resolve_years":
+        # Free-form CSV of support years ('1,5,10'); a native YAML/JSON
+        # list is the natural config form and previously stringified to
+        # '[1, 5, 10]' garbage that validate_config accepted and
+        # parse_support_years rejected at run time (the
+        # bess_augmentation_years precedent, same normalisation).
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+            return default
+        if isinstance(raw, (bool, np.bool_)):
+            raise ValueError(
+                f"{key!r} expects operating years (e.g. '1,5,10'), got "
+                f"boolean {bool(raw)!r}."
+            )
+        if isinstance(raw, _dt.date):
+            raise ValueError(
+                f"{key!r} expects operating years (e.g. '1,5,10'), got "
+                f"a date {raw!r}."
             )
         if isinstance(raw, (list, tuple)):
             token = ",".join(str(x) for x in raw).strip()
