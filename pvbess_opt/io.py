@@ -5892,7 +5892,11 @@ for _rows in _SHEET_ROW_TEMPLATES.values():
 def _format_assumptions(econ: dict[str, Any]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for key, value in econ.items():
-        rows.append({"key": key, "value": value, "unit": _ECON_UNITS.get(key, "")})
+        rows.append({
+            "key": key,
+            "value": _flag_as_text(value),
+            "unit": _ECON_UNITS.get(key, ""),
+        })
     return pd.DataFrame(rows, columns=["key", "value", "unit"])
 
 
@@ -6377,6 +6381,20 @@ def _flatten_kpis_for_sheet(kpis: dict[str, Any]) -> dict[str, Any]:
     return flat
 
 
+def _flag_as_text(value: Any) -> Any:
+    """Write boolean flags as ``'TRUE'``/``'FALSE'`` text in mixed columns.
+
+    A genuine boolean cell in a mixed ``metric``/``value`` (or
+    ``key``/``value``) column makes ``pandas.read_excel`` coerce every
+    zero-valued numeric row of that column to Python ``False`` on
+    readback — the raw cells are written correctly and Excel displays
+    them right, but pandas is the most likely tool a client reaches for.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return "TRUE" if value else "FALSE"
+    return value
+
+
 def _scalar_metric_rows(kpis: dict[str, Any]) -> list[tuple[str, Any]]:
     """Rows for a ``metric``/``value`` sheet — scalar values only.
 
@@ -6388,7 +6406,7 @@ def _scalar_metric_rows(kpis: dict[str, Any]) -> list[tuple[str, Any]]:
     sheets drop them.
     """
     return [
-        (key, value)
+        (key, _flag_as_text(value))
         for key, value in kpis.items()
         if not isinstance(value, (list, tuple, np.ndarray))
     ]
