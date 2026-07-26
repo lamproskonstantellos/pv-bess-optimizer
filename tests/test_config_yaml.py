@@ -568,3 +568,60 @@ def test_validate_config_accepts_np_bool_and_scalar_string_keys():
     assert validate_config(
         {"scenario_engine": {"debt_sizing_scenario": 2030}},
     ) == []
+
+
+def test_financing_grid_blocks_reject_bool_inf_and_truncation():
+    """Final-round-2 regression: the convenience blocks' number parser accepted
+    booleans (gearing: true -> silent 100 % debt), non-finite values and
+    fractional tenors (int(15.5) == 15, silent truncation)."""
+    import numpy as np
+
+    from pvbess_opt.io import ECONOMICS_SHEET_DEFAULTS
+    from pvbess_opt.io_read import _apply_financing_block, _apply_grid_block
+
+    def probe(fin=None, grid=None):
+        typed = {"economics": dict(ECONOMICS_SHEET_DEFAULTS)}
+        raw = {}
+        if fin is not None:
+            raw["financing"] = fin
+        if grid is not None:
+            raw["grid"] = grid
+        _apply_financing_block(raw, typed)
+        _apply_grid_block(raw, typed)
+        return typed["economics"]
+
+    with pytest.raises(ValueError, match=r"'gearing'.*boolean True"):
+        probe(fin={"gearing": True})
+    with pytest.raises(ValueError, match=r"'interest_rate'.*finite"):
+        probe(fin={"interest_rate": float("inf")})
+    with pytest.raises(ValueError, match=r"'tenor_years'.*whole number"):
+        probe(fin={"tenor_years": 15.5})
+    with pytest.raises(ValueError, match=r"'co2_intensity'.*boolean"):
+        probe(grid={"co2_intensity": True})
+    with pytest.raises(ValueError, match=r"'co2_annual_decline'.*boolean"):
+        probe(grid={"co2_annual_decline": np.bool_(True)})
+    # NaN is the workbook blank sentinel: default kept, not NaN delivered.
+    econ = probe(fin={"gearing": float("nan")})
+    assert econ["gearing_pct"] == ECONOMICS_SHEET_DEFAULTS["gearing_pct"]
+    # Legitimate values still map.
+    econ = probe(fin={"gearing": 0.65, "tenor_years": 12.0})
+    assert econ["gearing_pct"] == pytest.approx(65.0)
+    assert econ["debt_tenor_years"] == 12
+
+
+def test_scenario_resolve_years_accepts_native_list():
+    """A native YAML/JSON list previously stringified to '[1, 5, 10]'
+    garbage that validate_config accepted and parse_support_years
+    rejected at run time (the bess_augmentation_years precedent)."""
+    from pvbess_opt.io import _parse_value
+    from pvbess_opt.pricedata.resolve import parse_support_years
+
+    token = _parse_value("scenario_resolve_years", [1, 5, 10], None)
+    assert token == "1,5,10"
+    assert parse_support_years(token, 20) == [1, 5, 10]
+    # CSV / scalar / blank forms unchanged.
+    assert _parse_value("scenario_resolve_years", "1,5,10", None) == "1,5,10"
+    assert _parse_value("scenario_resolve_years", 5.0, None) == "5"
+    assert _parse_value("scenario_resolve_years", None, "1,5") == "1,5"
+    with pytest.raises(ValueError, match=r"scenario_resolve_years.*boolean"):
+        _parse_value("scenario_resolve_years", True, None)

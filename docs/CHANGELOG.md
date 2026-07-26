@@ -753,6 +753,69 @@ Pre-delivery release audit (final round 1):
   the two identical, so one mutant survived). The balancing fallback
   warning says "missing or empty", matching what it rescues.
 
+Pre-delivery release audit (final round 2):
+
+- **Financing/grid convenience blocks reject what the sheets reject.**
+  The final-round-1 rework of the config `financing:`/`grid:` blocks
+  parsed values with a bare `float()`/`int()`: `gearing: true` (or the
+  YAML-implicit `yes`/`on`) silently became gearing_pct = 100 — 100 %
+  debt — `interest_rate: true` a 100 % rate, `tenor_years: true` a
+  1-year tenor, `co2_annual_decline: true` a 100 % decline;
+  `gearing: .nan` delivered a literal NaN into the debt sizing; and
+  `tenor_years: 15.5` silently truncated to 15 while the direct key
+  path rejects fractional integers loudly. All five keys now share one
+  guard: booleans and non-finite values raise naming the block and
+  key, NaN joins None/'' as the blank-means-absent sentinel, and
+  integer keys reject fractional values.
+- **Compare-sources delivers the same financials the plain path
+  would.** The 'all' ensemble — which final round 1 wired into the
+  delivered settlement aggregates and NPV tail risk — ran with
+  hard-coded all-True noise flags, re-introducing sources the workbook
+  had explicitly disabled (`uncertainty_dam_enabled = FALSE` is the
+  documented remedy for unrealistic DAM noise), so compare-sources
+  runs delivered different numbers than plain-MC runs of the identical
+  workbook. The 'all' ensemble now honours the resolved per-source
+  toggles; the three single-source ensembles keep their fixed
+  diagnostic definitions; defaults are unchanged.
+- **The SOH threshold never replaces a brand-new pack, and a scheduled
+  replacement outside the horizon is loud.** `bess_eol_soh_pct = 100`
+  — inside the documented (0, 100] bound — matched the nameplate
+  year-1 factor and scheduled a replacement of the just-installed
+  battery in year 1 (full replacement CAPEX on top of the initial
+  investment, INFO-only); the crossing now requires the SOH to have
+  actually fallen. A `bess_replacement_year` beyond
+  `project_lifecycle_years` was accepted verbatim and the configured
+  investment event silently never fired (no CAPEX, no SOH reset, no
+  warning); the loader now rejects it naming both values (the
+  augmentation-years bound is the precedent).
+- **invariant_7 is back on for intraday frames.** The final-round-1
+  exemption switched the lazy-curtailment check off for the whole
+  Stage-2 frame; it now re-derives the predicate step by step (IDA
+  net of fee strictly profitable, no buy deviation occupying the
+  step, sell budget slack), so buy-back and budget-bound steps stay
+  exempt — the round-1 false positive stays fixed — while genuine
+  lazy curtailment on the delivered intraday dispatch is flagged
+  again.
+- **Sizing step + scenario names, finishing the round-1 guards.** The
+  `{min,max,step}` mapping validated min/max through the axis guard
+  but parsed `step` with a bare `float()` (a boolean step silently
+  drove the grid at step 1.0; a text step crashed unnamed) — step now
+  routes through the same named guard. The duplicate-scenario-name
+  guard skipped `name: None`, so repeated empty `- name:` entries
+  produced comparison rows all labelled None; explicit null/blank
+  names now raise while nameless entries keep their historical
+  default label.
+- **scenario_resolve_years accepts the native list form.** A YAML/JSON
+  list stringified to `'[1, 5, 10]'`, which validate_config accepted
+  and the run rejected late with a confusing per-token error; the key
+  now normalises lists to the canonical CSV and rejects booleans and
+  dates naming the key (the augmentation-years precedent).
+- **Docs.** The CLI table states that the rolling-horizon / Monte
+  Carlo family and `--strict` apply to single runs only (warned-
+  ignored on batch routes); the config sizing block documents its
+  `enabled` toggle and the grid point-count guard; the augmentation
+  years document the native list form.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.

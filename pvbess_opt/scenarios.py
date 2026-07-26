@@ -410,7 +410,25 @@ def resolve_inheritance(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]
     for scn in canonical:
         name = scn.get("name")
         if name is None:
-            continue
+            if "name" not in scn:
+                # A scenario with NO name key keeps its historical
+                # 'scenario' display label; only an explicit blank is
+                # rejected below.
+                continue
+            # An explicit '- name:' (null) or blank name is a drafting
+            # mistake: the comparison rows would all be labelled None
+            # and duplicates of it bypassed the duplicate-name guard.
+            raise ValueError(
+                "scenario with an empty 'name': give every scenario a "
+                "non-blank name (comparison rows and 'inherits' "
+                "references need one)."
+            )
+        if isinstance(name, str) and not name.strip():
+            raise ValueError(
+                "scenario with a blank 'name': give every scenario a "
+                "non-blank name (comparison rows and 'inherits' "
+                "references need one)."
+            )
         if name in seen:
             raise ValueError(
                 f"duplicate scenario name {name!r}: comparison rows and "

@@ -237,7 +237,8 @@ Sheet ``bess``
   margin first.  Dispatch always solves at nameplate.  Cannot combine
   with ``bess_replacement_year``.
 * ``bess_augmentation_years`` (default empty): comma-separated project
-  years of staged augmentation events, e.g. ``8,15``.  Each event adds
+  years of staged augmentation events, e.g. ``8,15``; a YAML / JSON
+  config may equivalently write a native list (``[8, 15]``).  Each event adds
   a fresh pool of cells; every pool fades on its own calendar + cycle
   curve and the plant capacity is the nameplate-clamped pool sum.  The
   event CAPEX books as its own ``augmentation_capex_eur`` cashflow
@@ -1078,6 +1079,15 @@ axis is an explicit list or a ``{min, max, step}`` mapping::
       pv_nameplate_kwp: [8000, 10000, 12000]
       bess_power_kw: [2000, 4000]
       bess_capacity_kwh: {min: 4000, max: 12000, step: 4000}
+
+The block may carry an explicit ``enabled`` toggle with the Excel
+sheet's exact semantics: ``enabled: false`` keeps the block but skips
+the sweep (absent = enabled — the presence of the block opts in).
+Axis entries are validated up front — booleans, negative, non-finite
+and non-numeric values are rejected naming the axis — and the grid's
+point count is guarded: past 1,000 points the sweep warns (each point
+is a full MILP solve), past 100,000 it refuses (always a typo'd axis;
+split the sweep instead).
 
 Either way the optimiser re-runs the dispatch solve at every
 ``(pv, power, capacity)`` point, ranks an **efficient frontier** by NPV,

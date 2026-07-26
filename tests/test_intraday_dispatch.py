@@ -341,3 +341,75 @@ def test_invariant_7_exempts_stage2_frames_and_strict_passes():
     inv2 = verify_dispatch_invariants(res2_full, params)
     assert inv2["invariant_7_curtail_behavior_count"] == 0.0
     _check_strict_invariants(inv2)  # must not raise
+
+
+def test_invariant_7_still_catches_lazy_curtailment_on_stage2_frames():
+    """Final-round-2 refinement: the round-1 exemption zeroed invariant_7 for
+    the WHOLE Stage-2 frame, silencing genuine lazy curtailment on the
+    delivered intraday dispatch.  The per-step predicate keeps buy-back
+    and budget-bound steps exempt while flagging a step that curtails
+    profitable PV with cap headroom, sell-budget slack and no trade."""
+    import numpy as np
+    import pandas as pd
+
+    from pvbess_opt.optimization import verify_dispatch_invariants
+
+    n = 4
+    idx = pd.date_range("2026-06-01", periods=n, freq="h")
+    zero = np.zeros(n)
+    res = pd.DataFrame({
+        "timestamp": idx,
+        "load_kwh": zero,
+        "pv_kwh": [2000.0] * n,
+        "pv_to_load_kwh": zero,
+        "pv_to_bess_kwh": zero,
+        "bess_charge_grid_kwh": zero,
+        "bess_dis_load_kwh": zero,
+        "bess_dis_grid_kwh": zero,
+        # steps 0-1 curtail 500 kWh with 1000 kWh of cap headroom.
+        "pv_to_grid_kwh": [1500.0, 1500.0, 2000.0, 2000.0],
+        "pv_curtail_kwh": [500.0, 500.0, 0.0, 0.0],
+        "grid_to_load_kwh": zero,
+        "grid_export_total_kwh": [1500.0, 1500.0, 2000.0, 2000.0],
+        "grid_export_cap_kwh": [2500.0] * n,
+        "grid_injection_total_kwh": [1500.0, 1500.0, 2000.0, 2000.0],
+        "soc_kwh": [500.0] * n,
+        "soc_pct": [50.0] * n,
+        "dam_price_eur_per_mwh": [80.0] * n,
+        "ida_price_eur_per_mwh": [90.0] * n,   # ida - fee = 89 > 0
+        # Stage-2 trade columns: step 0 is a BUY-BACK (legit curtail);
+        # step 1 has no trade, budget slack, profitable IDA -> LAZY.
+        "id_sell_pv_kwh": zero,
+        "id_sell_bess_kwh": zero,
+        "id_buy_pv_kwh": [500.0, 0.0, 0.0, 0.0],
+        "id_buy_bess_kwh": zero,
+        "id_da_position_kwh": [2000.0, 1500.0, 2000.0, 2000.0],
+        "id_da_pv_export_kwh": [2000.0, 1500.0, 2000.0, 2000.0],
+        "id_da_bess_export_kwh": zero,
+        "id_da_grid_charge_kwh": zero,
+    })
+    params = {
+        "mode": "merchant",
+        "dt_minutes": 60,
+        "pv_nameplate_kwp": 2000.0,
+        "bess_power_kw": 1000.0,
+        "bess_capacity_kwh": 1000.0,
+        "efficiency_charge": 0.97,
+        "efficiency_discharge": 0.97,
+        "p_grid_export_max_kw": 2500.0,
+        "intraday": {
+            "id_enabled": True,
+            "id_max_deviation_frac_of_cap": 0.25,  # dev cap = 625 kWh
+            "id_fee_eur_per_mwh": 1.0,
+        },
+    }
+    inv = verify_dispatch_invariants(res, params, mode="merchant")
+    # Exactly the one genuinely lazy step is flagged; the buy-back step
+    # is exempt.
+    assert inv["invariant_7_curtail_behavior_count"] == 1.0
+
+    # Make the lazy step's IDA unprofitable -> nothing left to flag.
+    res2 = res.copy()
+    res2.loc[1, "ida_price_eur_per_mwh"] = 0.5   # ida - fee < 0
+    inv2 = verify_dispatch_invariants(res2, params, mode="merchant")
+    assert inv2["invariant_7_curtail_behavior_count"] == 0.0

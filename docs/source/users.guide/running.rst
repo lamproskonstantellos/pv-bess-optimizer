@@ -29,7 +29,17 @@ Flag                                 Purpose
                                      (default 1800).
 ``--tee``                            Print solver output to stdout.
 ``--rolling-horizon``                Run a rolling-horizon dispatch with
-                                     imperfect foresight.
+                                     imperfect foresight.  Like every flag
+                                     in the rolling-horizon / Monte Carlo
+                                     family below (and ``--strict``), it
+                                     applies to SINGLE runs only: on the
+                                     ``--scenarios`` / scenarios-sheet /
+                                     sizing-sheet batch routes these flags
+                                     are ignored with a warning naming
+                                     them — configure the workbook's
+                                     ``simulation`` sheet
+                                     (``uncertainty_*`` keys) to run
+                                     scenarios with those features.
 ``--window-hours``                   Rolling-horizon window length in hours.
                                      Defaults to the workbook value
                                      (``window_hours = 48`` in the shipped

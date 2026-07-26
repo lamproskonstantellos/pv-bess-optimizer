@@ -185,7 +185,14 @@ def resolve_bess_replacement_year(
             replacement_year=replacement_year,
         )
         for y in range(from_year, n_years + 1):
-            if factors[y - 1] <= threshold + 1e-12:
+            # "Replace when SOH FALLS TO the threshold": the nameplate
+            # state (factor exactly 1.0) never counts as a crossing, or
+            # bess_eol_soh_pct = 100 — a loader-legal bound — would
+            # schedule a year-1 replacement of the brand-new pack.
+            if (
+                factors[y - 1] <= threshold + 1e-12
+                and factors[y - 1] < 1.0 - 1e-12
+            ):
                 return y
         return 0
 

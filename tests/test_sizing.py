@@ -462,3 +462,27 @@ def test_run_sizing_end_to_end(tmp_path):
     assert (runs[0] / "sizing.xlsx").exists()
     assert (runs[0] / "efficient_frontier.pdf").exists()
     assert (runs[0] / "npv_vs_capacity.pdf").exists()
+
+
+def test_sizing_step_routes_through_the_axis_guard():
+    """Final-round-2 regression: {min,max,step} validated min/max but parsed
+    'step' with a bare float() — a boolean step silently drove the grid
+    at step 1.0 (float(True)) and a non-numeric step raised an unnamed
+    conversion error."""
+    for bad, match in (
+        (True, r"pv_nameplate_kwp\.step.*boolean"),
+        ("2h", r"pv_nameplate_kwp\.step"),
+        (float("nan"), r"pv_nameplate_kwp\.step.*finite"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            parse_sizing_grid({
+                "pv_nameplate_kwp": {"min": 0, "max": 5, "step": bad},
+                "bess_power_kw": [500.0],
+                "bess_capacity_kwh": [1000.0],
+            })
+    grid = parse_sizing_grid({
+        "pv_nameplate_kwp": {"min": 0, "max": 4, "step": 2},
+        "bess_power_kw": [500.0],
+        "bess_capacity_kwh": [1000.0],
+    })
+    assert sorted({p[0] for p in grid}) == [0.0, 2.0, 4.0]

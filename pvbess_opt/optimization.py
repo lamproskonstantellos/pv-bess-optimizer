@@ -2511,13 +2511,62 @@ def verify_dispatch_invariants(
     # settles at the intraday price net of the venue fee, is capped by
     # the per-step deviation budget and gated by the anti-wash binary —
     # so curtailment with cap headroom at a positive DAM price can be
-    # the position-constrained optimum, not "lazy curtailment".  The
-    # DAM-price predicate is undefined for that dispatch, and flagging
-    # it aborted valid --strict merchant+intraday runs; the Stage-1
-    # frame of the same run keeps the full check.
+    # the position-constrained optimum, not "lazy curtailment", and the
+    # bare DAM-price predicate aborted valid --strict merchant+intraday
+    # runs.  Rather than disabling the check for the whole frame, the
+    # Stage-2 predicate re-derives profitability and freedom step by
+    # step: a step is anomalous only when the marginal intraday export
+    # (IDA net of the venue fee) is strictly profitable, no buy
+    # deviation occupies the step (a buy-back legitimately curtails the
+    # bought-back energy and holds the anti-wash binary), and the
+    # per-step sell budget still has slack.  Steps failing any of those
+    # are position-constrained optima, not laziness.
     _stage2_frame = "id_sell_pv_kwh" in res.columns
     if _stage2_frame:
-        inv_7 = 0.0
+        if "ida_price_eur_per_mwh" in res.columns:
+            _id_cfg = resolve_intraday_config(params.get("intraday") or {})
+            _p_export = float(params.get("p_grid_export_max_kw", 0.0) or 0.0)
+            _dt_h = dt_hours_from(params)
+            _sell = (
+                res["id_sell_pv_kwh"].to_numpy(dtype=float)
+                + res.get(
+                    "id_sell_bess_kwh", pd.Series(0.0, index=res.index),
+                ).to_numpy(dtype=float)
+            )
+            _buy = (
+                res.get(
+                    "id_buy_pv_kwh", pd.Series(0.0, index=res.index),
+                ).to_numpy(dtype=float)
+                + res.get(
+                    "id_buy_bess_kwh", pd.Series(0.0, index=res.index),
+                ).to_numpy(dtype=float)
+            )
+            _ida = res["ida_price_eur_per_mwh"].to_numpy(dtype=float)
+            _id_profitable = (
+                np.nan_to_num(_ida, nan=0.0)
+                - float(_id_cfg.id_fee_eur_per_mwh)
+            ) > 0.0
+            if np.isfinite(_p_export) and _p_export > 0.0:
+                _dev_cap = float(
+                    _id_cfg.id_max_deviation_frac_of_cap * _p_export * _dt_h
+                )
+                _sell_slack = (_dev_cap - _sell) > tol_kwh
+            else:
+                _sell_slack = np.zeros_like(_sell, dtype=bool)
+            inv_7 = float(
+                (
+                    pv_can_inject_more
+                    & (pv_curtail > tol_kwh)
+                    & _id_profitable
+                    & (_buy <= tol_kwh)
+                    & _sell_slack
+                ).astype(float).sum()
+            )
+        else:
+            # No IDA price on the frame: marginal profitability is not
+            # reconstructible, so the check stays off rather than
+            # false-flagging.
+            inv_7 = 0.0
     else:
         inv_7 = float(
             (pv_can_inject_more & (pv_curtail > tol_kwh) & export_profitable)
