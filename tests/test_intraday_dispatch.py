@@ -344,7 +344,7 @@ def test_invariant_7_exempts_stage2_frames_and_strict_passes():
 
 
 def test_invariant_7_still_catches_lazy_curtailment_on_stage2_frames():
-    """Round-2 refinement: the round-1 exemption zeroed invariant_7 for
+    """Final-round-2 refinement: the round-1 exemption zeroed invariant_7 for
     the WHOLE Stage-2 frame, silencing genuine lazy curtailment on the
     delivered intraday dispatch.  The per-step predicate keeps buy-back
     and budget-bound steps exempt while flagging a step that curtails

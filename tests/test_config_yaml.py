@@ -571,7 +571,7 @@ def test_validate_config_accepts_np_bool_and_scalar_string_keys():
 
 
 def test_financing_grid_blocks_reject_bool_inf_and_truncation():
-    """Round-2 regression: the convenience blocks' number parser accepted
+    """Final-round-2 regression: the convenience blocks' number parser accepted
     booleans (gearing: true -> silent 100 % debt), non-finite values and
     fractional tenors (int(15.5) == 15, silent truncation)."""
     import numpy as np

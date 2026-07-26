@@ -465,7 +465,7 @@ def test_run_sizing_end_to_end(tmp_path):
 
 
 def test_sizing_step_routes_through_the_axis_guard():
-    """Round-2 regression: {min,max,step} validated min/max but parsed
+    """Final-round-2 regression: {min,max,step} validated min/max but parsed
     'step' with a bare float() — a boolean step silently drove the grid
     at step 1.0 (float(True)) and a non-numeric step raised an unnamed
     conversion error."""

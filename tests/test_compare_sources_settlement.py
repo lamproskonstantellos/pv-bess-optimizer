@@ -137,7 +137,7 @@ def test_compare_sources_keeps_settlement_and_risk_metrics(
 
 @pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
 def test_all_ensemble_honours_per_source_toggles(tmp_path, monkeypatch):
-    """Round-2 regression: the 'all' ensemble — which feeds the DELIVERED
+    """Final-round-2 regression: the 'all' ensemble — which feeds the DELIVERED
     settlement aggregates and NPV tail risk — ran with hard-coded
     all-True noise flags, re-introducing a source the workbook had
     explicitly disabled (uncertainty_dam_enabled = FALSE); the plain-MC

@@ -223,7 +223,7 @@ def test_wear_cost_suppresses_cycles_and_is_not_double_counted(tmp_path):
 
 
 def test_eol_threshold_100_never_replaces_the_nameplate_pack():
-    """Round-2 regression: bess_eol_soh_pct = 100 (a loader-legal bound)
+    """Final-round-2 regression: bess_eol_soh_pct = 100 (a loader-legal bound)
     matched the nameplate year-1 factor (1.0 <= 100) and scheduled a
     replacement of the brand-new battery in year 1, charging a full
     replacement CAPEX on top of the initial investment.  'Falls to the
@@ -248,7 +248,7 @@ def test_eol_threshold_100_never_replaces_the_nameplate_pack():
 
 
 def test_scheduled_replacement_beyond_lifecycle_is_rejected(base_typed=None):
-    """Round-2 regression: bess_replacement_year = 25 on a 20-year
+    """Final-round-2 regression: bess_replacement_year = 25 on a 20-year
     project was accepted verbatim and the configured investment event
     silently never fired (no CAPEX, no SOH reset, no warning) — the
     bess_augmentation_years 1..lifecycle bound is the precedent."""

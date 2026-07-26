@@ -1073,7 +1073,7 @@ def test_nameplate_override_negative_is_rejected():
 
 
 def test_explicit_blank_scenario_names_are_rejected():
-    """Round-2 regression: the duplicate-name guard skipped name=None, so
+    """Final-round-2 regression: the duplicate-name guard skipped name=None, so
     repeated empty '- name:' YAML entries passed unflagged and produced
     comparison rows all labelled None."""
     with pytest.raises(ValueError, match="empty 'name'"):
