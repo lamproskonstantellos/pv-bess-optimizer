@@ -1083,3 +1083,42 @@ def test_explicit_blank_scenario_names_are_rejected():
     # A scenario with NO name key keeps its historical default label.
     out = resolve_inheritance([{"capex_multiplier": 0.5}])
     assert len(out) == 1 and "name" not in out[0]
+
+
+def test_scenario_override_native_lists_normalise_like_the_config_surface():
+    """Final-round-3 regression: a scenarios file is the second YAML surface
+    for the CSV-of-years keys, but overrides were copied verbatim into the
+    materialised workbook — scenario_resolve_years: [1, 5] stored the
+    stringified '[1, 5]' (erroring only post-solve when resolve mode was
+    armed) and bess_augmentation_years: [8, 15] crashed the batch mid-run
+    with a message naming neither the scenario nor the native list."""
+    from pvbess_opt.scenarios import _apply_scenario_overrides
+
+    base = {
+        "pv": {}, "bess": {}, "project": {}, "economics": {},
+        "simulation": {}, "balancing": {}, "scenario_engine": {},
+    }
+    out = _apply_scenario_overrides(base, {
+        "name": "lists",
+        "scenario_engine": {"scenario_resolve_years": [1, 5]},
+        "bess": {"bess_augmentation_years": [8, 15]},
+    })
+    assert out["scenario_engine"]["scenario_resolve_years"] == "1,5"
+    assert out["bess"]["bess_augmentation_years"] == "8,15"
+
+
+def test_scenario_override_bad_values_fail_fast_naming_the_scenario():
+    """The batch pre-pass (validate_scenario_overrides) must reject value-level
+    garbage BEFORE solver time, naming the scenario and the target."""
+    from pvbess_opt.scenarios import validate_scenario_overrides
+
+    with pytest.raises(ValueError, match=r"'typo'.*scenario_engine\.scenario_resolve_years"):
+        validate_scenario_overrides({
+            "name": "typo",
+            "scenario_engine": {"scenario_resolve_years": True},
+        })
+    with pytest.raises(ValueError, match=r"'badbool'.*balancing\.balancing_enabled"):
+        validate_scenario_overrides({
+            "name": "badbool",
+            "balancing": {"balancing_enabled": "maybe"},
+        })

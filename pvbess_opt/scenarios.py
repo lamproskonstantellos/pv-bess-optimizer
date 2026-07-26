@@ -106,7 +106,7 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
     ``bess.power_kw``, ``bess.capacity_kwh`` included), the bare
     ``balancing`` on/off scalar, or the ``capex_multiplier`` special.
     """
-    from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS
+    from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS, _parse_value
 
     name = scenario.get("name", "<unnamed>")
     for section, value in scenario.items():
@@ -216,7 +216,7 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
             else {}
         )
         defaults = _SHEET_DEFAULTS[section]
-        for key in value:
+        for key, raw in value.items():
             canonical = aliases.get(str(key), str(key))
             if section == "pv" and canonical == "timeseries_path":
                 # evaluate_scenario resolves the base PV profile ONCE and
@@ -235,6 +235,24 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
                     "rescale) or run separate base workbooks."
                 )
             if canonical in defaults:
+                # Route the VALUE through the loader's typed parser too.
+                # A scenarios file is the second YAML surface for these
+                # keys: previously values were copied verbatim into the
+                # materialised workbook, so a native list stringified to
+                # '[1, 5]' garbage and value errors surfaced only
+                # mid-batch — after earlier scenarios' paid solver time —
+                # naming neither the scenario nor the mistake.
+                # ``pv_nameplate_kwp`` keeps its dedicated guards in
+                # ``_apply_scenario_overrides`` (profile rescale needs
+                # the raw form).
+                if canonical != "pv_nameplate_kwp":
+                    try:
+                        _parse_value(canonical, raw, defaults[canonical])
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f"scenario {name!r}: override {section}.{key} "
+                            f"= {raw!r}: {exc}"
+                        ) from exc
                 continue
             owner = _KEY_TO_SHEET.get(canonical)
             hint = (
@@ -440,16 +458,45 @@ def resolve_inheritance(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]
     return [_resolve_one(scn, by_name, frozenset()) for scn in canonical]
 
 
+def _parsed_override_value(
+    section: str, key: Any, canonical: str, raw: Any, name: Any,
+) -> Any:
+    """Route one scenario override through the loader's typed parser.
+
+    Materialising the raw YAML value verbatim let native containers
+    stringify into the workbook cell (``[1, 5]``) and deferred value
+    errors to the scenario's re-read — mid-batch, after earlier
+    scenarios' solver time, without naming the scenario.  Parsing here
+    keeps the scenarios file and the structured-config surface (which
+    already runs ``_parse_value``) in agreement.
+    """
+    from .io import _SHEET_DEFAULTS, _parse_value
+
+    defaults = _SHEET_DEFAULTS.get(section) or {}
+    if canonical not in defaults:
+        return raw
+    try:
+        return _parse_value(canonical, raw, defaults[canonical])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"scenario {name!r}: override {section}.{key} = {raw!r}: {exc}"
+        ) from exc
+
+
 def _apply_scenario_overrides(
     base_typed: dict[str, Any], scenario: dict[str, Any],
 ) -> dict[str, Any]:
     validate_scenario_overrides(scenario)
     typed = copy.deepcopy(base_typed)
+    _scn_name = scenario.get("name", "scenario")
     _base_nameplate = float(
         (base_typed.get("pv") or {}).get("pv_nameplate_kwp", 0.0) or 0.0
     )
     for key, value in (scenario.get("pv") or {}).items():
-        typed["pv"][_PV_ALIASES.get(key, key)] = value
+        canonical = _PV_ALIASES.get(key, key)
+        if canonical != "pv_nameplate_kwp":
+            value = _parsed_override_value("pv", key, canonical, value, _scn_name)
+        typed["pv"][canonical] = value
     # A nameplate override changes the CAPEX/OPEX basis, so the resolved
     # PV profile must scale with it (shape preserved) or the scenario
     # would solve the BASE plant's generation against the OVERRIDDEN
@@ -527,7 +574,10 @@ def _apply_scenario_overrides(
             scenario.get("name", "scenario"), _new_nameplate,
         )
     for key, value in (scenario.get("bess") or {}).items():
-        typed["bess"][_BESS_ALIASES.get(key, key)] = value
+        canonical = _BESS_ALIASES.get(key, key)
+        typed["bess"][canonical] = _parsed_override_value(
+            "bess", key, canonical, value, _scn_name,
+        )
     for section in (
         "project", "economics", "simulation", "ppa", "intraday",
         "market_data", "scenario_engine",
@@ -536,11 +586,18 @@ def _apply_scenario_overrides(
         if overrides:
             target = typed.setdefault(section, {})
             for key, value in overrides.items():
-                target[key] = value
+                target[key] = _parsed_override_value(
+                    section, key, str(key), value, _scn_name,
+                )
 
     bal = scenario.get("balancing")
     if isinstance(bal, dict):
-        typed["balancing"].update(bal)
+        typed["balancing"].update({
+            key: _parsed_override_value(
+                "balancing", key, str(key), val, _scn_name,
+            )
+            for key, val in bal.items()
+        })
     elif bal is not None:
         typed["balancing"]["balancing_enabled"] = _as_bool(bal)
 
