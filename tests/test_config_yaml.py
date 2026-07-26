@@ -625,3 +625,100 @@ def test_scenario_resolve_years_accepts_native_list():
     assert _parse_value("scenario_resolve_years", None, "1,5") == "1,5"
     with pytest.raises(ValueError, match=r"scenario_resolve_years.*boolean"):
         _parse_value("scenario_resolve_years", True, None)
+
+
+def test_financing_grid_blocks_warn_on_unknown_keys_and_shapes(caplog):
+    """Final-round-3 regression: unknown keys inside financing:/grid: (and
+    entire non-mapping blocks) were dropped without a trace — a config
+    writing financing: {gearing_pct: 60} delivered an all-equity model
+    with zero warnings, while the same mistake in economics: warned."""
+    from pvbess_opt.io import ECONOMICS_SHEET_DEFAULTS
+    from pvbess_opt.io_read import _apply_financing_block, _apply_grid_block
+
+    def probe(fin=None, grid=None, econ_raw=None):
+        typed = {"economics": dict(ECONOMICS_SHEET_DEFAULTS)}
+        raw = {}
+        if fin is not None:
+            raw["financing"] = fin
+        if grid is not None:
+            raw["grid"] = grid
+        if econ_raw is not None:
+            raw["economics"] = econ_raw
+        _apply_financing_block(raw, typed)
+        _apply_grid_block(raw, typed)
+        return typed["economics"]
+
+    with caplog.at_level(logging.WARNING):
+        econ = probe(fin={"gaering": 0.6})
+    assert econ["gearing_pct"] == ECONOMICS_SHEET_DEFAULTS["gearing_pct"]
+    assert any(
+        "'gaering' is unknown" in r.getMessage() for r in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        econ = probe(fin={"gearing_pct": 60})
+    assert econ["gearing_pct"] == ECONOMICS_SHEET_DEFAULTS["gearing_pct"]
+    assert any(
+        "block spelling is 'gearing'" in r.getMessage()
+        for r in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        probe(fin=0.6)
+    assert any(
+        "must be a mapping" in r.getMessage() for r in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        econ = probe(grid={"co2_intensity_kg_per_mwh": 300})
+    assert econ["grid_co2_intensity_kg_per_mwh"] == (
+        ECONOMICS_SHEET_DEFAULTS["grid_co2_intensity_kg_per_mwh"]
+    )
+    assert any(
+        "'co2_intensity_kg_per_mwh' is unknown" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_financing_tenor_alias_and_conflict_semantics(caplog):
+    """Final-round-3 regression: a blank tenor_years stub consumed the branch
+    and silently dropped a valid tenor alias, and financing.gearing
+    silently overrode an explicit economics.gearing_pct set in the same
+    config (no both-surfaces warning, unlike every loader sibling)."""
+    from pvbess_opt.io import ECONOMICS_SHEET_DEFAULTS
+    from pvbess_opt.io_read import _apply_financing_block
+
+    def probe(fin, econ_raw=None):
+        typed = {"economics": dict(ECONOMICS_SHEET_DEFAULTS)}
+        raw = {"financing": fin}
+        if econ_raw is not None:
+            raw["economics"] = econ_raw
+        _apply_financing_block(raw, typed)
+        return typed["economics"]
+
+    # Blank tenor_years no longer shadows the valid alias.
+    with caplog.at_level(logging.WARNING):
+        econ = probe({"tenor_years": None, "tenor": 12})
+    assert econ["debt_tenor_years"] == 12
+
+    # Both valued: tenor_years wins loudly.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        econ = probe({"tenor_years": 10, "tenor": 12})
+    assert econ["debt_tenor_years"] == 10
+    assert any(
+        "'tenor' is ignored" in r.getMessage() for r in caplog.records
+    )
+
+    # Same-config conflict warns naming both keys and the winner.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        econ = probe({"gearing": 0.6}, econ_raw={"gearing_pct": 40})
+    assert econ["gearing_pct"] == pytest.approx(60.0)
+    assert any(
+        "financing.gearing overrides economics.gearing_pct"
+        in r.getMessage() for r in caplog.records
+    )

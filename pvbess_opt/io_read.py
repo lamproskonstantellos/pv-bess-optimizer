@@ -179,38 +179,126 @@ def _convenience_num(
     return as_float
 
 
+# Accepted convenience-block keys and the economics keys they map onto.
+# The values double as the unknown-key hint: a user writing the TARGET
+# economics key inside the block (``financing: {gearing_pct: 60}``) gets
+# pointed at both spellings instead of a silent all-equity model.
+_FINANCING_BLOCK_TARGETS: dict[str, str] = {
+    "gearing": "gearing_pct",
+    "interest_rate": "debt_interest_rate_pct",
+    "tenor_years": "debt_tenor_years",
+    "tenor": "debt_tenor_years",
+    "repayment": "debt_repayment",
+}
+_GRID_BLOCK_TARGETS: dict[str, str] = {
+    "co2_intensity": "grid_co2_intensity_kg_per_mwh",
+    "co2_annual_decline": "grid_co2_annual_decline_pct",
+}
+
+
+def _convenience_block(
+    raw: dict[str, Any], block: str, targets: dict[str, str],
+) -> dict[str, Any]:
+    """Return the ``block`` mapping, LOUD about shapes it cannot honour.
+
+    Every sheet section warns "key X is unknown; ignored" for a typo'd
+    key, but these top-level convenience blocks previously dropped
+    unknown keys — and entire non-mapping blocks — without a trace:
+    ``financing: {gearing_pct: 60}`` delivered an all-equity model with
+    zero warnings.
+    """
+    value = raw.get(block)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        logger.warning(
+            "top-level %r must be a mapping of <key>: <value>, got %s; "
+            "the block is ignored (accepted keys: %s).",
+            block, type(value).__name__, ", ".join(sorted(targets)),
+        )
+        return {}
+    known_targets = set(targets.values())
+    for key in value:
+        name = str(key)
+        if name in targets:
+            continue
+        if name in known_targets:
+            aliases = sorted(k for k, v in targets.items() if v == name)
+            logger.warning(
+                "%s block key %r is unknown; ignored. The block spelling "
+                "is %r (or set economics.%s directly).",
+                block, name, aliases[0], name,
+            )
+        else:
+            logger.warning(
+                "%s block key %r is unknown; ignored (accepted keys: %s).",
+                block, name, ", ".join(sorted(targets)),
+            )
+    return value
+
+
 def _apply_financing_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
     """Map an optional top-level ``financing:`` block onto economics keys.
 
     ``gearing`` / ``interest_rate`` are fractions (0..1); they map to the
     percentage economics keys ``gearing_pct`` / ``debt_interest_rate_pct``.
     """
-    fin = raw.get("financing")
-    if not isinstance(fin, dict):
+    fin = _convenience_block(raw, "financing", _FINANCING_BLOCK_TARGETS)
+    if not fin:
         return
 
     def _num(key: str, kind: type) -> float | int | None:
         return _convenience_num("financing", key, fin[key], kind)
 
+    raw_econ = raw.get("economics")
+    raw_econ = raw_econ if isinstance(raw_econ, dict) else {}
     econ = typed["economics"]
+
+    def _set(target: str, parsed: Any, src_key: str) -> None:
+        # Silent last-writer-wins between two documented surfaces for the
+        # same economics key is a trap; every sibling both-set conflict in
+        # the loader warns about which side won.
+        if target in raw_econ:
+            logger.warning(
+                "financing.%s overrides economics.%s set in the same "
+                "config (%r replaces %r).",
+                src_key, target, parsed, raw_econ[target],
+            )
+        econ[target] = parsed
+
     if "gearing" in fin:
         gearing = _num("gearing", float)
         if gearing is not None:
-            econ["gearing_pct"] = gearing * 100.0
+            _set("gearing_pct", gearing * 100.0, "gearing")
     if "interest_rate" in fin:
         rate = _num("interest_rate", float)
         if rate is not None:
-            econ["debt_interest_rate_pct"] = rate * 100.0
-    if "tenor_years" in fin:
+            _set("debt_interest_rate_pct", rate * 100.0, "interest_rate")
+    if "tenor_years" in fin and "tenor" in fin:
+        # Both spellings present: a VALUED tenor_years wins loudly; a
+        # blank tenor_years stub falls through to the alias instead of
+        # silently discarding a perfectly valid tenor.
         tenor = _num("tenor_years", int)
         if tenor is not None:
-            econ["debt_tenor_years"] = tenor
+            logger.warning(
+                "financing block sets both 'tenor_years' and 'tenor'; "
+                "'tenor_years' (%s) wins and 'tenor' is ignored.", tenor,
+            )
+            _set("debt_tenor_years", tenor, "tenor_years")
+        else:
+            alt = _num("tenor", int)
+            if alt is not None:
+                _set("debt_tenor_years", alt, "tenor")
+    elif "tenor_years" in fin:
+        tenor = _num("tenor_years", int)
+        if tenor is not None:
+            _set("debt_tenor_years", tenor, "tenor_years")
     elif "tenor" in fin:
         tenor = _num("tenor", int)
         if tenor is not None:
-            econ["debt_tenor_years"] = tenor
+            _set("debt_tenor_years", tenor, "tenor")
     if "repayment" in fin and fin["repayment"] is not None:
-        econ["debt_repayment"] = str(fin["repayment"])
+        _set("debt_repayment", str(fin["repayment"]), "repayment")
 
 
 def _apply_grid_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
@@ -219,23 +307,37 @@ def _apply_grid_block(raw: dict[str, Any], typed: dict[str, Any]) -> None:
     ``co2_intensity`` is kg/MWh (the economics-key unit); ``co2_annual_decline``
     is a fraction (0..1) mapped to the percentage key.
     """
-    grid = raw.get("grid")
-    if not isinstance(grid, dict):
+    grid = _convenience_block(raw, "grid", _GRID_BLOCK_TARGETS)
+    if not grid:
         return
+    raw_econ = raw.get("economics")
+    raw_econ = raw_econ if isinstance(raw_econ, dict) else {}
     econ = typed["economics"]
 
     def _num(key: str) -> float | None:
         value = _convenience_num("grid", key, grid[key], float)
         return None if value is None else float(value)
 
+    def _set(target: str, parsed: float, src_key: str) -> None:
+        if target in raw_econ:
+            logger.warning(
+                "grid.%s overrides economics.%s set in the same config "
+                "(%r replaces %r).",
+                src_key, target, parsed, raw_econ[target],
+            )
+        econ[target] = parsed
+
     if "co2_intensity" in grid:
         co2 = _num("co2_intensity")
         if co2 is not None:
-            econ["grid_co2_intensity_kg_per_mwh"] = co2
+            _set("grid_co2_intensity_kg_per_mwh", co2, "co2_intensity")
     if "co2_annual_decline" in grid:
         decline = _num("co2_annual_decline")
         if decline is not None:
-            econ["grid_co2_annual_decline_pct"] = decline * 100.0
+            _set(
+                "grid_co2_annual_decline_pct", decline * 100.0,
+                "co2_annual_decline",
+            )
 
 
 def load_structured_config(path: str | Path) -> dict[str, Any]:
