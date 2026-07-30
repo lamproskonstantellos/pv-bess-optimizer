@@ -22,7 +22,12 @@ A run produces a single result directory under ``results/``.
   sheets (debt layer active), and — when the market-data / price-scenario
   engine is armed — the ``market_data_provenance``,
   ``scenario_price_paths``, ``scenario_resolve_delta`` and
-  ``price_scenario_ensemble`` sheets.
+  ``price_scenario_ensemble`` sheets.  Note the percentile
+  orientation on ``price_scenario_ensemble``: ``npv_p90_eur`` is the
+  plain 90th percentile of the scenario NPV distribution (the BEST
+  case), the opposite orientation from the lender-convention P90 used
+  by ``production_p90_factor_pct`` / ``debt_sizing_case = p90``,
+  where P90 is the conservative case.
 * ``04_financial_plots/``: cumulative cashflow, yearly bars, NPV
   waterfall, payback visualisation, monthly cashflow Year-1, NPV /
   IRR tornados, the yearly revenue stack, the BESS revenue waterfall /

@@ -333,11 +333,37 @@ def test_resolve_warns_when_support_years_undercover_horizon(monkeypatch, caplog
     assert any("held flat" in r.message for r in caplog.records)
 
 
-def test_resolve_warns_when_support_reduces_to_year_one(monkeypatch, caplog):
+def test_resolve_rejects_support_reducing_to_year_one(monkeypatch):
+    """Final-round-3 upgrade of the year-1-only guard from a log warning to
+    a hard error: the run previously delivered a cashflow on FLAT Tier-2
+    factors while the scenario_price_paths sheet still showed the
+    declining Tier-1 path — an internally inconsistent workbook whose
+    only breadcrumbs were a console line and a zero-delta SUMMARY row."""
     _patch_fake_milp(monkeypatch)
-    with caplog.at_level(logging.WARNING):
+    with pytest.raises(PriceDataError, match="reduces to just year 1"):
         derive_resolve_trajectories(
             _deck(50.0), _params(), _hourly_year_ts(), _econ(),
             n_years=3, support_years=[1], resolution_minutes=60,
         )
-    assert any("collapses" in r.message for r in caplog.records)
+    # A 1-year horizon keeps [1]: the single support year covers the
+    # whole project.
+    out = derive_resolve_trajectories(
+        _deck(50.0), _params(), _hourly_year_ts(), _econ(),
+        n_years=1, support_years=[1], resolution_minutes=60,
+    )
+    assert out is not None
+
+
+def test_parse_support_years_rejects_fractional_and_non_finite():
+    """Final-round-3 regression: int(float(token)) silently truncated '2.7'
+    to year 2 (a typo'd '2.5' meant '2,5' collapsed two support years
+    into one), and int(float('inf')) escaped as a bare OverflowError
+    naming no key."""
+    with pytest.raises(PriceDataError, match="whole operating year"):
+        parse_support_years("2.7,5", 20)
+    with pytest.raises(PriceDataError, match="not a finite year"):
+        parse_support_years("inf,5", 20)
+    with pytest.raises(PriceDataError, match="not a finite year"):
+        parse_support_years("nan", 20)
+    # Whole-valued float tokens keep parsing ('5.0' is unambiguous).
+    assert parse_support_years("5.0,10", 20) == [1, 5, 10]

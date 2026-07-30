@@ -583,6 +583,24 @@ def _generate_all_energy_plots(
         or PROJECT_SHEET_DEFAULTS["project_start_year"]
     )
 
+    if _scope_active_for_year(daily_scope, 1):
+        # The daily fan-out dominates a full-scale run's wall-clock
+        # (~365 days x several figure types on the shipped defaults)
+        # with only fontTools INFO lines on the console — announce it
+        # so a first run does not look hung after the solve finishes.
+        try:
+            _n_days = int(
+                pd.to_datetime(res_year1["timestamp"]).dt.normalize().nunique()
+            )
+        except Exception:
+            _n_days = 0
+        print(
+            f"[plots] rendering daily dispatch figures for ~{_n_days} days "
+            f"(plot_daily_scope={daily_scope}); the numeric deliverables "
+            "are already on disk — set plot_daily_scope=none for a fast "
+            "numbers-first run."
+        )
+
     _leg_factors = _revenue_leg_factors(res_year1, year1_kpis)
 
     if lifetime_df is None or lifetime_df.empty:
@@ -969,6 +987,15 @@ def _build_financials(
     own cashflow) with a warning instead of freezing a mis-sized debt.
     """
     econ = read_economic_params(excel_path)
+    # The workbook re-read carries the STORED mode; a CLI/RunConfig
+    # --mode override patched params only, so the delivered
+    # economic_assumptions sheet and assumptions_summary recorded e.g.
+    # mode = self_consumption for a merchant study (contradicting
+    # kpis_year1 / SUMMARY.md in the same delivery).  Numerics were
+    # unaffected — every dispatch/finance consumer reads the resolved
+    # params — but the assumptions record must state the mode the run
+    # actually solved.
+    econ["mode"] = resolve_mode(params)
 
     site_capex_eur = float(econ.get("site_capex_eur", 0.0) or 0.0)
     site_devex_eur = float(econ.get("site_devex_eur", 0.0) or 0.0)
@@ -1420,6 +1447,8 @@ def _run_intraday_stage2(
     )
     if config.strict:
         _check_strict_energy_balance(residuals)
+    else:
+        _warn_energy_balance_offenders(residuals)
     invariants = verify_dispatch_invariants(
         res2_full, params, mode=resolve_mode(params),
     )
@@ -1429,6 +1458,8 @@ def _run_intraday_stage2(
     )
     if config.strict:
         _check_strict_invariants(invariants)
+    else:
+        _warn_invariant_offenders(invariants)
     kpis2 = compute_kpis(res2, params, verify_balance=False)
     kpis2 = apply_operating_derates(kpis2, params)
     _emit_bess_utilisation_audit(kpis2, params)
@@ -1543,7 +1574,14 @@ def _scenario_slug(params: dict[str, Any]) -> str:
     return f"{mode}{suffix}"
 
 
-def _check_strict_invariants(invariants: dict[str, float]) -> None:
+def _invariant_offenders(invariants: dict[str, float]) -> dict[str, float]:
+    """Invariants above their strict-mode tolerances (shared detector).
+
+    Both modes use the SAME detector so the --strict help text stays
+    honest: non-strict runs previously printed the raw numbers only —
+    a genuine violation exited 0 with no WARNING anywhere, visible
+    solely to a client who reads the numeric [invariants] line.
+    """
     tol = ENERGY_TOLERANCE
     # Invariant 6 is an integer count and piggybacks on the same tol;
     # the smallest non-zero count is 1, which trivially exceeds tol=1e-3.
@@ -1583,10 +1621,26 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
             "verify_dispatch_invariants is missing balancing/intraday "
             f"invariant keys: {missing}"
         )
+    return offenders
+
+
+def _check_strict_invariants(invariants: dict[str, float]) -> None:
+    offenders = _invariant_offenders(invariants)
     if offenders:
         raise AssertionError(
             "Strict-mode invariant violations: "
             + ", ".join(f"{k}={v:.6g}" for k, v in offenders.items())
+        )
+
+
+def _warn_invariant_offenders(invariants: dict[str, float]) -> None:
+    """Non-strict twin of :func:`_check_strict_invariants` — warn, exit 0."""
+    offenders = _invariant_offenders(invariants)
+    if offenders:
+        logger.warning(
+            "[invariants] violations above strict tolerances (rerun with "
+            "--strict to make these fatal): %s",
+            ", ".join(f"{k}={v:.6g}" for k, v in offenders.items()),
         )
 
 
@@ -1628,6 +1682,19 @@ def _check_strict_energy_balance(residuals: dict[str, float]) -> None:
         raise AssertionError(
             "Strict-mode energy-balance violations: "
             + ", ".join(f"{k}={v:.6g}" for k, v in offenders.items())
+        )
+
+
+def _warn_energy_balance_offenders(residuals: dict[str, float]) -> None:
+    """Non-strict twin of :func:`_check_strict_energy_balance`."""
+    offenders = {
+        k: float(v) for k, v in residuals.items() if v > ENERGY_TOLERANCE
+    }
+    if offenders:
+        logger.warning(
+            "[verify] energy-balance residuals above strict tolerances "
+            "(rerun with --strict to make these fatal): %s",
+            ", ".join(f"{k}={v:.6g}" for k, v in offenders.items()),
         )
 
 
@@ -1789,6 +1856,37 @@ def _resolve_uncertainty_config(
     enable_ida = bool(econ.get("uncertainty_ida_enabled", True)) and bool(
         econ.get("id_enabled", False)
     )
+    if compare and not enabled:
+        # An explicitly typed flag whose help promises four MC ensembles
+        # must not evaporate without a word (the batch routes already
+        # warn about ignored single-run flags; the single-run route
+        # did not).
+        logger.warning(
+            "--compare-uncertainty-sources / uncertainty_compare_sources "
+            "has no effect: rolling-horizon uncertainty is disabled. "
+            "Enable it with uncertainty_enabled = TRUE or "
+            "--rolling-horizon."
+        )
+    if enabled and n_seeds > 0 and not (
+        enable_dam or enable_pv or enable_load or enable_ida
+    ):
+        # Zero effective noise sources make every Monte Carlo seed
+        # byte-identical: the delivered percentiles collapse to a point
+        # mass, the imbalance settlement (forecast == actual) reports
+        # exactly 0.00 and VaR == CVaR — all silently, at the full cost
+        # of n_seeds rolling-horizon runs (x4 in compare mode, where the
+        # 'all' ensemble feeds the DELIVERED aggregates).
+        raise ValueError(
+            f"uncertainty_enabled with uncertainty_n_seeds = {n_seeds} "
+            "but no effective noise source: uncertainty_dam_enabled, "
+            "uncertainty_pv_enabled and uncertainty_load_enabled "
+            "resolve to FALSE (merchant mode forces load noise off; "
+            "intraday-price noise needs id_enabled). Every seed would "
+            "be identical, so the delivered Monte Carlo percentiles, "
+            "imbalance settlement and VaR/CVaR would be a point mass. "
+            "Enable at least one source, or set uncertainty_n_seeds = 0 "
+            "for the deterministic rolling-horizon run."
+        )
     # The loader enforces window >= 2 x commit whenever the imbalance
     # settlement is armed (the nomination is the [commit, 2*commit)
     # lookahead of each window) — but only on the WORKBOOK values.  CLI
@@ -1963,6 +2061,8 @@ def _run_one(
             )
             if config.strict:
                 _check_strict_energy_balance(residuals)
+            else:
+                _warn_energy_balance_offenders(residuals)
 
             invariants = verify_dispatch_invariants(
                 res_full, params, mode=resolve_mode(params),
@@ -1973,6 +2073,8 @@ def _run_one(
             )
             if config.strict:
                 _check_strict_invariants(invariants)
+            else:
+                _warn_invariant_offenders(invariants)
 
             kpis = compute_kpis(res, params, verify_balance=False)
             # Post-solve unavailability derate.  Multiplies a
@@ -2075,12 +2177,29 @@ def _run_one(
                 )
 
             if unc_cfg["compare_sources"] and n_seeds > 0:
+                compare_flags = list(_COMPARE_SOURCE_FLAGS)
+                if resolve_mode(params) == "merchant":
+                    # The plain path forces enable_load off in merchant
+                    # ("no load to perturb") — but the fixed
+                    # (False, False, True) diagnostic definition would
+                    # perturb a column the model never reads: n_seeds
+                    # identical rolling-horizon runs delivering a
+                    # plausible-looking foresight_gap_pct_p50_load for a
+                    # plant with no load.
+                    compare_flags = [
+                        f for f in compare_flags if f[0] != "load"
+                    ]
+                    print(
+                        "[rolling] compare-sources: skipping the 'load' "
+                        "ensemble in merchant mode (no load to perturb)."
+                    )
                 print(
-                    f"[rolling] compare-sources mode: 4 ensembles x {n_seeds} seeds "
+                    f"[rolling] compare-sources mode: "
+                    f"{len(compare_flags)} ensembles x {n_seeds} seeds "
                     f"(window={window_h}h, commit={commit_h}h, base_seed={base_seed})"
                 )
                 ensembles: list[pd.DataFrame] = []
-                for src, en_dam, en_pv, en_load in _COMPARE_SOURCE_FLAGS:
+                for src, en_dam, en_pv, en_load in compare_flags:
                     if src == "all":
                         # The 'all' ensemble feeds the DELIVERED
                         # settlement aggregates and NPV tail risk (it is
@@ -2278,7 +2397,10 @@ def _run_one(
                     else:
                         frame["foresight_gap_pct"] = float("nan")
             if rolling_compare_df is not None:
-                for src, _en_dam, _en_pv, _en_load in _COMPARE_SOURCE_FLAGS:
+                # Iterate the source sets actually PRESENT in the frame
+                # (merchant runs skip the inert 'load' ensemble), so an
+                # absent ensemble never materialises as a NaN KPI row.
+                for src in dict.fromkeys(rolling_compare_df["source_set"]):
                     p50 = float(
                         rolling_compare_df.loc[
                             rolling_compare_df["source_set"] == src,
@@ -2503,6 +2625,23 @@ def _run_one(
             ),
             price_scenario_ensemble=_ensemble_frame(ensemble_result),
         )
+        _summary_notes: list[str] = []
+        if (
+            resolve_mode(params) == "merchant"
+            and "load_kwh" in ts.columns
+            and float(pd.to_numeric(ts["load_kwh"], errors="coerce")
+                      .abs().sum()) > 0.0
+        ):
+            # The dispatch sheets copy the workbook's load column
+            # verbatim while merchant mode pins every load-serving flow
+            # (and the load KPIs) to zero — without this note the
+            # delivered artifacts show a load nothing serves.
+            _summary_notes.append(
+                "Merchant mode ignores the workbook's co-located load "
+                "column: `load_kwh` appears in the dispatch sheets for "
+                "reference, but no flow serves it and the load / grid "
+                "import KPIs are 0 by definition."
+            )
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
             kpis_year1=kpis,
@@ -2513,6 +2652,7 @@ def _run_one(
             lender_cases=bundle.get("lender_cases"),
             midlife_resolve=midlife_df,
             price_scenario_lines=_ps_lines,
+            notes=_summary_notes or None,
         )
 
         # Balancing plot pair promised by the README's report list; both
@@ -2647,6 +2787,12 @@ def _run_one(
             for key, value in bundle["fin_kpis"].items():
                 print(f"{key}: {value}")
         print(f"[io] outputs under: {out_dir.resolve()}")
+        # Completion sentinel — the last line the run log tee captures.
+        # An interrupted run (SIGTERM/SIGINT/OOM mid-solve) leaves the
+        # full directory skeleton with no results workbook and, without
+        # this marker, nothing telling a client who finds the directory
+        # later that the run never finished.
+        print("[run] complete")
     return Results(
         out_dir=out_dir,
         kpis=kpis,

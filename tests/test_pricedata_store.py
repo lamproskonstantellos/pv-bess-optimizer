@@ -683,3 +683,24 @@ def test_cpi_pct_defaults_to_schema_value_not_zero():
     assert _cpi_pct({}) == schema  # missing -> schema default
     assert _cpi_pct({"cpi_pct": 0.0}) == 0.0  # explicit zero preserved
     assert _cpi_pct({"cpi_pct": 3.5}) == 3.5  # explicit value honoured
+
+
+def test_parametric_level_at_or_below_minus_100_is_rejected(tmp_path):
+    """Final-round-3 regression: (1 + l/100)^(y-1) with l <= -100 built
+    sign-alternating (or all-zero) deck curves without any diagnostic."""
+    for knob in ("dam_level_pct_per_yr", "spread_evolution_pct_per_yr"):
+        store = _parametric_store(tmp_path, {knob: -150.0})
+        with pytest.raises(PriceDataError, match="non-positive annual"):
+            build_parametric_deck(
+                store, name="p", vintage="v", weight_pct=100.0,
+                year1_dam=np.full(HOURS, 100.0), pv_kwh=None,
+                year1_balancing=None, n_years=3,
+            )
+    # A steep-but-legal decline still builds.
+    store = _parametric_store(tmp_path, {"dam_level_pct_per_yr": -99.0})
+    deck = build_parametric_deck(
+        store, name="p", vintage="v", weight_pct=100.0,
+        year1_dam=np.full(HOURS, 100.0), pv_kwh=None,
+        year1_balancing=None, n_years=2,
+    )
+    assert deck.dam[2][0] == pytest.approx(1.0)

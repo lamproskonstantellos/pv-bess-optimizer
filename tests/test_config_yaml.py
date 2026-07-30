@@ -625,3 +625,178 @@ def test_scenario_resolve_years_accepts_native_list():
     assert _parse_value("scenario_resolve_years", None, "1,5") == "1,5"
     with pytest.raises(ValueError, match=r"scenario_resolve_years.*boolean"):
         _parse_value("scenario_resolve_years", True, None)
+
+
+def test_financing_grid_blocks_warn_on_unknown_keys_and_shapes(caplog):
+    """Final-round-3 regression: unknown keys inside financing:/grid: (and
+    entire non-mapping blocks) were dropped without a trace — a config
+    writing financing: {gearing_pct: 60} delivered an all-equity model
+    with zero warnings, while the same mistake in economics: warned."""
+    from pvbess_opt.io import ECONOMICS_SHEET_DEFAULTS
+    from pvbess_opt.io_read import _apply_financing_block, _apply_grid_block
+
+    def probe(fin=None, grid=None, econ_raw=None):
+        typed = {"economics": dict(ECONOMICS_SHEET_DEFAULTS)}
+        raw = {}
+        if fin is not None:
+            raw["financing"] = fin
+        if grid is not None:
+            raw["grid"] = grid
+        if econ_raw is not None:
+            raw["economics"] = econ_raw
+        _apply_financing_block(raw, typed)
+        _apply_grid_block(raw, typed)
+        return typed["economics"]
+
+    with caplog.at_level(logging.WARNING):
+        econ = probe(fin={"gaering": 0.6})
+    assert econ["gearing_pct"] == ECONOMICS_SHEET_DEFAULTS["gearing_pct"]
+    assert any(
+        "'gaering' is unknown" in r.getMessage() for r in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        econ = probe(fin={"gearing_pct": 60})
+    assert econ["gearing_pct"] == ECONOMICS_SHEET_DEFAULTS["gearing_pct"]
+    assert any(
+        "block spelling is 'gearing'" in r.getMessage()
+        for r in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        probe(fin=0.6)
+    assert any(
+        "must be a mapping" in r.getMessage() for r in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        econ = probe(grid={"co2_intensity_kg_per_mwh": 300})
+    assert econ["grid_co2_intensity_kg_per_mwh"] == (
+        ECONOMICS_SHEET_DEFAULTS["grid_co2_intensity_kg_per_mwh"]
+    )
+    assert any(
+        "'co2_intensity_kg_per_mwh' is unknown" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_financing_tenor_alias_and_conflict_semantics(caplog):
+    """Final-round-3 regression: a blank tenor_years stub consumed the branch
+    and silently dropped a valid tenor alias, and financing.gearing
+    silently overrode an explicit economics.gearing_pct set in the same
+    config (no both-surfaces warning, unlike every loader sibling)."""
+    from pvbess_opt.io import ECONOMICS_SHEET_DEFAULTS
+    from pvbess_opt.io_read import _apply_financing_block
+
+    def probe(fin, econ_raw=None):
+        typed = {"economics": dict(ECONOMICS_SHEET_DEFAULTS)}
+        raw = {"financing": fin}
+        if econ_raw is not None:
+            raw["economics"] = econ_raw
+        _apply_financing_block(raw, typed)
+        return typed["economics"]
+
+    # Blank tenor_years no longer shadows the valid alias.
+    with caplog.at_level(logging.WARNING):
+        econ = probe({"tenor_years": None, "tenor": 12})
+    assert econ["debt_tenor_years"] == 12
+
+    # Both valued: tenor_years wins loudly.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        econ = probe({"tenor_years": 10, "tenor": 12})
+    assert econ["debt_tenor_years"] == 10
+    assert any(
+        "'tenor' is ignored" in r.getMessage() for r in caplog.records
+    )
+
+    # Same-config conflict warns naming both keys and the winner.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        econ = probe({"gearing": 0.6}, econ_raw={"gearing_pct": 40})
+    assert econ["gearing_pct"] == pytest.approx(60.0)
+    assert any(
+        "financing.gearing overrides economics.gearing_pct"
+        in r.getMessage() for r in caplog.records
+    )
+
+
+def test_scenario_resolve_years_list_elements_are_vetted():
+    """Final-round-3 regression: the list branch joined str(x) on unvetted
+    members, smuggling the scalar branch's rejects straight past it —
+    [true, 5] stored 'True,5', [1.5, 5] silently truncated a Tier-2
+    re-solve year, [.inf, 5] died later as a bare OverflowError, and []
+    silently fell back to the default years."""
+    from pvbess_opt.io import _parse_value
+
+    default = "1,5,10,15,20"
+    with pytest.raises(ValueError, match="boolean True in the list"):
+        _parse_value("scenario_resolve_years", [True, 5], default)
+    with pytest.raises(ValueError, match="whole operating years"):
+        _parse_value("scenario_resolve_years", [1.5, 5], default)
+    with pytest.raises(ValueError, match="finite operating years"):
+        _parse_value("scenario_resolve_years", [float("inf"), 5], default)
+    with pytest.raises(ValueError, match="empty list is ambiguous"):
+        _parse_value("scenario_resolve_years", [], default)
+    # Whole-valued floats and numeric strings canonicalise.
+    assert _parse_value(
+        "scenario_resolve_years", [1.0, 5.0], default,
+    ) == "1,5"
+    assert _parse_value(
+        "scenario_resolve_years", ["1", 2], default,
+    ) == "1,2"
+
+
+def test_armed_resolve_mode_validates_years_at_startup():
+    """Final-round-3 regression: with the Tier-2 resolve armed, a garbage
+    scenario_resolve_years CSV passed validate_workbook_params and
+    burned the full Year-1 MILP before dying inside the price-scenario
+    engine; a support set reducing to {1} silently discarded the
+    configured scenario path post-solve."""
+    from pvbess_opt.io import read_workbook, validate_workbook_params
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["scenario_engine"] = {
+        "price_scenarios_enabled": True,
+        "scenario_projection_mode": "resolve",
+        "scenario_resolve_years": "1,banana,25",
+    }
+    with pytest.raises(ValueError, match="'banana' is not a year"):
+        validate_workbook_params(typed)
+
+    typed["scenario_engine"]["scenario_resolve_years"] = "1"
+    with pytest.raises(ValueError, match="reducing to just year 1"):
+        validate_workbook_params(typed)
+
+    # A healthy CSV passes; a disarmed engine never parses the key.
+    typed["scenario_engine"]["scenario_resolve_years"] = "1,5,10"
+    validate_workbook_params(typed)
+    typed["scenario_engine"] = {
+        "price_scenarios_enabled": False,
+        "scenario_resolve_years": "garbage",
+    }
+    validate_workbook_params(typed)
+
+
+def test_free_form_string_keys_reject_booleans_on_the_config_route():
+    """Final-round-3 regression: the workbook route rejects a TRUE cell at
+    the kv-sheet layer, but the config route reached _parse_value's
+    free-form string branches directly and silently stored 'True' —
+    debt_sizing_scenario: true became a scenario NAME failing lookup
+    only if/when the armed engine ran."""
+    from pvbess_opt.io import _parse_value
+
+    for key in (
+        "debt_sizing_scenario", "entsoe_token", "market_cache_dir",
+        "raddatabase", "timeseries_path",
+    ):
+        with pytest.raises(ValueError, match=rf"'{key}'.*boolean True"):
+            _parse_value(key, True, None)
+    with pytest.raises(ValueError, match=r"'debt_sizing_deck'.*boolean"):
+        _parse_value("debt_sizing_deck", True, "low")
+    # Legitimate strings still pass verbatim / lowercased.
+    assert _parse_value("debt_sizing_scenario", "Upside", None) == "Upside"
+    assert _parse_value("debt_sizing_deck", "LOW", "low") == "low"

@@ -247,6 +247,14 @@ def test_cli_main_smoke(tmp_path):
         "--time-limit", "180",
     ])
     assert rc == 0
+    # Atomic-write contract: no .partial temp workbook survives a healthy
+    # run, and the run log ends with the completion sentinel so an
+    # interrupted run's directory is distinguishable after the fact.
+    out_root = tmp_path / "cli_results"
+    assert not list(out_root.rglob("*.partial"))
+    run_log = next(out_root.rglob("run_log.txt"))
+    last_line = run_log.read_text(encoding="utf-8").rstrip().splitlines()[-1]
+    assert last_line == "[run] complete"
 
 
 def test_revenue_leg_factors_and_synthetic_year_kpis():
@@ -649,3 +657,75 @@ def test_snapshot_stale_rows_are_actually_cleared_and_blank_strings_count_empty(
             f"stale row {r} must be cleared, got "
             f"{ots.cell(row=r, column=ci).value!r}"
         )
+
+
+def test_cli_user_error_exit_codes(tmp_path, caplog):
+    """Final-round-3 regression: sibling user errors got three different
+    presentations — a missing workbook exited 2 cleanly, but a missing
+    --scenarios file / corrupt xlsx exited 1 with raw tracebacks, and a
+    solver typo was rejected only inside solve_model, after the workbook
+    read and the full model build."""
+    import logging
+
+    from pvbess_opt import cli
+
+    with caplog.at_level(logging.ERROR):
+        rc = cli.main([
+            str(ROOT / "inputs" / "input.xlsx"),
+            "--scenarios", str(tmp_path / "ghost.yaml"),
+        ])
+    assert rc == 2
+    assert any(
+        "Scenarios file not found" in r.getMessage() for r in caplog.records
+    )
+
+    caplog.clear()
+    junk = tmp_path / "junk.xlsx"
+    # Truncated/corrupt workbook: the zip magic makes pandas hand the
+    # bytes to openpyxl, which dies in zipfile with BadZipFile.
+    junk.write_bytes(b"PK\x03\x04" + b"garbage" * 64)
+    with caplog.at_level(logging.ERROR):
+        rc = cli.main([str(junk), "--outdir", str(tmp_path / "o1")])
+    assert rc == 2
+    assert any(
+        "junk.xlsx" in r.getMessage() and "not a valid .xlsx" in r.getMessage()
+        for r in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.ERROR):
+        rc = cli.main([
+            str(ROOT / "inputs" / "input.xlsx"),
+            "--solver", "nopesolver",
+            "--outdir", str(tmp_path / "o2"),
+        ])
+    assert rc == 2
+    assert any(
+        "nopesolver" in r.getMessage() and "not available" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_mode_override_reaches_the_assumptions_record(tmp_path):
+    """Final-round-3 regression (owner-approved): run() patched the CLI
+    --mode override into params only, while _build_financials re-read
+    the workbook for econ — so a merchant study delivered an
+    economic_assumptions sheet (and assumptions_summary section)
+    recording mode = self_consumption, contradicting kpis_year1 and
+    SUMMARY.md in the same output tree."""
+    import pandas as pd
+
+    from pvbess_opt.pipeline import RunConfig, run
+
+    result = run(RunConfig(
+        excel=_short_workbook(tmp_path), solver="highs",
+        outdir=tmp_path / "out", mip_gap=0.05, time_limit=180,
+        mode="merchant",
+    ))
+    results_xlsx = result.out_dir / "03_results.xlsx"
+    ea = pd.read_excel(results_xlsx, sheet_name="economic_assumptions")
+    assert ea.loc[ea["key"] == "mode", "value"].iloc[0] == "merchant"
+    summary_txt = (
+        result.out_dir / "01_inputs" / "assumptions_summary.txt"
+    ).read_text(encoding="utf-8")
+    assert "self_consumption" not in summary_txt

@@ -106,7 +106,7 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
     ``bess.power_kw``, ``bess.capacity_kwh`` included), the bare
     ``balancing`` on/off scalar, or the ``capex_multiplier`` special.
     """
-    from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS
+    from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS, _parse_value
 
     name = scenario.get("name", "<unnamed>")
     for section, value in scenario.items():
@@ -216,7 +216,7 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
             else {}
         )
         defaults = _SHEET_DEFAULTS[section]
-        for key in value:
+        for key, raw in value.items():
             canonical = aliases.get(str(key), str(key))
             if section == "pv" and canonical == "timeseries_path":
                 # evaluate_scenario resolves the base PV profile ONCE and
@@ -235,6 +235,24 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
                     "rescale) or run separate base workbooks."
                 )
             if canonical in defaults:
+                # Route the VALUE through the loader's typed parser too.
+                # A scenarios file is the second YAML surface for these
+                # keys: previously values were copied verbatim into the
+                # materialised workbook, so a native list stringified to
+                # '[1, 5]' garbage and value errors surfaced only
+                # mid-batch — after earlier scenarios' paid solver time —
+                # naming neither the scenario nor the mistake.
+                # ``pv_nameplate_kwp`` keeps its dedicated guards in
+                # ``_apply_scenario_overrides`` (profile rescale needs
+                # the raw form).
+                if canonical != "pv_nameplate_kwp":
+                    try:
+                        _parse_value(canonical, raw, defaults[canonical])
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f"scenario {name!r}: override {section}.{key} "
+                            f"= {raw!r}: {exc}"
+                        ) from exc
                 continue
             owner = _KEY_TO_SHEET.get(canonical)
             hint = (
@@ -440,16 +458,45 @@ def resolve_inheritance(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]
     return [_resolve_one(scn, by_name, frozenset()) for scn in canonical]
 
 
+def _parsed_override_value(
+    section: str, key: Any, canonical: str, raw: Any, name: Any,
+) -> Any:
+    """Route one scenario override through the loader's typed parser.
+
+    Materialising the raw YAML value verbatim let native containers
+    stringify into the workbook cell (``[1, 5]``) and deferred value
+    errors to the scenario's re-read — mid-batch, after earlier
+    scenarios' solver time, without naming the scenario.  Parsing here
+    keeps the scenarios file and the structured-config surface (which
+    already runs ``_parse_value``) in agreement.
+    """
+    from .io import _SHEET_DEFAULTS, _parse_value
+
+    defaults = _SHEET_DEFAULTS.get(section) or {}
+    if canonical not in defaults:
+        return raw
+    try:
+        return _parse_value(canonical, raw, defaults[canonical])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"scenario {name!r}: override {section}.{key} = {raw!r}: {exc}"
+        ) from exc
+
+
 def _apply_scenario_overrides(
     base_typed: dict[str, Any], scenario: dict[str, Any],
 ) -> dict[str, Any]:
     validate_scenario_overrides(scenario)
     typed = copy.deepcopy(base_typed)
+    _scn_name = scenario.get("name", "scenario")
     _base_nameplate = float(
         (base_typed.get("pv") or {}).get("pv_nameplate_kwp", 0.0) or 0.0
     )
     for key, value in (scenario.get("pv") or {}).items():
-        typed["pv"][_PV_ALIASES.get(key, key)] = value
+        canonical = _PV_ALIASES.get(key, key)
+        if canonical != "pv_nameplate_kwp":
+            value = _parsed_override_value("pv", key, canonical, value, _scn_name)
+        typed["pv"][canonical] = value
     # A nameplate override changes the CAPEX/OPEX basis, so the resolved
     # PV profile must scale with it (shape preserved) or the scenario
     # would solve the BASE plant's generation against the OVERRIDDEN
@@ -527,7 +574,10 @@ def _apply_scenario_overrides(
             scenario.get("name", "scenario"), _new_nameplate,
         )
     for key, value in (scenario.get("bess") or {}).items():
-        typed["bess"][_BESS_ALIASES.get(key, key)] = value
+        canonical = _BESS_ALIASES.get(key, key)
+        typed["bess"][canonical] = _parsed_override_value(
+            "bess", key, canonical, value, _scn_name,
+        )
     for section in (
         "project", "economics", "simulation", "ppa", "intraday",
         "market_data", "scenario_engine",
@@ -536,11 +586,18 @@ def _apply_scenario_overrides(
         if overrides:
             target = typed.setdefault(section, {})
             for key, value in overrides.items():
-                target[key] = value
+                target[key] = _parsed_override_value(
+                    section, key, str(key), value, _scn_name,
+                )
 
     bal = scenario.get("balancing")
     if isinstance(bal, dict):
-        typed["balancing"].update(bal)
+        typed["balancing"].update({
+            key: _parsed_override_value(
+                "balancing", key, str(key), val, _scn_name,
+            )
+            for key, val in bal.items()
+        })
     elif bal is not None:
         typed["balancing"]["balancing_enabled"] = _as_bool(bal)
 
@@ -663,6 +720,7 @@ def evaluate_scenario(
     from .pipeline import _build_financials
 
     typed = _apply_scenario_overrides(base_typed, scenario)
+    scn_name = str(scenario.get("name", "scenario"))
     tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_"))
     try:
         xlsx = tmp / "scenario.xlsx"
@@ -681,6 +739,14 @@ def evaluate_scenario(
             xlsx, params, ts, kpis, res,
             solver_opts=solver_opts, base_dir=base_dir,
         )
+    except (ValueError, RuntimeError) as exc:
+        # A failure from the materialised workbook's re-read or the
+        # solve carries no scenario context of its own — a ten-scenario
+        # batch died with "'bess_capacity_kwh' must be non-negative"
+        # and the client had to bisect to find which scenario.
+        if str(exc).startswith("scenario "):
+            raise
+        raise type(exc)(f"scenario {scn_name!r}: {exc}") from exc
     finally:
         # The scenario workbook has no consumer past its comparison row;
         # drop the temp dir so a batch does not leak one dir per scenario.
@@ -724,6 +790,8 @@ def run_scenario_batch(
     base_dir: Path | None = None,
 ) -> pd.DataFrame:
     """Evaluate every (inheritance-resolved) scenario into a comparison table."""
+    from .io import read_inputs, write_workbook
+
     resolved = resolve_inheritance(scenarios)
     # Fail fast on a typo'd override BEFORE any solver time is spent —
     # scenario N failing after N-1 solves wastes minutes per batch.
@@ -737,12 +805,51 @@ def run_scenario_batch(
                 base_typed["ts"], str(deck),
                 scenario_name=str(scn.get("name", "<unnamed>")),
             )
-    rows = [
-        evaluate_scenario(
-            base_typed, scn, solver_opts=solver_opts, base_dir=base_dir,
+    # Key-level checks above cannot see VALUE-level mistakes that only
+    # the materialised workbook's re-read rejects (a negative capacity,
+    # a replacement year beyond an overridden lifecycle, ...).  Dry-run
+    # every scenario through materialise + read BEFORE the solve loop:
+    # seconds per scenario against hours of solver work previously
+    # discarded when scenario N crashed the batch after N-1 solves.
+    for scn in resolved:
+        scn_name = str(scn.get("name", "<unnamed>"))
+        tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_val_"))
+        try:
+            typed = _apply_scenario_overrides(base_typed, scn)
+            xlsx = tmp / "scenario.xlsx"
+            write_workbook(typed, xlsx)
+            read_inputs(xlsx)
+        except (ValueError, KeyError) as exc:
+            if str(exc).startswith("scenario "):
+                raise
+            raise ValueError(f"scenario {scn_name!r}: {exc}") from exc
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    # The dry pre-pass has rejected everything the loaders can catch, so
+    # a failure past this point is solver-level (infeasible, solver
+    # crash).  One sick scenario must not discard its siblings' finished
+    # solves: log it, keep going, and report the failures alongside the
+    # completed comparison.
+    rows = []
+    failures: list[dict[str, str]] = []
+    for scn in resolved:
+        scn_name = str(scn.get("name", "scenario"))
+        try:
+            rows.append(evaluate_scenario(
+                base_typed, scn, solver_opts=solver_opts, base_dir=base_dir,
+            ))
+        except (ValueError, RuntimeError) as exc:
+            logger.error(
+                "scenario %r failed (%s); continuing with the remaining "
+                "scenarios — the comparison will list it on the "
+                "failed_scenarios sheet.", scn_name, exc,
+            )
+            failures.append({"name": scn_name, "error": str(exc)})
+    if failures and not rows:
+        raise RuntimeError(
+            f"all {len(failures)} scenarios failed; first error: "
+            f"{failures[0]['error']}"
         )
-        for scn in resolved
-    ]
     # The comparison gains a price_deck column ONLY when at least one
     # scenario names a deck, keeping deck-free batches bit-identical.
     columns = list(_COMPARISON_COLUMNS)
@@ -751,7 +858,12 @@ def run_scenario_batch(
     else:
         for r in rows:
             r.pop("price_deck", None)
-    return pd.DataFrame(rows, columns=columns)
+    comparison = pd.DataFrame(rows, columns=columns)
+    # pandas .attrs is the side channel to the orchestrator; the sheet
+    # writer surfaces it as a failed_scenarios sheet only when non-empty
+    # so healthy batches stay bit-identical.
+    comparison.attrs["failed_scenarios"] = failures
+    return comparison
 
 
 # ---------------------------------------------------------------------------
@@ -761,14 +873,29 @@ def run_scenario_batch(
 
 def write_scenario_comparison_workbook(
     out_path: str | Path, comparison: pd.DataFrame,
+    *, failures: list[dict[str, str]] | None = None,
 ) -> Path:
-    """Write the scenario-comparison table to a styled workbook."""
+    """Write the scenario-comparison table to a styled workbook.
+
+    ``failures`` (mid-batch solver-level casualties) land on a separate
+    ``failed_scenarios`` sheet — added only when non-empty, so healthy
+    batches keep the single-sheet layout bit-identical.
+    """
+    from .io import atomic_workbook_path
     from .io_style import style_workbook
 
+    if failures is None:
+        failures = list(comparison.attrs.get("failed_scenarios") or [])
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+    with atomic_workbook_path(out_path) as tmp_path, pd.ExcelWriter(
+        tmp_path, engine="openpyxl",
+    ) as writer:
         comparison.to_excel(writer, sheet_name="scenario_comparison", index=False)
+        if failures:
+            pd.DataFrame(failures, columns=["name", "error"]).to_excel(
+                writer, sheet_name="failed_scenarios", index=False,
+            )
         style_workbook(writer.book)
     return out_path
 
@@ -987,6 +1114,14 @@ def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResul
         "tee": config.tee,
     }
 
+    from .io import ensure_writable_outdir
+
+    # Fail on an unusable --outdir BEFORE the solve loop: the output
+    # directory was previously first touched after every scenario had
+    # solved, so a path collision or read-only filesystem discarded the
+    # entire batch at the very end.
+    ensure_writable_outdir(Path(config.outdir))
+
     apply_ieee_style()
     comparison = run_scenario_batch(
         base_typed, scenarios, solver_opts=solver_opts,
@@ -1035,6 +1170,10 @@ def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResul
         )
     write_scenario_comparison_workbook(
         out_dir / "scenario_comparison.xlsx", comparison_sheet,
+        # comparison_sheet may be a fresh concat (risk rows), which
+        # does not reliably carry .attrs — hand the failures over
+        # explicitly from the batch frame.
+        failures=list(comparison.attrs.get("failed_scenarios") or []),
     )
     plot_scenario_comparison_bars(comparison, out_dir / "scenario_comparison.pdf")
     if len(comparison) >= 2:

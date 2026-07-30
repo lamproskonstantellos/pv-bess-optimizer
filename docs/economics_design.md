@@ -1362,8 +1362,12 @@ $$\mathrm{DSCR}_s = \frac{\sum_{y=1}^{T_d}
 A $\mathrm{CFADS}_y \le 0$ year pays nothing (unpaid interest is not
 capitalised in this simple model) and later years absorb it; any
 clamp residual sweeps into the final year's principal so the balance
-amortises to ~0 exactly.  Under sculpting `min_dscr` $=$ `avg_dscr`
-by construction.
+amortises to ~0 exactly.  Under sculpting, coverage is level at the
+implied DSCR in every unclamped positive-CFADS year; when a clamp
+fired inside the tenor (e.g. a negative-CFADS replacement year), the
+residual swept into the final year lifts that year's DSCR above the
+implied level, so `min_dscr` $<$ `avg_dscr` in that regime and the
+two coincide only for clamp-free schedules.
 
 ### Target-DSCR debt sizing (Eqs. E41-E43; `debt_sizing_mode`)
 

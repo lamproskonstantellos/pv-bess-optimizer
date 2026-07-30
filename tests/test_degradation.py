@@ -270,3 +270,50 @@ def test_scheduled_replacement_beyond_lifecycle_is_rejected(base_typed=None):
     # A replacement in the final year is still legal.
     typed["bess"]["bess_replacement_year"] = 20
     validate_workbook_params(typed, dt_minutes=15)
+
+
+def test_pv_only_project_never_resolves_a_replacement():
+    """Final-round-3 regression: the calendar fade curve decays regardless of
+    capacity, so 'auto' resolved a year-19 replacement for a 0-kWh pack
+    on the shipped defaults and announced it in the run log and
+    SUMMARY.md (cash impact zero, reporting misleading)."""
+    from pvbess_opt.lifetime import resolve_bess_replacement_year
+
+    econ = {
+        "bess_replacement_year": "auto",
+        "project_lifecycle_years": 20,
+        "bess_degradation_annual_pct": 2.0,
+        "bess_eol_soh_pct": 70.0,
+    }
+    assert resolve_bess_replacement_year(
+        econ, year1_discharge_mwh=0.0, capacity_mwh=0.0,
+    ) == (0, "never", 0)
+    # A real pack keeps the auto resolution.
+    year, source, _second = resolve_bess_replacement_year(
+        econ, year1_discharge_mwh=100.0, capacity_mwh=10.0,
+    )
+    assert source == "soh_threshold" and year == 19
+
+
+def test_rainflow_counts_plateaued_turning_points():
+    """Final-round-3 regression (owner-approved default-path fix): the
+    reversal detector's strict < 0 product test dropped every peak or
+    valley that idled for even one step, collapsing a real battery's
+    SOC year to its endpoints — the delivered equivalent_full_cycles
+    was ~100x under-counted and independent of dispatch."""
+    from pvbess_opt.degradation import equivalent_full_cycles
+
+    # Charge, hold one step, discharge: one full 10-amplitude swing.
+    assert equivalent_full_cycles([0.0, 10.0, 10.0, 0.0], 10.0) == 1.0
+    # Plateau length must not change the count.
+    assert equivalent_full_cycles(
+        [0.0, 10.0, 10.0, 10.0, 10.0, 0.0], 10.0,
+    ) == equivalent_full_cycles([0.0, 10.0, 0.0], 10.0)
+    # Mixed idle steps on both peaks and valleys.
+    plateaued = [50.0, 80.0, 80.0, 30.0, 30.0, 60.0, 60.0, 10.0]
+    compressed = [50.0, 80.0, 30.0, 60.0, 10.0]
+    assert equivalent_full_cycles(plateaued, 100.0) == pytest.approx(
+        equivalent_full_cycles(compressed, 100.0)
+    )
+    # A constant trace still counts zero cycles.
+    assert equivalent_full_cycles([42.0] * 10, 100.0) == 0.0

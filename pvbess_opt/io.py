@@ -71,10 +71,13 @@ Mode-specific timeseries semantics
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import itertools
 import logging
+import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -2800,13 +2803,28 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         "debt_sizing_scenario",
     ):
         # Free-form strings: a blank cell resolves to the default; a
-        # non-blank cell is taken verbatim (stripped).
+        # non-blank cell is taken verbatim (stripped).  A boolean here
+        # is always a drafting mistake — the workbook route rejects it
+        # at the kv-sheet layer, but the config route reaches this
+        # parser directly and previously stored the string 'True' (e.g.
+        # debt_sizing_scenario: true becoming a scenario NAME that
+        # fails lookup only if/when the armed engine runs).
+        if isinstance(raw, (bool, np.bool_)):
+            raise ValueError(
+                f"{key!r} expects a free-form string, got boolean "
+                f"{bool(raw)!r}; write the value as text."
+            )
         return _parse_pv_path(raw, default)
     if key == "debt_sizing_deck":
         # Free-form deck name (matched lowercase against the
         # <column>__<deck> variant suffixes); a blank cell keeps the
         # default.  Deck existence is checked by the validator, not
         # the parser.
+        if isinstance(raw, (bool, np.bool_)):
+            raise ValueError(
+                f"{key!r} expects a free-form deck name, got boolean "
+                f"{bool(raw)!r}; write the value as text."
+            )
         if raw is None or (isinstance(raw, float) and np.isnan(raw)):
             return default
         token = str(raw).strip().lower()
@@ -2859,8 +2877,45 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
                 f"a date {raw!r}."
             )
         if isinstance(raw, (list, tuple)):
-            token = ",".join(str(x) for x in raw).strip()
-            return token if token else default
+            # Per-ELEMENT checks: str(x) on unvetted members smuggled the
+            # scalar branch's rejects straight past it — [true, 5] stored
+            # 'True,5', [1.5, 5] silently truncated year 1.5 to a Tier-2
+            # re-solve at year 1, [.inf, 5] died later as a bare
+            # OverflowError naming nothing.
+            if not raw:
+                raise ValueError(
+                    f"{key!r}: an empty list is ambiguous (it would "
+                    "silently fall back to the default years); give at "
+                    "least one operating year or omit the key."
+                )
+            parts: list[str] = []
+            for x in raw:
+                if isinstance(x, (bool, np.bool_)):
+                    raise ValueError(
+                        f"{key!r} expects operating years (e.g. "
+                        f"'1,5,10'), got boolean {bool(x)!r} in the list."
+                    )
+                if isinstance(x, _dt.date):
+                    raise ValueError(
+                        f"{key!r} expects operating years (e.g. "
+                        f"'1,5,10'), got a date {x!r} in the list."
+                    )
+                if isinstance(x, (int, float, np.integer, np.floating)):
+                    as_f = float(x)
+                    if not np.isfinite(as_f):
+                        raise ValueError(
+                            f"{key!r} expects finite operating years, "
+                            f"got {x!r} in the list."
+                        )
+                    if as_f != int(as_f):
+                        raise ValueError(
+                            f"{key!r} expects whole operating years, "
+                            f"got {x!r} in the list."
+                        )
+                    parts.append(str(int(as_f)))
+                else:
+                    parts.append(str(x).strip())
+            return ",".join(parts)
         if isinstance(raw, float) and np.isfinite(raw) and raw == int(raw):
             raw = int(raw)
         token = str(raw).strip()
@@ -4587,6 +4642,36 @@ def validate_workbook_params(
                 "mode (each event restores the plant to nameplate).",
                 aug_kwh,
             )
+    # scenario_resolve_years content is consumed by the price-scenario
+    # engine only AFTER the Year-1 MILP; with the Tier-2 resolve armed,
+    # a garbage CSV ('1,banana,25', a beyond-lifecycle year) previously
+    # passed startup validation and burned the full solve before dying —
+    # while its sibling bess_augmentation_years IS checked here.  Parse
+    # it up front with the engine's own parser when it will be used.
+    _scn_engine = typed.get("scenario_engine") or {}
+    if bool(_scn_engine.get("price_scenarios_enabled", False)) and str(
+        _scn_engine.get("scenario_projection_mode", "reprice") or "reprice"
+    ).strip().lower() == "resolve":
+        from .pricedata.resolve import parse_support_years
+
+        _resolve_lifecycle = int(
+            project.get("project_lifecycle_years", 20) or 20
+        )
+        _support = parse_support_years(
+            str(_scn_engine.get("scenario_resolve_years", "") or ""),
+            _resolve_lifecycle,
+        )
+        if _support == [1] and _resolve_lifecycle > 1:
+            # The engine would collapse every Tier-2 factor to 1.0 and
+            # silently discard the configured scenario path — and its
+            # own guard fires only after the Year-1 MILP.
+            raise ValueError(
+                "scenario_projection_mode = 'resolve' with "
+                "scenario_resolve_years reducing to just year 1 runs no "
+                "interior re-solves and discards the configured scenario "
+                "price path; add a later support year or use "
+                "scenario_projection_mode = 'reprice'."
+            )
     if aug_years or overbuild > 0.0:
         raw_repl = bess.get("bess_replacement_year", 0)
         if isinstance(raw_repl, str):
@@ -5892,7 +5977,11 @@ for _rows in _SHEET_ROW_TEMPLATES.values():
 def _format_assumptions(econ: dict[str, Any]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for key, value in econ.items():
-        rows.append({"key": key, "value": value, "unit": _ECON_UNITS.get(key, "")})
+        rows.append({
+            "key": key,
+            "value": _flag_as_text(value),
+            "unit": _ECON_UNITS.get(key, ""),
+        })
     return pd.DataFrame(rows, columns=["key", "value", "unit"])
 
 
@@ -5940,6 +6029,51 @@ def unique_output_dir(candidate: Path) -> Path:
         "stamp); writing to %s instead.", candidate, bumped,
     )
     return bumped
+
+
+@contextlib.contextmanager
+def atomic_workbook_path(out_path: str | Path) -> Iterator[Path]:
+    """Yield a sibling temp path; publish it to ``out_path`` on success.
+
+    openpyxl writes the xlsx zip in place at ExcelWriter context exit,
+    so a SIGKILL/OOM/crash inside that window left a 0-byte or truncated
+    workbook at the canonical results path — indistinguishable from a
+    finished artifact until the client double-clicks it.  Writing to a
+    ``.partial`` sibling and ``os.replace``-ing keeps the final path
+    either absent or complete; the temp file is removed on failure.
+    """
+    out_path = Path(out_path)
+    tmp = out_path.with_name(out_path.name + ".partial")
+    try:
+        yield tmp
+        os.replace(tmp, out_path)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()
+
+
+def ensure_writable_outdir(outdir: str | Path) -> Path:
+    """Create ``outdir`` (parents included) and prove it is writable.
+
+    The batch routes (scenarios, sizing) touch the output directory only
+    AFTER every point has solved, so an --outdir pointing at an existing
+    file or a read-only filesystem was detected at the very end — with
+    100 % of the solver work already done and discarded.  The single-run
+    route fails before its solve (``make_run_layout`` runs first); this
+    probe gives the batch routes the same fail-before-solve contract.
+    """
+    outdir = Path(outdir)
+    try:
+        outdir.mkdir(parents=True, exist_ok=True)
+        probe = outdir / ".pvbess_write_probe"
+        probe.touch()
+        probe.unlink()
+    except OSError as exc:
+        raise OSError(
+            f"--outdir {outdir} is not a writable directory ({exc}); "
+            "fix the path before the batch spends solver time."
+        ) from exc
+    return outdir
 
 
 def make_run_layout(out_dir: Path) -> dict[str, Path]:
@@ -6135,6 +6269,7 @@ def write_summary_md(
     lender_cases: pd.DataFrame | None = None,
     midlife_resolve: pd.DataFrame | None = None,
     price_scenario_lines: list[str] | None = None,
+    notes: list[str] | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -6169,6 +6304,11 @@ def write_summary_md(
     if price_scenario_lines:
         lines.extend(price_scenario_lines)
     lines.append("")
+    # Caller-supplied caveats (e.g. merchant runs whose workbook carries
+    # a co-located load column no flow serves); absent on default runs.
+    for note in notes or []:
+        lines.append(f"> **Note:** {note}")
+        lines.append("")
 
     lines.append("## Year-1 dispatch KPIs")
     lines.append("")
@@ -6328,7 +6468,9 @@ def write_dispatch_artifacts(
     out = dispatch_dir / "dispatch_timeseries.xlsx"
 
     if lifetime_df is not None and not lifetime_df.empty:
-        with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        with atomic_workbook_path(out) as tmp_path, pd.ExcelWriter(
+            tmp_path, engine="openpyxl",
+        ) as writer:
             for cy in sorted(lifetime_df["calendar_year"].unique()):
                 sheet = str(int(cy))
                 lifetime_df.loc[lifetime_df["calendar_year"] == cy].to_excel(
@@ -6342,7 +6484,9 @@ def write_dispatch_artifacts(
             )
         else:
             cal_year = int(project_start_year)
-        with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        with atomic_workbook_path(out) as tmp_path, pd.ExcelWriter(
+            tmp_path, engine="openpyxl",
+        ) as writer:
             res_year1.to_excel(writer, sheet_name=str(cal_year), index=False)
             style_workbook(writer.book)
 
@@ -6377,6 +6521,20 @@ def _flatten_kpis_for_sheet(kpis: dict[str, Any]) -> dict[str, Any]:
     return flat
 
 
+def _flag_as_text(value: Any) -> Any:
+    """Write boolean flags as ``'TRUE'``/``'FALSE'`` text in mixed columns.
+
+    A genuine boolean cell in a mixed ``metric``/``value`` (or
+    ``key``/``value``) column makes ``pandas.read_excel`` coerce every
+    zero-valued numeric row of that column to Python ``False`` on
+    readback — the raw cells are written correctly and Excel displays
+    them right, but pandas is the most likely tool a client reaches for.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return "TRUE" if value else "FALSE"
+    return value
+
+
 def _scalar_metric_rows(kpis: dict[str, Any]) -> list[tuple[str, Any]]:
     """Rows for a ``metric``/``value`` sheet — scalar values only.
 
@@ -6388,7 +6546,7 @@ def _scalar_metric_rows(kpis: dict[str, Any]) -> list[tuple[str, Any]]:
     sheets drop them.
     """
     return [
-        (key, value)
+        (key, _flag_as_text(value))
         for key, value in kpis.items()
         if not isinstance(value, (list, tuple, np.ndarray))
     ]
@@ -6423,7 +6581,9 @@ def write_results_workbook(
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+    with atomic_workbook_path(out_path) as tmp_path, pd.ExcelWriter(
+        tmp_path, engine="openpyxl",
+    ) as writer:
         pd.DataFrame(
             _scalar_metric_rows(_flatten_kpis_for_sheet(kpis_year1)),
             columns=["metric", "value"],

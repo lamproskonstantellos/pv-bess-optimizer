@@ -413,3 +413,44 @@ def test_invariant_7_still_catches_lazy_curtailment_on_stage2_frames():
     res2.loc[1, "ida_price_eur_per_mwh"] = 0.5   # ida - fee < 0
     inv2 = verify_dispatch_invariants(res2, params, mode="merchant")
     assert inv2["invariant_7_curtail_behavior_count"] == 0.0
+
+
+def test_non_strict_runs_warn_on_invariant_violations(caplog):
+    """Final-round-3 regression: the --strict help promises to turn invariant
+    violations 'from warnings into errors', but non-strict runs printed
+    raw numbers only — a genuine violation exited 0 with no WARNING
+    anywhere.  Both modes now share one offender detector."""
+    import logging
+
+    from pvbess_opt.optimization import (
+        BALANCING_INVARIANT_KEYS,
+        INTRADAY_INVARIANT_KEYS,
+    )
+    from pvbess_opt.pipeline import (
+        _warn_energy_balance_offenders,
+        _warn_invariant_offenders,
+    )
+
+    inv = dict.fromkeys(
+        (*BALANCING_INVARIANT_KEYS, *INTRADAY_INVARIANT_KEYS), 0.0,
+    )
+    inv["invariant_5_no_sim_grid_io_max_product_kwh2"] = 0.0
+    inv["invariant_1_pv_balance_kwh"] = 0.0
+
+    with caplog.at_level(logging.WARNING):
+        _warn_invariant_offenders(dict(inv))
+        _warn_energy_balance_offenders({"pv_split_kwh": 0.0})
+    assert not [r for r in caplog.records if "strict" in r.getMessage()]
+
+    inv["invariant_1_pv_balance_kwh"] = 7.5
+    with caplog.at_level(logging.WARNING):
+        _warn_invariant_offenders(inv)
+        _warn_energy_balance_offenders({"pv_split_kwh": 7.5})
+    warned = [r.getMessage() for r in caplog.records]
+    assert any(
+        "invariant_1_pv_balance_kwh=7.5" in m and "--strict" in m
+        for m in warned
+    )
+    assert any(
+        "pv_split_kwh=7.5" in m and "--strict" in m for m in warned
+    )

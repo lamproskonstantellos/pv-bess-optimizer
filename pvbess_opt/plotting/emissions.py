@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -75,6 +76,65 @@ _SANKEY_NODE_COLOURS: dict[str, str] = {
     "Losses": COLORS["BESS losses"],
 }
 _SANKEY_LOSSES_COLOUR = COLORS["BESS losses"]
+
+
+def _largest_remainder_totals(
+    values: dict[str, float], target: int,
+) -> dict[str, int]:
+    """Integer display totals that sum EXACTLY to ``target``.
+
+    Largest-remainder allocation: floor every value, then hand the
+    remaining units to the largest fractional parts (name as the
+    deterministic tie-break).  Controlled rounding is legitimate only
+    like this — algorithmically, inside the routine that draws the
+    labels; independently rounded labels close onto their total only
+    when the fractional parts happen to cancel.
+    """
+    floors = {n: math.floor(v) for n, v in values.items()}
+    residual = int(target - sum(floors.values()))
+    order = sorted(
+        values,
+        key=lambda n: (values[n] - floors[n], n),
+        reverse=True,
+    )
+    out = {n: int(f) for n, f in floors.items()}
+    for n in order[: max(residual, 0)]:
+        out[n] += 1
+    return out
+
+
+def _sankey_label_totals(
+    flows: list[tuple[str, str, float, str]],
+) -> dict[str, int]:
+    """Displayed node totals with per-column controlled rounding.
+
+    Source labels and sink labels each sum exactly to the rounded grand
+    total, so the closure the ribbons draw is also the closure a reader
+    summing the printed MWh numbers sees.  The BESS pass-through node
+    sits outside the contract (its label is throughput, not a share of
+    the balance) and keeps its own best rounding.
+    """
+    active = {n for f in flows for n in (f[0], f[1])}
+
+    def node_total(name: str) -> float:
+        return max(
+            sum(v for s, _t, v, _c in flows if s == name),
+            sum(v for _s, t, v, _c in flows if t == name),
+        )
+
+    src = [n for n in active if _SANKEY_NODE_COLUMNS[n] == 0]
+    snk = [n for n in active if _SANKEY_NODE_COLUMNS[n] == 2]
+    target = round(sum(node_total(n) for n in src))
+    labels: dict[str, int] = {}
+    labels.update(_largest_remainder_totals(
+        {n: node_total(n) for n in src}, target,
+    ))
+    labels.update(_largest_remainder_totals(
+        {n: node_total(n) for n in snk}, target,
+    ))
+    for n in active:
+        labels.setdefault(n, round(node_total(n)))
+    return labels
 
 
 def energy_sankey_flows(
@@ -283,12 +343,14 @@ def plot_energy_sankey(
             zorder=1.0 + (1.0 - v / max_v),
         ))
 
+    label_mwh = _sankey_label_totals(flows)
+
     for n, (x, y, h) in pos.items():
         ax.add_patch(Rectangle(
             (x, y), node_w, h, facecolor=_SANKEY_NODE_COLOURS[n],
             edgecolor="black", linewidth=0.5, zorder=3,
         ))
-        label = f"{n}\n({node_total(n):,.0f} MWh)"
+        label = f"{n}\n({label_mwh[n]:,} MWh)"
         if _SANKEY_NODE_COLUMNS[n] == 2:
             ax.text(x + node_w + 0.012, y + h / 2, label,
                     va="center", ha="left", fontsize=7)

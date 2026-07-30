@@ -364,6 +364,7 @@ def _breakeven_for_best_group(frontier: pd.DataFrame) -> float:
 
 def write_sizing_workbook(out_path: str | Path, result: SizingResult) -> Path:
     """Write the frontier + marginal-value + summary to a styled workbook."""
+    from .io import atomic_workbook_path
     from .io_style import style_workbook
 
     out_path = Path(out_path)
@@ -372,7 +373,9 @@ def write_sizing_workbook(out_path: str | Path, result: SizingResult) -> Path:
         [{"metric": "oversizing_breakeven_mwh",
           "value": result.oversizing_breakeven_mwh}],
     )
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+    with atomic_workbook_path(out_path) as tmp_path, pd.ExcelWriter(
+        tmp_path, engine="openpyxl",
+    ) as writer:
         result.frontier.to_excel(writer, sheet_name="sizing_frontier", index=False)
         if not result.marginal_value.empty:
             result.marginal_value.to_excel(
@@ -518,6 +521,13 @@ def run_sizing(config: Any, sizing_block: dict[str, Any]) -> SizingResult:
     grid = parse_sizing_grid(sizing_block)
     if not grid:
         raise ValueError("sizing block produced an empty grid")
+
+    from .io import ensure_writable_outdir
+
+    # Fail on an unusable --outdir BEFORE the sweep: like the scenario
+    # batch, the sizing route previously first touched the output
+    # directory after every grid point had solved.
+    ensure_writable_outdir(Path(config.outdir))
     solver_opts = {
         "solver_name": config.solver,
         "mip_gap": config.mip_gap,

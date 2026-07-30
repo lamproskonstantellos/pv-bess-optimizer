@@ -1083,3 +1083,150 @@ def test_explicit_blank_scenario_names_are_rejected():
     # A scenario with NO name key keeps its historical default label.
     out = resolve_inheritance([{"capex_multiplier": 0.5}])
     assert len(out) == 1 and "name" not in out[0]
+
+
+def test_scenario_override_native_lists_normalise_like_the_config_surface():
+    """Final-round-3 regression: a scenarios file is the second YAML surface
+    for the CSV-of-years keys, but overrides were copied verbatim into the
+    materialised workbook — scenario_resolve_years: [1, 5] stored the
+    stringified '[1, 5]' (erroring only post-solve when resolve mode was
+    armed) and bess_augmentation_years: [8, 15] crashed the batch mid-run
+    with a message naming neither the scenario nor the native list."""
+    from pvbess_opt.scenarios import _apply_scenario_overrides
+
+    base = {
+        "pv": {}, "bess": {}, "project": {}, "economics": {},
+        "simulation": {}, "balancing": {}, "scenario_engine": {},
+    }
+    out = _apply_scenario_overrides(base, {
+        "name": "lists",
+        "scenario_engine": {"scenario_resolve_years": [1, 5]},
+        "bess": {"bess_augmentation_years": [8, 15]},
+    })
+    assert out["scenario_engine"]["scenario_resolve_years"] == "1,5"
+    assert out["bess"]["bess_augmentation_years"] == "8,15"
+
+
+def test_scenario_override_bad_values_fail_fast_naming_the_scenario():
+    """The batch pre-pass (validate_scenario_overrides) must reject value-level
+    garbage BEFORE solver time, naming the scenario and the target."""
+    from pvbess_opt.scenarios import validate_scenario_overrides
+
+    with pytest.raises(ValueError, match=r"'typo'.*scenario_engine\.scenario_resolve_years"):
+        validate_scenario_overrides({
+            "name": "typo",
+            "scenario_engine": {"scenario_resolve_years": True},
+        })
+    with pytest.raises(ValueError, match=r"'badbool'.*balancing\.balancing_enabled"):
+        validate_scenario_overrides({
+            "name": "badbool",
+            "balancing": {"balancing_enabled": "maybe"},
+        })
+
+
+def _trimmed_typed() -> dict:
+    from pvbess_opt.io import read_workbook
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)
+    typed["bess"]["terminal_soc_equal"] = False
+    return typed
+
+
+_BATCH_SOLVER_OPTS = {
+    "solver_name": "highs", "mip_gap": 1e-3,
+    "time_limit_seconds": 60, "tee": False,
+}
+
+
+def test_value_level_scenario_mistakes_fail_before_any_solve(monkeypatch):
+    """Final-round-3 regression (batch resilience): a value-level mistake
+    (valid key, invalid value) passed the key-level fail-fast, solved
+    scenarios 1..N-1, then crashed the batch at scenario N's re-read —
+    discarding every completed solve and naming neither the scenario
+    nor the mistake."""
+    import pvbess_opt.scenarios as scn_mod
+
+    typed = _trimmed_typed()
+
+    def _boom(*a, **k):  # pragma: no cover - must never be reached
+        raise AssertionError("solver invoked before the dry validation pass")
+
+    monkeypatch.setattr(scn_mod, "evaluate_scenario", _boom)
+    with pytest.raises(ValueError, match=r"scenario 'bad_value'.*non-negative"):
+        scn_mod.run_scenario_batch(
+            typed,
+            [
+                {"name": "first_ok", "bess": {"capacity_kwh": 9000}},
+                {"name": "bad_value", "bess": {"capacity_kwh": -500}},
+            ],
+            solver_opts=_BATCH_SOLVER_OPTS,
+        )
+
+
+def test_mid_batch_solver_failure_keeps_completed_scenarios(
+    monkeypatch, tmp_path,
+):
+    """Solver-level failures past the dry pre-pass (infeasible, solver
+    crash) must not discard finished siblings: the batch continues, the
+    casualty is logged, and the comparison workbook lists it on a
+    failed_scenarios sheet — added only when non-empty so healthy
+    batches keep the single-sheet layout."""
+    import pvbess_opt.scenarios as scn_mod
+
+    typed = _trimmed_typed()
+
+    def flaky(base_typed, scenario, **kwargs):
+        name = str(scenario.get("name"))
+        if name == "sick":
+            raise RuntimeError("solver crashed: infeasible")
+        row = {c: 0.0 for c in _COMPARISON_COLUMNS}
+        row["name"] = name
+        return row
+
+    monkeypatch.setattr(scn_mod, "evaluate_scenario", flaky)
+    comparison = scn_mod.run_scenario_batch(
+        typed,
+        [{"name": "ok_a"}, {"name": "sick"}, {"name": "ok_b"}],
+        solver_opts=_BATCH_SOLVER_OPTS,
+    )
+    assert list(comparison["name"]) == ["ok_a", "ok_b"]
+    assert comparison.attrs["failed_scenarios"] == [
+        {"name": "sick", "error": "solver crashed: infeasible"},
+    ]
+
+    out = write_scenario_comparison_workbook(tmp_path / "cmp.xlsx", comparison)
+    wb = load_workbook(out)
+    assert "failed_scenarios" in wb.sheetnames
+    ws = wb["failed_scenarios"]
+    assert ws.cell(row=2, column=1).value == "sick"
+    assert "infeasible" in str(ws.cell(row=2, column=2).value)
+
+    # A batch where EVERY scenario fails still raises.
+    with pytest.raises(RuntimeError, match="all 1 scenarios failed"):
+        scn_mod.run_scenario_batch(
+            typed, [{"name": "sick"}], solver_opts=_BATCH_SOLVER_OPTS,
+        )
+
+    # Healthy batches keep the single-sheet layout bit-identical.
+    healthy = scn_mod.run_scenario_batch(
+        typed, [{"name": "ok_a"}], solver_opts=_BATCH_SOLVER_OPTS,
+    )
+    out2 = write_scenario_comparison_workbook(tmp_path / "cmp2.xlsx", healthy)
+    assert load_workbook(out2).sheetnames == ["scenario_comparison"]
+
+
+def test_batch_outdir_probed_before_solves(tmp_path):
+    """Final-round-3 regression: the batch/sizing routes first touched
+    --outdir AFTER all solves, so a path collision or read-only
+    filesystem discarded the whole batch at the very end."""
+    from pvbess_opt.io import ensure_writable_outdir
+
+    blocker = tmp_path / "iamafile"
+    blocker.write_text("x")
+    with pytest.raises(OSError, match="not a writable directory"):
+        ensure_writable_outdir(blocker)
+
+    made = ensure_writable_outdir(tmp_path / "a" / "b")
+    assert made.is_dir()
+    assert not any(made.iterdir())  # the probe file is cleaned up

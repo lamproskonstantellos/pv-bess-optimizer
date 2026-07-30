@@ -816,6 +816,92 @@ Pre-delivery release audit (final round 2):
   `enabled` toggle and the grid point-count guard; the augmentation
   years document the native list form.
 
+Pre-delivery release audit (final round 3):
+
+- **Rainflow counts plateaued turning points.** The reversal detector's
+  strict `< 0` slope-product test dropped every SOC peak/valley that
+  idles for even one step, collapsing a real battery's year to its
+  endpoints: the delivered `degradation.equivalent_full_cycles` was
+  ~100x under-counted and independent of dispatch (a diagnostic
+  column — SOH / fade / finance accrue throughput cycles, verified
+  unchanged).  Consecutive-equal runs now collapse before turning-point
+  detection.
+- **The assumptions record states the resolved run mode.** A CLI
+  `--mode` override patched `params` only, so a merchant study
+  delivered `economic_assumptions` / `assumptions_summary` recording
+  `mode = self_consumption` while `kpis_year1` and SUMMARY.md said
+  merchant; the econ dict now takes the resolved mode after its
+  workbook re-read (numerics were never affected).
+- **Sankey labels close by controlled rounding.** The energy sankey
+  rounded each node total independently, so the printed MWh numbers
+  summed onto the grand total only when the fractional parts happened
+  to cancel; displayed totals now come from a largest-remainder
+  allocation per terminal column inside the chart routine (labels
+  only — the underlying flows were and remain exactly conservative).
+- **Metric sheets survive a pandas round-trip.** A genuine boolean cell
+  in the mixed `metric`/`value` (and `key`/`value`) columns made
+  `pandas.read_excel` coerce every zero-valued numeric row of
+  `kpis_year1` / `financial_kpis` / `economic_assumptions` to Python
+  `False` on readback; boolean flags are now written as `'TRUE'`/
+  `'FALSE'` text (the raw cells were always correct — the corruption
+  was purely programmatic).
+- **Scenario batches are resilient and honest.** Override VALUES now
+  route through the loader's typed parser on both the fail-fast
+  pre-pass and materialisation (native lists canonicalise instead of
+  stringifying; garbage fails at t=0 naming the scenario); every
+  scenario is dry-validated (materialise + read) BEFORE the first
+  solve; a solver-level mid-batch failure no longer discards finished
+  siblings (the comparison workbook lists casualties on a
+  `failed_scenarios` sheet); errors name the offending scenario; and
+  both batch routes probe `--outdir` writability before spending
+  solver time.
+- **Monte Carlo cannot silently degenerate.** `uncertainty_enabled`
+  with seeds but zero effective noise sources (all toggles off, or
+  load-only in merchant) is rejected instead of delivering point-mass
+  percentiles, a 0.00 imbalance settlement and VaR == CVaR at full MC
+  cost; merchant compare-sources skips the definitionally inert
+  `load` ensemble (and its misleading `foresight_gap_pct_p50_load`);
+  `--compare-uncertainty-sources` warns when uncertainty is disabled
+  instead of no-opping.
+- **Non-strict runs warn on invariant violations.** The `--strict`
+  offender detection is shared: violations above strict tolerances now
+  log a WARNING (exit 0) in normal runs instead of hiding in the
+  numeric `[invariants]` line.
+- **Workbook writes are atomic.** The results / dispatch / comparison /
+  sizing workbooks write to a `.partial` sibling and `os.replace` into
+  place, so a kill mid-save can no longer leave a truncated `.xlsx` at
+  the canonical path; the run log ends with a `[run] complete`
+  sentinel so interrupted runs are identifiable.
+- **CLI errors are consistent.** Missing `--scenarios` file, corrupt
+  workbook and unknown solver now exit 2 with one-line errors naming
+  the file (the solver is probed before the workbook read and model
+  build, not after).
+- **Price-scenario inputs harden.** `scenario_resolve_years` list
+  ELEMENTS are vetted (booleans/dates/fractional/non-finite/empty
+  rejected named); `parse_support_years` rejects fractional years and
+  names the key on `inf` instead of a bare `OverflowError`; with the
+  Tier-2 resolve armed the CSV is validated at startup (not after the
+  Year-1 MILP); a support set reducing to year 1 on a multi-year
+  horizon is a hard error instead of a silently inconsistent workbook;
+  parametric deck knobs at or below -100 %/yr are rejected.
+- **Convenience blocks are loud.** Unknown keys inside `financing:` /
+  `grid:` (and non-mapping blocks) warn naming the accepted set (with
+  the alias spelling when the target economics key was written); a
+  blank `tenor_years` stub no longer shadows a valid `tenor` alias;
+  overriding an economics key set in the same config warns.  Free-form
+  string keys reject booleans on the config route like the workbook
+  route.
+- **Reporting corrections.** A PV-only project no longer resolves (and
+  announces) a phantom BESS replacement; merchant SUMMARYs note the
+  unserved workbook load column; `_payback_year` scans past a
+  zero-outlay year 0; IRR stays silent (and total) when Newton
+  diverges; the sculpted `min_dscr == avg_dscr` docs claim is
+  qualified to clamp-free schedules; install docs add the editable
+  install for the `pvbess` command and drop the phantom solver
+  fallback; the ensemble P90 orientation is documented; the README
+  quickstart warns about the ~2,900-figure plot phase and the run now
+  prints a `[plots]` progress line.
+
 ## 1.0.0 (2026-07-06)
 
 Production release.
