@@ -6010,25 +6010,35 @@ LAYOUT_SUBDIRS: tuple[str, ...] = (
 
 
 def unique_output_dir(candidate: Path) -> Path:
-    """Return ``candidate`` or, when it already exists, the first free
-    ``<candidate>_2`` / ``_3`` / ... sibling.
+    """Create and return ``candidate`` or, when it already exists, the
+    first free ``<candidate>_2`` / ``_3`` / ... sibling.
 
     The run directories are stamped to whole seconds, so two runs
     starting within the same second previously landed in ONE directory
-    and the second silently overwrote the first's artifacts.  The bump
-    is logged so the batch log records where each run actually went.
+    and the second silently overwrote the first's artifacts.  The
+    directory is RESERVED here with an exclusive ``mkdir`` — an
+    exists()-then-return probe left a race window in which two
+    concurrent same-second runs both computed the identical path and
+    interleaved artifacts.  The bump is logged so the batch log records
+    where each run actually went.
     """
     candidate = Path(candidate)
-    if not candidate.exists():
-        return candidate
-    n = 2
-    while (bumped := candidate.with_name(f"{candidate.name}_{n}")).exists():
-        n += 1
-    logger.info(
-        "[io] output directory %s already exists (same-second run "
-        "stamp); writing to %s instead.", candidate, bumped,
-    )
-    return bumped
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    current = candidate
+    n = 1
+    while True:
+        try:
+            current.mkdir(exist_ok=False)
+        except FileExistsError:
+            n += 1
+            current = candidate.with_name(f"{candidate.name}_{n}")
+            continue
+        if n > 1:
+            logger.info(
+                "[io] output directory %s already exists (same-second "
+                "run stamp); writing to %s instead.", candidate, current,
+            )
+        return current
 
 
 @contextlib.contextmanager

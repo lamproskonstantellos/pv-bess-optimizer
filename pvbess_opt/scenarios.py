@@ -486,8 +486,14 @@ def _parsed_override_value(
 
 def _apply_scenario_overrides(
     base_typed: dict[str, Any], scenario: dict[str, Any],
+    *, prevalidated: bool = False,
 ) -> dict[str, Any]:
-    validate_scenario_overrides(scenario)
+    # ``prevalidated`` lets the batch (which validates every scenario in
+    # its explicit fail-fast loop) skip the re-validation here — the
+    # validator's warning side effects (capex_multiplier stubs, no-shape
+    # nameplate) previously fired three times per scenario per batch.
+    if not prevalidated:
+        validate_scenario_overrides(scenario)
     typed = copy.deepcopy(base_typed)
     _scn_name = scenario.get("name", "scenario")
     _base_nameplate = float(
@@ -712,6 +718,7 @@ def evaluate_scenario(
     base_typed: dict[str, Any], scenario: dict[str, Any], *,
     solver_opts: dict[str, Any],
     base_dir: Path | None = None,
+    prevalidated: bool = False,
 ) -> dict[str, Any]:
     """Run one scenario and return its comparison row."""
     from .availability import apply_operating_derates
@@ -720,7 +727,9 @@ def evaluate_scenario(
     from .optimization import run_scenario
     from .pipeline import _build_financials
 
-    typed = _apply_scenario_overrides(base_typed, scenario)
+    typed = _apply_scenario_overrides(
+        base_typed, scenario, prevalidated=prevalidated,
+    )
     scn_name = str(scenario.get("name", "scenario"))
     tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_"))
     try:
@@ -816,7 +825,9 @@ def run_scenario_batch(
         scn_name = str(scn.get("name", "<unnamed>"))
         tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_val_"))
         try:
-            typed = _apply_scenario_overrides(base_typed, scn)
+            typed = _apply_scenario_overrides(
+                base_typed, scn, prevalidated=True,
+            )
             xlsx = tmp / "scenario.xlsx"
             write_workbook(typed, xlsx)
             _params_chk, _ts_chk = read_inputs(xlsx)
@@ -854,6 +865,7 @@ def run_scenario_batch(
         try:
             rows.append(evaluate_scenario(
                 base_typed, scn, solver_opts=solver_opts, base_dir=base_dir,
+                prevalidated=True,
             ))
         except (ValueError, RuntimeError) as exc:
             logger.error(

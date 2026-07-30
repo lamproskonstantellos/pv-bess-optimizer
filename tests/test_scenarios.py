@@ -1295,3 +1295,48 @@ def test_prepass_catches_armed_engine_store_errors(monkeypatch):
         scn_mod.run_scenario_batch(
             typed, [{"name": "only"}], solver_opts=_BATCH_SOLVER_OPTS,
         )
+
+
+def test_unique_output_dir_reserves_by_mkdir(tmp_path):
+    """Convergence-round polish: the exists()-then-return probe left a
+    race window where two same-second runs both computed the identical
+    directory; the path is now RESERVED with an exclusive mkdir, so
+    successive calls (without any caller mkdir in between) never
+    collide."""
+    from pvbess_opt.io import unique_output_dir
+
+    first = unique_output_dir(tmp_path / "run_20260730_120000")
+    second = unique_output_dir(tmp_path / "run_20260730_120000")
+    assert first != second
+    assert first.is_dir() and second.is_dir()
+    assert second.name.endswith("_2")
+
+
+def test_batch_warns_once_per_drafting_mistake(caplog, monkeypatch):
+    """Convergence-round polish: validate_scenario_overrides ran three
+    times per scenario per batch (fail-fast loop, pre-pass apply,
+    evaluation apply), so one capex_multiplier-null stub warned three
+    times — reading as three affected scenarios in a long batch log."""
+    import logging
+
+    import pvbess_opt.scenarios as scn_mod
+
+    typed = _trimmed_typed()
+
+    def fake_evaluate(base_typed, scenario, **kwargs):
+        row = {c: 0.0 for c in _COMPARISON_COLUMNS}
+        row["name"] = str(scenario.get("name"))
+        return row
+
+    monkeypatch.setattr(scn_mod, "evaluate_scenario", fake_evaluate)
+    with caplog.at_level(logging.WARNING):
+        scn_mod.run_scenario_batch(
+            typed,
+            [{"name": "stub", "capex_multiplier": None}],
+            solver_opts=_BATCH_SOLVER_OPTS,
+        )
+    stub_warnings = [
+        r for r in caplog.records
+        if "empty 'capex_multiplier'" in r.getMessage()
+    ]
+    assert len(stub_warnings) == 1

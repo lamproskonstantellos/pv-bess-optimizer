@@ -65,13 +65,24 @@ SKIP_DIR_PARTS = {
 }
 
 
+def _skip_part(part: str) -> bool:
+    """True for path components the whole-tree scans must ignore.
+
+    Any hidden directory counts: agent/editor tool workspaces (git
+    worktree copies of the repo under dotted directories) would
+    otherwise double-count every pattern in this very file, exactly
+    like an in-tree ``.venv``.
+    """
+    return part in SKIP_DIR_PARTS or part.startswith(".")
+
+
 @pytest.mark.parametrize("pattern", FORBIDDEN)
 def test_no_old_version_strings(pattern):
     hits = []
     for glob in SCAN_GLOBS:
         for path in ROOT.glob(glob):
             rel = path.relative_to(ROOT)
-            if any(part in SKIP_DIR_PARTS for part in rel.parts):
+            if any(_skip_part(part) for part in rel.parts[:-1]):
                 continue
             if str(rel).replace("\\", "/") in ALLOWED_PATHS:
                 continue
