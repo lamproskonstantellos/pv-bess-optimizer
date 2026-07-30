@@ -199,12 +199,21 @@ def test_every_dotted_target_resolves_as_scenario_override():
                 continue
             scenario = {"name": "probe", sheet: {key: value}}
             validate_scenario_overrides(scenario)  # must not raise
-    for alias in _PV_ALIASES:
-        if _PV_ALIASES[alias] == "timeseries_path":
+    # Alias probes carry the CANONICAL key's own default: override
+    # values now route through the loader's typed parser too, so an
+    # arbitrary 1.0 placeholder would (correctly) trip the value check
+    # on enum keys like pv.source — this test pins key resolution only.
+    for alias, canonical in _PV_ALIASES.items():
+        if canonical == "timeseries_path":
             continue
-        validate_scenario_overrides({"name": "probe", "pv": {alias: 1.0}})
-    for alias in _BESS_ALIASES:
-        validate_scenario_overrides({"name": "probe", "bess": {alias: 1.0}})
+        validate_scenario_overrides(
+            {"name": "probe", "pv": {alias: _SHEET_DEFAULTS["pv"][canonical]}}
+        )
+    for alias, canonical in _BESS_ALIASES.items():
+        validate_scenario_overrides(
+            {"name": "probe",
+             "bess": {alias: _SHEET_DEFAULTS["bess"][canonical]}}
+        )
     validate_scenario_overrides({"name": "probe", "balancing": "on"})
     validate_scenario_overrides({"name": "probe", "capex_multiplier": 0.8})
     validate_scenario_overrides(
