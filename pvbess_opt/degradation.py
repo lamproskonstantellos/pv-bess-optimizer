@@ -22,6 +22,7 @@ nonlinear model:
 
 from __future__ import annotations
 
+import itertools
 from typing import Any
 
 import numpy as np
@@ -33,6 +34,14 @@ from .lifetime import bess_capacity_factors_pooled, warranty_cycle_utilisation
 def _reversals(series: Any) -> list[float]:
     """Return the turning points (peaks/valleys) of ``series``."""
     x = [float(v) for v in np.asarray(series, dtype=float).tolist()]
+    # Collapse consecutive-equal runs FIRST: a plateau belongs to its
+    # surrounding trend, but the strict < 0 product test below zeroes
+    # one factor whenever x[i] equals a neighbour, silently dropping
+    # every peak/valley that idles for even one step.  On a real
+    # battery trace (most steps idle) that collapsed the whole year to
+    # its endpoints — the delivered equivalent_full_cycles was ~100x
+    # under-counted and independent of dispatch.
+    x = [value for value, _run in itertools.groupby(x)]
     if len(x) < 2:
         return x
     rev = [x[0]]

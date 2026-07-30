@@ -293,3 +293,27 @@ def test_pv_only_project_never_resolves_a_replacement():
         econ, year1_discharge_mwh=100.0, capacity_mwh=10.0,
     )
     assert source == "soh_threshold" and year == 19
+
+
+def test_rainflow_counts_plateaued_turning_points():
+    """Final-round-3 regression (owner-approved default-path fix): the
+    reversal detector's strict < 0 product test dropped every peak or
+    valley that idled for even one step, collapsing a real battery's
+    SOC year to its endpoints — the delivered equivalent_full_cycles
+    was ~100x under-counted and independent of dispatch."""
+    from pvbess_opt.degradation import equivalent_full_cycles
+
+    # Charge, hold one step, discharge: one full 10-amplitude swing.
+    assert equivalent_full_cycles([0.0, 10.0, 10.0, 0.0], 10.0) == 1.0
+    # Plateau length must not change the count.
+    assert equivalent_full_cycles(
+        [0.0, 10.0, 10.0, 10.0, 10.0, 0.0], 10.0,
+    ) == equivalent_full_cycles([0.0, 10.0, 0.0], 10.0)
+    # Mixed idle steps on both peaks and valleys.
+    plateaued = [50.0, 80.0, 80.0, 30.0, 30.0, 60.0, 60.0, 10.0]
+    compressed = [50.0, 80.0, 30.0, 60.0, 10.0]
+    assert equivalent_full_cycles(plateaued, 100.0) == pytest.approx(
+        equivalent_full_cycles(compressed, 100.0)
+    )
+    # A constant trace still counts zero cycles.
+    assert equivalent_full_cycles([42.0] * 10, 100.0) == 0.0
