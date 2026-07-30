@@ -2859,8 +2859,45 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
                 f"a date {raw!r}."
             )
         if isinstance(raw, (list, tuple)):
-            token = ",".join(str(x) for x in raw).strip()
-            return token if token else default
+            # Per-ELEMENT checks: str(x) on unvetted members smuggled the
+            # scalar branch's rejects straight past it — [true, 5] stored
+            # 'True,5', [1.5, 5] silently truncated year 1.5 to a Tier-2
+            # re-solve at year 1, [.inf, 5] died later as a bare
+            # OverflowError naming nothing.
+            if not raw:
+                raise ValueError(
+                    f"{key!r}: an empty list is ambiguous (it would "
+                    "silently fall back to the default years); give at "
+                    "least one operating year or omit the key."
+                )
+            parts: list[str] = []
+            for x in raw:
+                if isinstance(x, (bool, np.bool_)):
+                    raise ValueError(
+                        f"{key!r} expects operating years (e.g. "
+                        f"'1,5,10'), got boolean {bool(x)!r} in the list."
+                    )
+                if isinstance(x, _dt.date):
+                    raise ValueError(
+                        f"{key!r} expects operating years (e.g. "
+                        f"'1,5,10'), got a date {x!r} in the list."
+                    )
+                if isinstance(x, (int, float, np.integer, np.floating)):
+                    as_f = float(x)
+                    if not np.isfinite(as_f):
+                        raise ValueError(
+                            f"{key!r} expects finite operating years, "
+                            f"got {x!r} in the list."
+                        )
+                    if as_f != int(as_f):
+                        raise ValueError(
+                            f"{key!r} expects whole operating years, "
+                            f"got {x!r} in the list."
+                        )
+                    parts.append(str(int(as_f)))
+                else:
+                    parts.append(str(x).strip())
+            return ",".join(parts)
         if isinstance(raw, float) and np.isfinite(raw) and raw == int(raw):
             raw = int(raw)
         token = str(raw).strip()
@@ -4586,6 +4623,36 @@ def validate_workbook_params(
                 "bess_augmentation_kwh = %.4g is ignored in 'top_up' "
                 "mode (each event restores the plant to nameplate).",
                 aug_kwh,
+            )
+    # scenario_resolve_years content is consumed by the price-scenario
+    # engine only AFTER the Year-1 MILP; with the Tier-2 resolve armed,
+    # a garbage CSV ('1,banana,25', a beyond-lifecycle year) previously
+    # passed startup validation and burned the full solve before dying —
+    # while its sibling bess_augmentation_years IS checked here.  Parse
+    # it up front with the engine's own parser when it will be used.
+    _scn_engine = typed.get("scenario_engine") or {}
+    if bool(_scn_engine.get("price_scenarios_enabled", False)) and str(
+        _scn_engine.get("scenario_projection_mode", "reprice") or "reprice"
+    ).strip().lower() == "resolve":
+        from .pricedata.resolve import parse_support_years
+
+        _resolve_lifecycle = int(
+            project.get("project_lifecycle_years", 20) or 20
+        )
+        _support = parse_support_years(
+            str(_scn_engine.get("scenario_resolve_years", "") or ""),
+            _resolve_lifecycle,
+        )
+        if _support == [1] and _resolve_lifecycle > 1:
+            # The engine would collapse every Tier-2 factor to 1.0 and
+            # silently discard the configured scenario path — and its
+            # own guard fires only after the Year-1 MILP.
+            raise ValueError(
+                "scenario_projection_mode = 'resolve' with "
+                "scenario_resolve_years reducing to just year 1 runs no "
+                "interior re-solves and discards the configured scenario "
+                "price path; add a later support year or use "
+                "scenario_projection_mode = 'reprice'."
             )
     if aug_years or overbuild > 0.0:
         raw_repl = bess.get("bess_replacement_year", 0)

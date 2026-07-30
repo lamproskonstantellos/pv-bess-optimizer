@@ -120,6 +120,21 @@ def build_parametric_deck(
     spread_pct = float(
         block.get("spread_evolution_pct_per_yr", 0.0) or 0.0
     )
+    # (1 + l/100)^(y-1) with l <= -100 flips sign every year (l = -150
+    # yields +57, -29, +14, -7 EUR/MWh means) or zeroes every later year
+    # (l = -100) — physically meaningless deck curves previously built
+    # without any diagnostic.
+    for knob, val in (
+        ("dam_level_pct_per_yr", level_pct),
+        ("spread_evolution_pct_per_yr", spread_pct),
+    ):
+        if val <= -100.0:
+            raise PriceDataError(
+                f"{store_dir.name}: {knob} = {val:g} implies a "
+                "non-positive annual multiplier (1 + pct/100 <= 0), "
+                "which alternates the sign of every later year's "
+                "prices; use a decline above -100."
+            )
     if capture_pct and pv_kwh is None:
         raise PriceDataError(
             f"{store_dir.name}: pv_capture_decline_pct_per_yr needs the "

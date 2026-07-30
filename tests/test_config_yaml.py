@@ -722,3 +722,60 @@ def test_financing_tenor_alias_and_conflict_semantics(caplog):
         "financing.gearing overrides economics.gearing_pct"
         in r.getMessage() for r in caplog.records
     )
+
+
+def test_scenario_resolve_years_list_elements_are_vetted():
+    """Final-round-3 regression: the list branch joined str(x) on unvetted
+    members, smuggling the scalar branch's rejects straight past it —
+    [true, 5] stored 'True,5', [1.5, 5] silently truncated a Tier-2
+    re-solve year, [.inf, 5] died later as a bare OverflowError, and []
+    silently fell back to the default years."""
+    from pvbess_opt.io import _parse_value
+
+    default = "1,5,10,15,20"
+    with pytest.raises(ValueError, match="boolean True in the list"):
+        _parse_value("scenario_resolve_years", [True, 5], default)
+    with pytest.raises(ValueError, match="whole operating years"):
+        _parse_value("scenario_resolve_years", [1.5, 5], default)
+    with pytest.raises(ValueError, match="finite operating years"):
+        _parse_value("scenario_resolve_years", [float("inf"), 5], default)
+    with pytest.raises(ValueError, match="empty list is ambiguous"):
+        _parse_value("scenario_resolve_years", [], default)
+    # Whole-valued floats and numeric strings canonicalise.
+    assert _parse_value(
+        "scenario_resolve_years", [1.0, 5.0], default,
+    ) == "1,5"
+    assert _parse_value(
+        "scenario_resolve_years", ["1", 2], default,
+    ) == "1,2"
+
+
+def test_armed_resolve_mode_validates_years_at_startup():
+    """Final-round-3 regression: with the Tier-2 resolve armed, a garbage
+    scenario_resolve_years CSV passed validate_workbook_params and
+    burned the full Year-1 MILP before dying inside the price-scenario
+    engine; a support set reducing to {1} silently discarded the
+    configured scenario path post-solve."""
+    from pvbess_opt.io import read_workbook, validate_workbook_params
+
+    typed = read_workbook(ROOT / "inputs" / "input.xlsx")
+    typed["scenario_engine"] = {
+        "price_scenarios_enabled": True,
+        "scenario_projection_mode": "resolve",
+        "scenario_resolve_years": "1,banana,25",
+    }
+    with pytest.raises(ValueError, match="'banana' is not a year"):
+        validate_workbook_params(typed)
+
+    typed["scenario_engine"]["scenario_resolve_years"] = "1"
+    with pytest.raises(ValueError, match="reducing to just year 1"):
+        validate_workbook_params(typed)
+
+    # A healthy CSV passes; a disarmed engine never parses the key.
+    typed["scenario_engine"]["scenario_resolve_years"] = "1,5,10"
+    validate_workbook_params(typed)
+    typed["scenario_engine"] = {
+        "price_scenarios_enabled": False,
+        "scenario_resolve_years": "garbage",
+    }
+    validate_workbook_params(typed)

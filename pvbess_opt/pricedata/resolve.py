@@ -73,11 +73,28 @@ def parse_support_years(raw: str, n_years: int) -> list[int]:
         if not token:
             continue
         try:
-            year = int(float(token))
+            as_float = float(token)
         except ValueError as exc:
             raise PriceDataError(
                 f"scenario_resolve_years: {token!r} is not a year."
             ) from exc
+        if not math.isfinite(as_float):
+            # int(float('inf')) raises OverflowError, which the
+            # ValueError-only handler above let escape as a bare
+            # traceback naming no key.
+            raise PriceDataError(
+                f"scenario_resolve_years: {token!r} is not a finite year."
+            )
+        if as_float != int(as_float):
+            # int(float('2.7')) silently truncated to year 2 — a typo'd
+            # '2.5' (meant '2,5') collapsed two intended support years
+            # into one with no diagnostic, while the sibling
+            # parse_augmentation_years rejects fractional years loudly.
+            raise PriceDataError(
+                f"scenario_resolve_years: {token!r} is not a whole "
+                "operating year."
+            )
+        year = int(as_float)
         if year < 1 or year > n_years:
             raise PriceDataError(
                 f"scenario_resolve_years: year {year} is outside the "
@@ -170,24 +187,30 @@ def derive_resolve_trajectories(
     from pvbess_opt.lifetime import factors_for_year
     from pvbess_opt.optimization import run_scenario
 
-    # The Tier-2 factors are held flat past the last support year, and
-    # collapse to unity when year 1 is the only support point.  Either
-    # silently overrides the Tier-1 reprice cannibalization, so warn
-    # (the store loader logs an analogous hold_last note).
+    if support_years == [1] and n_years > 1:
+        # Previously a log warning: the run then delivered a cashflow on
+        # FLAT Tier-2 factors while the scenario_price_paths sheet still
+        # showed the declining Tier-1 path — an internally inconsistent
+        # workbook whose only breadcrumbs were a console line and a
+        # zero-delta SUMMARY row.  (A 1-year horizon keeps [1]: the
+        # single support year covers the whole project.)
+        raise PriceDataError(
+            "scenario_resolve_years reduces to just year 1: no interior "
+            "re-solve runs, so every Tier-2 DAM factor collapses to 1.0 "
+            "and the delivered cashflow silently discards the configured "
+            "scenario price path. Add a later support year, or set "
+            "scenario_projection_mode = 'reprice' for a price-path "
+            "projection without re-solves."
+        )
+    # Tier-2 factors are held flat past the LAST support year — silently
+    # overriding the Tier-1 reprice tail, so warn (the store loader logs
+    # an analogous hold_last note).
     if support_years and max(support_years) < n_years:
         logger.warning(
             "[pricedata] resolve support years reach only year %d of a "
             "%d-year horizon; the Tier-2 DAM factors are held flat over "
             "years %d..%d — add a later support year to re-solve the tail.",
             max(support_years), n_years, max(support_years) + 1, n_years,
-        )
-    if support_years == [1]:
-        logger.warning(
-            "[pricedata] resolve support years reduce to just year 1: no "
-            "interior re-solve runs, so every Tier-2 DAM factor collapses "
-            "to 1.0 and overrides the Tier-1 reprice cannibalization with a "
-            "flat path. Use scenario_projection_mode = 'reprice' for a "
-            "price-path projection without re-solves."
         )
 
     dt_minutes = int(params.get("dt_minutes", 0) or 0)
