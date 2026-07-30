@@ -64,3 +64,27 @@ def test_summary_md_without_financials(tmp_path):
     assert "## Financial KPIs" not in text
     assert "## Year-1 dispatch KPIs" in text
     assert not np.any([c in text for c in ("{", "}")])
+
+
+def test_summary_md_notes_render_only_when_supplied(tmp_path):
+    """Final-round-3 regression: merchant deliverables carried a fully
+    unserved load_kwh column while kpis/SUMMARY reported load 0, with
+    nothing in the artifacts explaining the dangling column.  The
+    pipeline now passes a caveat note; default runs stay note-free."""
+    kpis = {"profit_total_eur": 1.0}
+    note = (
+        "Merchant mode ignores the workbook's co-located load column."
+    )
+    out = write_summary_md(
+        tmp_path / "with_note.md",
+        kpis_year1=kpis, financial_kpis=None, params=_params(),
+        notes=[note],
+    )
+    text = out.read_text(encoding="utf-8")
+    assert f"> **Note:** {note}" in text
+
+    out2 = write_summary_md(
+        tmp_path / "without_note.md",
+        kpis_year1=kpis, financial_kpis=None, params=_params(),
+    )
+    assert "> **Note:**" not in out2.read_text(encoding="utf-8")

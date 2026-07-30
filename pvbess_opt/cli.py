@@ -209,9 +209,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.scenarios and sizing_block:
             logger.warning(
-                "--scenarios was supplied; the workbook's enabled 'sizing' "
-                "sheet is ignored for this run (the --scenarios batch takes "
-                "precedence)."
+                "--scenarios was supplied; the input's enabled sizing "
+                "block is ignored for this run (the --scenarios batch "
+                "takes precedence)."
             )
         if args.scenarios or sheet_scenarios or sizing_block:
             _warn_single_run_flags_ignored(args)

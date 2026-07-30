@@ -583,6 +583,24 @@ def _generate_all_energy_plots(
         or PROJECT_SHEET_DEFAULTS["project_start_year"]
     )
 
+    if _scope_active_for_year(daily_scope, 1):
+        # The daily fan-out dominates a full-scale run's wall-clock
+        # (~365 days x several figure types on the shipped defaults)
+        # with only fontTools INFO lines on the console — announce it
+        # so a first run does not look hung after the solve finishes.
+        try:
+            _n_days = int(
+                pd.to_datetime(res_year1["timestamp"]).dt.normalize().nunique()
+            )
+        except Exception:
+            _n_days = 0
+        print(
+            f"[plots] rendering daily dispatch figures for ~{_n_days} days "
+            f"(plot_daily_scope={daily_scope}); the numeric deliverables "
+            "are already on disk — set plot_daily_scope=none for a fast "
+            "numbers-first run."
+        )
+
     _leg_factors = _revenue_leg_factors(res_year1, year1_kpis)
 
     if lifetime_df is None or lifetime_df.empty:
@@ -2598,6 +2616,23 @@ def _run_one(
             ),
             price_scenario_ensemble=_ensemble_frame(ensemble_result),
         )
+        _summary_notes: list[str] = []
+        if (
+            resolve_mode(params) == "merchant"
+            and "load_kwh" in ts.columns
+            and float(pd.to_numeric(ts["load_kwh"], errors="coerce")
+                      .abs().sum()) > 0.0
+        ):
+            # The dispatch sheets copy the workbook's load column
+            # verbatim while merchant mode pins every load-serving flow
+            # (and the load KPIs) to zero — without this note the
+            # delivered artifacts show a load nothing serves.
+            _summary_notes.append(
+                "Merchant mode ignores the workbook's co-located load "
+                "column: `load_kwh` appears in the dispatch sheets for "
+                "reference, but no flow serves it and the load / grid "
+                "import KPIs are 0 by definition."
+            )
         write_summary_md(
             layout["summary"] / "SUMMARY.md",
             kpis_year1=kpis,
@@ -2608,6 +2643,7 @@ def _run_one(
             lender_cases=bundle.get("lender_cases"),
             midlife_resolve=midlife_df,
             price_scenario_lines=_ps_lines,
+            notes=_summary_notes or None,
         )
 
         # Balancing plot pair promised by the README's report list; both

@@ -6269,6 +6269,7 @@ def write_summary_md(
     lender_cases: pd.DataFrame | None = None,
     midlife_resolve: pd.DataFrame | None = None,
     price_scenario_lines: list[str] | None = None,
+    notes: list[str] | None = None,
 ) -> Path:
     """Write the ``00_summary/SUMMARY.md`` headline digest.
 
@@ -6303,6 +6304,11 @@ def write_summary_md(
     if price_scenario_lines:
         lines.extend(price_scenario_lines)
     lines.append("")
+    # Caller-supplied caveats (e.g. merchant runs whose workbook carries
+    # a co-located load column no flow serves); absent on default runs.
+    for note in notes or []:
+        lines.append(f"> **Note:** {note}")
+        lines.append("")
 
     lines.append("## Year-1 dispatch KPIs")
     lines.append("")

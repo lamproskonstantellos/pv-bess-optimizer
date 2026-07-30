@@ -111,7 +111,11 @@ venue.
 git clone https://github.com/lamproskonstantellos/pv-bess-optimizer.git
 cd pv-bess-optimizer
 pip install -r requirements/dev.txt
+pip install -e .   # optional: installs the `pvbess` console command
 ```
+
+Every documented command also works without the editable install via
+`python main.py ...` from the repository root.
 
 HiGHS is the default solver (`pip install highspy`). Gurobi
 (`pip install gurobipy` plus a licence) and CBC also work. The solver
@@ -141,6 +145,14 @@ enabled in the `economics` sheet), and writes:
 * the IEEE-styled PDF report under `results/<run>/04_financial_plots/`,
 * the energy plots under `results/<run>/05_energy_plots/`,
 * uncertainty diagnostics under `results/<run>/06_uncertainty_plots/`.
+
+> **First-run tip:** with the shipped plot scopes a full-year run
+> renders roughly 2,900 PDF figures after the solve — most of the
+> wall-clock is plotting, not optimisation. `03_results.xlsx` and
+> `SUMMARY.md` are on disk before the figure fan-out starts, and a
+> `[plots]` progress line marks where it begins. Set
+> `plot_daily_scope = none` in the `simulation` sheet for a fast
+> numbers-first run.
 
 Override the workbook value at the CLI:
 

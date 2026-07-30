@@ -334,8 +334,11 @@ def _leverage_kpis(
     frozen sized debt in target-DSCR mode, else ``gearing`` x the
     Year-0 investment.  Equity cashflow is the project cashflow net of
     debt service over the tenor.  DSCR is the operating cashflow over
-    the debt service per year; under the ``sculpted`` profile min and
-    avg coincide by construction (Eq. E40).
+    the debt service per year; under the ``sculpted`` profile coverage
+    is level at the implied DSCR in every unclamped positive-CFADS
+    year, but a clamp residual swept into the final year (Eq. E40a)
+    lifts that year's DSCR, so min and avg coincide only for
+    clamp-free schedules.
 
     ``schedule_source_cf`` overrides the cashflow the ``sculpted`` profile
     shapes its debt service on, WITHOUT changing the equity flow that
