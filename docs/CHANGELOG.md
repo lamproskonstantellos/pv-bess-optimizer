@@ -816,6 +816,44 @@ Pre-delivery release audit (final round 2):
   `enabled` toggle and the grid point-count guard; the augmentation
   years document the native list form.
 
+Pre-delivery release audit (final round 4 — convergence verification):
+
+- **ida-only Monte Carlo is rejected as degenerate.** The zero-noise
+  guard counted intraday-price noise as an effective source, but the
+  seed noise perturbs only the ida FORECAST — Stage 1 never reads
+  ida_price and the Stage-2 redispatch settles on the original
+  prices — so an ida-only configuration delivered the exact point-mass
+  percentiles the guard exists to reject, at full MC cost.  The error
+  message now names the right knob in every toggle combination, and
+  `--monte-carlo` rejects negatives at the parser.
+- **Grid-cap scenario overrides speak the token dialect again.**
+  Routing override values through the typed parser missed the
+  `p_grid_export_max_kw` / `p_grid_import_max_kw` special case: the
+  documented `'unlimited'` / `'inf'` / `'disabled'` tokens were
+  rejected on both scenario surfaces.  The validator and apply path
+  now share one parser helper with the config route's special case.
+- **The batch pre-pass pre-flights the armed price-scenario engine**
+  (store resolution, meta.yaml, curve cadence) so that error class
+  fails before solver time; the engine setup is factored into one
+  shared context helper.  The low_price sizing deck re-dispatches in
+  the RESOLVED run mode (a `--mode` override previously sized debt on
+  the stored-mode cashflow).  Batch validation warnings fire once per
+  mistake instead of three times.
+- **Sankey terminal columns close onto their own rounded totals** — a
+  net-SOC-drawdown dispatch (terminal SOC left free) genuinely
+  delivers more to the sinks than the sources supply, and the shared
+  source-derived target silently floored the sink labels.
+- **Regression tests hardened against the audit's own mutation
+  matrix** (15/15 fixes fail-on-revert): the zero-noise guard's
+  n_seeds = 1 boundary, the PV-only replacement guard's zero-capacity
+  scope, and a run-path (not helper-only) test for the non-strict
+  invariant warnings.
+- **CLI exit-code coverage completed** (non-zip `.xlsx`, unusable
+  `--outdir` — clean rc-2 one-liners with stacks at DEBUG);
+  `unique_output_dir` reserves via exclusive mkdir (same-second TOCTOU
+  race closed); the repo-hygiene whole-tree scans skip hidden
+  directories.
+
 Pre-delivery release audit (final round 3):
 
 - **Rainflow counts plateaued turning points.** The reversal detector's
