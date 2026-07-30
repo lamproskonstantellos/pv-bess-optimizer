@@ -16,9 +16,14 @@ import logging
 from pvbess_opt.io import unique_output_dir
 
 
-def test_free_name_is_returned_verbatim(tmp_path):
+def test_free_name_is_returned_verbatim_and_reserved(tmp_path):
     target = tmp_path / "input_scenarios_20260101_120000"
-    assert unique_output_dir(target) == target
+    out = unique_output_dir(target)
+    assert out == target
+    # The helper RESERVES the directory with an exclusive mkdir — an
+    # exists()-then-return probe left a race window where two
+    # concurrent same-second runs both computed the identical path.
+    assert out.is_dir()
 
 
 def test_collision_bumps_to_numbered_sibling(tmp_path, caplog):
@@ -27,8 +32,10 @@ def test_collision_bumps_to_numbered_sibling(tmp_path, caplog):
     with caplog.at_level(logging.INFO, logger="pvbess_opt.io"):
         bumped = unique_output_dir(target)
     assert bumped == tmp_path / "input_scenarios_20260101_120000_2"
+    assert bumped.is_dir()
     assert any("already exists" in r.getMessage() for r in caplog.records)
-    bumped.mkdir()
+    # The bumped sibling was reserved by the call itself; the next
+    # same-second run lands one further along.
     assert unique_output_dir(target) == (
         tmp_path / "input_scenarios_20260101_120000_3"
     )
