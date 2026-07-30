@@ -15,6 +15,7 @@ from __future__ import annotations
 import numpy as np
 import openpyxl
 import pandas as pd
+import pytest
 
 from pvbess_opt.io import write_results_workbook
 
@@ -117,3 +118,30 @@ def test_financial_kpis_flags_written_as_text(tmp_path):
     v = _value_of(f, "metric", "npv_eur")
     assert not isinstance(v, (bool, np.bool_)) and float(v) == 0.0
     assert _value_of(f, "metric", "dscr_breach") == "TRUE"
+
+
+def test_atomic_workbook_path_publishes_or_leaves_nothing(tmp_path):
+    """Final-round-3 regression: openpyxl wrote the xlsx zip in place at the
+    canonical path, so a kill inside the save window left a 0-byte or
+    truncated 03_results.xlsx that looked finished until double-clicked."""
+    import pandas as pd
+
+    from pvbess_opt.io import atomic_workbook_path
+
+    target = tmp_path / "results.xlsx"
+    with atomic_workbook_path(target) as tmp_file, pd.ExcelWriter(
+        tmp_file, engine="openpyxl",
+    ) as writer:
+        pd.DataFrame({"a": [1]}).to_excel(writer, index=False)
+    assert target.exists()
+    assert not list(tmp_path.glob("*.partial"))
+    assert pd.read_excel(target)["a"].tolist() == [1]
+
+    # A failure mid-write publishes nothing and cleans the temp file.
+    broken = tmp_path / "broken.xlsx"
+    with pytest.raises(RuntimeError, match="mid-write"):
+        with atomic_workbook_path(broken) as tmp_file:
+            tmp_file.write_bytes(b"partial zip bytes")
+            raise RuntimeError("simulated crash mid-write")
+    assert not broken.exists()
+    assert not list(tmp_path.glob("*.partial"))

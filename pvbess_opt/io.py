@@ -71,10 +71,13 @@ Mode-specific timeseries semantics
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
 import itertools
 import logging
+import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -6028,6 +6031,27 @@ def unique_output_dir(candidate: Path) -> Path:
     return bumped
 
 
+@contextlib.contextmanager
+def atomic_workbook_path(out_path: str | Path) -> Iterator[Path]:
+    """Yield a sibling temp path; publish it to ``out_path`` on success.
+
+    openpyxl writes the xlsx zip in place at ExcelWriter context exit,
+    so a SIGKILL/OOM/crash inside that window left a 0-byte or truncated
+    workbook at the canonical results path — indistinguishable from a
+    finished artifact until the client double-clicks it.  Writing to a
+    ``.partial`` sibling and ``os.replace``-ing keeps the final path
+    either absent or complete; the temp file is removed on failure.
+    """
+    out_path = Path(out_path)
+    tmp = out_path.with_name(out_path.name + ".partial")
+    try:
+        yield tmp
+        os.replace(tmp, out_path)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()
+
+
 def ensure_writable_outdir(outdir: str | Path) -> Path:
     """Create ``outdir`` (parents included) and prove it is writable.
 
@@ -6438,7 +6462,9 @@ def write_dispatch_artifacts(
     out = dispatch_dir / "dispatch_timeseries.xlsx"
 
     if lifetime_df is not None and not lifetime_df.empty:
-        with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        with atomic_workbook_path(out) as tmp_path, pd.ExcelWriter(
+            tmp_path, engine="openpyxl",
+        ) as writer:
             for cy in sorted(lifetime_df["calendar_year"].unique()):
                 sheet = str(int(cy))
                 lifetime_df.loc[lifetime_df["calendar_year"] == cy].to_excel(
@@ -6452,7 +6478,9 @@ def write_dispatch_artifacts(
             )
         else:
             cal_year = int(project_start_year)
-        with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        with atomic_workbook_path(out) as tmp_path, pd.ExcelWriter(
+            tmp_path, engine="openpyxl",
+        ) as writer:
             res_year1.to_excel(writer, sheet_name=str(cal_year), index=False)
             style_workbook(writer.book)
 
@@ -6547,7 +6575,9 @@ def write_results_workbook(
     """Write the consolidated ``03_results.xlsx`` workbook."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+    with atomic_workbook_path(out_path) as tmp_path, pd.ExcelWriter(
+        tmp_path, engine="openpyxl",
+    ) as writer:
         pd.DataFrame(
             _scalar_metric_rows(_flatten_kpis_for_sheet(kpis_year1)),
             columns=["metric", "value"],

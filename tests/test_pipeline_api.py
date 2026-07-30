@@ -247,6 +247,14 @@ def test_cli_main_smoke(tmp_path):
         "--time-limit", "180",
     ])
     assert rc == 0
+    # Atomic-write contract: no .partial temp workbook survives a healthy
+    # run, and the run log ends with the completion sentinel so an
+    # interrupted run's directory is distinguishable after the fact.
+    out_root = tmp_path / "cli_results"
+    assert not list(out_root.rglob("*.partial"))
+    run_log = next(out_root.rglob("run_log.txt"))
+    last_line = run_log.read_text(encoding="utf-8").rstrip().splitlines()[-1]
+    assert last_line == "[run] complete"
 
 
 def test_revenue_leg_factors_and_synthetic_year_kpis():

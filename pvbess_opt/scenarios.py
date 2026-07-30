@@ -881,13 +881,16 @@ def write_scenario_comparison_workbook(
     ``failed_scenarios`` sheet — added only when non-empty, so healthy
     batches keep the single-sheet layout bit-identical.
     """
+    from .io import atomic_workbook_path
     from .io_style import style_workbook
 
     if failures is None:
         failures = list(comparison.attrs.get("failed_scenarios") or [])
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+    with atomic_workbook_path(out_path) as tmp_path, pd.ExcelWriter(
+        tmp_path, engine="openpyxl",
+    ) as writer:
         comparison.to_excel(writer, sheet_name="scenario_comparison", index=False)
         if failures:
             pd.DataFrame(failures, columns=["name", "error"]).to_excel(

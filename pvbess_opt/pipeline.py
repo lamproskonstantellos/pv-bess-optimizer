@@ -2742,6 +2742,12 @@ def _run_one(
             for key, value in bundle["fin_kpis"].items():
                 print(f"{key}: {value}")
         print(f"[io] outputs under: {out_dir.resolve()}")
+        # Completion sentinel — the last line the run log tee captures.
+        # An interrupted run (SIGTERM/SIGINT/OOM mid-solve) leaves the
+        # full directory skeleton with no results workbook and, without
+        # this marker, nothing telling a client who finds the directory
+        # later that the run never finished.
+        print("[run] complete")
     return Results(
         out_dir=out_dir,
         kpis=kpis,
