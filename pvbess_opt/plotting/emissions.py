@@ -108,11 +108,20 @@ def _sankey_label_totals(
 ) -> dict[str, int]:
     """Displayed node totals with per-column controlled rounding.
 
-    Source labels and sink labels each sum exactly to the rounded grand
-    total, so the closure the ribbons draw is also the closure a reader
-    summing the printed MWh numbers sees.  The BESS pass-through node
-    sits outside the contract (its label is throughput, not a share of
-    the balance) and keeps its own best rounding.
+    Each terminal column's labels sum exactly to that column's own
+    rounded total, so the closure the ribbons draw is also the closure
+    a reader summing the printed MWh numbers sees.  On a conservative
+    flow set (the shipped default: ``terminal_soc_equal`` closes the
+    SOC cycle) the two column totals coincide, so source labels ==
+    sink labels == the rounded grand total.  A dispatch that net-drains
+    its initial SOC (``terminal_soc_equal = FALSE``) genuinely delivers
+    more to the sinks than the sources supply — there is no initial-SOC
+    source node — and the per-column targets keep every label
+    nearest-value instead of silently flooring the whole sink column
+    (a shared source-derived target left a negative remainder that the
+    allocator dropped).  The BESS pass-through node sits outside the
+    contract (its label is throughput, not a share of the balance) and
+    keeps its own best rounding.
     """
     active = {n for f in flows for n in (f[0], f[1])}
 
@@ -122,16 +131,15 @@ def _sankey_label_totals(
             sum(v for _s, t, v, _c in flows if t == name),
         )
 
-    src = [n for n in active if _SANKEY_NODE_COLUMNS[n] == 0]
-    snk = [n for n in active if _SANKEY_NODE_COLUMNS[n] == 2]
-    target = round(sum(node_total(n) for n in src))
     labels: dict[str, int] = {}
-    labels.update(_largest_remainder_totals(
-        {n: node_total(n) for n in src}, target,
-    ))
-    labels.update(_largest_remainder_totals(
-        {n: node_total(n) for n in snk}, target,
-    ))
+    for column in (0, 2):
+        names = [n for n in active if _SANKEY_NODE_COLUMNS[n] == column]
+        if not names:
+            continue
+        totals = {n: node_total(n) for n in names}
+        labels.update(_largest_remainder_totals(
+            totals, round(sum(totals.values())),
+        ))
     for n in active:
         labels.setdefault(n, round(node_total(n)))
     return labels

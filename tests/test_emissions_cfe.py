@@ -448,3 +448,34 @@ def test_sankey_labels_close_by_controlled_rounding():
     assert labels["PV generation"] == 100
     assert labels["Load"] + labels["Losses"] == 100
     assert labels["BESS"] == 51
+
+
+def test_sankey_sink_labels_close_on_their_own_column_total():
+    """Convergence-round regression: a net SOC drawdown (terminal SOC left
+    free) makes the sink column genuinely exceed the sources — there is
+    no initial-SOC source node — and the shared source-derived target
+    left a negative remainder the allocator dropped, silently FLOORING
+    every sink label (sum 93 against a 94.7 truth on the repro run).
+    Each terminal column now closes onto its own rounded total."""
+    from pvbess_opt.plotting.emissions import _sankey_label_totals
+
+    flows = [
+        ("PV generation", "Load", 40.3, "#000000"),
+        ("Grid import", "Load", 46.0, "#000000"),
+        ("BESS", "Load", 5.7, "#000000"),
+        ("BESS", "Grid export", 4.731, "#000000"),
+        ("BESS", "Losses", 1.577, "#000000"),
+    ]
+    labels = _sankey_label_totals(flows)
+    src_sum = labels["PV generation"] + labels["Grid import"]
+    snk_sum = labels["Load"] + labels["Grid export"] + labels["Losses"]
+    assert src_sum == round(40.3 + 46.0)
+    assert snk_sum == round(40.3 + 46.0 + 5.7 + 4.731 + 1.577)
+    # Every label stays nearest-value (within 1 of its float total).
+    truths = {
+        "PV generation": 40.3, "Grid import": 46.0,
+        "Load": 92.0, "Grid export": 4.731, "Losses": 1.577,
+        "BESS": 12.008,
+    }
+    for name, truth in truths.items():
+        assert abs(labels[name] - truth) < 1.0
