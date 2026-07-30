@@ -832,6 +832,12 @@ Pre-delivery release audit (final round 3):
   `mode = self_consumption` while `kpis_year1` and SUMMARY.md said
   merchant; the econ dict now takes the resolved mode after its
   workbook re-read (numerics were never affected).
+- **Sankey labels close by controlled rounding.** The energy sankey
+  rounded each node total independently, so the printed MWh numbers
+  summed onto the grand total only when the fractional parts happened
+  to cancel; displayed totals now come from a largest-remainder
+  allocation per terminal column inside the chart routine (labels
+  only — the underlying flows were and remain exactly conservative).
 - **Metric sheets survive a pandas round-trip.** A genuine boolean cell
   in the mixed `metric`/`value` (and `key`/`value`) columns made
   `pandas.read_excel` coerce every zero-valued numeric row of
