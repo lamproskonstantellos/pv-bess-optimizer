@@ -298,3 +298,43 @@ def test_merchant_compare_skips_the_inert_load_ensemble(tmp_path, monkeypatch):
     assert "foresight_gap_pct_p50_dam" in metrics
     assert "foresight_gap_pct_p50_all" in metrics
     assert "foresight_gap_pct_p50_load" not in metrics
+
+
+def test_ida_only_monte_carlo_is_rejected_as_degenerate():
+    """Convergence-round regression: enable_ida counted as an effective
+    noise source, but the seed noise perturbs only the ida FORECAST —
+    Stage-1 never reads ida_price and the Stage-2 redispatch settles on
+    the original noise-free intraday prices, so an ida-only config
+    delivered the exact point mass the guard exists to reject."""
+    econ_ida_only = {
+        "uncertainty_enabled": True,
+        "uncertainty_n_seeds": 2,
+        "uncertainty_dam_enabled": False,
+        "uncertainty_pv_enabled": False,
+        "uncertainty_load_enabled": False,
+        "uncertainty_ida_enabled": True,
+        "id_enabled": True,
+    }
+    with pytest.raises(ValueError, match="does not by itself differentiate"):
+        _resolve_uncertainty_config(
+            RunConfig(excel="x.xlsx"), econ_ida_only, "merchant",
+        )
+    # The message names the right knob when ida noise is off by the
+    # USER'S toggle (the venue itself is on).
+    econ_user_off = {**econ_ida_only, "uncertainty_ida_enabled": False}
+    with pytest.raises(ValueError, match="uncertainty_ida_enabled is FALSE"):
+        _resolve_uncertainty_config(
+            RunConfig(excel="x.xlsx"), econ_user_off, "merchant",
+        )
+    # ...and the venue when it is the venue that is off.
+    econ_venue_off = {**econ_ida_only, "id_enabled": False}
+    with pytest.raises(ValueError, match="id_enabled is FALSE"):
+        _resolve_uncertainty_config(
+            RunConfig(excel="x.xlsx"), econ_venue_off, "merchant",
+        )
+    # ida noise stacked on a real source stays legal.
+    cfg = _resolve_uncertainty_config(
+        RunConfig(excel="x.xlsx"),
+        {**econ_ida_only, "uncertainty_dam_enabled": True}, "merchant",
+    )
+    assert cfg["enable_ida"] is True and cfg["enable_dam"] is True
