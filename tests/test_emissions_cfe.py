@@ -403,3 +403,48 @@ def test_energy_sankey_full_availability_is_raw_dispatch():
     pv_to_grid = next(v for s, t, v, _c in flows
                       if s == "PV generation" and t == "Grid export")
     assert pv_to_grid == pytest.approx(400.0)
+
+
+def test_sankey_labels_close_by_controlled_rounding():
+    """Owner-requested check: displayed node totals must close
+    algorithmically (largest-remainder inside the chart routine), never
+    by luck of the fractions or a hand-tuned label.  Fractions
+    0.4/0.4/0.2 are the canonical naive-rounding failure: independently
+    rounded sinks sum to 599 against a 600 source."""
+    from pvbess_opt.plotting.emissions import (
+        _largest_remainder_totals,
+        _sankey_label_totals,
+    )
+
+    values = {"a": 100.4, "b": 200.4, "c": 299.2}
+    naive = sum(round(v) for v in values.values())
+    assert naive == 599  # the failure the fix exists for
+    closed = _largest_remainder_totals(values, 600)
+    assert sum(closed.values()) == 600
+    assert all(abs(closed[n] - values[n]) < 1.0 for n in values)
+
+    flows = [
+        ("PV generation", "Load", 100.4, "#000000"),
+        ("PV generation", "Grid export", 200.4, "#000000"),
+        ("PV generation", "Curtailed PV", 299.2, "#000000"),
+    ]
+    labels = _sankey_label_totals(flows)
+    assert labels["PV generation"] == 600
+    assert (
+        labels["Load"] + labels["Grid export"] + labels["Curtailed PV"]
+    ) == 600
+    for _s, t, v, _c in flows:
+        assert abs(labels[t] - v) < 1.0
+
+    # The BESS pass-through node keeps its own best rounding and the
+    # terminal columns still close around it.
+    flows_bess = [
+        ("PV generation", "BESS", 50.6, "#000000"),
+        ("PV generation", "Load", 49.4, "#000000"),
+        ("BESS", "Load", 47.6, "#000000"),
+        ("BESS", "Losses", 3.0, "#000000"),
+    ]
+    labels = _sankey_label_totals(flows_bess)
+    assert labels["PV generation"] == 100
+    assert labels["Load"] + labels["Losses"] == 100
+    assert labels["BESS"] == 51
