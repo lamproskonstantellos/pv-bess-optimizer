@@ -369,3 +369,37 @@ def test_sensitivity_deltas_helper_returns_default():
 
     expected = DEFAULT_SENSITIVITY_DELTA_PCT / 100.0
     assert _sensitivity_deltas({}) == pytest.approx((expected, expected))
+
+
+def test_payback_zero_outlay_with_later_positive_flows():
+    """Final-round-3 regression: cumulative starting at exactly 0 with a
+    ~zero Year-0 incremental returned NaN without ever looking past
+    year 0, contradicting the docstring's promise that NaN is reserved
+    for the stuck-at-zero column (every incremental ~ 0)."""
+    years = np.array([0.0, 1.0])
+    assert _payback_year(
+        years, np.array([0.0, 10.0]), np.array([0.0, 10.0]),
+    ) == 0.0
+    # The stuck-at-zero column keeps its NaN.
+    assert np.isnan(_payback_year(
+        np.array([0.0, 1.0, 2.0]), np.zeros(3), np.zeros(3),
+    ))
+
+
+def test_calculate_irr_stays_silent_when_newton_diverges():
+    """Final-round-3 regression: a diverging Newton iterate overflowed
+    (1 + rate) ** t — numpy RuntimeWarnings leaked into the console of
+    legitimately loss-making runs (and an extreme guess raised a bare
+    OverflowError).  The overflow now stays on the silenced numpy path
+    and the clamped iterate hands over to bisection."""
+    import warnings
+
+    from pvbess_opt.economics import calculate_irr
+
+    cf = [-1000.0, 300.0, 300.0, 300.0, 300.0, 300.0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        diverged = calculate_irr(cf, guess=1e150)
+        normal = calculate_irr(cf)
+    assert diverged == pytest.approx(normal, abs=1e-4)
+    assert normal == pytest.approx(0.152382, abs=1e-4)

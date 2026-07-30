@@ -120,19 +120,40 @@ def calculate_irr(
         return float("nan")
 
     def npv(rate: float) -> float:
-        return float(sum(cf / (1.0 + rate) ** t for t, cf in enumerate(cash_flows)))
+        # A diverging Newton iterate can push (1 + rate) ** t past the
+        # float range.  The np.float64 base keeps the overflow on the
+        # numpy path (inf, not a raised OverflowError), and errstate
+        # silences the RuntimeWarning ("overflow encountered in scalar
+        # power") that previously leaked into the console of
+        # legitimately loss-making runs; the inf/nan outcome is owned
+        # by the guards below and the bisection fall-back.
+        with np.errstate(over="ignore"):
+            base = np.float64(1.0 + rate)
+            return float(
+                sum(cf / base ** t for t, cf in enumerate(cash_flows))
+            )
 
     rate = guess
     for _ in range(max_iterations):
         if rate <= -0.999:
             break
         f = npv(rate)
-        df = sum(-t * cf / (1.0 + rate) ** (t + 1) for t, cf in enumerate(cash_flows))
+        with np.errstate(over="ignore"):
+            base = np.float64(1.0 + rate)
+            df = sum(
+                -t * cf / base ** (t + 1)
+                for t, cf in enumerate(cash_flows)
+            )
         if abs(df) < 1.0e-12:
             break
         new_rate = rate - f / df
         if abs(new_rate - rate) < tolerance:
             return float(new_rate)
+        if not (-0.999 < new_rate < 1.0e9):
+            # Diverged far outside any meaningful IRR (nan included —
+            # both comparisons are False): hand over to bisection
+            # instead of powering ever-larger bases.
+            break
         rate = new_rate
 
     # Bracket the valid IRR domain down to the same floor the Newton path
@@ -3820,6 +3841,13 @@ def _payback_year(
                 if cumulative[0] > 1e-12:
                     return float(years[0])
                 if incremental[0] > 1e-12:
+                    return float(years[0])
+                if bool(np.any(incremental > 1e-12)):
+                    # Zero Year-0 outlay with genuinely positive later
+                    # flows: cumulative first touches 0 at years[0].
+                    # NaN stays reserved for the stuck-at-zero column
+                    # the docstring promises it for — previously this
+                    # branch bailed without ever looking past year 0.
                     return float(years[0])
                 return float("nan")
             cum_prev = cumulative[i - 1]
