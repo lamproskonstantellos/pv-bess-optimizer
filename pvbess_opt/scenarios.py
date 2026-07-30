@@ -819,7 +819,23 @@ def run_scenario_batch(
             typed = _apply_scenario_overrides(base_typed, scn)
             xlsx = tmp / "scenario.xlsx"
             write_workbook(typed, xlsx)
-            read_inputs(xlsx)
+            _params_chk, _ts_chk = read_inputs(xlsx)
+            # An ARMED price-scenario engine's own inputs (store_path
+            # resolution, meta.yaml, curve cadence) previously escaped
+            # this pre-pass and surfaced only inside _build_financials —
+            # after each scenario's full MILP; with the arming in the
+            # base workbook, EVERY scenario burned its solve and the
+            # batch ended in the all-fail error.  Validate them here,
+            # against the same base_dir the evaluation threads.
+            from .economics import read_economic_params
+            from .pricedata.engine import preflight_price_scenarios
+
+            preflight_price_scenarios(
+                read_economic_params(xlsx), _ts_chk,
+                base_dir=(
+                    Path(base_dir) if base_dir is not None else xlsx.parent
+                ),
+            )
         except (ValueError, KeyError) as exc:
             if str(exc).startswith("scenario "):
                 raise

@@ -1264,3 +1264,34 @@ def test_grid_cap_override_tokens_round_trip():
         validate_scenario_overrides(
             {"name": "caps", "project": {"p_grid_export_max_kw": "banana"}}
         )
+
+
+def test_prepass_catches_armed_engine_store_errors(monkeypatch):
+    """Convergence-round regression: the dry pre-pass ran write+read only,
+    so an ARMED price-scenario engine's own input errors (missing
+    store, bad cadence) surfaced inside _build_financials — after each
+    scenario's full MILP; with the arming in the base workbook every
+    scenario burned its solve and the batch ended in the all-fail
+    error.  The pre-pass now pre-flights the engine's decks."""
+    import pvbess_opt.scenarios as scn_mod
+
+    typed = _trimmed_typed()
+    typed["scenario_engine"]["price_scenarios_enabled"] = True
+    typed["scenario_engine"]["scenario_projection_mode"] = "reprice"
+    typed["price_scenarios"] = [{
+        "name": "Central", "provider": "parametric", "vintage": "2026-07",
+        "weight_pct": 100.0, "store_path": "definitely_missing_store/x",
+        "notes": "",
+    }]
+
+    def _boom(*a, **k):  # pragma: no cover - must never be reached
+        raise AssertionError("solver invoked before the engine preflight")
+
+    monkeypatch.setattr(scn_mod, "evaluate_scenario", _boom)
+    # On the 96-step trim the engine's cadence check fires first — the
+    # same pre-solve error class as the missing store; either proves
+    # the preflight runs before any solve and names the scenario.
+    with pytest.raises(ValueError, match=r"scenario 'only'.*price-scenario"):
+        scn_mod.run_scenario_batch(
+            typed, [{"name": "only"}], solver_opts=_BATCH_SOLVER_OPTS,
+        )
