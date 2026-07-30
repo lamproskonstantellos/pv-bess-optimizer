@@ -649,3 +649,50 @@ def test_snapshot_stale_rows_are_actually_cleared_and_blank_strings_count_empty(
             f"stale row {r} must be cleared, got "
             f"{ots.cell(row=r, column=ci).value!r}"
         )
+
+
+def test_cli_user_error_exit_codes(tmp_path, caplog):
+    """Final-round-3 regression: sibling user errors got three different
+    presentations — a missing workbook exited 2 cleanly, but a missing
+    --scenarios file / corrupt xlsx exited 1 with raw tracebacks, and a
+    solver typo was rejected only inside solve_model, after the workbook
+    read and the full model build."""
+    import logging
+
+    from pvbess_opt import cli
+
+    with caplog.at_level(logging.ERROR):
+        rc = cli.main([
+            str(ROOT / "inputs" / "input.xlsx"),
+            "--scenarios", str(tmp_path / "ghost.yaml"),
+        ])
+    assert rc == 2
+    assert any(
+        "Scenarios file not found" in r.getMessage() for r in caplog.records
+    )
+
+    caplog.clear()
+    junk = tmp_path / "junk.xlsx"
+    # Truncated/corrupt workbook: the zip magic makes pandas hand the
+    # bytes to openpyxl, which dies in zipfile with BadZipFile.
+    junk.write_bytes(b"PK\x03\x04" + b"garbage" * 64)
+    with caplog.at_level(logging.ERROR):
+        rc = cli.main([str(junk), "--outdir", str(tmp_path / "o1")])
+    assert rc == 2
+    assert any(
+        "junk.xlsx" in r.getMessage() and "not a valid .xlsx" in r.getMessage()
+        for r in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.ERROR):
+        rc = cli.main([
+            str(ROOT / "inputs" / "input.xlsx"),
+            "--solver", "nopesolver",
+            "--outdir", str(tmp_path / "o2"),
+        ])
+    assert rc == 2
+    assert any(
+        "nopesolver" in r.getMessage() and "not available" in r.getMessage()
+        for r in caplog.records
+    )

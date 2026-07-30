@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import zipfile
 from pathlib import Path
 
 from pvbess_opt.pipeline import RunConfig, run
@@ -152,6 +153,22 @@ def main(argv: list[str] | None = None) -> int:
     if not input_path.exists():
         logger.error("Input file not found: %s", input_path)
         return 2
+    if args.scenarios and not Path(args.scenarios).exists():
+        # Same user-error class as a missing workbook — same clean exit
+        # (previously a raw FileNotFoundError traceback with rc 1).
+        logger.error("Scenarios file not found: %s", args.scenarios)
+        return 2
+    # A solver typo previously surfaced only inside solve_model — after
+    # the workbook read and the full model build (minutes at client
+    # scale).  Probe availability up front with the same fail-fast
+    # message and the missing-input exit code.
+    from pvbess_opt.optimization import choose_solver
+
+    try:
+        choose_solver(args.solver)
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        return 2
 
     config = RunConfig(
         excel=input_path,
@@ -206,6 +223,20 @@ def main(argv: list[str] | None = None) -> int:
             run_sizing(config, sizing_block)
         else:
             run(config)
+    except zipfile.BadZipFile as exc:
+        # A corrupt/truncated workbook previously died as a bare
+        # 'zipfile.BadZipFile: File is not a zip file' traceback naming
+        # no file at all.
+        logger.error(
+            "Input file %s is not a valid .xlsx workbook (%s).",
+            input_path, exc,
+        )
+        return 2
+    except FileNotFoundError as exc:
+        # E.g. a config's timeseries_path pointing nowhere: one line
+        # naming the file, same exit code as the missing-workbook path.
+        logger.error("File not found: %s", exc.filename or exc)
+        return 2
     except Exception:
         logger.exception("Run failed")
         return 1
