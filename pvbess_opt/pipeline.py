@@ -913,6 +913,16 @@ def _low_price_sizing_cashflow(
     typed = _apply_scenario_overrides(typed, {
         "name": "debt-sizing-low-price-case",
         "price_deck": deck,
+        # The re-read carries the workbook's STORED mode; a CLI/RunConfig
+        # --mode override lives in the resolved params/econ only, so the
+        # deck that SIZES THE DEBT previously solved the wrong regime
+        # while the delivered assumptions record (correctly) claimed the
+        # resolved one.  Thread the resolved mode like run_scenarios
+        # patches its batch base.
+        "project": {
+            "mode": str(econ.get("mode", "self_consumption")
+                        or "self_consumption"),
+        },
         "economics": {
             "debt_sizing_mode": "manual",
             "lender_cases_enabled": False,
