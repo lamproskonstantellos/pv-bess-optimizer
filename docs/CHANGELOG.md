@@ -818,6 +818,20 @@ Pre-delivery release audit (final round 2):
 
 Pre-delivery release audit (final round 3):
 
+- **Rainflow counts plateaued turning points.** The reversal detector's
+  strict `< 0` slope-product test dropped every SOC peak/valley that
+  idles for even one step, collapsing a real battery's year to its
+  endpoints: the delivered `degradation.equivalent_full_cycles` was
+  ~100x under-counted and independent of dispatch (a diagnostic
+  column — SOH / fade / finance accrue throughput cycles, verified
+  unchanged).  Consecutive-equal runs now collapse before turning-point
+  detection.
+- **The assumptions record states the resolved run mode.** A CLI
+  `--mode` override patched `params` only, so a merchant study
+  delivered `economic_assumptions` / `assumptions_summary` recording
+  `mode = self_consumption` while `kpis_year1` and SUMMARY.md said
+  merchant; the econ dict now takes the resolved mode after its
+  workbook re-read (numerics were never affected).
 - **Metric sheets survive a pandas round-trip.** A genuine boolean cell
   in the mixed `metric`/`value` (and `key`/`value`) columns made
   `pandas.read_excel` coerce every zero-valued numeric row of
