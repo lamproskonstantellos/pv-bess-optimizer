@@ -1230,3 +1230,37 @@ def test_batch_outdir_probed_before_solves(tmp_path):
     made = ensure_writable_outdir(tmp_path / "a" / "b")
     assert made.is_dir()
     assert not any(made.iterdir())  # the probe file is cleaned up
+
+
+def test_grid_cap_override_tokens_round_trip():
+    """Convergence-round regression: routing override values through
+    _parse_value missed the grid-cap keys' token dialect — the
+    documented 'unlimited'/'inf'/'disabled' forms were rejected on both
+    scenario surfaces while the workbook and config surfaces accepted
+    them.  One shared parser path now serves validation and apply."""
+    from pvbess_opt.scenarios import (
+        _apply_scenario_overrides,
+        validate_scenario_overrides,
+    )
+
+    base = {
+        "pv": {}, "bess": {}, "project": {}, "economics": {},
+        "simulation": {}, "balancing": {},
+    }
+    for token in ("unlimited", "inf", "disabled"):
+        validate_scenario_overrides(
+            {"name": "caps", "project": {"p_grid_export_max_kw": token}}
+        )
+        out = _apply_scenario_overrides(
+            base, {"name": "caps", "project": {"p_grid_export_max_kw": token}}
+        )
+        assert out["project"]["p_grid_export_max_kw"] == float("inf")
+    out = _apply_scenario_overrides(
+        base, {"name": "caps", "project": {"p_grid_import_max_kw": "unlimited"}}
+    )
+    assert out["project"]["p_grid_import_max_kw"] == float("inf")
+    # Garbage still fails fast naming the scenario and target.
+    with pytest.raises(ValueError, match=r"'caps'.*p_grid_export_max_kw"):
+        validate_scenario_overrides(
+            {"name": "caps", "project": {"p_grid_export_max_kw": "banana"}}
+        )

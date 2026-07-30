@@ -106,7 +106,7 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
     ``bess.power_kw``, ``bess.capacity_kwh`` included), the bare
     ``balancing`` on/off scalar, or the ``capex_multiplier`` special.
     """
-    from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS, _parse_value
+    from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS
 
     name = scenario.get("name", "<unnamed>")
     for section, value in scenario.items():
@@ -235,24 +235,18 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
                     "rescale) or run separate base workbooks."
                 )
             if canonical in defaults:
-                # Route the VALUE through the loader's typed parser too.
-                # A scenarios file is the second YAML surface for these
-                # keys: previously values were copied verbatim into the
-                # materialised workbook, so a native list stringified to
-                # '[1, 5]' garbage and value errors surfaced only
-                # mid-batch — after earlier scenarios' paid solver time —
-                # naming neither the scenario nor the mistake.
-                # ``pv_nameplate_kwp`` keeps its dedicated guards in
-                # ``_apply_scenario_overrides`` (profile rescale needs
-                # the raw form).
+                # Route the VALUE through the SAME parser the apply path
+                # uses (_parsed_override_value): a scenarios file is the
+                # second YAML surface for these keys, and the two paths
+                # once diverged — the validator inlined _parse_value and
+                # missed the grid-cap keys' _parse_grid_export_max
+                # special case, rejecting the documented 'unlimited' /
+                # 'inf' / 'disabled' tokens that the workbook and config
+                # surfaces accept.  ``pv_nameplate_kwp`` keeps its
+                # dedicated guards in ``_apply_scenario_overrides``
+                # (profile rescale needs the raw form).
                 if canonical != "pv_nameplate_kwp":
-                    try:
-                        _parse_value(canonical, raw, defaults[canonical])
-                    except (TypeError, ValueError) as exc:
-                        raise ValueError(
-                            f"scenario {name!r}: override {section}.{key} "
-                            f"= {raw!r}: {exc}"
-                        ) from exc
+                    _parsed_override_value(section, key, canonical, raw, name)
                 continue
             owner = _KEY_TO_SHEET.get(canonical)
             hint = (
@@ -470,12 +464,19 @@ def _parsed_override_value(
     keeps the scenarios file and the structured-config surface (which
     already runs ``_parse_value``) in agreement.
     """
-    from .io import _SHEET_DEFAULTS, _parse_value
+    from .io import _SHEET_DEFAULTS, _parse_grid_export_max, _parse_value
 
     defaults = _SHEET_DEFAULTS.get(section) or {}
     if canonical not in defaults:
         return raw
     try:
+        if canonical in ("p_grid_export_max_kw", "p_grid_import_max_kw"):
+            # The grid caps speak the documented 'unlimited' / 'inf' /
+            # 'disabled' token dialect; the workbook kv layer and the
+            # structured-config route both special-case them through
+            # _parse_grid_export_max, and _parse_value's numeric branch
+            # would reject the tokens — the third surface must agree.
+            return _parse_grid_export_max(raw, canonical)
         return _parse_value(canonical, raw, defaults[canonical])
     except (TypeError, ValueError) as exc:
         raise ValueError(
