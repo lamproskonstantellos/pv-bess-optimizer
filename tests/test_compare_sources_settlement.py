@@ -222,6 +222,14 @@ def test_degenerate_zero_noise_monte_carlo_is_rejected():
         RunConfig(excel="x.xlsx"), econ_load_only, "self_consumption",
     )
     assert cfg["enable_load"] is True
+    # The guard must fire at the SMALLEST armed seed count too — the
+    # mutation matrix showed an off-by-one weakening (n_seeds > 1)
+    # survived when only n_seeds = 2 was probed.
+    with pytest.raises(ValueError, match="no effective noise source"):
+        _resolve_uncertainty_config(
+            RunConfig(excel="x.xlsx"),
+            {**econ_all_off, "uncertainty_n_seeds": 1}, "self_consumption",
+        )
     # The deterministic-run escape hatch is CLI --monte-carlo 0 (the
     # loader rejects a workbook uncertainty_n_seeds < 1).
     cfg = _resolve_uncertainty_config(

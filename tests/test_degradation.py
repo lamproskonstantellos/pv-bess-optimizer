@@ -293,6 +293,15 @@ def test_pv_only_project_never_resolves_a_replacement():
         econ, year1_discharge_mwh=100.0, capacity_mwh=10.0,
     )
     assert source == "soh_threshold" and year == 19
+    # A SMALL but real pack (50 kWh) keeps it too — the guard is a
+    # zero-capacity sentinel, not a size threshold: the mutation matrix
+    # showed an epsilon inflation to 0.1 MWh survived, silently
+    # removing a real replacement (non-zero CAPEX base) from the
+    # cashflow.
+    year, source, _second = resolve_bess_replacement_year(
+        econ, year1_discharge_mwh=1.0, capacity_mwh=0.05,
+    )
+    assert source == "soh_threshold" and year == 19
 
 
 def test_rainflow_counts_plateaued_turning_points():
