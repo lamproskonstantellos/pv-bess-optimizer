@@ -704,3 +704,28 @@ def test_cli_user_error_exit_codes(tmp_path, caplog):
         "nopesolver" in r.getMessage() and "not available" in r.getMessage()
         for r in caplog.records
     )
+
+
+def test_mode_override_reaches_the_assumptions_record(tmp_path):
+    """Final-round-3 regression (owner-approved): run() patched the CLI
+    --mode override into params only, while _build_financials re-read
+    the workbook for econ — so a merchant study delivered an
+    economic_assumptions sheet (and assumptions_summary section)
+    recording mode = self_consumption, contradicting kpis_year1 and
+    SUMMARY.md in the same output tree."""
+    import pandas as pd
+
+    from pvbess_opt.pipeline import RunConfig, run
+
+    result = run(RunConfig(
+        excel=_short_workbook(tmp_path), solver="highs",
+        outdir=tmp_path / "out", mip_gap=0.05, time_limit=180,
+        mode="merchant",
+    ))
+    results_xlsx = result.out_dir / "03_results.xlsx"
+    ea = pd.read_excel(results_xlsx, sheet_name="economic_assumptions")
+    assert ea.loc[ea["key"] == "mode", "value"].iloc[0] == "merchant"
+    summary_txt = (
+        result.out_dir / "01_inputs" / "assumptions_summary.txt"
+    ).read_text(encoding="utf-8")
+    assert "self_consumption" not in summary_txt

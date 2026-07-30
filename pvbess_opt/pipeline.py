@@ -987,6 +987,15 @@ def _build_financials(
     own cashflow) with a warning instead of freezing a mis-sized debt.
     """
     econ = read_economic_params(excel_path)
+    # The workbook re-read carries the STORED mode; a CLI/RunConfig
+    # --mode override patched params only, so the delivered
+    # economic_assumptions sheet and assumptions_summary recorded e.g.
+    # mode = self_consumption for a merchant study (contradicting
+    # kpis_year1 / SUMMARY.md in the same delivery).  Numerics were
+    # unaffected — every dispatch/finance consumer reads the resolved
+    # params — but the assumptions record must state the mode the run
+    # actually solved.
+    econ["mode"] = resolve_mode(params)
 
     site_capex_eur = float(econ.get("site_capex_eur", 0.0) or 0.0)
     site_devex_eur = float(econ.get("site_devex_eur", 0.0) or 0.0)
