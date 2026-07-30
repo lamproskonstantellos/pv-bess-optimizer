@@ -270,3 +270,26 @@ def test_scheduled_replacement_beyond_lifecycle_is_rejected(base_typed=None):
     # A replacement in the final year is still legal.
     typed["bess"]["bess_replacement_year"] = 20
     validate_workbook_params(typed, dt_minutes=15)
+
+
+def test_pv_only_project_never_resolves_a_replacement():
+    """Final-round-3 regression: the calendar fade curve decays regardless of
+    capacity, so 'auto' resolved a year-19 replacement for a 0-kWh pack
+    on the shipped defaults and announced it in the run log and
+    SUMMARY.md (cash impact zero, reporting misleading)."""
+    from pvbess_opt.lifetime import resolve_bess_replacement_year
+
+    econ = {
+        "bess_replacement_year": "auto",
+        "project_lifecycle_years": 20,
+        "bess_degradation_annual_pct": 2.0,
+        "bess_eol_soh_pct": 70.0,
+    }
+    assert resolve_bess_replacement_year(
+        econ, year1_discharge_mwh=0.0, capacity_mwh=0.0,
+    ) == (0, "never", 0)
+    # A real pack keeps the auto resolution.
+    year, source, _second = resolve_bess_replacement_year(
+        econ, year1_discharge_mwh=100.0, capacity_mwh=10.0,
+    )
+    assert source == "soh_threshold" and year == 19

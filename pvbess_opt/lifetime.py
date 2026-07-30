@@ -161,6 +161,13 @@ def resolve_bess_replacement_year(
     (cashflow, lifetime projection, LCOS, degradation report) reads one
     source of truth via :func:`effective_bess_replacement_year`.
     """
+    if capacity_mwh <= 1e-12:
+        # A PV-only project has no pack to replace: the calendar fade
+        # curve still decays on the shipped defaults, so 'auto'
+        # previously resolved a year-19 replacement for a 0-kWh battery
+        # and announced it in the run log and SUMMARY.md (cash impact
+        # zero — the replacement CAPEX base is 0 — but misleading).
+        return 0, "never", 0
     raw = econ.get("bess_replacement_year", 0)
     n_years = int(
         econ.get(
