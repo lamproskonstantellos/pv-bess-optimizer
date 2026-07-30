@@ -185,3 +185,116 @@ def test_all_ensemble_honours_per_source_toggles(tmp_path, monkeypatch):
     # like the plain-MC path (DAM noise disabled here).
     assert all_combined["enable_dam"] is False
     assert all_combined["enable_pv"] is True
+
+
+def test_degenerate_zero_noise_monte_carlo_is_rejected():
+    """Final-round-3 regression: uncertainty_enabled with n_seeds > 0 and every
+    noise source toggled off ran the full MC cost to deliver a point
+    mass — identical seeds, imbalance settlement frozen at 0.00 and
+    VaR == CVaR — with no message anywhere."""
+    econ_all_off = {
+        "uncertainty_enabled": True,
+        "uncertainty_n_seeds": 2,
+        "uncertainty_dam_enabled": False,
+        "uncertainty_pv_enabled": False,
+        "uncertainty_load_enabled": False,
+    }
+    with pytest.raises(ValueError, match="no effective noise source"):
+        _resolve_uncertainty_config(
+            RunConfig(excel="x.xlsx"), econ_all_off, "self_consumption",
+        )
+    # Merchant forces load noise off, so load-only resolves to zero
+    # effective sources too.
+    econ_load_only = {
+        "uncertainty_enabled": True,
+        "uncertainty_n_seeds": 2,
+        "uncertainty_dam_enabled": False,
+        "uncertainty_pv_enabled": False,
+        "uncertainty_load_enabled": True,
+    }
+    with pytest.raises(ValueError, match="no effective noise source"):
+        _resolve_uncertainty_config(
+            RunConfig(excel="x.xlsx"), econ_load_only, "merchant",
+        )
+    # The same workbook stays legal in self-consumption (load noise
+    # perturbs a real column) and as a deterministic n_seeds = 0 run.
+    cfg = _resolve_uncertainty_config(
+        RunConfig(excel="x.xlsx"), econ_load_only, "self_consumption",
+    )
+    assert cfg["enable_load"] is True
+    # The deterministic-run escape hatch is CLI --monte-carlo 0 (the
+    # loader rejects a workbook uncertainty_n_seeds < 1).
+    cfg = _resolve_uncertainty_config(
+        RunConfig(excel="x.xlsx", monte_carlo=0),
+        econ_all_off, "self_consumption",
+    )
+    assert cfg["n_seeds"] == 0
+
+
+def test_compare_flag_without_uncertainty_warns(caplog):
+    """Final-round-3 regression: --compare-uncertainty-sources on a workbook
+    with uncertainty_enabled = FALSE (and no --rolling-horizon) was a
+    silent no-op — exit 0, zero ensembles, zero mention of the flag."""
+    with caplog.at_level(logging.WARNING):
+        cfg = _resolve_uncertainty_config(
+            RunConfig(excel="x.xlsx", compare_uncertainty_sources=True),
+            {"uncertainty_enabled": False}, "self_consumption",
+        )
+    assert cfg["enabled"] is False
+    assert any(
+        "has no effect" in r.getMessage() for r in caplog.records
+    )
+
+
+@pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_merchant_compare_skips_the_inert_load_ensemble(tmp_path, monkeypatch):
+    """Final-round-3 regression: merchant compare-sources ran the fixed
+    (False, False, True) 'load' diagnostic ensemble — perturbing a column
+    the model never reads, wasting a quarter of the compare wall-clock —
+    and delivered a plausible-looking foresight_gap_pct_p50_load for a
+    plant with no load."""
+    workbook = _one_day_workbook(
+        tmp_path,
+        uncertainty_enabled=True,
+        uncertainty_compare_sources=True,
+        uncertainty_n_seeds=2,
+        uncertainty_window_hours=12,
+        uncertainty_commit_hours=6,
+    )
+
+    calls: list[dict] = []
+
+    def fake_mc(params, ts, **kwargs):
+        calls.append(dict(kwargs))
+        pf = float(kwargs["pf_profit_eur"])
+        return pd.DataFrame({
+            "seed": [42, 43],
+            "profit_total_eur": [pf * 0.99, pf * 0.97],
+            "grid_export_mwh": [1.0, 1.0],
+            "grid_import_mwh": [1.0, 1.0],
+            "pv_curtailed_mwh": [0.0, 0.0],
+            "bess_cycles_total": [1.0, 1.0],
+        })
+
+    monkeypatch.setattr("pvbess_opt.pipeline.monte_carlo_rolling", fake_mc)
+    run(RunConfig(
+        excel=workbook, solver="highs", outdir=tmp_path / "out",
+        mip_gap=1e-3, time_limit=120, mode="merchant",
+    ))
+
+    # Three ensembles: dam, pv, all — the inert 'load' set is skipped.
+    assert len(calls) == 3
+    dam_only, pv_only, all_combined = calls
+    assert (dam_only["enable_dam"], dam_only["enable_pv"]) == (True, False)
+    assert (pv_only["enable_dam"], pv_only["enable_pv"]) == (False, True)
+    assert all_combined["enable_dam"] is True
+    assert all_combined["enable_load"] is False
+
+    # The delivered KPI sheet carries p50 rows only for the ensembles
+    # that ran — no NaN foresight_gap_pct_p50_load.
+    results = next((tmp_path / "out").rglob("03_results.xlsx"))
+    kpi = pd.read_excel(results, sheet_name="kpis_year1")
+    metrics = set(kpi["metric"].astype(str))
+    assert "foresight_gap_pct_p50_dam" in metrics
+    assert "foresight_gap_pct_p50_all" in metrics
+    assert "foresight_gap_pct_p50_load" not in metrics

@@ -1789,6 +1789,37 @@ def _resolve_uncertainty_config(
     enable_ida = bool(econ.get("uncertainty_ida_enabled", True)) and bool(
         econ.get("id_enabled", False)
     )
+    if compare and not enabled:
+        # An explicitly typed flag whose help promises four MC ensembles
+        # must not evaporate without a word (the batch routes already
+        # warn about ignored single-run flags; the single-run route
+        # did not).
+        logger.warning(
+            "--compare-uncertainty-sources / uncertainty_compare_sources "
+            "has no effect: rolling-horizon uncertainty is disabled. "
+            "Enable it with uncertainty_enabled = TRUE or "
+            "--rolling-horizon."
+        )
+    if enabled and n_seeds > 0 and not (
+        enable_dam or enable_pv or enable_load or enable_ida
+    ):
+        # Zero effective noise sources make every Monte Carlo seed
+        # byte-identical: the delivered percentiles collapse to a point
+        # mass, the imbalance settlement (forecast == actual) reports
+        # exactly 0.00 and VaR == CVaR — all silently, at the full cost
+        # of n_seeds rolling-horizon runs (x4 in compare mode, where the
+        # 'all' ensemble feeds the DELIVERED aggregates).
+        raise ValueError(
+            f"uncertainty_enabled with uncertainty_n_seeds = {n_seeds} "
+            "but no effective noise source: uncertainty_dam_enabled, "
+            "uncertainty_pv_enabled and uncertainty_load_enabled "
+            "resolve to FALSE (merchant mode forces load noise off; "
+            "intraday-price noise needs id_enabled). Every seed would "
+            "be identical, so the delivered Monte Carlo percentiles, "
+            "imbalance settlement and VaR/CVaR would be a point mass. "
+            "Enable at least one source, or set uncertainty_n_seeds = 0 "
+            "for the deterministic rolling-horizon run."
+        )
     # The loader enforces window >= 2 x commit whenever the imbalance
     # settlement is armed (the nomination is the [commit, 2*commit)
     # lookahead of each window) — but only on the WORKBOOK values.  CLI
@@ -2075,12 +2106,29 @@ def _run_one(
                 )
 
             if unc_cfg["compare_sources"] and n_seeds > 0:
+                compare_flags = list(_COMPARE_SOURCE_FLAGS)
+                if resolve_mode(params) == "merchant":
+                    # The plain path forces enable_load off in merchant
+                    # ("no load to perturb") — but the fixed
+                    # (False, False, True) diagnostic definition would
+                    # perturb a column the model never reads: n_seeds
+                    # identical rolling-horizon runs delivering a
+                    # plausible-looking foresight_gap_pct_p50_load for a
+                    # plant with no load.
+                    compare_flags = [
+                        f for f in compare_flags if f[0] != "load"
+                    ]
+                    print(
+                        "[rolling] compare-sources: skipping the 'load' "
+                        "ensemble in merchant mode (no load to perturb)."
+                    )
                 print(
-                    f"[rolling] compare-sources mode: 4 ensembles x {n_seeds} seeds "
+                    f"[rolling] compare-sources mode: "
+                    f"{len(compare_flags)} ensembles x {n_seeds} seeds "
                     f"(window={window_h}h, commit={commit_h}h, base_seed={base_seed})"
                 )
                 ensembles: list[pd.DataFrame] = []
-                for src, en_dam, en_pv, en_load in _COMPARE_SOURCE_FLAGS:
+                for src, en_dam, en_pv, en_load in compare_flags:
                     if src == "all":
                         # The 'all' ensemble feeds the DELIVERED
                         # settlement aggregates and NPV tail risk (it is
@@ -2278,7 +2326,10 @@ def _run_one(
                     else:
                         frame["foresight_gap_pct"] = float("nan")
             if rolling_compare_df is not None:
-                for src, _en_dam, _en_pv, _en_load in _COMPARE_SOURCE_FLAGS:
+                # Iterate the source sets actually PRESENT in the frame
+                # (merchant runs skip the inert 'load' ensemble), so an
+                # absent ensemble never materialises as a NaN KPI row.
+                for src in dict.fromkeys(rolling_compare_df["source_set"]):
                     p50 = float(
                         rolling_compare_df.loc[
                             rolling_compare_df["source_set"] == src,
