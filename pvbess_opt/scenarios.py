@@ -720,6 +720,7 @@ def evaluate_scenario(
     from .pipeline import _build_financials
 
     typed = _apply_scenario_overrides(base_typed, scenario)
+    scn_name = str(scenario.get("name", "scenario"))
     tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_"))
     try:
         xlsx = tmp / "scenario.xlsx"
@@ -738,6 +739,14 @@ def evaluate_scenario(
             xlsx, params, ts, kpis, res,
             solver_opts=solver_opts, base_dir=base_dir,
         )
+    except (ValueError, RuntimeError) as exc:
+        # A failure from the materialised workbook's re-read or the
+        # solve carries no scenario context of its own — a ten-scenario
+        # batch died with "'bess_capacity_kwh' must be non-negative"
+        # and the client had to bisect to find which scenario.
+        if str(exc).startswith("scenario "):
+            raise
+        raise type(exc)(f"scenario {scn_name!r}: {exc}") from exc
     finally:
         # The scenario workbook has no consumer past its comparison row;
         # drop the temp dir so a batch does not leak one dir per scenario.
@@ -781,6 +790,8 @@ def run_scenario_batch(
     base_dir: Path | None = None,
 ) -> pd.DataFrame:
     """Evaluate every (inheritance-resolved) scenario into a comparison table."""
+    from .io import read_inputs, write_workbook
+
     resolved = resolve_inheritance(scenarios)
     # Fail fast on a typo'd override BEFORE any solver time is spent —
     # scenario N failing after N-1 solves wastes minutes per batch.
@@ -794,12 +805,51 @@ def run_scenario_batch(
                 base_typed["ts"], str(deck),
                 scenario_name=str(scn.get("name", "<unnamed>")),
             )
-    rows = [
-        evaluate_scenario(
-            base_typed, scn, solver_opts=solver_opts, base_dir=base_dir,
+    # Key-level checks above cannot see VALUE-level mistakes that only
+    # the materialised workbook's re-read rejects (a negative capacity,
+    # a replacement year beyond an overridden lifecycle, ...).  Dry-run
+    # every scenario through materialise + read BEFORE the solve loop:
+    # seconds per scenario against hours of solver work previously
+    # discarded when scenario N crashed the batch after N-1 solves.
+    for scn in resolved:
+        scn_name = str(scn.get("name", "<unnamed>"))
+        tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_val_"))
+        try:
+            typed = _apply_scenario_overrides(base_typed, scn)
+            xlsx = tmp / "scenario.xlsx"
+            write_workbook(typed, xlsx)
+            read_inputs(xlsx)
+        except (ValueError, KeyError) as exc:
+            if str(exc).startswith("scenario "):
+                raise
+            raise ValueError(f"scenario {scn_name!r}: {exc}") from exc
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    # The dry pre-pass has rejected everything the loaders can catch, so
+    # a failure past this point is solver-level (infeasible, solver
+    # crash).  One sick scenario must not discard its siblings' finished
+    # solves: log it, keep going, and report the failures alongside the
+    # completed comparison.
+    rows = []
+    failures: list[dict[str, str]] = []
+    for scn in resolved:
+        scn_name = str(scn.get("name", "scenario"))
+        try:
+            rows.append(evaluate_scenario(
+                base_typed, scn, solver_opts=solver_opts, base_dir=base_dir,
+            ))
+        except (ValueError, RuntimeError) as exc:
+            logger.error(
+                "scenario %r failed (%s); continuing with the remaining "
+                "scenarios — the comparison will list it on the "
+                "failed_scenarios sheet.", scn_name, exc,
+            )
+            failures.append({"name": scn_name, "error": str(exc)})
+    if failures and not rows:
+        raise RuntimeError(
+            f"all {len(failures)} scenarios failed; first error: "
+            f"{failures[0]['error']}"
         )
-        for scn in resolved
-    ]
     # The comparison gains a price_deck column ONLY when at least one
     # scenario names a deck, keeping deck-free batches bit-identical.
     columns = list(_COMPARISON_COLUMNS)
@@ -808,7 +858,12 @@ def run_scenario_batch(
     else:
         for r in rows:
             r.pop("price_deck", None)
-    return pd.DataFrame(rows, columns=columns)
+    comparison = pd.DataFrame(rows, columns=columns)
+    # pandas .attrs is the side channel to the orchestrator; the sheet
+    # writer surfaces it as a failed_scenarios sheet only when non-empty
+    # so healthy batches stay bit-identical.
+    comparison.attrs["failed_scenarios"] = failures
+    return comparison
 
 
 # ---------------------------------------------------------------------------
@@ -818,14 +873,26 @@ def run_scenario_batch(
 
 def write_scenario_comparison_workbook(
     out_path: str | Path, comparison: pd.DataFrame,
+    *, failures: list[dict[str, str]] | None = None,
 ) -> Path:
-    """Write the scenario-comparison table to a styled workbook."""
+    """Write the scenario-comparison table to a styled workbook.
+
+    ``failures`` (mid-batch solver-level casualties) land on a separate
+    ``failed_scenarios`` sheet — added only when non-empty, so healthy
+    batches keep the single-sheet layout bit-identical.
+    """
     from .io_style import style_workbook
 
+    if failures is None:
+        failures = list(comparison.attrs.get("failed_scenarios") or [])
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         comparison.to_excel(writer, sheet_name="scenario_comparison", index=False)
+        if failures:
+            pd.DataFrame(failures, columns=["name", "error"]).to_excel(
+                writer, sheet_name="failed_scenarios", index=False,
+            )
         style_workbook(writer.book)
     return out_path
 
@@ -1044,6 +1111,14 @@ def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResul
         "tee": config.tee,
     }
 
+    from .io import ensure_writable_outdir
+
+    # Fail on an unusable --outdir BEFORE the solve loop: the output
+    # directory was previously first touched after every scenario had
+    # solved, so a path collision or read-only filesystem discarded the
+    # entire batch at the very end.
+    ensure_writable_outdir(Path(config.outdir))
+
     apply_ieee_style()
     comparison = run_scenario_batch(
         base_typed, scenarios, solver_opts=solver_opts,
@@ -1092,6 +1167,10 @@ def run_scenarios(config: Any, scenarios: list[dict[str, Any]]) -> ScenarioResul
         )
     write_scenario_comparison_workbook(
         out_dir / "scenario_comparison.xlsx", comparison_sheet,
+        # comparison_sheet may be a fresh concat (risk rows), which
+        # does not reliably carry .attrs — hand the failures over
+        # explicitly from the batch frame.
+        failures=list(comparison.attrs.get("failed_scenarios") or []),
     )
     plot_scenario_comparison_bars(comparison, out_dir / "scenario_comparison.pdf")
     if len(comparison) >= 2:

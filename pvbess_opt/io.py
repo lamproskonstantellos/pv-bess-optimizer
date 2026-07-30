@@ -5946,6 +5946,30 @@ def unique_output_dir(candidate: Path) -> Path:
     return bumped
 
 
+def ensure_writable_outdir(outdir: str | Path) -> Path:
+    """Create ``outdir`` (parents included) and prove it is writable.
+
+    The batch routes (scenarios, sizing) touch the output directory only
+    AFTER every point has solved, so an --outdir pointing at an existing
+    file or a read-only filesystem was detected at the very end — with
+    100 % of the solver work already done and discarded.  The single-run
+    route fails before its solve (``make_run_layout`` runs first); this
+    probe gives the batch routes the same fail-before-solve contract.
+    """
+    outdir = Path(outdir)
+    try:
+        outdir.mkdir(parents=True, exist_ok=True)
+        probe = outdir / ".pvbess_write_probe"
+        probe.touch()
+        probe.unlink()
+    except OSError as exc:
+        raise OSError(
+            f"--outdir {outdir} is not a writable directory ({exc}); "
+            "fix the path before the batch spends solver time."
+        ) from exc
+    return outdir
+
+
 def make_run_layout(out_dir: Path) -> dict[str, Path]:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
