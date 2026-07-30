@@ -779,3 +779,24 @@ def test_armed_resolve_mode_validates_years_at_startup():
         "scenario_resolve_years": "garbage",
     }
     validate_workbook_params(typed)
+
+
+def test_free_form_string_keys_reject_booleans_on_the_config_route():
+    """Final-round-3 regression: the workbook route rejects a TRUE cell at
+    the kv-sheet layer, but the config route reached _parse_value's
+    free-form string branches directly and silently stored 'True' —
+    debt_sizing_scenario: true became a scenario NAME failing lookup
+    only if/when the armed engine ran."""
+    from pvbess_opt.io import _parse_value
+
+    for key in (
+        "debt_sizing_scenario", "entsoe_token", "market_cache_dir",
+        "raddatabase", "timeseries_path",
+    ):
+        with pytest.raises(ValueError, match=rf"'{key}'.*boolean True"):
+            _parse_value(key, True, None)
+    with pytest.raises(ValueError, match=r"'debt_sizing_deck'.*boolean"):
+        _parse_value("debt_sizing_deck", True, "low")
+    # Legitimate strings still pass verbatim / lowercased.
+    assert _parse_value("debt_sizing_scenario", "Upside", None) == "Upside"
+    assert _parse_value("debt_sizing_deck", "LOW", "low") == "low"

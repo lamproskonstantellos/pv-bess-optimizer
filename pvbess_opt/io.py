@@ -2800,13 +2800,28 @@ def _parse_value(key: str, raw: Any, default: Any) -> Any:
         "debt_sizing_scenario",
     ):
         # Free-form strings: a blank cell resolves to the default; a
-        # non-blank cell is taken verbatim (stripped).
+        # non-blank cell is taken verbatim (stripped).  A boolean here
+        # is always a drafting mistake — the workbook route rejects it
+        # at the kv-sheet layer, but the config route reaches this
+        # parser directly and previously stored the string 'True' (e.g.
+        # debt_sizing_scenario: true becoming a scenario NAME that
+        # fails lookup only if/when the armed engine runs).
+        if isinstance(raw, (bool, np.bool_)):
+            raise ValueError(
+                f"{key!r} expects a free-form string, got boolean "
+                f"{bool(raw)!r}; write the value as text."
+            )
         return _parse_pv_path(raw, default)
     if key == "debt_sizing_deck":
         # Free-form deck name (matched lowercase against the
         # <column>__<deck> variant suffixes); a blank cell keeps the
         # default.  Deck existence is checked by the validator, not
         # the parser.
+        if isinstance(raw, (bool, np.bool_)):
+            raise ValueError(
+                f"{key!r} expects a free-form deck name, got boolean "
+                f"{bool(raw)!r}; write the value as text."
+            )
         if raw is None or (isinstance(raw, float) and np.isnan(raw)):
             return default
         token = str(raw).strip().lower()
