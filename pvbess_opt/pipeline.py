@@ -1420,6 +1420,8 @@ def _run_intraday_stage2(
     )
     if config.strict:
         _check_strict_energy_balance(residuals)
+    else:
+        _warn_energy_balance_offenders(residuals)
     invariants = verify_dispatch_invariants(
         res2_full, params, mode=resolve_mode(params),
     )
@@ -1429,6 +1431,8 @@ def _run_intraday_stage2(
     )
     if config.strict:
         _check_strict_invariants(invariants)
+    else:
+        _warn_invariant_offenders(invariants)
     kpis2 = compute_kpis(res2, params, verify_balance=False)
     kpis2 = apply_operating_derates(kpis2, params)
     _emit_bess_utilisation_audit(kpis2, params)
@@ -1543,7 +1547,14 @@ def _scenario_slug(params: dict[str, Any]) -> str:
     return f"{mode}{suffix}"
 
 
-def _check_strict_invariants(invariants: dict[str, float]) -> None:
+def _invariant_offenders(invariants: dict[str, float]) -> dict[str, float]:
+    """Invariants above their strict-mode tolerances (shared detector).
+
+    Both modes use the SAME detector so the --strict help text stays
+    honest: non-strict runs previously printed the raw numbers only —
+    a genuine violation exited 0 with no WARNING anywhere, visible
+    solely to a client who reads the numeric [invariants] line.
+    """
     tol = ENERGY_TOLERANCE
     # Invariant 6 is an integer count and piggybacks on the same tol;
     # the smallest non-zero count is 1, which trivially exceeds tol=1e-3.
@@ -1583,10 +1594,26 @@ def _check_strict_invariants(invariants: dict[str, float]) -> None:
             "verify_dispatch_invariants is missing balancing/intraday "
             f"invariant keys: {missing}"
         )
+    return offenders
+
+
+def _check_strict_invariants(invariants: dict[str, float]) -> None:
+    offenders = _invariant_offenders(invariants)
     if offenders:
         raise AssertionError(
             "Strict-mode invariant violations: "
             + ", ".join(f"{k}={v:.6g}" for k, v in offenders.items())
+        )
+
+
+def _warn_invariant_offenders(invariants: dict[str, float]) -> None:
+    """Non-strict twin of :func:`_check_strict_invariants` — warn, exit 0."""
+    offenders = _invariant_offenders(invariants)
+    if offenders:
+        logger.warning(
+            "[invariants] violations above strict tolerances (rerun with "
+            "--strict to make these fatal): %s",
+            ", ".join(f"{k}={v:.6g}" for k, v in offenders.items()),
         )
 
 
@@ -1628,6 +1655,19 @@ def _check_strict_energy_balance(residuals: dict[str, float]) -> None:
         raise AssertionError(
             "Strict-mode energy-balance violations: "
             + ", ".join(f"{k}={v:.6g}" for k, v in offenders.items())
+        )
+
+
+def _warn_energy_balance_offenders(residuals: dict[str, float]) -> None:
+    """Non-strict twin of :func:`_check_strict_energy_balance`."""
+    offenders = {
+        k: float(v) for k, v in residuals.items() if v > ENERGY_TOLERANCE
+    }
+    if offenders:
+        logger.warning(
+            "[verify] energy-balance residuals above strict tolerances "
+            "(rerun with --strict to make these fatal): %s",
+            ", ".join(f"{k}={v:.6g}" for k, v in offenders.items()),
         )
 
 
@@ -1994,6 +2034,8 @@ def _run_one(
             )
             if config.strict:
                 _check_strict_energy_balance(residuals)
+            else:
+                _warn_energy_balance_offenders(residuals)
 
             invariants = verify_dispatch_invariants(
                 res_full, params, mode=resolve_mode(params),
@@ -2004,6 +2046,8 @@ def _run_one(
             )
             if config.strict:
                 _check_strict_invariants(invariants)
+            else:
+                _warn_invariant_offenders(invariants)
 
             kpis = compute_kpis(res, params, verify_balance=False)
             # Post-solve unavailability derate.  Multiplies a
