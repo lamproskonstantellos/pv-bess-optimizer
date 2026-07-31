@@ -1843,6 +1843,15 @@ def _resolve_uncertainty_config(
         int(config.monte_carlo) if config.monte_carlo is not None
         else int(econ.get("uncertainty_n_seeds", 30) or 30)
     )
+    if n_seeds < 0:
+        # The CLI parser rejects a negative --monte-carlo, but the
+        # programmatic RunConfig route reached here unchecked and
+        # silently aliased to the documented 0 (deterministic run).
+        # One shared gate at the choke point serves both surfaces.
+        raise ValueError(
+            f"monte_carlo/uncertainty_n_seeds must be >= 0, got "
+            f"{n_seeds} (0 = deterministic rolling-horizon run)."
+        )
     window = (
         int(config.window_hours) if config.window_hours is not None
         else int(econ.get("uncertainty_window_hours", 48) or 48)

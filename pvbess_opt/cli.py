@@ -13,6 +13,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+from pvbess_opt.io import UnusableOutdirError
 from pvbess_opt.pipeline import RunConfig, run
 from pvbess_opt.scenarios import (
     read_scenarios_block,
@@ -246,9 +247,12 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("File not found: %s", exc.filename or exc)
         logger.debug("Traceback:", exc_info=True)
         return 2
-    except OSError as exc:
-        # ensure_writable_outdir raises a self-explanatory one-liner
-        # (unusable --outdir); sibling user-error classes exit 2.
+    except UnusableOutdirError as exc:
+        # The dedicated outdir user-error class gets the clean rc-2
+        # one-liner; every OTHER OSError (disk-full mid-run, EIO, the
+        # builtin TimeoutError) stays on the generic rc-1 traceback
+        # path — a blanket `except OSError` here misclassified mid-run
+        # environment failures as input mistakes.
         logger.error("%s", exc)
         logger.debug("Traceback:", exc_info=True)
         return 2

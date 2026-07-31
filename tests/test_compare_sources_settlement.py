@@ -346,3 +346,20 @@ def test_ida_only_monte_carlo_is_rejected_as_degenerate():
         {**econ_ida_only, "uncertainty_dam_enabled": True}, "merchant",
     )
     assert cfg["enable_ida"] is True and cfg["enable_dam"] is True
+
+
+def test_programmatic_negative_seed_count_is_rejected():
+    """Final-verification polish: the CLI parser rejects a negative
+    --monte-carlo, but RunConfig(monte_carlo=-3) reached the resolver
+    unchecked and silently aliased to the documented 0 (deterministic
+    run).  One shared gate now serves both surfaces."""
+    with pytest.raises(ValueError, match="must be >= 0"):
+        _resolve_uncertainty_config(
+            RunConfig(excel="x.xlsx", monte_carlo=-3),
+            {"uncertainty_enabled": True}, "self_consumption",
+        )
+    cfg = _resolve_uncertainty_config(
+        RunConfig(excel="x.xlsx", monte_carlo=0),
+        {"uncertainty_enabled": True}, "self_consumption",
+    )
+    assert cfg["n_seeds"] == 0

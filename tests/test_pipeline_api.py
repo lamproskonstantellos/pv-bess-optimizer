@@ -774,3 +774,24 @@ def test_cli_polish_exit_codes(tmp_path, caplog):
     # mutation matrix while '-3' alone was probed).
     args = cli.parse_args(["x.xlsx", "--monte-carlo", "0"])
     assert args.monte_carlo == 0
+
+
+def test_mid_run_oserror_keeps_the_traceback_exit_class(monkeypatch, caplog):
+    """Final-verification polish: a blanket `except OSError` in cli.main
+    swept mid-run environment failures (disk-full, EIO, the builtin
+    TimeoutError) into the rc-2 user-error class with a bare one-liner;
+    only the dedicated UnusableOutdirError keeps the clean exit."""
+    import logging
+
+    import pvbess_opt.cli as cli_mod
+
+    def _explode(_config):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(cli_mod, "run", _explode)
+    with caplog.at_level(logging.ERROR):
+        rc = cli_mod.main([
+            str(ROOT / "inputs" / "input.xlsx"), "--outdir", "/tmp/x",
+        ])
+    assert rc == 1
+    assert any("Run failed" in r.getMessage() for r in caplog.records)
