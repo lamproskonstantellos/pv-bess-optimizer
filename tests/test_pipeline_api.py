@@ -769,3 +769,8 @@ def test_cli_polish_exit_codes(tmp_path, caplog):
     with pytest.raises(SystemExit) as exc_info:
         cli.parse_args(["x.xlsx", "--monte-carlo", "-3"])
     assert exc_info.value.code == 2
+    # Both sides of the boundary: 0 is the DOCUMENTED deterministic
+    # escape hatch and must stay parseable (a <= flip survived the
+    # mutation matrix while '-3' alone was probed).
+    args = cli.parse_args(["x.xlsx", "--monte-carlo", "0"])
+    assert args.monte_carlo == 0
