@@ -454,3 +454,61 @@ def test_non_strict_runs_warn_on_invariant_violations(caplog):
     assert any(
         "pv_split_kwh=7.5" in m and "--strict" in m for m in warned
     )
+
+    # Near-tolerance offender pins the THRESHOLD itself (the mutation
+    # matrix showed a 10x relaxation survived a 7.5-kWh-only probe):
+    # 0.005 kWh is 5x ENERGY_TOLERANCE — over the real gate, under a
+    # 10x-relaxed one.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        _warn_energy_balance_offenders({"pv_split_kwh": 0.005})
+    assert any(
+        "pv_split_kwh=0.005" in r.getMessage() for r in caplog.records
+    )
+
+
+@pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_non_strict_run_path_wires_the_offender_warning(
+    tmp_path, monkeypatch, caplog,
+):
+    """Convergence-round regression: the offender-warning fix was tested at
+    helper level only — deleting the _run_one wiring (reintroducing the
+    exact 'violation exits 0 with no WARNING anywhere' defect) survived
+    the whole file.  This test drives the REAL non-strict run path with
+    an injected violation and asserts the warning reaches the log."""
+    import logging
+    from pathlib import Path
+
+    import pvbess_opt.pipeline as pipeline_mod
+    from pvbess_opt.io import read_workbook, write_workbook
+    from pvbess_opt.pipeline import RunConfig, run
+
+    root = Path(__file__).resolve().parent.parent
+    typed = read_workbook(root / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)
+    for scope in ("plot_daily_scope", "plot_monthly_scope", "plot_yearly_scope"):
+        typed["simulation"][scope] = "none"
+    typed["bess"]["terminal_soc_equal"] = False
+    workbook = tmp_path / "wired.xlsx"
+    write_workbook(typed, workbook)
+
+    real_verify = pipeline_mod.verify_dispatch_invariants
+
+    def violating(res, params, **kwargs):
+        inv = dict(real_verify(res, params, **kwargs))
+        inv["invariant_1_pv_balance_kwh"] = 7.5
+        return inv
+
+    monkeypatch.setattr(
+        pipeline_mod, "verify_dispatch_invariants", violating,
+    )
+    with caplog.at_level(logging.WARNING):
+        run(RunConfig(
+            excel=workbook, solver="highs", outdir=tmp_path / "out",
+            mip_gap=0.05, time_limit=180, strict=False,
+        ))
+    assert any(
+        "invariant_1_pv_balance_kwh=7.5" in r.getMessage()
+        and "--strict" in r.getMessage()
+        for r in caplog.records
+    )

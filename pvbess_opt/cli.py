@@ -98,7 +98,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "All-combined) and emit a comparison plot "
              "(overrides workbook uncertainty_compare_sources).",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.monte_carlo is not None and args.monte_carlo < 0:
+        # A negative count fell through every `n_seeds > 0` gate and
+        # silently behaved like the documented 0 (deterministic RH).
+        parser.error("--monte-carlo must be >= 0 (0 = deterministic run)")
+    return args
 
 
 def _warn_single_run_flags_ignored(args: argparse.Namespace) -> None:
@@ -231,12 +236,35 @@ def main(argv: list[str] | None = None) -> int:
             "Input file %s is not a valid .xlsx workbook (%s).",
             input_path, exc,
         )
+        logger.debug("Traceback:", exc_info=True)
         return 2
     except FileNotFoundError as exc:
         # E.g. a config's timeseries_path pointing nowhere: one line
         # naming the file, same exit code as the missing-workbook path.
+        # The stack stays available at DEBUG so an internal write-phase
+        # FileNotFoundError is still diagnosable.
         logger.error("File not found: %s", exc.filename or exc)
+        logger.debug("Traceback:", exc_info=True)
         return 2
+    except OSError as exc:
+        # ensure_writable_outdir raises a self-explanatory one-liner
+        # (unusable --outdir); sibling user-error classes exit 2.
+        logger.error("%s", exc)
+        logger.debug("Traceback:", exc_info=True)
+        return 2
+    except ValueError as exc:
+        if "Excel file format cannot be determined" in str(exc):
+            # A non-Excel file saved with an .xlsx name (CSV/HTML/text)
+            # raises pandas' format-sniff ValueError instead of
+            # BadZipFile; same user error, same clean exit.
+            logger.error(
+                "Input file %s is not a valid .xlsx workbook (%s).",
+                input_path, exc,
+            )
+            logger.debug("Traceback:", exc_info=True)
+            return 2
+        logger.exception("Run failed")
+        return 1
     except Exception:
         logger.exception("Run failed")
         return 1

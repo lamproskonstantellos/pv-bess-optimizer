@@ -1230,3 +1230,113 @@ def test_batch_outdir_probed_before_solves(tmp_path):
     made = ensure_writable_outdir(tmp_path / "a" / "b")
     assert made.is_dir()
     assert not any(made.iterdir())  # the probe file is cleaned up
+
+
+def test_grid_cap_override_tokens_round_trip():
+    """Convergence-round regression: routing override values through
+    _parse_value missed the grid-cap keys' token dialect — the
+    documented 'unlimited'/'inf'/'disabled' forms were rejected on both
+    scenario surfaces while the workbook and config surfaces accepted
+    them.  One shared parser path now serves validation and apply."""
+    from pvbess_opt.scenarios import (
+        _apply_scenario_overrides,
+        validate_scenario_overrides,
+    )
+
+    base = {
+        "pv": {}, "bess": {}, "project": {}, "economics": {},
+        "simulation": {}, "balancing": {},
+    }
+    for token in ("unlimited", "inf", "disabled"):
+        validate_scenario_overrides(
+            {"name": "caps", "project": {"p_grid_export_max_kw": token}}
+        )
+        out = _apply_scenario_overrides(
+            base, {"name": "caps", "project": {"p_grid_export_max_kw": token}}
+        )
+        assert out["project"]["p_grid_export_max_kw"] == float("inf")
+    out = _apply_scenario_overrides(
+        base, {"name": "caps", "project": {"p_grid_import_max_kw": "unlimited"}}
+    )
+    assert out["project"]["p_grid_import_max_kw"] == float("inf")
+    # Garbage still fails fast naming the scenario and target.
+    with pytest.raises(ValueError, match=r"'caps'.*p_grid_export_max_kw"):
+        validate_scenario_overrides(
+            {"name": "caps", "project": {"p_grid_export_max_kw": "banana"}}
+        )
+
+
+def test_prepass_catches_armed_engine_store_errors(monkeypatch):
+    """Convergence-round regression: the dry pre-pass ran write+read only,
+    so an ARMED price-scenario engine's own input errors (missing
+    store, bad cadence) surfaced inside _build_financials — after each
+    scenario's full MILP; with the arming in the base workbook every
+    scenario burned its solve and the batch ended in the all-fail
+    error.  The pre-pass now pre-flights the engine's decks."""
+    import pvbess_opt.scenarios as scn_mod
+
+    typed = _trimmed_typed()
+    typed["scenario_engine"]["price_scenarios_enabled"] = True
+    typed["scenario_engine"]["scenario_projection_mode"] = "reprice"
+    typed["price_scenarios"] = [{
+        "name": "Central", "provider": "parametric", "vintage": "2026-07",
+        "weight_pct": 100.0, "store_path": "definitely_missing_store/x",
+        "notes": "",
+    }]
+
+    def _boom(*a, **k):  # pragma: no cover - must never be reached
+        raise AssertionError("solver invoked before the engine preflight")
+
+    monkeypatch.setattr(scn_mod, "evaluate_scenario", _boom)
+    # On the 96-step trim the engine's cadence check fires first — the
+    # same pre-solve error class as the missing store; either proves
+    # the preflight runs before any solve and names the scenario.
+    with pytest.raises(ValueError, match=r"scenario 'only'.*price-scenario"):
+        scn_mod.run_scenario_batch(
+            typed, [{"name": "only"}], solver_opts=_BATCH_SOLVER_OPTS,
+        )
+
+
+def test_unique_output_dir_reserves_by_mkdir(tmp_path):
+    """Convergence-round polish: the exists()-then-return probe left a
+    race window where two same-second runs both computed the identical
+    directory; the path is now RESERVED with an exclusive mkdir, so
+    successive calls (without any caller mkdir in between) never
+    collide."""
+    from pvbess_opt.io import unique_output_dir
+
+    first = unique_output_dir(tmp_path / "run_20260730_120000")
+    second = unique_output_dir(tmp_path / "run_20260730_120000")
+    assert first != second
+    assert first.is_dir() and second.is_dir()
+    assert second.name.endswith("_2")
+
+
+def test_batch_warns_once_per_drafting_mistake(caplog, monkeypatch):
+    """Convergence-round polish: validate_scenario_overrides ran three
+    times per scenario per batch (fail-fast loop, pre-pass apply,
+    evaluation apply), so one capex_multiplier-null stub warned three
+    times — reading as three affected scenarios in a long batch log."""
+    import logging
+
+    import pvbess_opt.scenarios as scn_mod
+
+    typed = _trimmed_typed()
+
+    def fake_evaluate(base_typed, scenario, **kwargs):
+        row = {c: 0.0 for c in _COMPARISON_COLUMNS}
+        row["name"] = str(scenario.get("name"))
+        return row
+
+    monkeypatch.setattr(scn_mod, "evaluate_scenario", fake_evaluate)
+    with caplog.at_level(logging.WARNING):
+        scn_mod.run_scenario_batch(
+            typed,
+            [{"name": "stub", "capex_multiplier": None}],
+            solver_opts=_BATCH_SOLVER_OPTS,
+        )
+    stub_warnings = [
+        r for r in caplog.records
+        if "empty 'capex_multiplier'" in r.getMessage()
+    ]
+    assert len(stub_warnings) == 1

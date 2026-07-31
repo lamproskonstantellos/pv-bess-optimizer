@@ -729,3 +729,43 @@ def test_mode_override_reaches_the_assumptions_record(tmp_path):
         result.out_dir / "01_inputs" / "assumptions_summary.txt"
     ).read_text(encoding="utf-8")
     assert "self_consumption" not in summary_txt
+
+
+def test_cli_polish_exit_codes(tmp_path, caplog):
+    """Convergence-round polish: the remaining user-error shapes join the
+    rc-2 one-liner contract — a non-zip file saved as .xlsx (pandas
+    format-sniff ValueError, not BadZipFile), an unusable --outdir
+    (OSError from the writability probe), and a negative --monte-carlo
+    (previously a silent alias of the documented 0)."""
+    import logging
+
+    from pvbess_opt import cli
+
+    caplog.clear()
+    textfile = tmp_path / "notes.xlsx"
+    textfile.write_text("this is a csv,really\n1,2\n")
+    with caplog.at_level(logging.ERROR):
+        rc = cli.main([str(textfile), "--outdir", str(tmp_path / "o1")])
+    assert rc == 2
+    assert any(
+        "notes.xlsx" in r.getMessage() and "not a valid .xlsx" in r.getMessage()
+        for r in caplog.records
+    )
+
+    caplog.clear()
+    blocker = tmp_path / "iamafile"
+    blocker.write_text("x")
+    with caplog.at_level(logging.ERROR):
+        rc = cli.main([
+            str(ROOT / "inputs" / "input.xlsx"),
+            "--outdir", str(blocker / "nested"),
+        ])
+    # An unusable --outdir (a FILE in the path) surfaces as OSError from
+    # the output-dir reservation, before any solve; it now lands as a
+    # clean rc-2 one-liner instead of a traceback.
+    assert rc == 2
+    assert not any("Traceback" in r.getMessage() for r in caplog.records)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.parse_args(["x.xlsx", "--monte-carlo", "-3"])
+    assert exc_info.value.code == 2

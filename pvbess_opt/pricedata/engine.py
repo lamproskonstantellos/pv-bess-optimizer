@@ -384,6 +384,103 @@ class ScenarioApplication:
     applied_trajectories: dict[str, dict[str, Any]] | None = None
 
 
+def _engine_context(
+    econ: dict[str, Any],
+    ts: pd.DataFrame,
+    scenarios: list[dict[str, Any]],
+) -> tuple[int, int, int, str, int, float, str]:
+    """Shared armed-engine setup: validated deck-building parameters.
+
+    Factored out of :func:`apply_price_scenarios` so the batch
+    pre-flight (:func:`preflight_price_scenarios`) validates with the
+    IDENTICAL rules — a divergent copy would drift.
+    """
+    n_years = int(econ.get("project_lifecycle_years", 0) or 0)
+    if n_years <= 0:
+        raise PriceDataError(
+            "price scenarios need project_lifecycle_years >= 1."
+        )
+    # Default the start year to the SAME schema value the rest of the
+    # pipeline uses (io.PROJECT_SHEET_DEFAULTS): a blank/zero cell must not
+    # collapse to calendar year 0, which drives the real→nominal / TYNDP
+    # basis bridge (Eq. G-basis) to ~0 and silently zeroes projected
+    # prices.  Lazy import keeps pricedata decoupled from the heavy io
+    # module and sidesteps any import cycle.
+    from pvbess_opt.io import PROJECT_SHEET_DEFAULTS, SCENARIO_ENGINE_SHEET_DEFAULTS
+
+    start_year = int(
+        econ.get("project_start_year")
+        or PROJECT_SHEET_DEFAULTS["project_start_year"]
+    )
+    if start_year <= 0:
+        raise PriceDataError(
+            "price scenarios need a positive project_start_year (got "
+            f"{start_year!r}); set project_start_year on the project sheet."
+        )
+    dt_minutes = _infer_dt_minutes(ts)
+    engine_basis = str(econ.get("price_basis", "nominal") or "nominal")
+    engine_base_year = int(econ.get("price_base_year", 0) or 0)
+    # Default a MISSING cpi_pct to the schema value (2.0), not 0.0: a bare
+    # `econ.get('cpi_pct', 0.0) or 0.0` diverges from the schema default and
+    # would deflate a real-/TYNDP-basis store at 0 % CPI for any caller that
+    # bypasses read_economic_params.  An explicit 0.0 is preserved (a valid
+    # "no inflation" choice), so `... or SCHEMA` is deliberately NOT used.
+    _cpi = econ.get("cpi_pct")
+    cpi_pct = float(
+        SCENARIO_ENGINE_SHEET_DEFAULTS["cpi_pct"] if _cpi is None else _cpi
+    )
+
+    requested = str(econ.get("debt_sizing_scenario", "") or "").strip()
+    names = [str(entry["name"]) for entry in scenarios]
+    if requested and requested not in names:
+        raise PriceDataError(
+            f"debt_sizing_scenario {requested!r} does not match any "
+            f"enabled price scenario ({', '.join(names)})."
+        )
+    applied_name = requested or names[0]
+    return (
+        n_years, start_year, dt_minutes, engine_basis, engine_base_year,
+        cpi_pct, applied_name,
+    )
+
+
+def preflight_price_scenarios(
+    econ: dict[str, Any], ts: pd.DataFrame, *, base_dir: Path,
+) -> None:
+    """Cheap structural validation of an armed engine's inputs — no solve.
+
+    Builds every enabled scenario's deck exactly like
+    :func:`apply_price_scenarios` (store_path resolution against
+    ``base_dir``, meta.yaml presence, curve cadence, the
+    debt_sizing_scenario name check) WITHOUT deriving trajectories or
+    re-solving, so the scenario batch's dry pre-pass can reject this
+    error class before any solver time — previously a missing store or
+    a non-year curve cadence surfaced only after each scenario's full
+    MILP.  No-op when the layer is disarmed, unconfigured, or in
+    ``trajectory_only`` mode.
+    """
+    if not bool(econ.get("price_scenarios_enabled", False)):
+        return
+    scenarios = econ.get("price_scenarios") or []
+    if not scenarios:
+        return
+    mode = str(
+        econ.get("scenario_projection_mode", "reprice") or "reprice",
+    ).strip().lower()
+    if mode == "trajectory_only":
+        return
+    (n_years, start_year, dt_minutes, engine_basis, engine_base_year,
+     cpi_pct, _applied_name) = _engine_context(econ, ts, scenarios)
+    for entry in scenarios:
+        build_scenario_deck(
+            entry,
+            base_dir=base_dir, ts=ts, n_steps=len(ts),
+            dt_minutes=dt_minutes, n_years=n_years,
+            start_year=start_year, engine_basis=engine_basis,
+            engine_base_year=engine_base_year, cpi_pct=cpi_pct,
+        )
+
+
 def apply_price_scenarios(
     econ: dict[str, Any],
     ts: pd.DataFrame,
@@ -444,49 +541,8 @@ def apply_price_scenarios(
             "caller must pass params=."
         )
 
-    n_years = int(econ.get("project_lifecycle_years", 0) or 0)
-    if n_years <= 0:
-        raise PriceDataError(
-            "price scenarios need project_lifecycle_years >= 1."
-        )
-    # Default the start year to the SAME schema value the rest of the
-    # pipeline uses (io.PROJECT_SHEET_DEFAULTS): a blank/zero cell must not
-    # collapse to calendar year 0, which drives the real→nominal / TYNDP
-    # basis bridge (Eq. G-basis) to ~0 and silently zeroes projected
-    # prices.  Lazy import keeps pricedata decoupled from the heavy io
-    # module and sidesteps any import cycle.
-    from pvbess_opt.io import PROJECT_SHEET_DEFAULTS, SCENARIO_ENGINE_SHEET_DEFAULTS
-
-    start_year = int(
-        econ.get("project_start_year")
-        or PROJECT_SHEET_DEFAULTS["project_start_year"]
-    )
-    if start_year <= 0:
-        raise PriceDataError(
-            "price scenarios need a positive project_start_year (got "
-            f"{start_year!r}); set project_start_year on the project sheet."
-        )
-    dt_minutes = _infer_dt_minutes(ts)
-    engine_basis = str(econ.get("price_basis", "nominal") or "nominal")
-    engine_base_year = int(econ.get("price_base_year", 0) or 0)
-    # Default a MISSING cpi_pct to the schema value (2.0), not 0.0: a bare
-    # `econ.get('cpi_pct', 0.0) or 0.0` diverges from the schema default and
-    # would deflate a real-/TYNDP-basis store at 0 % CPI for any caller that
-    # bypasses read_economic_params.  An explicit 0.0 is preserved (a valid
-    # "no inflation" choice), so `... or SCHEMA` is deliberately NOT used.
-    _cpi = econ.get("cpi_pct")
-    cpi_pct = float(
-        SCENARIO_ENGINE_SHEET_DEFAULTS["cpi_pct"] if _cpi is None else _cpi
-    )
-
-    requested = str(econ.get("debt_sizing_scenario", "") or "").strip()
-    names = [str(entry["name"]) for entry in scenarios]
-    if requested and requested not in names:
-        raise PriceDataError(
-            f"debt_sizing_scenario {requested!r} does not match any "
-            f"enabled price scenario ({', '.join(names)})."
-        )
-    applied_name = requested or names[0]
+    (n_years, start_year, dt_minutes, engine_basis, engine_base_year,
+     cpi_pct, applied_name) = _engine_context(econ, ts, scenarios)
 
     fan: dict[str, pd.DataFrame] = {}
     weights: dict[str, float] = {}

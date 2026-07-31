@@ -106,7 +106,7 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
     ``bess.power_kw``, ``bess.capacity_kwh`` included), the bare
     ``balancing`` on/off scalar, or the ``capex_multiplier`` special.
     """
-    from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS, _parse_value
+    from .io import _KEY_TO_SHEET, _SHEET_DEFAULTS
 
     name = scenario.get("name", "<unnamed>")
     for section, value in scenario.items():
@@ -235,24 +235,18 @@ def validate_scenario_overrides(scenario: dict[str, Any]) -> None:
                     "rescale) or run separate base workbooks."
                 )
             if canonical in defaults:
-                # Route the VALUE through the loader's typed parser too.
-                # A scenarios file is the second YAML surface for these
-                # keys: previously values were copied verbatim into the
-                # materialised workbook, so a native list stringified to
-                # '[1, 5]' garbage and value errors surfaced only
-                # mid-batch — after earlier scenarios' paid solver time —
-                # naming neither the scenario nor the mistake.
-                # ``pv_nameplate_kwp`` keeps its dedicated guards in
-                # ``_apply_scenario_overrides`` (profile rescale needs
-                # the raw form).
+                # Route the VALUE through the SAME parser the apply path
+                # uses (_parsed_override_value): a scenarios file is the
+                # second YAML surface for these keys, and the two paths
+                # once diverged — the validator inlined _parse_value and
+                # missed the grid-cap keys' _parse_grid_export_max
+                # special case, rejecting the documented 'unlimited' /
+                # 'inf' / 'disabled' tokens that the workbook and config
+                # surfaces accept.  ``pv_nameplate_kwp`` keeps its
+                # dedicated guards in ``_apply_scenario_overrides``
+                # (profile rescale needs the raw form).
                 if canonical != "pv_nameplate_kwp":
-                    try:
-                        _parse_value(canonical, raw, defaults[canonical])
-                    except (TypeError, ValueError) as exc:
-                        raise ValueError(
-                            f"scenario {name!r}: override {section}.{key} "
-                            f"= {raw!r}: {exc}"
-                        ) from exc
+                    _parsed_override_value(section, key, canonical, raw, name)
                 continue
             owner = _KEY_TO_SHEET.get(canonical)
             hint = (
@@ -470,12 +464,19 @@ def _parsed_override_value(
     keeps the scenarios file and the structured-config surface (which
     already runs ``_parse_value``) in agreement.
     """
-    from .io import _SHEET_DEFAULTS, _parse_value
+    from .io import _SHEET_DEFAULTS, _parse_grid_export_max, _parse_value
 
     defaults = _SHEET_DEFAULTS.get(section) or {}
     if canonical not in defaults:
         return raw
     try:
+        if canonical in ("p_grid_export_max_kw", "p_grid_import_max_kw"):
+            # The grid caps speak the documented 'unlimited' / 'inf' /
+            # 'disabled' token dialect; the workbook kv layer and the
+            # structured-config route both special-case them through
+            # _parse_grid_export_max, and _parse_value's numeric branch
+            # would reject the tokens — the third surface must agree.
+            return _parse_grid_export_max(raw, canonical)
         return _parse_value(canonical, raw, defaults[canonical])
     except (TypeError, ValueError) as exc:
         raise ValueError(
@@ -485,8 +486,14 @@ def _parsed_override_value(
 
 def _apply_scenario_overrides(
     base_typed: dict[str, Any], scenario: dict[str, Any],
+    *, prevalidated: bool = False,
 ) -> dict[str, Any]:
-    validate_scenario_overrides(scenario)
+    # ``prevalidated`` lets the batch (which validates every scenario in
+    # its explicit fail-fast loop) skip the re-validation here — the
+    # validator's warning side effects (capex_multiplier stubs, no-shape
+    # nameplate) previously fired three times per scenario per batch.
+    if not prevalidated:
+        validate_scenario_overrides(scenario)
     typed = copy.deepcopy(base_typed)
     _scn_name = scenario.get("name", "scenario")
     _base_nameplate = float(
@@ -711,6 +718,7 @@ def evaluate_scenario(
     base_typed: dict[str, Any], scenario: dict[str, Any], *,
     solver_opts: dict[str, Any],
     base_dir: Path | None = None,
+    prevalidated: bool = False,
 ) -> dict[str, Any]:
     """Run one scenario and return its comparison row."""
     from .availability import apply_operating_derates
@@ -719,7 +727,9 @@ def evaluate_scenario(
     from .optimization import run_scenario
     from .pipeline import _build_financials
 
-    typed = _apply_scenario_overrides(base_typed, scenario)
+    typed = _apply_scenario_overrides(
+        base_typed, scenario, prevalidated=prevalidated,
+    )
     scn_name = str(scenario.get("name", "scenario"))
     tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_"))
     try:
@@ -815,10 +825,28 @@ def run_scenario_batch(
         scn_name = str(scn.get("name", "<unnamed>"))
         tmp = Path(tempfile.mkdtemp(prefix="pvbess_scn_val_"))
         try:
-            typed = _apply_scenario_overrides(base_typed, scn)
+            typed = _apply_scenario_overrides(
+                base_typed, scn, prevalidated=True,
+            )
             xlsx = tmp / "scenario.xlsx"
             write_workbook(typed, xlsx)
-            read_inputs(xlsx)
+            _params_chk, _ts_chk = read_inputs(xlsx)
+            # An ARMED price-scenario engine's own inputs (store_path
+            # resolution, meta.yaml, curve cadence) previously escaped
+            # this pre-pass and surfaced only inside _build_financials —
+            # after each scenario's full MILP; with the arming in the
+            # base workbook, EVERY scenario burned its solve and the
+            # batch ended in the all-fail error.  Validate them here,
+            # against the same base_dir the evaluation threads.
+            from .economics import read_economic_params
+            from .pricedata.engine import preflight_price_scenarios
+
+            preflight_price_scenarios(
+                read_economic_params(xlsx), _ts_chk,
+                base_dir=(
+                    Path(base_dir) if base_dir is not None else xlsx.parent
+                ),
+            )
         except (ValueError, KeyError) as exc:
             if str(exc).startswith("scenario "):
                 raise
@@ -837,6 +865,7 @@ def run_scenario_batch(
         try:
             rows.append(evaluate_scenario(
                 base_typed, scn, solver_opts=solver_opts, base_dir=base_dir,
+                prevalidated=True,
             ))
         except (ValueError, RuntimeError) as exc:
             logger.error(

@@ -913,6 +913,16 @@ def _low_price_sizing_cashflow(
     typed = _apply_scenario_overrides(typed, {
         "name": "debt-sizing-low-price-case",
         "price_deck": deck,
+        # The re-read carries the workbook's STORED mode; a CLI/RunConfig
+        # --mode override lives in the resolved params/econ only, so the
+        # deck that SIZES THE DEBT previously solved the wrong regime
+        # while the delivered assumptions record (correctly) claimed the
+        # resolved one.  Thread the resolved mode like run_scenarios
+        # patches its batch base.
+        "project": {
+            "mode": str(econ.get("mode", "self_consumption")
+                        or "self_consumption"),
+        },
         "economics": {
             "debt_sizing_mode": "manual",
             "lender_cases_enabled": False,
@@ -1868,7 +1878,7 @@ def _resolve_uncertainty_config(
             "--rolling-horizon."
         )
     if enabled and n_seeds > 0 and not (
-        enable_dam or enable_pv or enable_load or enable_ida
+        enable_dam or enable_pv or enable_load
     ):
         # Zero effective noise sources make every Monte Carlo seed
         # byte-identical: the delivered percentiles collapse to a point
@@ -1876,15 +1886,34 @@ def _resolve_uncertainty_config(
         # exactly 0.00 and VaR == CVaR — all silently, at the full cost
         # of n_seeds rolling-horizon runs (x4 in compare mode, where the
         # 'all' ensemble feeds the DELIVERED aggregates).
+        #
+        # enable_ida deliberately does NOT count as an effective source:
+        # the seed noise perturbs the window's ida_price FORECAST, but
+        # the Stage-1 window MILP never reads ida_price (the intraday
+        # block needs the DA position columns of a committed schedule)
+        # and the Stage-2 redispatch settles on the ORIGINAL, noise-free
+        # intraday prices — so an ida-only configuration is exactly the
+        # point-mass pathology this guard exists to reject.
+        _ida_note = (
+            "intraday-price noise (uncertainty_ida_enabled) does not by "
+            "itself differentiate seeds — the two-stage redispatch "
+            "settles on the actual intraday prices"
+            if enable_ida else
+            "intraday-price noise is off ("
+            + ("uncertainty_ida_enabled is FALSE"
+               if bool(econ.get("id_enabled", False))
+               else "id_enabled is FALSE")
+            + ")"
+        )
         raise ValueError(
             f"uncertainty_enabled with uncertainty_n_seeds = {n_seeds} "
             "but no effective noise source: uncertainty_dam_enabled, "
             "uncertainty_pv_enabled and uncertainty_load_enabled "
-            "resolve to FALSE (merchant mode forces load noise off; "
-            "intraday-price noise needs id_enabled). Every seed would "
-            "be identical, so the delivered Monte Carlo percentiles, "
-            "imbalance settlement and VaR/CVaR would be a point mass. "
-            "Enable at least one source, or set uncertainty_n_seeds = 0 "
+            "resolve to FALSE (merchant mode forces load noise off), "
+            f"and {_ida_note}. Every seed would be identical, so the "
+            "delivered Monte Carlo percentiles, imbalance settlement "
+            "and VaR/CVaR would be a point mass. Enable at least one "
+            "of the DAM/PV/load sources, or set uncertainty_n_seeds = 0 "
             "for the deterministic rolling-horizon run."
         )
     # The loader enforces window >= 2 x commit whenever the imbalance

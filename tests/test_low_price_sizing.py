@@ -320,3 +320,49 @@ def test_scenario_batch_over_low_price_base_does_not_crash():
         solver_opts={},
     )
     assert np.isfinite(row2["npv_eur"])
+
+
+@pytest.mark.skipif(not _highs_available(), reason="HiGHS solver not installed")
+def test_low_price_deck_redispatch_honours_the_mode_override(
+    tmp_path, monkeypatch,
+):
+    """Convergence-round regression: the deck re-dispatch that SIZES THE
+    DEBT re-read the workbook's stored mode, so a --mode merchant run on
+    a self_consumption workbook sized debt on a self_consumption deck
+    cashflow while the delivered assumptions record said merchant."""
+    from pathlib import Path
+
+    import pvbess_opt.pipeline as pipeline_mod
+    from pvbess_opt.io import read_workbook, write_workbook
+    from pvbess_opt.pipeline import RunConfig, run
+
+    root = Path(__file__).resolve().parent.parent
+    typed = read_workbook(root / "inputs" / "input.xlsx")
+    typed["ts"] = typed["ts"].iloc[:96].reset_index(drop=True)
+    typed["ts"]["dam_price_eur_per_mwh__low"] = (
+        typed["ts"]["dam_price_eur_per_mwh"].astype(float) * 0.5
+    )
+    for scope in ("plot_daily_scope", "plot_monthly_scope", "plot_yearly_scope"):
+        typed["simulation"][scope] = "none"
+    typed["bess"]["terminal_soc_equal"] = False
+    typed["economics"]["gearing_pct"] = 60.0
+    typed["economics"]["debt_sizing_mode"] = "target_dscr"
+    typed["economics"]["debt_sizing_case"] = "low_price"
+    typed["economics"]["sensitivity_enabled"] = False
+    workbook = tmp_path / "deck.xlsx"
+    write_workbook(typed, workbook)
+
+    solved_modes: list[str] = []
+    real_run_scenario = pipeline_mod.run_scenario
+
+    def spying_run_scenario(params, ts, **kwargs):
+        solved_modes.append(str(params.get("mode")))
+        return real_run_scenario(params, ts, **kwargs)
+
+    monkeypatch.setattr(pipeline_mod, "run_scenario", spying_run_scenario)
+    run(RunConfig(
+        excel=workbook, solver="highs", outdir=tmp_path / "out",
+        mip_gap=0.05, time_limit=180, mode="merchant",
+    ))
+    # Headline solve AND the deck re-dispatch both run the resolved mode.
+    assert solved_modes == ["merchant", "merchant"]
