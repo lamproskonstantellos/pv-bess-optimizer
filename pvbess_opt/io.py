@@ -6023,7 +6023,14 @@ def unique_output_dir(candidate: Path) -> Path:
     where each run actually went.
     """
     candidate = Path(candidate)
-    candidate.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # A file in the parent chain / unwritable filesystem: the same
+        # user-error class as ensure_writable_outdir.
+        raise UnusableOutdirError(
+            f"output directory {candidate} cannot be created ({exc})."
+        ) from exc
     current = candidate
     n = 1
     while True:
@@ -6033,12 +6040,26 @@ def unique_output_dir(candidate: Path) -> Path:
             n += 1
             current = candidate.with_name(f"{candidate.name}_{n}")
             continue
+        except OSError as exc:
+            raise UnusableOutdirError(
+                f"output directory {current} cannot be created ({exc})."
+            ) from exc
         if n > 1:
             logger.info(
                 "[io] output directory %s already exists (same-second "
                 "run stamp); writing to %s instead.", candidate, current,
             )
         return current
+
+
+class UnusableOutdirError(OSError):
+    """The requested output directory cannot be created or written.
+
+    A dedicated subclass so the CLI can give this USER-error class its
+    clean rc-2 one-liner without sweeping unrelated mid-run OSErrors
+    (disk-full, EIO, the builtin TimeoutError) into the same exit
+    class — those keep the rc-1 traceback.
+    """
 
 
 @contextlib.contextmanager
@@ -6079,7 +6100,7 @@ def ensure_writable_outdir(outdir: str | Path) -> Path:
         probe.touch()
         probe.unlink()
     except OSError as exc:
-        raise OSError(
+        raise UnusableOutdirError(
             f"--outdir {outdir} is not a writable directory ({exc}); "
             "fix the path before the batch spends solver time."
         ) from exc

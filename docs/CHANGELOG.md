@@ -816,6 +816,28 @@ Pre-delivery release audit (final round 2):
   `enabled` toggle and the grid point-count guard; the augmentation
   years document the native list form.
 
+Pre-delivery release audit (final round 5 — closing verification):
+
+- **One seed-count gate for both surfaces.** `RunConfig(monte_carlo=-3)`
+  bypassed the parser-only `--monte-carlo` gate and silently aliased to
+  the documented 0; the resolver now rejects negative seed counts at
+  the shared choke point.
+- **Scoped outdir exit class.** The output-directory helpers raise a
+  dedicated `UnusableOutdirError` and only that class gets the CLI's
+  clean rc-2 one-liner; unrelated mid-run `OSError`s (disk-full, EIO,
+  the builtin `TimeoutError`) keep the rc-1 traceback.
+- **Final mutation pass closed.** The last two boundary survivors were
+  test-only: the batch warn-once test now drives the real evaluation
+  path (solver stubbed one level below), and both sides of the
+  `--monte-carlo` zero boundary are pinned.
+- Known accepted corner (documented, not fixed): overriding the mode
+  onto a workbook whose intraday venue requires the stored mode fails
+  loudly at the debt-sizing deck materialise — after the headline
+  solve and without naming the override; the input is contradictory
+  and the pre-change behaviour (silently sizing debt in the wrong
+  regime) was strictly worse.  A resolved-mode venue-gate
+  re-validation at override time is the candidate future improvement.
+
 Pre-delivery release audit (final round 4 — convergence verification):
 
 - **ida-only Monte Carlo is rejected as degenerate.** The zero-noise

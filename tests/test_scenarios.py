@@ -1323,18 +1323,23 @@ def test_batch_warns_once_per_drafting_mistake(caplog, monkeypatch):
 
     typed = _trimmed_typed()
 
-    def fake_evaluate(base_typed, scenario, **kwargs):
-        row = {c: 0.0 for c in _COMPARISON_COLUMNS}
-        row["name"] = str(scenario.get("name"))
-        return row
+    # Stub ONE LEVEL BELOW evaluate_scenario (the solver), so the REAL
+    # evaluation path — including its _apply_scenario_overrides call and
+    # the prevalidated flag it threads — still executes: a wholesale
+    # evaluate stub left the evaluation-side re-validation unobserved
+    # (the mutation matrix flipped that call's prevalidated=True to
+    # False and survived).
+    def _no_solve(*_a, **_k):
+        raise RuntimeError("solver stub: batch warn-count probe")
 
-    monkeypatch.setattr(scn_mod, "evaluate_scenario", fake_evaluate)
+    monkeypatch.setattr("pvbess_opt.optimization.run_scenario", _no_solve)
     with caplog.at_level(logging.WARNING):
-        scn_mod.run_scenario_batch(
-            typed,
-            [{"name": "stub", "capex_multiplier": None}],
-            solver_opts=_BATCH_SOLVER_OPTS,
-        )
+        with pytest.raises(RuntimeError, match="all 1 scenarios failed"):
+            scn_mod.run_scenario_batch(
+                typed,
+                [{"name": "stub", "capex_multiplier": None}],
+                solver_opts=_BATCH_SOLVER_OPTS,
+            )
     stub_warnings = [
         r for r in caplog.records
         if "empty 'capex_multiplier'" in r.getMessage()
