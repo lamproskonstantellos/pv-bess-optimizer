@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Added (input workbook guardrails)
+
+- **Input-workbook guardrails** (`scripts/polish_input_workbook.py`,
+  `inputs/input.xlsx`): the ten parameter sheets now carry
+  spreadsheet-level guardrails generated from the loader's own
+  schemas, so the workbook UI and the parser cannot disagree.  Every
+  boolean key gets a TRUE/FALSE in-cell dropdown and every enumerated
+  key (`mode`, `support_scheme`, `bidding_zone`, ...) a dropdown
+  listing exactly the loader's accepted values (56 dropdowns); numeric
+  keys with hard loader bounds get range validation with the same
+  interval (23 rules; keys with half-open `(0, hi]` loader bounds —
+  the round-trip efficiencies, `production_p90_factor_pct`,
+  `bess_eol_soh_pct` — warn instead of blocking);
+  rows of disabled feature blocks (`balancing_enabled`, `id_enabled`,
+  `uncertainty_enabled`, `price_scenarios_enabled`, `ppa_enabled`,
+  `support_scheme = none`) are greyed via conditional formatting until
+  the toggle enables them (79 rules); and parameter sheets are
+  protected without a password so only the `value` column is editable
+  (key/unit/notes stay locked, data-entry sheets stay open, Review >
+  Unprotect Sheet lifts it).  Selecting a guarded cell shows a tooltip
+  with the accepted values or range; the shipped workbook keeps its
+  single header accent — no extra fills are introduced.
+  The guardrails are a convenience layer only — the loaders
+  keep validating every value on every surface (YAML/JSON configs
+  carry no dropdowns; pasting bypasses spreadsheet validation).
+  `tests/test_input_workbook_guardrails.py` locks the shipped workbook
+  to the schemas: dropdown lists must equal `_BOOL_KEYS` /
+  `_ALLOWED_VALUES`, every polisher bound is probed just outside its
+  range against `validate_workbook_params` (with the PPA share probed
+  under `ppa_enabled = TRUE`, since its check is gated on the
+  contract), and protection, dimming anchors, idempotence and the
+  loader round-trip are asserted — so a loader schema change fails the
+  suite until the polisher is re-run.
+
 ### Added (market data & price scenarios)
 
 - **Market-data ingestion** (`market_data` sheet,

@@ -12,6 +12,46 @@ optional opt-in sheets ``sizing``, ``scenarios``, ``trajectories``,
 shipped inert: gated by an ``enabled`` toggle or defaulting to the
 inactive source / master switch).  All keys use lowercase snake_case.
 
+Workbook guardrails
+-------------------
+
+The ten parameter sheets carry spreadsheet-level guardrails generated
+from the loader's own schemas by ``scripts/polish_input_workbook.py``,
+so the workbook UI and the parser cannot disagree:
+
+* **Dropdowns.**  Every boolean key offers a TRUE / FALSE in-cell
+  dropdown, and every enumerated key (``mode``, ``support_scheme``,
+  ``bidding_zone``, ...) lists exactly the values the loader accepts.
+  Selecting a guarded cell shows a tooltip with the accepted values.
+* **Range checks.**  Numeric keys with hard loader bounds (percentage
+  shares, SOC fractions, ``project_lifecycle_years``, ...) reject an
+  out-of-range entry at typing time with the same interval the loader
+  enforces.  Keys with a half-open ``(0, hi]`` loader bound (the
+  round-trip efficiencies, ``production_p90_factor_pct``,
+  ``bess_eol_soh_pct``) warn instead of blocking, since Excel
+  validation cannot express an open endpoint exactly.
+* **Dependency dimming.**  Rows of a feature block whose toggle is off
+  (``balancing_enabled``, ``id_enabled``, ``uncertainty_enabled``,
+  ``price_scenarios_enabled``, ``ppa_enabled``, and the ``support_*``
+  rows while ``support_scheme = none``) are greyed out until the
+  toggle enables them.  Visual only — the cells stay editable.
+* **Sheet protection.**  On parameter sheets only the ``value`` column
+  is editable; the key / unit / notes columns and the header are
+  locked so a stray edit cannot silently rename a key (the reader
+  matches keys exactly, and a damaged key would make the row fall back
+  to its default).  The protection carries **no password** — lift it
+  any time via *Review > Unprotect Sheet*.  Data-entry sheets
+  (``timeseries``, ``scenarios``, ``sizing``, ``trajectories``,
+  ``price_scenarios``, the max-injection sheets) stay fully editable.
+
+The guardrails are a convenience layer only: the loaders keep
+validating every value on every surface (YAML / JSON configs carry no
+dropdowns, and pasting bypasses spreadsheet validation), so a value
+that slips past Excel is still rejected with the same message.
+``tests/test_input_workbook_guardrails.py`` locks the shipped workbook
+to the schemas — an enum value added to the loader fails the suite
+until the polisher is re-run.
+
 Sheet ``timeseries``
 --------------------
 
