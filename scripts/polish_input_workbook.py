@@ -30,6 +30,15 @@ in order:
 6. Create the optional ``trajectories`` sheet (per-year stream
    multipliers, Eq. E24) with its shipped disabled example when the
    workbook predates it; an existing sheet is left untouched.
+7. Attach schema-generated guardrails to the parameter sheets:
+   TRUE/FALSE and enum dropdowns from :data:`pvbess_opt.io._BOOL_KEYS`
+   / :data:`pvbess_opt.io._ALLOWED_VALUES`, numeric range validation
+   mirroring :func:`pvbess_opt.io.validate_workbook_params` bounds,
+   conditional-formatting dimming for feature blocks whose toggle is
+   off, and passwordless sheet protection that leaves only the value
+   column editable.  ``tests/test_input_workbook_guardrails.py`` locks
+   the shipped workbook to the schemas, so a loader schema change
+   fails the suite until this script is re-run.
 """
 
 from __future__ import annotations
@@ -39,8 +48,11 @@ import logging
 import sys
 from pathlib import Path
 
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
+from openpyxl import Workbook, load_workbook
+from openpyxl.formatting.formatting import ConditionalFormattingList
+from openpyxl.formatting.rule import FormulaRule
+from openpyxl.styles import Font, PatternFill, Protection
+from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
 # Allow running as a standalone script
@@ -326,6 +338,241 @@ def _ensure_price_scenarios_sheet(wb) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# Input guardrails — dropdowns, numeric bounds, protection, dependency tint
+# ---------------------------------------------------------------------------
+
+#: Grey-out styling for rows whose feature block is switched off.
+_DIMMED_FONT_COLOR = "FF9CA3AF"
+
+#: Hard numeric bounds mirrored from ``validate_workbook_params`` — the
+#: validator stays the source of truth (the guardrails test probes the
+#: loader just outside every bound listed here, so this table cannot
+#: silently drift).  Closed [lo, hi] bounds only; entries render as a
+#: stop-style "decimal between" validation.
+_NUMERIC_BOUNDS: dict[str, tuple[float, float]] = {
+    # io.validate_workbook_params: "must be in [0, 100]"
+    "gearing_pct": (0.0, 100.0),
+    "bess_overbuild_pct": (0.0, 100.0),
+    "corporate_tax_rate_pct": (0.0, 100.0),
+    "curtailment_pct": (0.0, 100.0),
+    "curtailment_compensated_pct": (0.0, 100.0),
+    "unavailability_pct": (0.0, 100.0),
+    "ppa_volume_share_pct": (0.0, 100.0),
+    "grid_co2_annual_decline_pct": (0.0, 100.0),
+    "aggregator_fee_pct_revenue": (0.0, 100.0),
+    "balancing_aggregator_fee_pct_revenue": (0.0, 100.0),
+    "optimizer_revenue_share_pct": (0.0, 100.0),
+    "state_support_clawback_share_pct": (0.0, 100.0),
+    "revenue_levy_pct": (0.0, 100.0),
+    "capacity_market_derating_pct": (0.0, 100.0),
+    # io.validate_workbook_params: "must be in [0, 30]"
+    "bess_cost_decline_pct_per_year": (0.0, 30.0),
+    # io.validate_workbook_params: "must be in [0, 1]"
+    "soc_min_frac": (0.0, 1.0),
+    "soc_max_frac": (0.0, 1.0),
+}
+
+#: Whole-number lower bounds ("must be >= 1" in the validator).
+_WHOLE_MINIMUMS: dict[str, int] = {
+    "project_lifecycle_years": 1,
+    "uncertainty_n_seeds": 1,
+}
+
+#: Half-open (lo, hi] loader bounds — an OPEN lower bound Excel's
+#: single "between" rule cannot express, so these render as a
+#: WARNING-style validation (Excel lets the user proceed) and are
+#: exempt from the probe-lock test; the loader remains the hard gate.
+#: The rendered lower limit is lo + 1e-9, so entering lo itself (a
+#: value the loader rejects) fires the warning instead of passing
+#: silently, while every loader-legal value above it stays enterable
+#: (warning style never blocks).
+_WARNING_BOUNDS: dict[str, tuple[float, float]] = {
+    # io.validate_workbook_params: "must be in (0, 1]"
+    "efficiency_charge": (0.0, 1.0),
+    "efficiency_discharge": (0.0, 1.0),
+    # io.validate_workbook_params: "must be in (0, 100]"
+    "production_p90_factor_pct": (0.0, 100.0),
+    "bess_eol_soh_pct": (0.0, 100.0),
+}
+
+#: Feature blocks greyed out while their toggle is off.  Same-sheet
+#: rules only (cross-sheet CF formulas are fragile across spreadsheet
+#: applications).  Gates verified against the loader/pipeline:
+#: balancing activation keys on balancing_enabled; id_* is the
+#: intraday venue; imbalance settlement and the risk metrics ride the
+#: rolling-horizon MC (loader couples them to uncertainty_enabled);
+#: every scenario_engine key is engine-only; ppa_* rides ppa_enabled
+#: and support_* rides support_scheme (mutually exclusive families).
+#: selector: prefixes of DEPENDENT keys, or None = every other key on
+#: the sheet.
+_DIM_GROUPS: tuple[tuple[str, str, str, tuple[str, ...] | None], ...] = (
+    # (sheet, toggle key, off-condition template, dependent prefixes)
+    ("balancing", "balancing_enabled", "={toggle}=FALSE", None),
+    ("intraday", "id_enabled", "={toggle}=FALSE", None),
+    ("simulation", "uncertainty_enabled", "={toggle}=FALSE",
+     ("uncertainty_", "imbalance_", "risk_")),
+    ("scenario_engine", "price_scenarios_enabled", "={toggle}=FALSE", None),
+    ("ppa", "ppa_enabled", "={toggle}=FALSE", ("ppa_",)),
+    # A blanked scheme cell must dim too: the loader defaults blank to
+    # "none" (the block is inert), and Excel evaluates ""="none" FALSE.
+    ("ppa", "support_scheme", '=OR({toggle}="none",{toggle}="")',
+     ("support_",)),
+)
+
+
+def _kv_rows(ws: Worksheet) -> dict[str, int]:
+    """Map ``key`` (column A) to its 1-based row on a key/value sheet."""
+    rows: dict[str, int] = {}
+    for row in ws.iter_rows(min_row=2, max_col=1):
+        cell = row[0]
+        if cell.value is not None and str(cell.value).strip():
+            rows[str(cell.value).strip()] = cell.row
+    return rows
+
+
+def _add_validation(
+    ws: Worksheet, coord: str, dv_kwargs: dict, *, key: str,
+    accepted: str, style: str = "stop",
+) -> None:
+    dv = DataValidation(allow_blank=True, **dv_kwargs)
+    dv.errorStyle = "stop" if style == "stop" else "warning"
+    dv.showErrorMessage = True
+    dv.errorTitle = "Invalid value"
+    dv.error = f"'{key}' accepts: {accepted}."
+    dv.showInputMessage = True
+    # OOXML caps promptTitle at 32 characters (Excel's own UI enforces
+    # it); the longest keys exceed that, so clamp — the full key stays
+    # in column A and in the error/prompt bodies.
+    dv.promptTitle = key if len(key) <= 32 else key[:29] + "..."
+    dv.prompt = f"Accepted: {accepted}."
+    ws.add_data_validation(dv)
+    dv.add(coord)
+
+
+def _apply_input_guardrails(wb: Workbook) -> dict[str, int]:
+    """Attach schema-generated guardrails to every parameter sheet.
+
+    Everything here is generated from the loader's own schemas
+    (``_BOOL_KEYS`` / ``_ALLOWED_VALUES``) or mirrored from
+    ``validate_workbook_params`` bounds, so the workbook UI and the
+    parser cannot disagree.  The guardrails are a convenience layer
+    ONLY — the loaders keep rejecting bad values on every surface
+    (YAML/JSON carry no dropdowns, and spreadsheet validation is
+    bypassable by paste), so nothing downstream may rely on them.
+    """
+    from pvbess_opt.io import _ALLOWED_VALUES, _BOOL_KEYS, _STR_KEYS
+
+    counts = {"dropdowns": 0, "bounds": 0, "dimmed_rows": 0, "sheets": 0}
+    for sheet_name in _PARAMETER_SHEETS:
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        rows = _kv_rows(ws)
+        # Idempotence: the polisher fully owns validations and
+        # conditional formatting on parameter sheets — rebuild both.
+        ws.data_validations.dataValidation = []
+        ws.conditional_formatting = ConditionalFormattingList()
+
+        for key, row in rows.items():
+            coord = f"B{row}"
+            if key in _BOOL_KEYS:
+                _add_validation(
+                    ws, coord,
+                    {"type": "list", "formula1": '"TRUE,FALSE"'},
+                    key=key, accepted="TRUE or FALSE",
+                )
+                counts["dropdowns"] += 1
+            elif key in _STR_KEYS and _ALLOWED_VALUES.get(key):
+                values = sorted(_ALLOWED_VALUES[key])
+                joined = ",".join(values)
+                # Excel's inline list source caps at 255 characters; the
+                # longest current list (bidding_zone) sits well under it.
+                if len(joined) > 255:  # pragma: no cover - schema guard
+                    raise ValueError(
+                        f"enum list for {key!r} exceeds Excel's inline "
+                        "255-char validation limit; move it to a helper "
+                        "sheet."
+                    )
+                _add_validation(
+                    ws, coord,
+                    {"type": "list", "formula1": f'"{joined}"'},
+                    key=key, accepted=", ".join(values),
+                )
+                counts["dropdowns"] += 1
+            elif key in _NUMERIC_BOUNDS:
+                lo, hi = _NUMERIC_BOUNDS[key]
+                _add_validation(
+                    ws, coord,
+                    {"type": "decimal", "operator": "between",
+                     "formula1": str(lo), "formula2": str(hi)},
+                    key=key, accepted=f"a number in [{lo:g}, {hi:g}]",
+                )
+                counts["bounds"] += 1
+            elif key in _WHOLE_MINIMUMS:
+                lo_int = _WHOLE_MINIMUMS[key]
+                _add_validation(
+                    ws, coord,
+                    {"type": "whole", "operator": "greaterThanOrEqual",
+                     "formula1": str(lo_int)},
+                    key=key, accepted=f"a whole number >= {lo_int}",
+                )
+                counts["bounds"] += 1
+            elif key in _WARNING_BOUNDS:
+                lo, hi = _WARNING_BOUNDS[key]
+                _add_validation(
+                    ws, coord,
+                    {"type": "decimal", "operator": "between",
+                     # lo itself is loader-illegal on these half-open
+                     # bounds: nudge the rendered limit so entering lo
+                     # fires the (non-blocking) warning.
+                     "formula1": f"{lo + 1e-9:.9f}", "formula2": str(hi)},
+                    key=key,
+                    accepted=f"a number in ({lo:g}, {hi:g}] — {lo:g} "
+                             "itself is rejected by the loader",
+                    style="warning",
+                )
+                counts["bounds"] += 1
+
+        # Dependency greying: dim the whole row of a dependent key while
+        # its feature toggle is off.  Visual only — values stay editable
+        # and the loaders keep validating them.
+        dim_font = Font(color=_DIMMED_FONT_COLOR)
+        for group_sheet, toggle, template, prefixes in _DIM_GROUPS:
+            if group_sheet != sheet_name or toggle not in rows:
+                continue
+            formula = template.format(toggle=f"$B${rows[toggle]}")
+            for key, row in rows.items():
+                if key == toggle:
+                    continue
+                if prefixes is not None and not key.startswith(prefixes):
+                    continue
+                rule = FormulaRule(  # type: ignore[no-untyped-call]
+                    formula=[formula[1:]], font=dim_font,
+                )
+                ws.conditional_formatting.add(f"A{row}:D{row}", rule)
+                counts["dimmed_rows"] += 1
+
+        # Protection: the key/unit/notes columns and the header are the
+        # schema — lock them so a stray edit cannot silently rename a
+        # key (the kv reader requires exact keys; a damaged key column
+        # historically made every value fall back to its default).
+        # Only the value column stays editable.  No password: the
+        # protection is a guardrail, not a lock — Review > Unprotect
+        # lifts it deliberately.
+        for row_idx, row_cells in enumerate(
+            ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=4),
+            start=1,
+        ):
+            for cell in row_cells:
+                cell.protection = Protection(
+                    locked=not (cell.column == 2 and row_idx >= 2),
+                )
+        ws.protection.sheet = True
+        counts["sheets"] += 1
+    return counts
+
+
 def polish_workbook(path: Path) -> dict[str, int]:
     """Polish ``path`` in place and return per-sheet diagnostics.
 
@@ -350,6 +597,13 @@ def polish_workbook(path: Path) -> dict[str, int]:
         style_worksheet(ws)
         if sheet_name in _CENTERED_HEADER_SHEETS:
             _center_header_row(ws)
+    guardrails = _apply_input_guardrails(wb)
+    logging.getLogger(__name__).info(
+        "[guardrails] %d dropdowns, %d numeric bounds, %d dimmed rows "
+        "across %d protected parameter sheets.",
+        guardrails["dropdowns"], guardrails["bounds"],
+        guardrails["dimmed_rows"], guardrails["sheets"],
+    )
     wb.save(path)
     return cleared_by_sheet
 
