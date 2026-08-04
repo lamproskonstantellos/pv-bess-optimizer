@@ -194,6 +194,16 @@ scrolling, plus AutoFit column widths. Every workbook the tool writes
 goes through the same styler (`pvbess_opt/io_style.py`), so inputs and
 outputs are formatted identically.
 
+The ten parameter sheets also carry guardrails generated from the
+loader's own schemas by `scripts/polish_input_workbook.py`: TRUE/FALSE
+and enum dropdowns on every constrained key, numeric range validation
+mirroring the loader's hard bounds, greyed-out rows for feature blocks
+whose toggle is off, and passwordless sheet protection that leaves only
+the `value` column editable (Review > Unprotect Sheet lifts it). The
+guardrails are a convenience layer only — the loaders keep validating
+every value on every surface, so a value that slips past Excel (paste,
+YAML/JSON configs) is still rejected with the same message.
+
 ### `timeseries`
 
 15-minute series of `timestamp`, `pv_kwh`, optionally `load_kwh`
